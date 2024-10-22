@@ -122,7 +122,31 @@ fn parse_constant(self: Lexer, ~base: ConstantBase) -> LexerResult {
     Err(_) => return Grr(InvalidConstant(~lexeme, ~base))
   }
 
-  Yay(Constant(~base, ~value))
+  let size = match base {
+    Binary => {
+      if lexeme.length() <= 8 {
+        Byte
+      } else {
+        Word
+      }
+    }
+    Decimal => {
+      if lexeme.length() <= 3 && value <= 0xFF {
+        Byte
+      } else {
+        Word
+      }
+    }
+    Hexadecimal => {
+      if lexeme.length() <= 2 {
+        Byte
+      } else {
+        Word
+      }
+    }
+  }
+
+  Yay(Constant(~base, ~value, ~size))
 }
 
 fn parse_opcode(str: String) -> OpCode? {
@@ -140,6 +164,13 @@ fn parse_opcode(str: String) -> OpCode? {
         "bcc" => Some(BCC)
         "bcs" => Some(BCS)
         "beq" => Some(BEQ)
+        "bit" => Some(BIT)
+        "bmi" => Some(BMI)
+        "bne" => Some(BNE)
+        "bpl" => Some(BPL)
+        "brk" => Some(BRK)
+        "bvc" => Some(BVC)
+        "bvs" => Some(BVS)
         _ => None
       }
     }
@@ -148,6 +179,10 @@ fn parse_opcode(str: String) -> OpCode? {
         "clc" => Some(CLC)
         "cld" => Some(CLD)
         "cli" => Some(CLI)
+        "clv" => Some(CLV)
+        "cmp" => Some(CMP)
+        "cpx" => Some(CPX)
+        "cpy" => Some(CPY)
         _ => None
       }
     }

@@ -1,7 +1,8 @@
 
 type! PipelineError {
   IOError(String)
-  LexerError(String)
+  LexerError(@parse.LexerError)
+  ParserError(@parse.ParserError)
 } derive(Show)
 
 fn read_rom() -> String!PipelineError {
@@ -17,15 +18,25 @@ fn lex() -> Array[@parse.Token]!PipelineError {
 
   match lexer.lex?() {
     Ok(tokens) => tokens
-    Err(err) => raise LexerError(Show::to_string(err))
+    Err(err) => raise LexerError(err)
+  }
+}
+
+fn parse() -> Array[@parse.AsmInst]!PipelineError {
+  let tokens = lex!()
+  let parser = @parse.Parser::new(tokens)
+
+  match parser.parse?() {
+    Ok(instructions) => instructions
+    Err(err) => raise ParserError(err)
   }
 }
 
 fn main {
-    match lex?() {
-        Ok(tokens) => {
-            for token in tokens {
-                println(Show::to_string(token))
+    match parse?() {
+        Ok(insts) => {
+            for inst in insts {
+                println(inst)
             }
         }
         Err(err) => {
