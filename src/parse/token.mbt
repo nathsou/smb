@@ -1,15 +1,15 @@
-enum OpCode {
+pub enum OpCode {
   ADC; AND; ASL; BCC; BCS; BEQ; BIT; BMI; BNE; BPL; BRK; BVC; BVS; CLC
   CLD; CLI; CLV; CMP; CPX; CPY; DEC; DEX; DEY; EOR; INC; INX; INY; JMP
   JSR; LDA; LDX; LDY; LSR; NOP; ORA; PHA; PHP; PLA; PLP; ROL; ROR; RTI
   RTS; SBC; SEC; SED; SEI; STA; STX; STY; TAX; TAY; TSX; TXA; TXS; TYA
 } derive (Show, Eq)
 
-enum ConstantBase {
+pub enum ConstantBase {
   Binary; Decimal; Hexadecimal
 } derive (Show, Eq)
 
-enum ConstantSize {
+pub enum ConstantSize {
   Byte; Word
 } derive (Show, Eq)
 
@@ -59,5 +59,12 @@ pub fn supports_accumulator_addr_mode(self: OpCode) -> Bool {
   match self {
     ASL | LSR | ROL | ROR => true
     _ => false
+  }
+}
+
+pub fn byte_size(self: ConstantSize) -> Int {
+  match self {
+    Byte => 1
+    Word => 2
   }
 }

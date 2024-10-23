@@ -1,0 +1,6 @@
+{
+    "is-main": false,
+    "import": [
+      "nathsou/smb/parse"
+    ]
+  }
