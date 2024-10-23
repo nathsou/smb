@@ -1,33 +1,33 @@
 pub struct Parser {
-  tokens : Array[Token]
-  defines : Map[String, ConstantSize]
-  mut index : Int
+  tokens: Array[Token]
+  defines: Map[String, ConstantSize]
+  mut index: Int
 }
 
 pub type! ParserError {
-  UnexpectedToken(~expected : Token, ~received : Token)
+  UnexpectedToken(~expected: Token, ~received: Token)
   ExpectedIdentifier(Token)
   ExpectedExpr(Token)
   Unreachable(String)
 } derive(Show)
 
-pub fn Parser::new(tokens : Array[Token]) -> Parser {
+pub fn Parser::new(tokens: Array[Token]) -> Parser {
   { tokens, index: 0, defines: {} }
 }
 
-fn peek(self : Parser) -> Token {
+fn peek(self: Parser) -> Token {
   self.tokens[self.index]
 }
 
-fn lookahead(self : Parser, n : Int) -> Token {
+fn lookahead(self: Parser, n: Int) -> Token {
   self.tokens[self.index + n]
 }
 
-fn advance(self : Parser) -> Unit {
+fn advance(self: Parser) -> Unit {
   self.index += 1
 }
 
-fn expect(self : Parser, expected : Token) -> Unit!ParserError {
+fn expect(self: Parser, expected: Token) -> Unit!ParserError {
   let token = self.peek()
   if token == expected {
     self.advance()
@@ -36,15 +36,15 @@ fn expect(self : Parser, expected : Token) -> Unit!ParserError {
   }
 }
 
-fn matches(self : Parser, token : Token) -> Bool {
+fn matches(self: Parser, token: Token) -> Bool {
   self.peek() == token
 }
 
-fn matches_predicate(self : Parser, predicate : (Token) -> Bool) -> Bool {
+fn matches_predicate(self: Parser, predicate: (Token) -> Bool) -> Bool {
   predicate(self.peek())
 }
 
-fn consumes(self : Parser, token : Token) -> Bool {
+fn consumes(self: Parser, token: Token) -> Bool {
   if self.matches(token) {
     self.advance()
     true
@@ -53,12 +53,12 @@ fn consumes(self : Parser, token : Token) -> Bool {
   }
 }
 
-fn consumeIfPresent(self : Parser, token : Token) -> Unit {
+fn consumeIfPresent(self: Parser, token: Token) -> Unit {
   let _ = self.consumes(token)
 
 }
 
-fn parse_identifier(self : Parser) -> String!ParserError {
+fn parse_identifier(self: Parser) -> String!ParserError {
   let token = self.peek()
   match token {
     Identifier(name) => {
@@ -69,7 +69,7 @@ fn parse_identifier(self : Parser) -> String!ParserError {
   }
 }
 
-fn parse_primary_expr(self : Parser) -> AsmExpr!ParserError {
+fn parse_primary_expr(self: Parser) -> SourceExpr!ParserError {
   let token = self.peek()
   match token {
     Constant(~base, ~value, ~size) => {
@@ -100,7 +100,7 @@ fn parse_primary_expr(self : Parser) -> AsmExpr!ParserError {
   }
 }
 
-fn parse_additive_expr(self : Parser) -> AsmExpr!ParserError {
+fn parse_additive_expr(self: Parser) -> SourceExpr!ParserError {
   let mut lhs = self.parse_primary_expr!()
   while true {
     if self.consumes(Plus) {
@@ -116,12 +116,12 @@ fn parse_additive_expr(self : Parser) -> AsmExpr!ParserError {
   lhs
 }
 
-fn parse_expr(self : Parser) -> AsmExpr!ParserError {
+fn parse_expr(self: Parser) -> SourceExpr!ParserError {
   self.parse_additive_expr!()
 }
 
-fn parse_directive_args(self : Parser) -> Array[AsmExpr]!ParserError {
-  let args : Array[AsmExpr] = []
+fn parse_directive_args(self: Parser) -> Array[SourceExpr]!ParserError {
+  let args: Array[SourceExpr] = []
   while true {
     let expr = self.parse_expr!()
     args.push(expr)
@@ -133,9 +133,9 @@ fn parse_directive_args(self : Parser) -> Array[AsmExpr]!ParserError {
 }
 
 fn parse_addressing_mode(
-  self : Parser,
-  ~opcode : OpCode
-) -> AddressingMode!ParserError {
+  self: Parser,
+  ~opcode: OpCode
+) -> SourceAddressingMode!ParserError {
   if opcode.is_implied() {
     Implied
   } else {
@@ -200,7 +200,7 @@ fn parse_addressing_mode(
   }
 }
 
-fn parse_inst(self : Parser) -> AsmInst!ParserError {
+fn parse_inst(self: Parser) -> SourceItem!ParserError {
   let token = self.peek()
 
   match token {
@@ -232,8 +232,8 @@ fn parse_inst(self : Parser) -> AsmInst!ParserError {
   }
 }
 
-pub fn parse(self : Parser) -> Array[AsmInst]!ParserError {
-  let insts : Array[AsmInst] = []
+pub fn parse(self: Parser) -> Array[SourceItem]!ParserError {
+  let insts: Array[SourceItem] = []
 
   while self.index < self.tokens.length() {
     let inst = self.parse_inst!()
