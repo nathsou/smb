@@ -152,9 +152,9 @@ fn parse_addressing_mode(
 
         if self.consumes(Comma) {
           if self.consumes(Identifier("x")) {
-            return IndirectX(~addr)
+            return IndexedIndirect(~addr)
           } else {
-            raise Unreachable("Expected 'x' after comma")
+            raise Unreachable("Expected 'x' after comma in indexed indirect addressing mode")
           }
         }
 
@@ -162,9 +162,9 @@ fn parse_addressing_mode(
 
         if self.consumes(Comma) {
           if self.consumes(Identifier("y")) {
-            IndirectY(~addr)
+            IndirectIndexed(~addr)
           } else {
-            raise Unreachable("Expected 'y' after comma")
+            raise Unreachable("Expected 'y' after comma in indirect indexed addressing mode")
           }
         } else {
           Indirect(~addr)
@@ -224,9 +224,9 @@ fn parse_inst(self: Parser) -> SourceItem!ParserError {
       let mode = self.parse_addressing_mode!(opcode=op)
       Inst(~op, ~mode)
     }
-    Comment(~comment, is_inline=_) => {
+    Comment(~comment, ~is_inline) => {
       self.advance()
-      Comment(comment)
+      Comment(~comment, ~is_inline)
     }
     _ => raise Unreachable("Expected instruction, got: \{token}")
   }

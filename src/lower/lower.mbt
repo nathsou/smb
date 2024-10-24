@@ -2,8 +2,8 @@
 pub struct AsmLowering {
   items: Array[@parse.SourceItem]
   defines: Map[String, LazyVal]
+  jump_target_labels: Set[String]
   tables: Array[AsmTable]
-  subroutine_labels: Set[String]
   tables_by_label: Map[String, AsmTable]
   mut table_offset: Int
 } derive (Show)
@@ -37,8 +37,8 @@ pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
     items,
     defines: {},
     tables: [],
-    table_offset: 0,
-    subroutine_labels: Set::new(),
+    table_offset: 0, // in bytes
+    jump_target_labels: Set::new(),
     tables_by_label: {},
   }
 }
@@ -101,8 +101,8 @@ fn eval_expr(self: AsmLowering, expr: @parse.SourceExpr) -> AsmValue!AsmLowering
           match self.tables_by_label[name] {
             Some(table) => DataTableOffset(label=Some(name), offset=table.offset)
             None => {
-              if self.subroutine_labels.contains(name) {
-                SubroutineLabel(name)
+              if self.jump_target_labels.contains(name) {
+                JumpTarget(name)
               } else {
                 raise Unreachable("Undefined label: \{name}")
               }
@@ -179,7 +179,7 @@ fn detect_table(self: AsmLowering, name: String, index: Int) -> AsmTable?!AsmLow
 
         data.push_iter(args.map(LazyVal::new).iter())
       }
-      Comment(comment) => comments.push(comment)
+      Comment(~comment, is_inline=_) => comments.push(comment)
       _ => break
     }
   }
@@ -196,24 +196,22 @@ fn collect_labels_and_tables(self: AsmLowering) -> Unit!AsmLoweringError {
   for idx, item in self.items {
     match item {
       Label(name) => {
-        match name {
-          "GameText" | "AreaAddrOffsets" => {
-            // aliases for the next table label
-            let table = self.detect_table!(name, idx + 1).unwrap()
+        let is_alias = match name {
+          "GameText" | "AreaAddrOffsets" => true
+          _ => false
+        }
+
+        match self.detect_table!(name, idx + (if is_alias { 1 } else { 0 })) {
+          Some(table) => {
             self.tables.push(table)
-            self.tables_by_label[name] = table
+            self.table_offset += table.data.length() * table.elem_size.byte_size()
             self.tables_by_label[table.name] = table
-          }
-          _ => {
-            match self.detect_table!(name, idx) {
-              Some(table) => {
-                self.tables.push(table)
-                self.table_offset += table.data.length() * table.elem_size.byte_size()
-                self.tables_by_label[name] = table
-              }
-              None => self.subroutine_labels.insert(name)
+
+            if is_alias {
+              self.tables_by_label[name] = table
             }
           }
+          None => self.jump_target_labels.insert(name)
         }
       }
       _ => ()
@@ -246,9 +244,109 @@ fn eval_tables(self: AsmLowering) -> Unit!AsmLoweringError {
   }
 }
 
-pub fn lower(self: AsmLowering) -> Unit!AsmLoweringError {
+fn collect_instructions(self: AsmLowering) -> Array[AsmItem]!AsmLoweringError {
+  let items: Array[AsmItem] = []
+  let mut inside_table = false
+  let mut item_idx = 0
+
+  while item_idx < self.items.length() {
+    let item = self.items[item_idx]
+    let mut idx_increment = 1
+
+    match item {
+      Label(name) => {
+        if not(self.tables_by_label.contains(name)) {
+          // this label is a jump target if it's not a table label
+          items.push(Label(name))
+          inside_table = false
+        } else {
+          inside_table = true
+        }
+      }
+      Inst(~op, ~mode) => {
+        if op == JSR && (match mode { AbsoluteOrZeroPage(addr=Ident("JumpEngine")) => true; _ => false }) {
+          let jump_table: Array[String] = []
+          inside_table = true
+
+          for i in (item_idx + 1)..<self.items.length() {
+            match self.items[i] {
+              Directive(name="dw", ~args) => {
+                for arg in args {
+                  match arg {
+                    Ident(label) => {
+                      if not(self.jump_target_labels.contains(label)) {
+                        raise Unreachable("Unknown label in jump table")
+                      }
+
+                      jump_table.push(label)
+                    }
+                    _ => raise Unreachable("Expected label in jump table")
+                  }
+                }
+              }
+              Comment(_) => ()
+              _ => {
+                idx_increment = i - item_idx
+                break
+              }
+            }
+          }
+
+          items.push(JumpEngine(~jump_table))
+        } else {
+          let addr_mode: AsmAddressingMode = match mode {
+            Accumulator => Accumulator
+            Implied => Implied
+            Immediate(operand) => Immediate(self.eval_expr!(operand))
+            Relative(~addr) => Relative(addr=self.eval_expr!(addr))
+            AbsoluteOrZeroPage(~addr) | AbsoluteOrZeroPageX(~addr) | AbsoluteOrZeroPageY(~addr) => {
+              let addr = self.eval_expr!(addr)
+              let size = match addr {
+                Const(base=_, value=_, ~size) => size
+                JumpTarget(_) | DataTableOffset(_) => Word
+              }
+
+              match (mode, size) {
+                (AbsoluteOrZeroPage(_), Byte) => ZeroPage(~addr)
+                (AbsoluteOrZeroPage(_), Word) => Absolute(~addr)
+                (AbsoluteOrZeroPageX(_), Byte) => ZeroPageX(~addr)
+                (AbsoluteOrZeroPageX(_), Word) => AbsoluteX(~addr)
+                (AbsoluteOrZeroPageY(_), Byte) => ZeroPageY(~addr)
+                (AbsoluteOrZeroPageY(_), Word) => AbsoluteY(~addr)
+                _ => raise Unreachable("Invalid addressing mode")
+              }
+            }
+            Indirect(~addr) => Indirect(addr=self.eval_expr!(addr))
+            IndexedIndirect(~addr) => IndexedIndirect(addr=self.eval_expr!(addr))
+            IndirectIndexed(~addr) => IndirectIndexed(addr=self.eval_expr!(addr))
+          }
+
+          items.push(Inst(~op, mode=addr_mode))
+        }
+      }
+      Comment(~comment, ~is_inline) => {
+        if not(inside_table) {
+          items.push(Comment(~comment, ~is_inline))
+        }
+      }
+      Directive(name="db" | "dw" as name, ~args) => {
+        if not(inside_table) {
+          raise Unreachable("Raw data in code detected: \{name} \{args}")
+        }
+      }
+      _ => ()
+    }
+
+    item_idx += idx_increment
+  }
+
+  items
+}
+
+pub fn lower(self: AsmLowering) -> Array[AsmItem]!AsmLoweringError {
   self.collect_labels_and_tables!()
   self.collect_defines()
   self.eval_defines!()
   self.eval_tables!()
+  self.collect_instructions!()
 }

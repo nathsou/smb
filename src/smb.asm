@@ -1,5 +1,6 @@
 ;SMBDIS.ASM - A COMPREHENSIVE SUPER MARIO BROS. DISASSEMBLY
 ;by doppelganger (doppelheathen@gmail.com)
+;tweaked by nathsou to simplify recompilation
 
 ;This file is provided for your own use as-is.  It will require the character rom data
 ;and an iNES file header to get it to work.
@@ -939,10 +940,12 @@ OperModeExecutionTree:
 
 MoveAllSpritesOffscreen:
               ldy #$00                ;this routine moves all sprites off the screen
-              .db $2c                 ;BIT instruction opcode
+              ; in multiple places, the bit absolute ($2c) instruction opcode is used to skip the next instruction using only one byte
+              jmp MoveSpritesOffscreenSkip ; .db $2c ;BIT instruction opcode
 
 MoveSpritesOffscreen:
               ldy #$04                ;this routine moves all but sprite 0
+MoveSpritesOffscreenSkip:
               lda #$f8                ;off the screen
 SprInitLoop:  sta Sprite_Y_Position,y ;write 248 into OAM data's Y coordinate
               iny                     ;which will move it off the screen
@@ -3918,10 +3921,11 @@ Hole_Water:
 
 QuestionBlockRow_High:
       lda #$03    ;start on the fourth row
-      .db $2c     ;BIT instruction opcode
+      jmp QuestionBlockRow_LowSkip ; .db $2c ;BIT instruction opcode
 
 QuestionBlockRow_Low:
       lda #$07             ;start on the eighth row
+QuestionBlockRow_LowSkip:
       pha                  ;save whatever row to the stack for now
       jsr ChkLrgObjLength  ;get low nybble and save as length
       pla
@@ -3934,14 +3938,15 @@ QuestionBlockRow_Low:
 
 Bridge_High:
       lda #$06  ;start on the seventh row from top of screen
-      .db $2c   ;BIT instruction opcode
+      jmp Bridge_LowSkip ; .db $2c ;BIT instruction opcode
 
 Bridge_Middle:
       lda #$07  ;start on the eighth row
-      .db $2c   ;BIT instruction opcode
+      jmp Bridge_LowSkip ; .db $2c ;BIT instruction opcode
 
 Bridge_Low:
       lda #$09             ;start on the tenth row
+Bridge_LowSkip:
       pha                  ;save whatever row to the stack for now
       jsr ChkLrgObjLength  ;get low nybble and save as length
       pla
@@ -4344,7 +4349,7 @@ GetBlockBufferAddr:
 ;-------------------------------------------------------------------------------------
 
 ;unused space
-      .db $ff, $ff
+;      .db $ff, $ff
 
 ;-------------------------------------------------------------------------------------
 
@@ -5281,7 +5286,7 @@ L_WaterArea3:
 ;-------------------------------------------------------------------------------------
 
 ;unused space
-      .db $ff
+;      .db $ff
 
 ;-------------------------------------------------------------------------------------
 
@@ -7337,14 +7342,15 @@ BlockCode: jsr JumpEngine          ;run appropriate subroutine depending on bloc
 
 MushFlowerBlock:
       lda #$00       ;load mushroom/fire flower into power-up type
-      .db $2c        ;BIT instruction opcode
+      jmp ExtraLifeMushBlockSkip ; .db $2c ;BIT instruction opcode
 
 StarBlock:
       lda #$02       ;load star into power-up type
-      .db $2c        ;BIT instruction opcode
+      jmp ExtraLifeMushBlockSkip ; .db $2c ;BIT instruction opcode
 
 ExtraLifeMushBlock:
       lda #$03         ;load 1-up mushroom into power-up type
+ExtraLifeMushBlockSkip:
       sta $39          ;store correct power-up type
       jmp SetupPowerUp
 
@@ -7653,9 +7659,9 @@ SetXMoveAmt: sty $00                 ;set movement amount here
 MaxSpdBlockData:
       .db $06, $08
 
-ResidualGravityCode:
-      ldy #$00       ;this part appears to be residual,
-      .db $2c        ;no code branches or jumps to it...
+; ResidualGravityCode:
+;       ldy #$00       ;this part appears to be residual,
+;       .db $2c        ;no code branches or jumps to it...
 
 ImposeGravityBlock:
       ldy #$01       ;set offset for maximum speed
@@ -7672,10 +7678,11 @@ ImposeGravitySprObj:
 
 MovePlatformDown:
       lda #$00    ;save value to stack (if branching here, execute next
-      .db $2c     ;part as BIT instruction)
+      jmp MovePlatformUpSkip ; .db $2c     ;part as BIT instruction)
 
 MovePlatformUp:
            lda #$01        ;save value to stack
+MovePlatformUpSkip:
            pha
            ldy Enemy_ID,x  ;get enemy object identifier
            inx             ;increment offset for enemy object
@@ -11052,7 +11059,7 @@ ExScrnBd: rts                     ;leave
 ;-------------------------------------------------------------------------------------
 
 ;some unused space
-      .db $ff, $ff, $ff
+;      .db $ff, $ff, $ff
 
 ;-------------------------------------------------------------------------------------
 ;$01 - enemy buffer offset
@@ -11841,10 +11848,11 @@ PositionPlayerOnS_Plat:
       lda Enemy_Y_Position,x     ;for offset
       clc                        ;add positioning data using offset to the vertical
       adc PlayerPosSPlatData-1,y ;coordinate
-      .db $2c                    ;BIT instruction opcode
+      jmp PositionPlayerOnVPlatSkip ; .db $2c ;BIT instruction opcode
 
 PositionPlayerOnVPlat:
          lda Enemy_Y_Position,x    ;get vertical coordinate
+PositionPlayerOnVPlatSkip:
          ldy GameEngineSubroutine
          cpy #$0b                  ;if certain routine being executed on this frame,
          beq ExPlPos               ;skip all of this
@@ -13044,10 +13052,11 @@ BlockBufferColli_Feet:
 
 BlockBufferColli_Head:
        lda #$00       ;set flag to return vertical coordinate
-       .db $2c        ;BIT instruction opcode
+       jmp BlockBufferColli_SideSkip ; .db $2c ;BIT instruction opcode
 
 BlockBufferColli_Side:
        lda #$01       ;set flag to return horizontal coordinate
+BlockBufferColli_SideSkip:
        ldx #$00       ;set offset for player object
 
 BlockBufferCollision:
@@ -13092,7 +13101,7 @@ RetYC: and #%00001111              ;and mask out high nybble
 ;-------------------------------------------------------------------------------------
 
 ;unused byte
-      .db $ff
+;      .db $ff
 
 ;-------------------------------------------------------------------------------------
 ;$00 - offset to vine Y coordinate adder
@@ -15038,7 +15047,7 @@ SetHFAt: ora $04                    ;add other OAM attributes if necessary
 ;-------------------------------------------------------------------------------------
 
 ;unused space
-        .db $ff, $ff, $ff, $ff, $ff, $ff
+;        .db $ff, $ff, $ff, $ff, $ff, $ff
 
 ;-------------------------------------------------------------------------------------
 
@@ -16296,7 +16305,7 @@ VictoryMusData:
       .db $26, $22, $1e, $1c, $18, $1e, $22, $0c, $14
 
 ;unused space
-      .db $ff, $ff, $ff
+;      .db $ff, $ff, $ff
 
 FreqRegLookupTbl:
       .db $00, $88, $00, $2f, $00, $00
