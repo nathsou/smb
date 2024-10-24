@@ -33,21 +33,21 @@ fn parse() -> Array[@parse.SourceItem]!PipelineError {
   }
 }
 
-fn lower() -> @lower.AsmLowering!PipelineError {
+fn lower() -> Array[@lower.AsmItem]!PipelineError {
   let instructions = parse!()
   let lowering = @lower.AsmLowering::new(instructions)
   match lowering.lower?() {
-    Ok(_) => lowering
+    Ok(items) => items
     Err(err) => raise LoweringError(err)
   }
 }
 
 fn main {
     match lower?() {
-        Ok(info) => {
-            for table in info.tables {
-                println(table)
-            }
+        Ok(items) => {
+          for item in items {
+              println(item)
+          }
         }
         Err(err) => {
             println(err)
