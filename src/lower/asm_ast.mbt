@@ -1,5 +1,5 @@
 
-enum AsmValue {
+pub enum AsmValue {
   Const(
     ~base: @parse.ConstantBase,
     ~value: Int,
@@ -9,7 +9,7 @@ enum AsmValue {
   JumpTarget(String)
 } derive (Show)
 
-enum AsmAddressingMode {
+pub enum AsmAddressingMode {
   Accumulator
   Implied
   Immediate(AsmValue)
@@ -25,7 +25,7 @@ enum AsmAddressingMode {
   IndirectIndexed(~addr: AsmValue)
 } derive (Show)
 
-enum AsmItem {
+pub enum AsmItem {
   Label(String)
   Inst(~op: @parse.OpCode, ~mode: AsmAddressingMode)
   JumpEngine(~jump_table: Array[String])

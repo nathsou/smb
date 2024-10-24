@@ -4,6 +4,7 @@ type! PipelineError {
   LexerError(@parse.LexerError)
   ParserError(@parse.ParserError)
   LoweringError(@lower.AsmLoweringError)
+  InterpreterError(@interpret.InterpreterError)
 } derive(Show)
 
 fn read_rom() -> String!PipelineError {
@@ -33,21 +34,27 @@ fn parse() -> Array[@parse.SourceItem]!PipelineError {
   }
 }
 
-fn lower() -> Array[@lower.AsmItem]!PipelineError {
+fn lower() -> @lower.AsmLowering!PipelineError {
   let instructions = parse!()
   let lowering = @lower.AsmLowering::new(instructions)
   match lowering.lower?() {
-    Ok(items) => items
+    Ok(_) => lowering
     Err(err) => raise LoweringError(err)
   }
 }
 
+fn interpret() -> @interpret.Interpreter!PipelineError {
+  let lowering = lower!()
+  match @interpret.Interpreter::from?(lowering) {
+    Ok(interpreter) => interpreter
+    Err(err) => raise InterpreterError(err)
+  }
+}
+
 fn main {
-    match lower?() {
-        Ok(items) => {
-          for item in items {
-              println(item)
-          }
+    match interpret?() {
+        Ok(interpreter) => {
+          ()
         }
         Err(err) => {
             println(err)
