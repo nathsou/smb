@@ -1,6 +1,7 @@
 
 pub struct AsmLowering {
   items: Array[@parse.SourceItem]
+  lowered: Array[AsmItem]
   defines: Map[String, LazyVal]
   jump_target_labels: Set[String]
   tables: Array[AsmTable]
@@ -20,7 +21,7 @@ pub type! AsmLoweringError {
   Unreachable(String)
 } derive (Show)
 
-struct LazyVal {
+pub struct LazyVal {
   expr: @parse.SourceExpr
   value: Ref[AsmValue?]
 }
@@ -35,6 +36,7 @@ pub impl Show for LazyVal with output(self: LazyVal, logger: Logger) -> Unit {
 pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
   {
     items,
+    lowered: [],
     defines: {},
     tables: [],
     table_offset: 0, // in bytes
@@ -45,6 +47,10 @@ pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
 
 fn LazyVal::new(expr: @parse.SourceExpr) -> LazyVal {
   { expr, value: Ref::new(None) }
+}
+
+pub fn unwrap(self: LazyVal) -> AsmValue {
+  self.value.val.unwrap()
 }
 
 enum ConstType {
@@ -244,8 +250,7 @@ fn eval_tables(self: AsmLowering) -> Unit!AsmLoweringError {
   }
 }
 
-fn collect_instructions(self: AsmLowering) -> Array[AsmItem]!AsmLoweringError {
-  let items: Array[AsmItem] = []
+fn collect_instructions(self: AsmLowering) -> Unit!AsmLoweringError {
   let mut inside_table = false
   let mut item_idx = 0
 
@@ -257,7 +262,7 @@ fn collect_instructions(self: AsmLowering) -> Array[AsmItem]!AsmLoweringError {
       Label(name) => {
         if not(self.tables_by_label.contains(name)) {
           // this label is a jump target if it's not a table label
-          items.push(Label(name))
+          self.lowered.push(Label(name))
           inside_table = false
         } else {
           inside_table = true
@@ -292,7 +297,7 @@ fn collect_instructions(self: AsmLowering) -> Array[AsmItem]!AsmLoweringError {
             }
           }
 
-          items.push(JumpEngine(~jump_table))
+          self.lowered.push(JumpEngine(~jump_table))
         } else {
           let addr_mode: AsmAddressingMode = match mode {
             Accumulator => Accumulator
@@ -321,12 +326,12 @@ fn collect_instructions(self: AsmLowering) -> Array[AsmItem]!AsmLoweringError {
             IndirectIndexed(~addr) => IndirectIndexed(addr=self.eval_expr!(addr))
           }
 
-          items.push(Inst(~op, mode=addr_mode))
+          self.lowered.push(Inst(~op, mode=addr_mode))
         }
       }
       Comment(~comment, ~is_inline) => {
         if not(inside_table) {
-          items.push(Comment(~comment, ~is_inline))
+          self.lowered.push(Comment(~comment, ~is_inline))
         }
       }
       Directive(name="db" | "dw" as name, ~args) => {
@@ -339,11 +344,9 @@ fn collect_instructions(self: AsmLowering) -> Array[AsmItem]!AsmLoweringError {
 
     item_idx += idx_increment
   }
-
-  items
 }
 
-pub fn lower(self: AsmLowering) -> Array[AsmItem]!AsmLoweringError {
+pub fn lower(self: AsmLowering) -> Unit!AsmLoweringError {
   self.collect_labels_and_tables!()
   self.collect_defines()
   self.eval_defines!()
