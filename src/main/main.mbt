@@ -54,7 +54,9 @@ fn interpret() -> @interpret.Interpreter!PipelineError {
 fn main {
     match interpret?() {
         Ok(interpreter) => {
-          ()
+          for inst in interpreter.insts {
+            println(inst)
+          }
         }
         Err(err) => {
             println(err)
