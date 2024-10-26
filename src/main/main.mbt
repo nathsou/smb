@@ -56,7 +56,9 @@ fn main {
 
   match transpile?() {
       Ok(tr) => {
-          tr.constants.write(dir=output_dir)
+          for file in tr.files {
+              file.write(dir=output_dir)
+          }
       }
       Err(err) => {
           println(err)
