@@ -44,7 +44,10 @@ fn lower() -> @lower.AsmLowering!PipelineError {
 
 fn transpile() -> @transpile.Transpiler!PipelineError {
   let low = lower!()
-  @transpile.Transpiler::new(low)
+  match @transpile.Transpiler::new?(low) {
+    Ok(tr) => tr
+    Err(err) => raise IOError(Show::to_string(err))
+  }
 }
 
 let output_dir: String = "out"

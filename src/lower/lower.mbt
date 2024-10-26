@@ -182,13 +182,12 @@ fn collect_instructions(self: AsmLowering) -> Unit!LoweringError {
       Label(name) => {
         if not(self.tables_by_label.contains(name)) {
           // this label is a jump target if it's not a table label
+          
           self.lowered.push(Label(name))
           inside_table = false
         } else {
           inside_table = true
         }
-
-        // println("inside_table: \{inside_table} name: \{name}")
       }
       Inst(~op, ~mode) => {
         if op == JSR && (match mode { AbsoluteOrZeroPage(addr=Ident("JumpEngine")) => true; _ => false }) {
@@ -248,12 +247,17 @@ fn collect_instructions(self: AsmLowering) -> Unit!LoweringError {
             IndirectIndexed(~addr) => IndirectIndexed(self.type_expr!(addr))
           }
 
-          self.lowered.push(Inst(~op, mode=addr_mode))
+          let comment = match self.items[item_idx + 1] {
+            Comment(~comment, is_inline=true) => Some(comment)
+            _ => None
+          }
+
+          self.lowered.push(Inst(~op, mode=addr_mode, ~comment))
         }
       }
-      Comment(~comment, ~is_inline) => {
+      Comment(~comment, is_inline=false) => {
         if not(inside_table) {
-          self.lowered.push(Comment(~comment, ~is_inline))
+          self.lowered.push(Comment(comment))
         }
       }
       Directive(name="db" | "dw" as name, ~args) => {

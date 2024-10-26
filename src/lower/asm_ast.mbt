@@ -45,9 +45,9 @@ pub enum AsmAddressingMode {
 
 pub enum AsmItem {
   Label(String)
-  Inst(~op: @parse.OpCode, ~mode: AsmAddressingMode)
+  Inst(~op: @parse.OpCode, ~mode: AsmAddressingMode, ~comment: String?)
   JumpEngine(~jump_table: Array[String])
-  Comment(~comment: String, ~is_inline: Bool)
+  Comment(String)
 } derive (Show)
 
 pub fn ty(self: TypedExpr) -> Type {
@@ -56,5 +56,23 @@ pub fn ty(self: TypedExpr) -> Type {
     Ident(name=_, ~ty) => ty
     Unary(op=_, expr=_, ~ty) => ty
     Binary(op=_, lhs=_, rhs=_, ~ty) => ty
+  }
+}
+
+pub fn suffix(self: AsmAddressingMode) -> String {
+  match self {
+    Accumulator => "_acc"
+    Implied => ""
+    Immediate(_) => "_imm"
+    Relative(_) => "_rel"
+    ZeroPage(_) => "_zp"
+    ZeroPageX(_) => "_zpx"
+    ZeroPageY(_) => "_zpy"
+    Absolute(_) => "_abs"
+    AbsoluteX(_) => "_absx"
+    AbsoluteY(_) => "_absy"
+    Indirect(_) => "_ind"
+    IndexedIndirect(_) => "_indx"
+    IndirectIndexed(_) => "_indy"
   }
 }
