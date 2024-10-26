@@ -3,3 +3,4 @@ target/
 used_insts.txt
 out/
 .vscode/
+smb

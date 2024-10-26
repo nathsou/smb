@@ -121,13 +121,12 @@ fn emit_data_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"stdint.h\"")
   self.emit("#include \"constants.h\"")
   self.emit("")
+  self.emit("extern const uint8_t data[\{low.table_offset}];")
+  self.emit("")
 
   for label, table in low.tables_by_label {
     self.emit("#define \{label} 0x\{hex(0x8000 + table.offset)}")
   }
-
-  self.emit("")
-  self.emit("const uint8_t data[\{low.table_offset}];")
 
   self.emit("")
   self.emit("#endif")
@@ -166,7 +165,7 @@ fn emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
 
 fn emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"data.h\"")
-  self.emit("#include \"cpu.h\"")
+  self.emit("#include \"instructions.h\"")
   self.emit("")
   self.emit("void smb(void) {")
   self.indentation += 1
@@ -240,6 +239,7 @@ fn emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
             "jsr(\{target}, \{jsr_return_index});"
           }
           (RTS, _) => "goto rts;"
+          (RTI, _) => "return; // rti"
           _ => "\{op.to_string().to_lower()}\{mode.suffix()}(\{args});"
         }
         
@@ -333,6 +333,9 @@ pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
   }
 
   let cpu_h = File::read!(name="cpu.h", path="src/c/cpu.h")
+  let cpu_c = File::read!(name="cpu.c", path="src/c/cpu.c")
+  let instructions_h = File::read!(name="instructions.h", path="src/c/instructions.h")
+  let instructions_c = File::read!(name="instructions.c", path="src/c/instructions.c")
 
   let code_c = {
     name: "code.c",
@@ -343,5 +346,16 @@ pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
     }
   }
 
-  { files: [constants_h, data_h, data_c, cpu_h, code_c] }
+  let main_c = File::read!(name="main.c", path="src/c/main.c")
+
+  {
+    files: [
+      constants_h,
+      data_h, data_c,
+      cpu_h, cpu_c,
+      instructions_h, instructions_c,
+      code_c,
+      main_c,
+    ],
+  }
 }

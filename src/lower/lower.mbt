@@ -144,7 +144,10 @@ fn type_expr(self: AsmLowering, expr: @parse.SourceExpr) -> TypedExpr!LoweringEr
     Ident(name) => {
       match self.tables_by_label[name] {
         Some(table) => Ident(~name, ty=ArrayTy(table.elem_size))
-        None => Ident(~name, ty=LabelTy)
+        None => match self.defines[name] {
+          Some(expr) => Ident(~name, ty=expr.ty())
+          None => Ident(~name, ty=LabelTy)
+        }
       }
     }
     Unary(~op, ~expr) => {

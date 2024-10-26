@@ -6,7 +6,12 @@ pub enum Type {
 } derive (Show, Eq)
 
 pub enum TypedExpr {
-  Const(~base: @parse.ConstantBase, ~value: Int, ~size: @parse.ConstantSize, ~ty: Type)
+  Const(
+    ~base: @parse.ConstantBase,
+    ~value: Int,
+    ~size: @parse.ConstantSize,
+    ~ty: Type,
+  )
   Ident(~name: String, ~ty: Type)
   Unary(~op: @parse.UnaryOp, ~expr: TypedExpr, ~ty: Type)
   Binary(~op: @parse.BinaryOp, ~lhs: TypedExpr, ~rhs: TypedExpr, ~ty: Type)

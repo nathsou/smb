@@ -1,28 +1,59 @@
 #ifndef SMB_CPU_H
 #define SMB_CPU_H
 
+#include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 // registers
-uint8_t a;
-uint8_t x;
-uint8_t y;
-uint8_t sp;
-uint16_t pc;
+extern uint8_t a;
+extern uint8_t x;
+extern uint8_t y;
+extern uint8_t sp;
 
 // flags
-uint8_t carry_flag;
-uint8_t zero_flag;
-uint8_t neg_flag;
-uint8_t overflow_flag;
+extern bool carry_flag;  
+extern bool zero_flag;
+extern bool neg_flag;
+// the overflow flag is never used :)
+
+// memory
+extern uint8_t ram[0x800]; // 2KB
+extern uint8_t* chr_rom; // 8KB
+
+uint8_t read_byte(uint16_t addr);
+void write_byte(uint16_t addr, uint8_t value);
+
+uint16_t read_word(uint16_t addr);
+void write_word(uint16_t addr, uint16_t value);
 
 // jsr return stack
-int jsr_return_stack[255]; // TODO: experiment with the stack size
-int jsr_return_stack_top;
+extern size_t jsr_return_stack[255]; // TODO: experiment with the stack size
+extern size_t jsr_return_stack_top;
 
-void push_jsr(int return_index);
-int pop_jsr();
+void push_jsr(size_t return_index);
+size_t pop_jsr();
 
 #define jsr(target, return_index) push_jsr(return_index); goto target; jsr_ret_##return_index:
+
+void init_cpu(uint8_t* rom);
+
+// addressing mode utils
+
+void update_nz(uint8_t value);
+
+uint8_t zero_page(uint8_t addr);
+uint8_t zero_page_x(uint8_t addr);
+uint8_t zero_page_y(uint8_t addr);
+
+uint8_t absolute(uint16_t addr);
+uint8_t absolute_x(uint16_t addr);
+uint8_t absolute_y(uint16_t addr);
+
+uint8_t indirect_x_addr(uint8_t addr);
+uint8_t indirect_y_addr(uint8_t addr);
+
+uint8_t indirect_x_val(uint8_t addr);
+uint8_t indirect_y_val(uint8_t addr);
 
 #endif
