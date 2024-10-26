@@ -134,14 +134,12 @@ pub fn emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"data.h\"")
   self.emit("")
 
-  for table in low.tables {
-    let elem_ty = match table.elem_size {
-      Byte => "uint8_t"
-      Word => "uint16_t"
-    }
+  self.emit("const uint8_t data[] = {")
+  self.indentation += 1
 
-    self.emit("const \{elem_ty} \{table.name}_[] = {")
-    self.indentation += 1
+  for table in low.tables {
+    self.emit("")
+    self.emit("// \{table.name}")
 
     for line in table.lines {
       match line {
@@ -158,10 +156,10 @@ pub fn emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
         }
       }
     }
-
-    self.indentation -= 1
-    self.emit("};\n")
   }
+
+  self.indentation -= 1
+    self.emit("};\n")
 }
 
 pub struct File {
