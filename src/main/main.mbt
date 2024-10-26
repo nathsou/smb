@@ -3,8 +3,7 @@ type! PipelineError {
   IOError(String)
   LexerError(@parse.LexerError)
   ParserError(@parse.ParserError)
-  LoweringError(@lower.AsmLoweringError)
-  InterpreterError(@interpret.InterpreterError)
+  LoweringError(@lower.LoweringError)
 } derive(Show)
 
 fn read_rom() -> String!PipelineError {
@@ -43,23 +42,24 @@ fn lower() -> @lower.AsmLowering!PipelineError {
   }
 }
 
-fn interpret() -> @interpret.Interpreter!PipelineError {
-  let lowering = lower!()
-  match @interpret.Interpreter::from?(lowering) {
-    Ok(interpreter) => interpreter
-    Err(err) => raise InterpreterError(err)
-  }
+fn transpile() -> @transpile.Transpiler!PipelineError {
+  let low = lower!()
+  @transpile.Transpiler::new(low)
 }
 
+let output_dir: String = "out"
+
 fn main {
-    match interpret?() {
-        Ok(interpreter) => {
-          for inst in interpreter.insts {
-            println(inst)
-          }
-        }
-        Err(err) => {
-            println(err)
-        }
-    }
+  if not(@fs.path_exists(path=output_dir)) {
+    @fs.create_dir(path=output_dir)
+  }
+
+  match transpile?() {
+      Ok(tr) => {
+          tr.constants.write(dir=output_dir)
+      }
+      Err(err) => {
+          println(err)
+      }
+  }
 }
