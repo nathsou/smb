@@ -1,6 +1,8 @@
 
 pub enum Type {
-  ByteTy; WordTy; TableTy; LabelTy
+  ConstTy(@parse.ConstantSize)
+  ArrayTy(@parse.ConstantSize)
+  LabelTy
 } derive (Show, Eq)
 
 pub enum TypedExpr {
@@ -8,6 +10,21 @@ pub enum TypedExpr {
   Ident(~name: String, ~ty: Type)
   Unary(~op: @parse.UnaryOp, ~expr: TypedExpr, ~ty: Type)
   Binary(~op: @parse.BinaryOp, ~lhs: TypedExpr, ~rhs: TypedExpr, ~ty: Type)
+} derive (Show)
+
+
+pub enum AsmTableLine {
+  Data(~data: Array[TypedExpr], ~comment: Ref[String])
+  Comment(String)
+} derive (Show)
+
+pub struct AsmTable {
+  name: String
+  offset: Int
+  lines: Array[AsmTableLine]
+  size: Int
+  elem_size: @parse.ConstantSize
+  items_count: Int
 } derive (Show)
 
 pub enum AsmAddressingMode {

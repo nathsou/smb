@@ -9,14 +9,6 @@ pub struct AsmLowering {
   mut table_offset: Int
 } derive (Show)
 
-pub struct AsmTable {
-  name: String
-  offset: Int
-  data: Array[TypedExpr]
-  elem_size: @parse.ConstantSize
-  comments: Array[String]
-} derive (Show)
-
 pub type! LoweringError String derive(Show)
 
 pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
@@ -32,11 +24,12 @@ pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
 }
 
 fn detect_table(self: AsmLowering, name: String, index: Int) -> AsmTable?!LoweringError {
-  let data: Array[TypedExpr] = []
-  let comments: Array[String] = []
+  let lines: Array[AsmTableLine] = []
   let mut elem_size: @parse.ConstantSize? = None
+  let mut length = 0
+  let mut i = index + 1
 
-  for i in (index + 1)..<self.items.length() {
+  while i < self.items.length() {
     match self.items[i] {
       Directive(name="db" | "dw" as name, ~args) => {
         let directive_elem_size: @parse.ConstantSize = if name == "db" { Byte } else { Word }
@@ -52,25 +45,56 @@ fn detect_table(self: AsmLowering, name: String, index: Int) -> AsmTable?!Loweri
           }
         }
 
+        length += args.length()
+
+        let data = []
+
         for arg in args {
           data.push(self.type_expr!(arg))
         }
+
+        lines.push(Data(~data, comment=Ref::new("")))
       }
-      Comment(~comment, is_inline=_) => comments.push(comment)
+      Comment(~comment, ~is_inline) => {
+        if is_inline {
+          match lines.last() {
+            Some(Data(data=_, comment=comment_ref)) => {
+              comment_ref.val = comment
+            }
+            _ => ()
+          }
+        } else {
+          lines.push(Comment(comment))
+        }
+      }
       _ => break
     }
+
+    i += 1
   }
 
   match elem_size {
     Some(elem_size) => {
-      Some({ name, offset: self.table_offset, data, elem_size, comments })
+      Some({
+        name,
+        offset: self.table_offset,
+        size: length * elem_size.byte_size(),
+        lines,
+        elem_size,
+        items_count: i - index,
+      })
     }
     None => None
   }
 }
 
 fn collect_labels_and_tables(self: AsmLowering) -> Unit!LoweringError {
-  for idx, item in self.items {
+  let mut idx = 0
+
+  while idx < self.items.length() {
+    let item = self.items[idx]
+    let mut idx_increment = 1
+
     match item {
       Label(name) => {
         let is_alias = match name {
@@ -81,18 +105,29 @@ fn collect_labels_and_tables(self: AsmLowering) -> Unit!LoweringError {
         match self.detect_table!(name, idx + (if is_alias { 1 } else { 0 })) {
           Some(table) => {
             self.tables.push(table)
-            self.table_offset += table.data.length() * table.elem_size.byte_size()
+            self.table_offset += table.size
             self.tables_by_label[table.name] = table
 
             if is_alias {
-              self.tables_by_label[name] = table
+              let alias = match self.items[idx + 1] {
+                Label(name) => name
+                _ => raise LoweringError("Expected alias label")
+              }
+
+              self.tables_by_label[alias] = table
             }
+
+            idx_increment = table.items_count
           }
-          None => self.jump_target_labels.insert(name)
+          None => {
+            self.jump_target_labels.insert(name)
+          }
         }
       }
       _ => ()
     }
+
+    idx += idx_increment
   }
 }
 
@@ -100,15 +135,15 @@ fn type_expr(self: AsmLowering, expr: @parse.SourceExpr) -> TypedExpr!LoweringEr
   match expr {
     Const(~base, ~value, ~size) => {
       let ty = match size {
-        Byte => ByteTy
-        Word => WordTy
+        Byte => ConstTy(Byte)
+        Word => ConstTy(Word)
       }
 
       Const(~base, ~value, ~size, ~ty)
     }
     Ident(name) => {
       match self.tables_by_label[name] {
-        Some(_) => Ident(~name, ty=TableTy)
+        Some(table) => Ident(~name, ty=ArrayTy(table.elem_size))
         None => Ident(~name, ty=LabelTy)
       }
     }
@@ -152,6 +187,8 @@ fn collect_instructions(self: AsmLowering) -> Unit!LoweringError {
         } else {
           inside_table = true
         }
+
+        // println("inside_table: \{inside_table} name: \{name}")
       }
       Inst(~op, ~mode) => {
         if op == JSR && (match mode { AbsoluteOrZeroPage(addr=Ident("JumpEngine")) => true; _ => false }) {
@@ -192,8 +229,8 @@ fn collect_instructions(self: AsmLowering) -> Unit!LoweringError {
             AbsoluteOrZeroPage(~addr) | AbsoluteOrZeroPageX(~addr) | AbsoluteOrZeroPageY(~addr) => {
               let addr = self.type_expr!(addr)
               let size: @parse.ConstantSize = match addr.ty() {
-                ByteTy => Byte
-                WordTy | TableTy | LabelTy => Word
+                ConstTy(size) => size
+                ArrayTy(_) | LabelTy => Word
               }
 
               match (mode, size) {

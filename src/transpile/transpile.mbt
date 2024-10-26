@@ -1,7 +1,7 @@
 
 pub struct Emitter {
   output: StringBuilder
-  indentation: Int
+  mut indentation: Int
 }
 
 pub fn Emitter::new() -> Emitter {
@@ -16,9 +16,17 @@ fn emit(self: Emitter, s: String) -> Unit {
   self.output.write_string("\{indent}\{s}\n")
 }
 
+fn write(self: Emitter, s: String) -> Unit {
+  self.output.write_string(s)
+}
+
 fn hex(n: Int) -> String {
   let mut n = n
   let h = StringBuilder::new()
+
+  if n == 0 {
+    return "0"
+  }
 
   while n > 0 {
     let digit = n % 16
@@ -43,6 +51,10 @@ fn hex(n: Int) -> String {
 fn bin(n: Int) -> String {
   let mut n = n
   let b = StringBuilder::new()
+
+  if n == 0 {
+    return "0"
+  }
 
   while n > 0 {
     let digit = n % 2
@@ -87,7 +99,7 @@ fn show_expr(expr: @lower.TypedExpr) -> String {
 
 pub type! EmitterError String derive(Show)
 
-pub fn emit_defines(self: Emitter, low: @lower.AsmLowering) -> Unit {
+pub fn emit_constants_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#ifndef SMB_CONSTANTS_H")
   self.emit("#define SMB_CONSTANTS_H")
   self.emit("")
@@ -102,6 +114,56 @@ pub fn emit_defines(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("\n#endif")
 }
 
+pub fn emit_data_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
+  self.emit("#ifndef SMB_DATA_H")
+  self.emit("#define SMB_DATA_H")
+  self.emit("")
+  self.emit("#include \"stdint.h\"")
+  self.emit("#include \"constants.h\"")
+  self.emit("")
+
+  for label, table in low.tables_by_label {
+    self.emit("#define \{label} 0x\{hex(0x8000 + table.offset)}")
+  }
+
+  self.emit("")
+  self.emit("#endif")
+}
+
+pub fn emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
+  self.emit("#include \"data.h\"")
+  self.emit("")
+
+  for table in low.tables {
+    let elem_ty = match table.elem_size {
+      Byte => "uint8_t"
+      Word => "uint16_t"
+    }
+
+    self.emit("const \{elem_ty} \{table.name}_[] = {")
+    self.indentation += 1
+
+    for line in table.lines {
+      match line {
+        Data(~data, ~comment) => {
+          let data = String::concat(data.map(show_expr), separator=", ")
+
+          match comment.val {
+            "" => self.emit(data + ",")
+            _ => self.emit("\{data}, // \{comment.val}")
+          }
+        }
+        Comment(comment) => {
+          self.emit("// \{comment}")
+        }
+      }
+    }
+
+    self.indentation -= 1
+    self.emit("};\n")
+  }
+}
+
 pub struct File {
   name: String
   contents: String
@@ -112,19 +174,36 @@ pub fn write(self: File, ~dir: String) -> Unit {
 }
 
 pub struct Transpiler {
-  constants: File
+  files: Array[File]
 }
 
 pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler {
-
-  {
-    constants: {
-      name: "constants.h",
-      contents: {
-        let emitter = Emitter::new()
-        emitter.emit_defines(low)
-        emitter.output.to_string()
-      }
+  let constants_h = {
+    name: "constants.h",
+    contents: {
+      let emitter = Emitter::new()
+      emitter.emit_constants_h(low)
+      emitter.output.to_string()
     }
   }
+
+  let data_h = {
+    name: "data.h",
+    contents: {
+      let emitter = Emitter::new()
+      emitter.emit_data_h(low)
+      emitter.output.to_string()
+    }
+  }
+
+  let data_c = {
+    name: "data.c",
+    contents: {
+      let emitter = Emitter::new()
+      emitter.emit_data_c(low)
+      emitter.output.to_string()
+    }
+  }
+
+  { files: [constants_h, data_h, data_c] }
 }
