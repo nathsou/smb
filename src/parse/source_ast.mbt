@@ -36,4 +36,3 @@ pub enum SourceItem {
   Directive(~name: String, ~args: Array[SourceExpr])
   Comment(~comment: String, ~is_inline: Bool)
 } derive (Show)
-

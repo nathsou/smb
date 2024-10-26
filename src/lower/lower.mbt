@@ -2,7 +2,7 @@
 pub struct AsmLowering {
   items: Array[@parse.SourceItem]
   lowered: Array[AsmItem]
-  defines: Map[String, LazyVal]
+  defines: Map[String, TypedExpr]
   jump_target_labels: Set[String]
   tables: Array[AsmTable]
   tables_by_label: Map[String, AsmTable]
@@ -12,26 +12,12 @@ pub struct AsmLowering {
 pub struct AsmTable {
   name: String
   offset: Int
-  data: Array[LazyVal]
+  data: Array[TypedExpr]
   elem_size: @parse.ConstantSize
   comments: Array[String]
 } derive (Show)
 
-pub type! AsmLoweringError {
-  Unreachable(String)
-} derive (Show)
-
-pub struct LazyVal {
-  expr: @parse.SourceExpr
-  value: Ref[AsmValue?]
-}
-
-pub impl Show for LazyVal with output(self: LazyVal, logger: Logger) -> Unit {
-  match self.value.val {
-    Some(value) => logger.write_string("\{value}")
-    None => logger.write_string("\{self.expr}")
-  }
-}
+pub type! LoweringError String derive(Show)
 
 pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
   {
@@ -45,125 +31,8 @@ pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
   }
 }
 
-fn LazyVal::new(expr: @parse.SourceExpr) -> LazyVal {
-  { expr, value: Ref::new(None) }
-}
-
-pub fn unwrap(self: LazyVal) -> AsmValue {
-  self.value.val.unwrap()
-}
-
-enum ConstType {
-  Const; DataOffset
-}
-
-struct Const {
-  base: @parse.ConstantBase
-  value: Int
-  size: @parse.ConstantSize
-  ty: ConstType
-}
-
-fn cast_const(const: Const, ty: ConstType) -> AsmValue {
-  match ty {
-    Const => Const(base=const.base, value=const.value, size=const.size)
-    DataOffset => DataTableOffset(offset=const.value, label=None)
-  }
-}
-
-fn expect_const(value: AsmValue) -> Const!AsmLoweringError {
-  match value {
-    Const(~base, ~value, ~size) => { base, value, size, ty: Const }
-    DataTableOffset(~offset, label=_) => { base: Hexadecimal, value: offset, size: Word, ty: DataOffset }
-    _ => raise Unreachable("Expected constant expression, got: \{value}")
-  }
-}
-
-fn get_common_type(lhs: ConstType, rhs: ConstType) -> ConstType {
-  match (lhs, rhs) {
-    (Const, Const) => Const
-    _ => DataOffset
-  }
-}
-
-fn eval_lazy_val(self: AsmLowering, val: LazyVal) -> AsmValue!AsmLoweringError {
-  match val.value.val {
-    Some(value) => value
-    None => {
-      let v = self.eval_expr!(val.expr)
-      val.value.val = Some(v)
-      v
-    }
-  }
-}
-
-fn eval_expr(self: AsmLowering, expr: @parse.SourceExpr) -> AsmValue!AsmLoweringError {
-  match expr {
-    Const(~base, ~value, ~size) => Const(~base, ~value, ~size)
-    Ident(name) => {
-      match self.defines[name] {
-        Some(def) => self.eval_lazy_val!(def)
-        None => {
-          match self.tables_by_label[name] {
-            Some(table) => DataTableOffset(label=Some(name), offset=table.offset)
-            None => {
-              if self.jump_target_labels.contains(name) {
-                JumpTarget(name)
-              } else {
-                raise Unreachable("Undefined label: \{name}")
-              }
-            }
-          }
-        }
-      }
-    }
-    Unary(~op, ~expr) => {
-      let v = self.eval_expr!(expr) |> expect_const!()
-
-      match op {
-        GetLowByte => {
-          if v.size == Byte {
-            raise Unreachable("Cannot get low byte of a byte-sized value")
-          }
-
-          Const(base=v.base, value=v.value & 0xFF, size=Byte)
-        }
-        GetHighByte => {
-          if v.size == Byte {
-            raise Unreachable("Cannot get high byte of a byte-sized value")
-          }
-
-          Const(base=v.base, value=(v.value >> 8) & 0xFF, size=Byte)
-        }
-      }
-    }
-    Binary(~op, ~lhs, ~rhs) => {
-      let lhs = self.eval_expr!(lhs) |> expect_const!()
-      let rhs = self.eval_expr!(rhs) |> expect_const!()
-      let res_ty = get_common_type(lhs.ty, rhs.ty)
-
-      let res_size: @parse.ConstantSize = match (lhs.size, rhs.size) {
-        (Byte, Byte) => Byte
-        _ => Word
-      }
-
-      let mask = match res_size {
-        Byte => 0xFF
-        Word => 0xFFFF
-      }
-
-      let res: Const = match op {
-        Add => { base: Hexadecimal, value: (lhs.value + rhs.value) & mask, size: res_size, ty: res_ty }
-        Sub => { base: Hexadecimal, value: (lhs.value - rhs.value) & mask, size: res_size, ty: res_ty }
-      }
-
-      cast_const(res, res_ty)
-    }
-  }
-}
-
-fn detect_table(self: AsmLowering, name: String, index: Int) -> AsmTable?!AsmLoweringError {
-  let data: Array[LazyVal] = []
+fn detect_table(self: AsmLowering, name: String, index: Int) -> AsmTable?!LoweringError {
+  let data: Array[TypedExpr] = []
   let comments: Array[String] = []
   let mut elem_size: @parse.ConstantSize? = None
 
@@ -175,7 +44,7 @@ fn detect_table(self: AsmLowering, name: String, index: Int) -> AsmTable?!AsmLow
         match elem_size {
           Some(size) => {
             if size != directive_elem_size {
-              raise Unreachable("Inconsistent element size in table")
+              raise LoweringError("Inconsistent element size in table")
             }
           }
           None => elem_size = {
@@ -183,7 +52,9 @@ fn detect_table(self: AsmLowering, name: String, index: Int) -> AsmTable?!AsmLow
           }
         }
 
-        data.push_iter(args.map(LazyVal::new).iter())
+        for arg in args {
+          data.push(self.type_expr!(arg))
+        }
       }
       Comment(~comment, is_inline=_) => comments.push(comment)
       _ => break
@@ -198,7 +69,7 @@ fn detect_table(self: AsmLowering, name: String, index: Int) -> AsmTable?!AsmLow
   }
 }
 
-fn collect_labels_and_tables(self: AsmLowering) -> Unit!AsmLoweringError {
+fn collect_labels_and_tables(self: AsmLowering) -> Unit!LoweringError {
   for idx, item in self.items {
     match item {
       Label(name) => {
@@ -225,32 +96,46 @@ fn collect_labels_and_tables(self: AsmLowering) -> Unit!AsmLoweringError {
   }
 }
 
-fn collect_defines(self: AsmLowering) -> Unit {
+fn type_expr(self: AsmLowering, expr: @parse.SourceExpr) -> TypedExpr!LoweringError {
+  match expr {
+    Const(~base, ~value, ~size) => {
+      let ty = match size {
+        Byte => ByteTy
+        Word => WordTy
+      }
+
+      Const(~base, ~value, ~size, ~ty)
+    }
+    Ident(name) => {
+      match self.tables_by_label[name] {
+        Some(_) => Ident(~name, ty=TableTy)
+        None => Ident(~name, ty=LabelTy)
+      }
+    }
+    Unary(~op, ~expr) => {
+      let expr = self.type_expr!(expr)
+      Unary(~op, ~expr, ty=expr.ty())
+    }
+    Binary(~op, ~lhs, ~rhs) => {
+      let lhs = self.type_expr!(lhs)
+      let rhs = self.type_expr!(rhs)
+      Binary(~op, ~lhs, ~rhs, ty=lhs.ty())
+    }
+  }
+}
+
+fn collect_defines(self: AsmLowering) -> Unit!LoweringError {
   for item in self.items {
     match item {
       Define(~name, ~rhs) => {
-        self.defines[name] = LazyVal::new(rhs)
+        self.defines[name] = self.type_expr!(rhs)
       }
       _ => ()
     }
   }
 }
 
-fn eval_defines(self: AsmLowering) -> Unit!AsmLoweringError {
-  for val in self.defines.values() {
-    let _ = self.eval_lazy_val!(val)
-  }
-}
-
-fn eval_tables(self: AsmLowering) -> Unit!AsmLoweringError {
-  for table in self.tables {
-    for lazy_val in table.data {
-      let _ = self.eval_lazy_val!(lazy_val)
-    }
-  }
-}
-
-fn collect_instructions(self: AsmLowering) -> Unit!AsmLoweringError {
+fn collect_instructions(self: AsmLowering) -> Unit!LoweringError {
   let mut inside_table = false
   let mut item_idx = 0
 
@@ -280,12 +165,12 @@ fn collect_instructions(self: AsmLowering) -> Unit!AsmLoweringError {
                   match arg {
                     Ident(label) => {
                       if not(self.jump_target_labels.contains(label)) {
-                        raise Unreachable("Unknown label in jump table")
+                        raise LoweringError("Unknown label in jump table")
                       }
 
                       jump_table.push(label)
                     }
-                    _ => raise Unreachable("Expected label in jump table")
+                    _ => raise LoweringError("Expected label in jump table")
                   }
                 }
               }
@@ -302,28 +187,28 @@ fn collect_instructions(self: AsmLowering) -> Unit!AsmLoweringError {
           let addr_mode: AsmAddressingMode = match mode {
             Accumulator => Accumulator
             Implied => Implied
-            Immediate(operand) => Immediate(self.eval_expr!(operand))
-            Relative(~addr) => Relative(addr=self.eval_expr!(addr))
+            Immediate(operand) => Immediate(self.type_expr!(operand))
+            Relative(~addr) => Relative(self.type_expr!(addr))
             AbsoluteOrZeroPage(~addr) | AbsoluteOrZeroPageX(~addr) | AbsoluteOrZeroPageY(~addr) => {
-              let addr = self.eval_expr!(addr)
-              let size = match addr {
-                Const(base=_, value=_, ~size) => size
-                JumpTarget(_) | DataTableOffset(_) => Word
+              let addr = self.type_expr!(addr)
+              let size: @parse.ConstantSize = match addr.ty() {
+                ByteTy => Byte
+                WordTy | TableTy | LabelTy => Word
               }
 
               match (mode, size) {
-                (AbsoluteOrZeroPage(_), Byte) => ZeroPage(~addr)
-                (AbsoluteOrZeroPage(_), Word) => Absolute(~addr)
-                (AbsoluteOrZeroPageX(_), Byte) => ZeroPageX(~addr)
-                (AbsoluteOrZeroPageX(_), Word) => AbsoluteX(~addr)
-                (AbsoluteOrZeroPageY(_), Byte) => ZeroPageY(~addr)
-                (AbsoluteOrZeroPageY(_), Word) => AbsoluteY(~addr)
-                _ => raise Unreachable("Invalid addressing mode")
+                (AbsoluteOrZeroPage(_), Byte) => ZeroPage(addr)
+                (AbsoluteOrZeroPage(_), Word) => Absolute(addr)
+                (AbsoluteOrZeroPageX(_), Byte) => ZeroPageX(addr)
+                (AbsoluteOrZeroPageX(_), Word) => AbsoluteX(addr)
+                (AbsoluteOrZeroPageY(_), Byte) => ZeroPageY(addr)
+                (AbsoluteOrZeroPageY(_), Word) => AbsoluteY(addr)
+                _ => raise LoweringError("Invalid addressing mode")
               }
             }
-            Indirect(~addr) => Indirect(addr=self.eval_expr!(addr))
-            IndexedIndirect(~addr) => IndexedIndirect(addr=self.eval_expr!(addr))
-            IndirectIndexed(~addr) => IndirectIndexed(addr=self.eval_expr!(addr))
+            Indirect(~addr) => Indirect(self.type_expr!(addr))
+            IndexedIndirect(~addr) => IndexedIndirect(self.type_expr!(addr))
+            IndirectIndexed(~addr) => IndirectIndexed(self.type_expr!(addr))
           }
 
           self.lowered.push(Inst(~op, mode=addr_mode))
@@ -336,7 +221,7 @@ fn collect_instructions(self: AsmLowering) -> Unit!AsmLoweringError {
       }
       Directive(name="db" | "dw" as name, ~args) => {
         if not(inside_table) {
-          raise Unreachable("Raw data in code detected: \{name} \{args}")
+          raise LoweringError("Raw data in code detected: \{name} \{args}")
         }
       }
       _ => ()
@@ -346,10 +231,8 @@ fn collect_instructions(self: AsmLowering) -> Unit!AsmLoweringError {
   }
 }
 
-pub fn lower(self: AsmLowering) -> Unit!AsmLoweringError {
+pub fn lower(self: AsmLowering) -> Unit!LoweringError {
   self.collect_labels_and_tables!()
-  self.collect_defines()
-  self.eval_defines!()
-  self.eval_tables!()
+  self.collect_defines!()
   self.collect_instructions!()
 }

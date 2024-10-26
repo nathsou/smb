@@ -3,7 +3,7 @@ pub enum OpCode {
   CLD; CLI; CLV; CMP; CPX; CPY; DEC; DEX; DEY; EOR; INC; INX; INY; JMP
   JSR; LDA; LDX; LDY; LSR; NOP; ORA; PHA; PHP; PLA; PLP; ROL; ROR; RTI
   RTS; SBC; SEC; SED; SEI; STA; STX; STY; TAX; TAY; TSX; TXA; TXS; TYA
-} derive (Show, Eq)
+} derive (Show, Eq, Hash)
 
 pub enum ConstantBase {
   Binary; Decimal; Hexadecimal
