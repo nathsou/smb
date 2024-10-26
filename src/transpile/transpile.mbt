@@ -11,13 +11,13 @@ pub fn Emitter::new() -> Emitter {
   }
 }
 
-fn emit(self: Emitter, s: String) -> Unit {
+fn emit(self: Emitter, s: String, ~newline: Bool = true) -> Unit {
   let indent = "  ".repeat(self.indentation)
-  self.output.write_string("\{indent}\{s}\n")
-}
+  self.output.write_string("\{indent}\{s}")
 
-fn write(self: Emitter, s: String) -> Unit {
-  self.output.write_string(s)
+  if newline {
+    self.output.write_char('\n')
+  }
 }
 
 fn hex(n: Int) -> String {
@@ -99,7 +99,7 @@ fn show_expr(expr: @lower.TypedExpr) -> String {
 
 pub type! EmitterError String derive(Show)
 
-pub fn emit_constants_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
+fn emit_constants_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#ifndef SMB_CONSTANTS_H")
   self.emit("#define SMB_CONSTANTS_H")
   self.emit("")
@@ -114,7 +114,7 @@ pub fn emit_constants_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("\n#endif")
 }
 
-pub fn emit_data_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
+fn emit_data_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#ifndef SMB_DATA_H")
   self.emit("#define SMB_DATA_H")
   self.emit("")
@@ -127,10 +127,12 @@ pub fn emit_data_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   }
 
   self.emit("")
+  self.emit("const uint8_t data[\{low.table_offset}];")
+
+  self.emit("")
   self.emit("#endif")
 }
-
-pub fn emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
+fn emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"data.h\"")
   self.emit("")
 
@@ -162,9 +164,136 @@ pub fn emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
     self.emit("};\n")
 }
 
+fn emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
+  self.emit("#include \"data.h\"")
+  self.emit("#include \"cpu.h\"")
+  self.emit("")
+  self.emit("void smb(void) {")
+  self.indentation += 1
+  let mut jsr_return_index = 0
+  let mut is_inside_jump_engine = false
+
+  for item in low.lowered {
+    match item {
+      Label(name) => {
+        is_inside_jump_engine = name == "JumpEngine"
+        self.indentation = 1
+        self.emit("\n\{name}:")
+        self.indentation = 2
+      }
+      Inst(~op, ~mode, ~comment) => {
+        if is_inside_jump_engine {
+          continue
+        }
+
+        let args = match mode {
+          Accumulator => ""
+          Implied => ""
+          Immediate(expr) => "\{show_expr(expr)}"
+          Relative(expr) => "\{show_expr(expr)}"
+          ZeroPage(expr) => "\{show_expr(expr)}"
+          ZeroPageX(expr) => "\{show_expr(expr)}"
+          ZeroPageY(expr) => "\{show_expr(expr)}"
+          Absolute(expr) => "\{show_expr(expr)}"
+          AbsoluteX(expr) => "\{show_expr(expr)}"
+          AbsoluteY(expr) => "\{show_expr(expr)}"
+          Indirect(expr) => "\{show_expr(expr)}"
+          IndexedIndirect(expr) => "\{show_expr(expr)}"
+          IndirectIndexed(expr) => "\{show_expr(expr)}"
+        }
+
+        let is_relative = match mode {
+          Relative(_) => true
+          _ => false
+        }
+
+        let stmt = match (op, is_relative) {
+          (BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS , true) => {
+            let cond = match op {
+              BCC => "!carry_flag"
+              BCS => "carry_flag"
+              BEQ => "zero_flag"
+              BNE => "!zero_flag"
+              BMI => "neg_flag"
+              BPL => "!neg_flag"
+              BVC => "!overflow_flag"
+              BVS => "overflow_flag"
+              _ => abort("unreachable")
+            }
+
+            let target = match mode {
+              Relative(expr) => "\{show_expr(expr)}"
+              _ => abort("unreachable")
+            }
+
+            "if (\{cond}) { goto \{target}; }"
+          }
+          (JMP, _) => "goto \{args};"
+          (JSR, _) => {
+            jsr_return_index += 1
+
+            let target = match mode {
+              Absolute(Ident(~name, ty=_)) => name
+              _ => ""
+            }
+            
+            "jsr(\{target}, \{jsr_return_index});"
+          }
+          (RTS, _) => "goto rts;"
+          _ => "\{op.to_string().to_lower()}\{mode.suffix()}(\{args});"
+        }
+        
+        let stmt = match comment {
+          Some(comment) => {
+            "\{stmt} // \{comment}"
+          }
+          None => stmt
+        }
+
+        self.emit(stmt)
+      }
+      Comment(comment) => {
+        self.emit("// \{comment}")
+      }
+      JumpEngine(~jump_table) => {
+        self.emit("// jsr JumpEngine")
+        self.emit("switch (a) {")
+        self.indentation += 1
+
+        for idx, label in jump_table {
+          self.emit("case \{idx}: goto \{label};")
+        }
+
+        self.indentation -= 1
+        self.emit("}")
+      }
+    }
+  }
+
+  self.emit("")
+  self.emit("rts:")
+  self.indentation += 1
+  self.emit("switch (pop_jsr()) {")
+  self.indentation += 1
+
+  for i in 1..=jsr_return_index {
+    self.emit("case \{i}: goto jsr_ret_\{i};")
+  }
+
+  self.indentation -= 1
+  self.emit("}")
+  self.indentation = 0
+  self.emit("}")
+}
+
 pub struct File {
   name: String
   contents: String
+}
+
+fn File::read(~name: String, ~path: String) -> File!Error {
+  let contents = @fs.read_file_to_string!(~path)
+  { name, contents: contents }
 }
 
 pub fn write(self: File, ~dir: String) -> Unit {
@@ -175,7 +304,7 @@ pub struct Transpiler {
   files: Array[File]
 }
 
-pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler {
+pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
   let constants_h = {
     name: "constants.h",
     contents: {
@@ -203,5 +332,16 @@ pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler {
     }
   }
 
-  { files: [constants_h, data_h, data_c] }
+  let cpu_h = File::read!(name="cpu.h", path="src/c/cpu.h")
+
+  let code_c = {
+    name: "code.c",
+    contents: {
+      let emitter = Emitter::new()
+      emitter.emit_code_c(low)
+      emitter.output.to_string()
+    }
+  }
+
+  { files: [constants_h, data_h, data_c, cpu_h, code_c] }
 }
