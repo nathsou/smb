@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include "raylib.h"
 #include "code.h"
 #include "ppu.h"
 
@@ -7,6 +8,9 @@
 #define CHR_ROM_SIZE 8192
 #define NES_HEADER_SIZE 16
 #define PRG_ROM_SIZE 32768  // Super Mario Bros has 32KB of PRG ROM
+#define WINDOW_SCALE 2
+#define WINDOW_WIDTH SCREEN_WIDTH * WINDOW_SCALE
+#define WINDOW_HEIGHT SCREEN_HEIGHT * WINDOW_SCALE
 
 int read_chr_rom() {
     FILE *input_file, *output_file;
@@ -58,10 +62,43 @@ int read_chr_rom() {
 int main(void) {
     init_cpu();
     smb(RUN_STATE_RESET);
+    smb(RUN_STATE_NMI_HANDLER);
 
     if (read_chr_rom()) {
         return 1;
     }
+
+    render_ppu();
+
+    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "SMB");
+    SetTargetFPS(60);
+
+    Image image = {
+        .data = frame,
+        .width = SCREEN_WIDTH,
+        .height = SCREEN_HEIGHT,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8,
+        .mipmaps = 1,
+    };
+
+    Texture2D texture = LoadTextureFromImage(image);
+    SetTextureFilter(texture, TEXTURE_FILTER_POINT);
+
+    while (!WindowShouldClose()) {
+        UpdateTexture(texture, frame);
+
+        BeginDrawing();
+            ClearBackground(WHITE);
+
+            Rectangle source = { 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
+            Rectangle dest = { 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT };
+
+            DrawTexturePro(texture, source, dest, (Vector2){ 0, 0 }, 0.0f, WHITE);
+        EndDrawing();
+    }
+
+    UnloadTexture(texture);
+    CloseWindow();
 
     return 0;
 }

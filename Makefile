@@ -1,10 +1,15 @@
 CC = clang
-CFLAGS = -g
+CFLAGS = -g -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function -Wno-unused-value
+CFLAGS += -I./raylib-quickstart/build/external/raylib-master/src
+RAYLIB_FLAGS = -lGL -lm -lpthread -ldl -lrt -lX11
+SOURCES = $(wildcard src/*.c)
+SOURCES += $(wildcard out/*.c)
+OBJECTS = raylib-quickstart/bin/Debug/libraylib.a
 
 .PHONY: smb codegen clean
 
-smb: clean
-	$(CC) $(CFLAGS) -o smb out/main.c out/data.c out/code.c out/cpu.c out/instructions.c out/ppu.c
+build: clean
+	$(CC) $(CFLAGS) -o smb $(SOURCES) $(RAYLIB_FLAGS) $(OBJECTS)
 
 codegen:
 	moon run src/main
