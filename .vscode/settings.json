@@ -12,6 +12,7 @@
         "code.h": "c",
         "stdio.h": "c",
         "ppu.h": "c",
-        "raylib.h": "c"
+        "raylib.h": "c",
+        "*.m": "c"
     }
 }

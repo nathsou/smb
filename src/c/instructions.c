@@ -108,35 +108,36 @@ void sta_absy(uint16_t addr) {
 }
 
 void sta_indy(uint8_t addr) {
-    write_byte(indirect_y_addr(addr), a);
+    uint16_t ind_addr = indirect_y_addr(addr);
+    write_byte(ind_addr, a);
 }
 
 // STX - Store X Register
 
 void stx_zp(uint8_t addr) {
-    write_byte(zero_page(addr), x);
+    write_byte(addr, x);
 }
 
 void stx_zpy(uint8_t addr) {
-    write_byte(zero_page_y(addr), x);
+    write_byte(addr + y, x);
 }
 
 void stx_abs(uint16_t addr) {
-    write_byte(absolute(addr), x);
+    write_byte(addr, x);
 }
 
 // STY - Store Y Register
 
 void sty_zp(uint8_t addr) {
-    write_byte(zero_page(addr), y);
+    write_byte(addr, y);
 }
 
 void sty_zpx(uint8_t addr) {
-    write_byte(zero_page_x(addr), y);
+    write_byte(addr + x, y);
 }
 
 void sty_abs(uint16_t addr) {
-    write_byte(absolute(addr), y);
+    write_byte(addr, y);
 }
 
 // ADC - Add with Carry
@@ -144,7 +145,7 @@ void sty_abs(uint16_t addr) {
 void adc_imm(uint8_t value) {
     uint16_t sum = a + value + (carry_flag ? 1 : 0);
     carry_flag = sum > 0xff;
-    a = sum;
+    a = (uint8_t)sum;
     update_nz(a);
 }
 
@@ -331,50 +332,45 @@ void lsr_acc() {
     update_nz(a);
 }
 
-void lsr_zp(uint8_t addr) {
-    uint8_t val = zero_page(addr);
+void _lsr(uint16_t addr) {
+    uint8_t val = read_byte(addr);
     carry_flag = val & 1;
     val >>= 1;
     write_byte(addr, val);
     update_nz(val);
 }
 
+void lsr_zp(uint8_t addr) {
+    _lsr(addr);
+}
+
 void lsr_abs(uint16_t addr) {
-    uint8_t val = absolute(addr);
-    carry_flag = val & 1;
-    val >>= 1;
-    write_byte(addr, val);
-    update_nz(val);
+    _lsr(addr);
 }
 
 // INC - Increment Memory
 
-void inc_zp(uint8_t addr) {
-    uint8_t val = zero_page(addr);
+void _inc(uint16_t addr) {
+    uint8_t val = read_byte(addr);
     val++;
     write_byte(addr, val);
     update_nz(val);
+}
+
+void inc_zp(uint8_t addr) {
+    _inc(addr);
 }
 
 void inc_zpx(uint8_t addr) {
-    uint8_t val = zero_page_x(addr);
-    val++;
-    write_byte(addr, val);
-    update_nz(val);
+    _inc(addr + x);
 }
 
 void inc_abs(uint16_t addr) {
-    uint8_t val = absolute(addr);
-    val++;
-    write_byte(addr, val);
-    update_nz(val);
+    _inc(addr);
 }
 
 void inc_absx(uint16_t addr) {
-    uint8_t val = absolute_x(addr);
-    val++;
-    write_byte(addr, val);
-    update_nz(val);
+    _inc(addr + x);
 }
 
 // INX - Increment X Register
@@ -393,32 +389,27 @@ void iny() {
 
 // DEC - Decrement Memory
 
-void dec_zp(uint8_t addr) {
-    uint8_t val = zero_page(addr);
+void _dec(uint16_t addr) {
+    uint8_t val = read_byte(addr);
     val--;
     write_byte(addr, val);
     update_nz(val);
+}
+
+void dec_zp(uint8_t addr) {
+    _dec(addr);
 }
 
 void dec_zpx(uint8_t addr) {
-    uint8_t val = zero_page_x(addr);
-    val--;
-    write_byte(addr, val);
-    update_nz(val);
+    _dec(addr + x);
 }
 
 void dec_abs(uint16_t addr) {
-    uint8_t val = absolute(addr);
-    val--;
-    write_byte(addr, val);
-    update_nz(val);
+    _dec(addr);
 }
 
 void dec_absx(uint16_t addr) {
-    uint8_t val = absolute_x(addr);
-    val--;
-    write_byte(addr, val);
-    update_nz(val);
+    _dec(addr + x);
 }
 
 // DEX - Decrement X Register
@@ -569,11 +560,11 @@ void rol_acc() {
 }
 
 void rol_zp(uint8_t addr) {
-    _rol(zero_page(addr));
+    _rol(addr);
 }
 
 void rol_abs(uint16_t addr) {
-    _rol(absolute(addr));
+    _rol(addr);
 }
 
 // ROR - Rotate Right

@@ -61,14 +61,12 @@ int read_chr_rom() {
 
 int main(void) {
     init_cpu();
-    smb(RUN_STATE_RESET);
-    smb(RUN_STATE_NMI_HANDLER);
 
     if (read_chr_rom()) {
         return 1;
     }
 
-    render_ppu();
+    smb(RUN_STATE_RESET);
 
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "SMB");
     SetTargetFPS(60);
@@ -85,6 +83,8 @@ int main(void) {
     SetTextureFilter(texture, TEXTURE_FILTER_POINT);
 
     while (!WindowShouldClose()) {
+        smb(RUN_STATE_NMI_HANDLER);
+        render_ppu();
         UpdateTexture(texture, frame);
 
         BeginDrawing();

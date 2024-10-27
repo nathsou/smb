@@ -1,5 +1,5 @@
 CC = clang
-CFLAGS = -g -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function -Wno-unused-value
+CFLAGS = -g -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function -Wno-unused-value -Wconversion -Wsign-conversion -Wno-missing-braces
 CFLAGS += -I./raylib-quickstart/build/external/raylib-master/src
 RAYLIB_FLAGS = -lGL -lm -lpthread -ldl -lrt -lX11
 SOURCES = $(wildcard src/*.c)

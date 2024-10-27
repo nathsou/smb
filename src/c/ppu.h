@@ -23,8 +23,9 @@ extern uint8_t oam_addr; // OAM address: $2003
 extern uint8_t oam_data; // OAM data: $2004
 extern uint8_t ppu_scroll_x;
 extern uint8_t ppu_scroll_y;
-extern uint16_t ppu_addr;
-extern uint8_t ppu_data; // PPU data: $2007
+
+extern uint16_t vram_addr;
+extern uint8_t vram_internal_buffer; // VRAM read/write buffer
 extern uint8_t oam_dma; // OAM DMA: $4014
 
 // screen

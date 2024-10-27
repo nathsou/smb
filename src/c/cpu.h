@@ -49,8 +49,8 @@ uint8_t absolute(uint16_t addr);
 uint8_t absolute_x(uint16_t addr);
 uint8_t absolute_y(uint16_t addr);
 
-uint8_t indirect_x_addr(uint8_t addr);
-uint8_t indirect_y_addr(uint8_t addr);
+uint16_t indirect_x_addr(uint8_t addr);
+uint16_t indirect_y_addr(uint8_t addr);
 
 uint8_t indirect_x_val(uint8_t addr);
 uint8_t indirect_y_val(uint8_t addr);
