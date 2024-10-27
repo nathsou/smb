@@ -44,7 +44,6 @@ uint8_t read_byte(uint16_t addr) {
 
     if (addr < 0x4020) {
         // APU
-        printf("TODO: read_byte: APU register: %x\n", addr);
     }
 
     if (addr >= 0x8000) {
@@ -62,7 +61,6 @@ void write_byte(uint16_t addr, uint8_t value) {
         write_ppu_register(0x2000 + (addr & 0b111), value);
     } else if (addr < 0x4020) {
         // APU
-        printf("TODO: write_byte: APU register: %x\n", addr);
     } else {
         printf("write_byte: unhandled address: %x\n", addr);
     }
@@ -70,7 +68,10 @@ void write_byte(uint16_t addr, uint8_t value) {
 
 uint16_t read_word(uint16_t addr) {
     // little endian
-    return ((uint16_t)read_byte(addr)) | ((uint16_t)(read_byte(addr + 1) << 8));
+    uint16_t low_byte = (uint16_t)read_byte(addr);
+    uint16_t high_byte = ((uint16_t)read_byte(addr + 1)) << 8;
+    uint16_t word = high_byte | low_byte;
+    return word;
 }
 
 void write_word(uint16_t addr, uint16_t value) {
@@ -117,11 +118,11 @@ uint8_t absolute_y(uint16_t addr) {
     return read_byte(addr + y);
 }
 
-uint8_t indirect_x_addr(uint8_t addr) {
+uint16_t indirect_x_addr(uint8_t addr) {
     return read_word(addr + x);
 }
 
-uint8_t indirect_y_addr(uint8_t addr) {
+uint16_t indirect_y_addr(uint8_t addr) {
     return read_word(addr) + y;
 }
 
