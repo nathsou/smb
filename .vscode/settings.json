@@ -11,6 +11,7 @@
         "stddef.h": "c",
         "code.h": "c",
         "stdio.h": "c",
-        "ppu.h": "c"
+        "ppu.h": "c",
+        "raylib.h": "c"
     }
 }
