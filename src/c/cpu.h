@@ -19,7 +19,6 @@ extern bool neg_flag;
 
 // memory
 extern uint8_t ram[0x800]; // 2KB
-extern uint8_t* chr_rom; // 8KB
 
 uint8_t read_byte(uint16_t addr);
 void write_byte(uint16_t addr, uint8_t value);
@@ -36,7 +35,7 @@ size_t pop_jsr();
 
 #define jsr(target, return_index) push_jsr(return_index); goto target; jsr_ret_##return_index:
 
-void init_cpu(uint8_t* rom);
+void init_cpu(void);
 
 // addressing mode utils
 
@@ -55,5 +54,8 @@ uint8_t indirect_y_addr(uint8_t addr);
 
 uint8_t indirect_x_val(uint8_t addr);
 uint8_t indirect_y_val(uint8_t addr);
+
+// engine
+void next_frame(void);
 
 #endif

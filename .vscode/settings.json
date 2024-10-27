@@ -1,0 +1,16 @@
+{
+    "files.associations": {
+        "*.nesk": "plaintext",
+        "*.alp": "json",
+        "data.h": "c",
+        "cpu.h": "c",
+        "constants.h": "c",
+        "stdint.h": "c",
+        "stdbool.h": "c",
+        "instructions.h": "c",
+        "stddef.h": "c",
+        "code.h": "c",
+        "stdio.h": "c",
+        "ppu.h": "c"
+    }
+}

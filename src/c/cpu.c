@@ -1,8 +1,8 @@
 #include "cpu.h"
 #include "data.h"
 #include <stdio.h>
-
-#define CHR_ROM_OFFSET 0x8010 // iNES header (16 bytes) + 2 pages of PRG ROM (32KB)
+#include "code.h"
+#include "ppu.h"
 
 uint8_t a;
 uint8_t x;
@@ -15,10 +15,9 @@ bool neg_flag;
 
 size_t jsr_return_stack[255];
 size_t jsr_return_stack_top;
-// uint8_t chr_rom[8192];
 uint8_t ram[2048];
 
-void init_cpu(uint8_t* rom) {
+void init_cpu(void) {
     // registers
     a = 0;
     x = 0;
@@ -32,18 +31,15 @@ void init_cpu(uint8_t* rom) {
 
     // jsr return stack
     jsr_return_stack_top = 0;
-    // chr_rom = rom + CHR_ROM_OFFSET;
 }
 
 uint8_t read_byte(uint16_t addr) {
     if (addr < 0x2000) {
-        return ram[addr & 0x7ff];
+        return ram[addr & 0b0000011111111111];
     }
 
-    if (addr < 0x4018) {
-        // PPU registers
-        printf("TODO: read_byte: PPU register: %x\n", addr);
-        return 0;
+    if (addr < 0x4000) {
+        return read_ppu_register(0x2000 + (addr & 0b111));
     }
 
     if (addr < 0x4020) {
@@ -61,10 +57,9 @@ uint8_t read_byte(uint16_t addr) {
 
 void write_byte(uint16_t addr, uint8_t value) {
     if (addr < 0x2000) {
-        ram[addr & 0x7ff] = value;
-    } else if (addr < 0x4018) {
-        // PPU registers
-        printf("TODO: write_byte: PPU register: %x\n", addr);
+        ram[addr & 0b0000011111111111] = value;
+    } else if (addr < 0x4000) {
+        write_ppu_register(0x2000 + (addr & 0b111), value);
     } else if (addr < 0x4020) {
         // APU
         printf("TODO: write_byte: APU register: %x\n", addr);
@@ -73,9 +68,15 @@ void write_byte(uint16_t addr, uint8_t value) {
     }
 }
 
-uint16_t read_word(uint16_t addr) { return 0; }
+uint16_t read_word(uint16_t addr) {
+    // little endian
+    return ((uint16_t)read_byte(addr)) | ((uint16_t)(read_byte(addr + 1) << 8));
+}
 
-void write_word(uint16_t addr, uint16_t value) {}
+void write_word(uint16_t addr, uint16_t value) {
+    write_byte(addr, value & 0xff);
+    write_byte(addr + 1, value >> 8);
+}
 
 void push_jsr(size_t return_index) {
     jsr_return_stack[jsr_return_stack_top++] = return_index;
@@ -130,4 +131,8 @@ uint8_t indirect_x_val(uint8_t addr) {
 
 uint8_t indirect_y_val(uint8_t addr) {
     return read_byte(indirect_y_addr(addr));
+}
+
+void next_frame(void) {
+    smb(RUN_STATE_NMI_HANDLER);
 }

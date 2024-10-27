@@ -163,12 +163,33 @@ fn emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
     self.emit("};\n")
 }
 
-fn emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
+fn emit_code_h(self: Emitter) -> Unit {
+  self.emit("#ifndef SMB_CODE_H")
+  self.emit("#define SMB_CODE_H")
+  self.emit("")
   self.emit("#include \"data.h\"")
   self.emit("#include \"instructions.h\"")
   self.emit("")
-  self.emit("void smb(void) {")
+  self.emit("typedef enum { RUN_STATE_RESET, RUN_STATE_NMI_HANDLER } RunState;")
+  self.emit("")
+  self.emit("void smb(RunState state);")
+  self.emit("")
+  self.emit("#endif")
+}
+
+fn emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
+  self.emit("#include \"code.h\"")
+  self.emit("")
+  self.emit("void smb(RunState state) {")
   self.indentation += 1
+
+  self.emit("switch (state) {")
+  self.indentation += 1
+  self.emit("case RUN_STATE_RESET: goto Start;")
+  self.emit("case RUN_STATE_NMI_HANDLER: goto NonMaskableInterrupt;")
+  self.indentation -= 1
+  self.emit("}\n")
+
   let mut jsr_return_index = 0
   let mut is_inside_jump_engine = false
 
@@ -227,7 +248,12 @@ fn emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
 
             "if (\{cond}) { goto \{target}; }"
           }
-          (JMP, _) => "goto \{args};"
+          (JMP, _) => {
+            match args {
+              "EndlessLoop" => "return; // jmp EndlessLoop"
+              _ => "goto \{args};"
+            }
+          }
           (JSR, _) => {
             jsr_return_index += 1
 
@@ -236,7 +262,7 @@ fn emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
               _ => ""
             }
             
-            "jsr(\{target}, \{jsr_return_index});"
+            "jsr(\{target}, \{jsr_return_index - 1});"
           }
           (RTS, _) => "goto rts;"
           (RTI, _) => "return; // rti"
@@ -271,12 +297,13 @@ fn emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
   }
 
   self.emit("")
+  self.indentation = 0
   self.emit("rts:")
   self.indentation += 1
   self.emit("switch (pop_jsr()) {")
   self.indentation += 1
 
-  for i in 1..=jsr_return_index {
+  for i in 0..<jsr_return_index {
     self.emit("case \{i}: goto jsr_ret_\{i};")
   }
 
@@ -336,6 +363,17 @@ pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
   let cpu_c = File::read!(name="cpu.c", path="src/c/cpu.c")
   let instructions_h = File::read!(name="instructions.h", path="src/c/instructions.h")
   let instructions_c = File::read!(name="instructions.c", path="src/c/instructions.c")
+  let ppu_h = File::read!(name="ppu.h", path="src/c/ppu.h")
+  let ppu_c = File::read!(name="ppu.c", path="src/c/ppu.c")
+
+  let code_h = {
+    name: "code.h",
+    contents: {
+      let emitter = Emitter::new()
+      emitter.emit_code_h()
+      emitter.output.to_string()
+    }
+  }
 
   let code_c = {
     name: "code.c",
@@ -354,7 +392,8 @@ pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
       data_h, data_c,
       cpu_h, cpu_c,
       instructions_h, instructions_c,
-      code_c,
+      code_h, code_c,
+      ppu_h, ppu_c,
       main_c,
     ],
   }
