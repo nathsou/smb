@@ -313,8 +313,8 @@ void draw_sprite_tile(
                 uint8_t palette_offset = palette_table[palette_idx + color_index - 1];
                 uint8_t flipped_x = (uint8_t)(flip_x ? tile_x : 7 - tile_x);
                 uint8_t flipped_y = (uint8_t)(flip_y ? 7 - tile_y : tile_y);
-                uint8_t screen_x = x + flipped_x;
-                uint8_t screen_y = y + flipped_y;
+                size_t screen_x = x + flipped_x;
+                size_t screen_y = y + flipped_y;
 
                 bool is_hidden = behind_bg && opaque_bg_mask[screen_y * SCREEN_WIDTH + screen_x];
 

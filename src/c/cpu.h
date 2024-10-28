@@ -35,6 +35,9 @@ size_t pop_jsr();
 
 #define jsr(target, return_index) push_jsr(return_index); goto target; jsr_ret_##return_index:
 
+// controllers
+extern uint8_t controller1_state;
+
 void init_cpu(void);
 
 // addressing mode utils
