@@ -13,6 +13,15 @@
         "stdio.h": "c",
         "ppu.h": "c",
         "raylib.h": "c",
-        "*.m": "c"
+        "*.m": "c",
+        "array": "c",
+        "string": "c",
+        "string_view": "c",
+        "*.tcc": "c",
+        "system_error": "c",
+        "functional": "c",
+        "tuple": "c",
+        "type_traits": "c",
+        "utility": "c"
     }
 }

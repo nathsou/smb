@@ -64,6 +64,9 @@ void write_byte(uint16_t addr, uint8_t value) {
         ram[addr & 0b0000011111111111] = value;
     } else if (addr < 0x4000) {
         write_ppu_register(0x2000 + (addr & 0b111), value);
+    } else if (addr == 0x4014) {
+        uint16_t start_addr = value << 8;
+        transfer_oam(start_addr);
     } else if (addr < 0x4020) {
         // APU
     } else if (WARN_UNHANDLED_ADDRESS) {
