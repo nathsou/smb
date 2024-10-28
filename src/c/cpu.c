@@ -4,6 +4,8 @@
 #include "code.h"
 #include "ppu.h"
 
+#define WARN_UNHANDLED_ADDRESS false
+
 uint8_t a;
 uint8_t x;
 uint8_t y;
@@ -50,7 +52,10 @@ uint8_t read_byte(uint16_t addr) {
         return data[addr - 0x8000];
     }
 
-    printf("read_byte: unhandled address: %x\n", addr);
+    if (WARN_UNHANDLED_ADDRESS) {
+        printf("read_byte: unhandled address: %x\n", addr);
+    }
+
     return 0;
 }
 
@@ -61,7 +66,7 @@ void write_byte(uint16_t addr, uint8_t value) {
         write_ppu_register(0x2000 + (addr & 0b111), value);
     } else if (addr < 0x4020) {
         // APU
-    } else {
+    } else if (WARN_UNHANDLED_ADDRESS) {
         printf("write_byte: unhandled address: %x\n", addr);
     }
 }
@@ -69,7 +74,7 @@ void write_byte(uint16_t addr, uint8_t value) {
 uint16_t read_word(uint16_t addr) {
     // little endian
     uint16_t low_byte = (uint16_t)read_byte(addr);
-    uint16_t high_byte = ((uint16_t)read_byte(addr + 1)) << 8;
+    uint16_t high_byte = (uint16_t)(((uint16_t)read_byte(addr + 1)) << 8);
     uint16_t word = high_byte | low_byte;
     return word;
 }
