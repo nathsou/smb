@@ -2,15 +2,35 @@
 #include <stdlib.h>
 #include "raylib.h"
 #include "code.h"
+#include "cpu.h"
 #include "ppu.h"
 
 #define ROM_PATH "Super Mario Bros.nes"
 #define CHR_ROM_SIZE 8192
 #define NES_HEADER_SIZE 16
 #define PRG_ROM_SIZE 32768  // Super Mario Bros has 32KB of PRG ROM
-#define WINDOW_SCALE 2
+#define WINDOW_SCALE 4
 #define WINDOW_WIDTH SCREEN_WIDTH * WINDOW_SCALE
 #define WINDOW_HEIGHT SCREEN_HEIGHT * WINDOW_SCALE
+#define CONTROLLER1_RAM_ADDR 0x4016
+
+#define CONTROLLER_RIGHT 0b10000000
+#define CONTROLLER_LEFT 0b01000000
+#define CONTROLLER_DOWN 0b00100000
+#define CONTROLLER_UP 0b00010000
+#define CONTROLLER_START 0b00001000
+#define CONTROLLER_SELECT 0b00000100
+#define CONTROLLER_B 0b00000010
+#define CONTROLLER_A 0b00000001
+
+#define CONTROLLER1_UP_KEY KEY_W
+#define CONTROLLER1_LEFT_KEY KEY_A
+#define CONTROLLER1_DOWN_KEY KEY_S
+#define CONTROLLER1_RIGHT_KEY KEY_D
+#define CONTROLLER1_A_KEY KEY_L
+#define CONTROLLER1_B_KEY KEY_K
+#define CONTROLLER1_START_KEY KEY_ENTER
+#define CONTROLLER1_SELECT_KEY KEY_SPACE
 
 int read_chr_rom() {
     FILE *input_file, *output_file;
@@ -59,6 +79,56 @@ int read_chr_rom() {
     return 0;
 }
 
+void update_controller1(void) {
+    if (IsKeyDown(CONTROLLER1_UP_KEY)) {
+        controller1_state |= CONTROLLER_UP;
+    } else if (IsKeyReleased(CONTROLLER1_UP_KEY)) {
+        controller1_state &= ~CONTROLLER_UP;
+    }
+    
+    if (IsKeyDown(CONTROLLER1_LEFT_KEY)) {
+        controller1_state |= CONTROLLER_LEFT;
+    } else if (IsKeyReleased(CONTROLLER1_LEFT_KEY)) {
+        controller1_state &= ~CONTROLLER_LEFT;
+    }
+
+    if (IsKeyDown(CONTROLLER1_DOWN_KEY)) {
+        controller1_state |= CONTROLLER_DOWN;
+    } else if (IsKeyReleased(CONTROLLER1_DOWN_KEY)) {
+        controller1_state &= ~CONTROLLER_DOWN;
+    }
+
+    if (IsKeyDown(CONTROLLER1_RIGHT_KEY)) {
+        controller1_state |= CONTROLLER_RIGHT;
+    } else if (IsKeyReleased(CONTROLLER1_RIGHT_KEY)) {
+        controller1_state &= ~CONTROLLER_RIGHT;
+    }
+
+    if (IsKeyDown(CONTROLLER1_A_KEY)) {
+        controller1_state |= CONTROLLER_A;
+    } else if (IsKeyReleased(CONTROLLER1_A_KEY)) {
+        controller1_state &= ~CONTROLLER_A;
+    }
+
+    if (IsKeyDown(CONTROLLER1_B_KEY)) {
+        controller1_state |= CONTROLLER_B;
+    } else if (IsKeyReleased(CONTROLLER1_B_KEY)) {
+        controller1_state &= ~CONTROLLER_B;
+    }
+
+    if (IsKeyDown(CONTROLLER1_START_KEY)) {
+        controller1_state |= CONTROLLER_START;
+    } else if (IsKeyReleased(CONTROLLER1_START_KEY)) {
+        controller1_state &= ~CONTROLLER_START;
+    }
+
+    if (IsKeyDown(CONTROLLER1_SELECT_KEY)) {
+        controller1_state |= CONTROLLER_SELECT;
+    } else if (IsKeyReleased(CONTROLLER1_SELECT_KEY)) {
+        controller1_state &= ~CONTROLLER_SELECT;
+    }
+}
+
 int main(void) {
     init_cpu();
 
@@ -82,17 +152,17 @@ int main(void) {
     Texture2D texture = LoadTextureFromImage(image);
     SetTextureFilter(texture, TEXTURE_FILTER_POINT);
 
+    Rectangle source = { 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
+    Rectangle dest = { 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT };
+
     while (!WindowShouldClose()) {
+        update_controller1();
         smb(RUN_STATE_NMI_HANDLER);
         render_ppu();
         UpdateTexture(texture, frame);
 
         BeginDrawing();
             ClearBackground(WHITE);
-
-            Rectangle source = { 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
-            Rectangle dest = { 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT };
-
             DrawTexturePro(texture, source, dest, (Vector2){ 0, 0 }, 0.0f, WHITE);
         EndDrawing();
     }

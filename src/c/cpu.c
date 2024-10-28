@@ -19,6 +19,10 @@ size_t jsr_return_stack[255];
 size_t jsr_return_stack_top;
 uint8_t ram[2048];
 
+uint8_t controller1_state;
+bool controller1_strobe;
+uint8_t controller1_btn_index;
+
 void init_cpu(void) {
     // registers
     a = 0;
@@ -33,6 +37,11 @@ void init_cpu(void) {
 
     // jsr return stack
     jsr_return_stack_top = 0;
+
+    // controller
+    controller1_state = 0;
+    controller1_strobe = false;
+    controller1_btn_index = 0;
 }
 
 uint8_t read_byte(uint16_t addr) {
@@ -42,6 +51,20 @@ uint8_t read_byte(uint16_t addr) {
 
     if (addr < 0x4000) {
         return read_ppu_register(0x2000 + (addr & 0b111));
+    }
+
+    if (addr == 0x4016) {
+        if (controller1_btn_index > 7) {
+            return 1;
+        }
+
+        uint8_t state = (controller1_state & (1 << controller1_btn_index)) >> controller1_btn_index;
+
+        if (!controller1_strobe && controller1_btn_index < 8) {
+            controller1_btn_index++;
+        }
+        
+        return state;
     }
 
     if (addr < 0x4020) {
@@ -67,6 +90,13 @@ void write_byte(uint16_t addr, uint8_t value) {
     } else if (addr == 0x4014) {
         uint16_t start_addr = (uint16_t)(value << 8);
         transfer_oam(start_addr);
+    } else if (addr == 0x4016) {
+        // controller 1
+        controller1_strobe = (value & 1) == 1;
+        
+        if (controller1_strobe) {
+            controller1_btn_index = 0;
+        }
     } else if (addr < 0x4020) {
         // APU
     } else if (WARN_UNHANDLED_ADDRESS) {
