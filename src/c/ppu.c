@@ -1,6 +1,10 @@
 #include "ppu.h"
 #include "cpu.h"
 #include <stdio.h>
+#include <string.h>
+
+#define SPRITES_PALETTES_OFFSET 0x11
+#define BYTES_PER_PALETTE 4
 
 uint8_t chr_rom[8192];
 uint8_t nametable[2048];
@@ -15,7 +19,6 @@ uint8_t ppu_ctrl;
 uint8_t ppu_mask;
 uint8_t ppu_status;
 uint8_t oam_addr;
-uint8_t oam_data;
 uint8_t ppu_scroll_x;
 uint8_t ppu_scroll_y;
 
@@ -43,9 +46,11 @@ uint8_t COLOR_PALETTE[] = {
 };
 
 void init_ppu(uint8_t* chr) {
-    for (int i = 0; i < 8192; i++) {
-        chr_rom[i] = chr[i];
-    }
+    // copy CHR ROM
+    memcpy(chr_rom, chr, 8192);
+
+    // fill the frame with black
+    memset(frame, 0, SCREEN_WIDTH * SCREEN_HEIGHT * 3);
 }
 
 bool status_clear = false;
@@ -69,7 +74,9 @@ uint8_t read_ppu_register(uint16_t addr) {
             // vblank and sprite 0 hit always set
             return status_clear ? 0 : 0b11000000;
         }
-        case 0x2004: return oam_data;
+        case 0x2004: {
+            return oam[oam_addr];
+        }
         case 0x2007: {
             uint8_t value = vram_internal_buffer;
             vram_internal_buffer = read_ppu(vram_addr);
@@ -79,6 +86,10 @@ uint8_t read_ppu_register(uint16_t addr) {
         }
         default: return 0;
     }
+}
+
+void transfer_oam(uint16_t start_addr) {
+    memcpy(oam, ram + start_addr, 256);
 }
 
 void write_ppu_register(uint16_t addr, uint8_t value) {
@@ -96,8 +107,8 @@ void write_ppu_register(uint16_t addr, uint8_t value) {
             break;
         }
         case 0x2004: {
+            oam[oam_addr] = value;
             oam_addr++;
-            oam_data = value;
             break;
         }
         case 0x2005: {
@@ -162,11 +173,18 @@ void write_ppu(uint16_t addr, uint8_t value) {
     }
 }
 
-void set_pixel(size_t x, size_t y, uint8_t r, uint8_t g, uint8_t b) {
+void set_pixel(size_t x, size_t y, uint8_t palette_color) {
     size_t index = (y * SCREEN_WIDTH + x) * 3;
-    frame[index] = r;
-    frame[index + 1] = g;
-    frame[index + 2] = b;
+
+    if (index < SCREEN_WIDTH * SCREEN_HEIGHT * 3) {
+        uint8_t r = COLOR_PALETTE[palette_color * 3];
+        uint8_t g = COLOR_PALETTE[palette_color * 3 + 1];
+        uint8_t b = COLOR_PALETTE[palette_color * 3 + 2];
+
+        frame[index] = r;
+        frame[index + 1] = g;
+        frame[index + 2] = b;
+    }
 }
 
 size_t get_background_palette_index(size_t tile_col, size_t tile_row, size_t nametable_offset) {
@@ -177,10 +195,10 @@ size_t get_background_palette_index(size_t tile_col, size_t tile_row, size_t nam
     size_t block_y = (tile_row % 4) / 2;
     size_t shift = block_y * 4 + block_x * 2;
 
-    return (attr_table_byte >> shift) & 0b11;
+    return ((attr_table_byte >> shift) & 0b11) * BYTES_PER_PALETTE;
 }
 
-void draw_tile(size_t n, size_t x, size_t y, size_t bank_offset, size_t palette_idx) {
+void draw_background_tile(size_t n, size_t x, size_t y, size_t bank_offset, size_t palette_idx) {
     for (size_t tile_y = 0; tile_y < 8; tile_y++) {
         uint8_t plane1 = chr_rom[bank_offset + n * 16 + tile_y];
         uint8_t plane2 = chr_rom[bank_offset + n * 16 + tile_y + 8];
@@ -199,20 +217,40 @@ void draw_tile(size_t n, size_t x, size_t y, size_t bank_offset, size_t palette_
                 // Universal background color
                 palette_offset = palette_table[0];
             } else {
-                palette_offset = palette_table[palette_idx * 4 + color_index];
+                palette_offset = palette_table[palette_idx + color_index];
             }
 
-            uint8_t r = COLOR_PALETTE[palette_offset * 3];
-            uint8_t g = COLOR_PALETTE[palette_offset * 3 + 1];
-            uint8_t b = COLOR_PALETTE[palette_offset * 3 + 2];
+            set_pixel(x + (7 - tile_x), y + tile_y, palette_offset);
+        }
+    }
+}
 
-            set_pixel(x + (7 - tile_x), y + tile_y, r, g, b);
+void draw_sprite_tile(size_t n, size_t x, size_t y, size_t bank_offset, size_t palette_idx, bool flip_x, bool flip_y) {
+    for (size_t tile_y = 0; tile_y < 8; tile_y++) {
+        uint8_t plane1 = chr_rom[bank_offset + n * 16 + tile_y];
+        uint8_t plane2 = chr_rom[bank_offset + n * 16 + tile_y + 8];
+
+        for (size_t tile_x = 0; tile_x < 8; tile_x++) {
+            uint8_t bit0 = plane1 & 1;
+            uint8_t bit1 = plane2 & 1;
+            uint8_t color_index = (uint8_t)((bit1 << 1) | bit0);
+            
+            plane1 >>= 1;
+            plane2 >>= 1;
+
+            if (color_index != 0) {
+                uint8_t palette_offset = palette_table[palette_idx + color_index - 1];
+                uint8_t fliped_x = flip_x ? tile_x : 7 - tile_x;
+                uint8_t fliped_y = flip_y ? 7 - tile_y : tile_y;
+
+                set_pixel(x + fliped_x, y + fliped_y, palette_offset);
+            }
         }
     }
 }
 
 void render_background(void) {
-    // see https://austinmorlan.com/posts/nes_rendering_overview/
+    // https://austinmorlan.com/posts/nes_rendering_overview/
     size_t bank_offset = ppu_ctrl & 0b10000 ? 0x1000 : 0;
     size_t nametable_offset;
 
@@ -228,15 +266,30 @@ void render_background(void) {
         uint8_t tile_x = i % 32;
         uint8_t tile_y = (uint8_t)(i / 32);
         size_t palette_index = get_background_palette_index(tile_x, tile_y, nametable_offset);
-        draw_tile(tile, tile_x * 8, tile_y * 8, bank_offset, palette_index);
+        draw_background_tile(tile, tile_x * 8, tile_y * 8, bank_offset, palette_index);
+    }
+}
+
+void render_sprites(void) {
+    // https://www.nesdev.org/wiki/PPU_OAM
+    uint8_t bank_offset = ppu_ctrl & 0b1000 ? 0x1000 : 0;
+
+    for (size_t i = 0; i < 256; i += 4) {
+        uint8_t y = oam[i] + 1;
+        uint8_t tile = oam[i + 1];
+        uint8_t attr = oam[i + 2];
+        uint8_t x = oam[i + 3];
+        bool flip_x = (attr & 0b01000000) != 0;
+        bool flip_y = (attr & 0b10000000) != 0;
+        uint8_t palette_index = SPRITES_PALETTES_OFFSET + (attr & 0b11) * BYTES_PER_PALETTE;
+        
+        draw_sprite_tile(tile, x, y, bank_offset, palette_index, flip_x, flip_y);
     }
 }
 
 void render_ppu(void) {
-    // clear screen
-    for (size_t i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT * 3; i++) {
-        frame[i] = 0;
-    }
-    
+    oam_addr = 0; // reset OAM address
+
     render_background();
+    render_sprites();
 }
