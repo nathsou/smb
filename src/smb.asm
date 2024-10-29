@@ -710,7 +710,7 @@ ColdBoot:    jsr InitializeMemory         ;clear memory using pointer in Y
              lda Mirror_PPU_CTRL_REG1
              ora #%10000000               ;enable NMIs
              jsr WritePPUReg1
-EndlessLoop: jmp EndlessLoop              ;endless loop, need I say more?
+             jmp EndlessLoop ; EndlessLoop: jmp EndlessLoop ; endless loop, need I say more?
 
 ;-------------------------------------------------------------------------------------
 ;$00 - vram buffer address table low, also used for pseudorandom bit
@@ -13012,13 +13012,13 @@ BlockBufferChk_Enemy:
       pla        ;pull A from stack and jump elsewhere
       jmp BBChk_E
 
-ResidualMiscObjectCode:
-      txa
-      clc           ;supposedly used once to set offset for
-      adc #$0d      ;miscellaneous objects
-      tax
-      ldy #$1b      ;supposedly used once to set offset for block buffer data
-      jmp ResJmpM   ;probably used in early stages to do misc to bg collision detection
+; ResidualMiscObjectCode:
+;       txa
+;       clc           ;supposedly used once to set offset for
+;       adc #$0d      ;miscellaneous objects
+;       tax
+;       ldy #$1b      ;supposedly used once to set offset for block buffer data
+;       jmp ResJmpM   ;probably used in early stages to do misc to bg collision detection
 
 BlockBufferChk_FBall:
          ldy #$1a                  ;set offset for block buffer adder data
@@ -13026,7 +13026,7 @@ BlockBufferChk_FBall:
          clc
          adc #$07                  ;add seven bytes to use
          tax
-ResJmpM: lda #$00                  ;set A to return vertical coordinate
+         lda #$00 ; ResJmpM: lda #$00 ;set A to return vertical coordinate
 BBChk_E: jsr BlockBufferCollision  ;do collision detection subroutine for sprite object
          ldx ObjectOffset          ;get object offset
          cmp #$00                  ;check to see if object bumped into anything

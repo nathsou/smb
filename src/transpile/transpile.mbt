@@ -197,9 +197,13 @@ fn emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
     match item {
       Label(name) => {
         is_inside_jump_engine = name == "JumpEngine"
-        self.indentation = 1
-        self.emit("\n\{name}:")
-        self.indentation = 2
+
+        if not(is_inside_jump_engine) {
+          is_inside_jump_engine = false
+          self.indentation = 1
+          self.emit("\n\{name}:")
+          self.indentation = 2
+        }
       }
       Inst(~op, ~mode, ~comment) => {
         if is_inside_jump_engine {
@@ -246,11 +250,11 @@ fn emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
               _ => abort("unreachable")
             }
 
-            "if (\{cond}) { goto \{target}; }"
+            "if (\{cond}) goto \{target};"
           }
           (JMP, _) => {
             match args {
-              "EndlessLoop" => "return; // jmp EndlessLoop"
+              "EndlessLoop" => "return;"
               _ => "goto \{args};"
             }
           }
