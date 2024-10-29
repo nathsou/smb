@@ -1,10 +1,7 @@
 #include "cpu.h"
 #include "data.h"
-#include <stdio.h>
 #include "code.h"
 #include "ppu.h"
-
-#define WARN_UNHANDLED_ADDRESS false
 
 uint8_t a;
 uint8_t x;
@@ -22,6 +19,10 @@ uint8_t ram[2048];
 uint8_t controller1_state;
 bool controller1_strobe;
 uint8_t controller1_btn_index;
+
+void update_controller1(uint8_t state) {
+    controller1_state = state;
+}
 
 void init_cpu(void) {
     // registers
@@ -75,10 +76,6 @@ uint8_t read_byte(uint16_t addr) {
         return data[addr - 0x8000];
     }
 
-    if (WARN_UNHANDLED_ADDRESS) {
-        printf("read_byte: unhandled address: %x\n", addr);
-    }
-
     return 0;
 }
 
@@ -99,8 +96,6 @@ void write_byte(uint16_t addr, uint8_t value) {
         }
     } else if (addr < 0x4020) {
         // APU
-    } else if (WARN_UNHANDLED_ADDRESS) {
-        printf("write_byte: unhandled address: %x\n", addr);
     }
 }
 

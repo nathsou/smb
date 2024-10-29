@@ -3,6 +3,8 @@ target/
 used_insts.txt
 out/
 smb
+smb.wasm
+web/*.nes
 Super Mario Bros.nes
 raylib-quickstart/
 .idea/

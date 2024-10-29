@@ -37,6 +37,7 @@ size_t pop_jsr();
 
 // controllers
 extern uint8_t controller1_state;
+void update_controller1(uint8_t state);
 
 void init_cpu(void);
 

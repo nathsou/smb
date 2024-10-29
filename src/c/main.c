@@ -79,7 +79,7 @@ int read_chr_rom() {
     return 0;
 }
 
-void update_controller1(void) {
+void handle_inputs(void) {
     if (IsKeyDown(CONTROLLER1_UP_KEY)) {
         controller1_state |= CONTROLLER_UP;
     } else if (IsKeyReleased(CONTROLLER1_UP_KEY)) {
@@ -160,7 +160,7 @@ int main(void) {
     Rectangle dest = { 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT };
 
     while (!WindowShouldClose()) {
-        update_controller1();
+        handle_inputs();
         smb(RUN_STATE_NMI_HANDLER);
         render_ppu();
         UpdateTexture(texture, frame);
