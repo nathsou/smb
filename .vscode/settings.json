@@ -23,6 +23,7 @@
         "tuple": "c",
         "type_traits": "c",
         "utility": "c",
-        "compare": "c"
+        "compare": "c",
+        "string.h": "c"
     }
 }

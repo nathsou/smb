@@ -9,7 +9,7 @@
 #define CHR_ROM_SIZE 8192
 #define NES_HEADER_SIZE 16
 #define PRG_ROM_SIZE 32768  // Super Mario Bros has 32KB of PRG ROM
-#define WINDOW_SCALE 4
+#define WINDOW_SCALE 3
 #define WINDOW_WIDTH SCREEN_WIDTH * WINDOW_SCALE
 #define WINDOW_HEIGHT SCREEN_HEIGHT * WINDOW_SCALE
 #define CONTROLLER1_RAM_ADDR 0x4016
@@ -151,6 +151,10 @@ int main(void) {
 
     Texture2D texture = LoadTextureFromImage(image);
     SetTextureFilter(texture, TEXTURE_FILTER_POINT);
+    SetExitKey(KEY_NULL);
+    SetConfigFlags(FLAG_VSYNC_HINT);
+    SetWindowMaxSize(SCREEN_WIDTH * WINDOW_SCALE, SCREEN_HEIGHT * WINDOW_SCALE);
+    SetWindowMinSize(SCREEN_WIDTH * WINDOW_SCALE, SCREEN_HEIGHT * WINDOW_SCALE);
 
     Rectangle source = { 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
     Rectangle dest = { 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT };
