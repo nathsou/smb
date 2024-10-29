@@ -1,4 +1,3 @@
-
 const SCREEN_WIDTH = 256;
 const SCREEN_HEIGHT = 240;
 
@@ -10,12 +9,15 @@ function createCanvas() {
     }
 
     canvas.width = SCREEN_WIDTH;
-    canvas.height = 240;
+    canvas.height = SCREEN_HEIGHT;
 
-    const scalingFactor = 2;
+    const scalingFactor = Math.min(
+        Math.floor(window.innerWidth / SCREEN_WIDTH),
+        Math.floor(window.innerHeight / SCREEN_HEIGHT),
+    );
+
     canvas.style.width = `${SCREEN_WIDTH * scalingFactor}px`;
     canvas.style.height = `${SCREEN_HEIGHT * scalingFactor}px`;
-    canvas.style.imageRendering = 'pixelated';
 
     const context = canvas.getContext('2d');
 
@@ -46,11 +48,12 @@ function createController() {
         a: 'l',
         b: 'k',
         start: 'Enter',
-        select: 'Space',
+        select: ' ',
     };
-    
+
     window.addEventListener('keydown', (event) => {
-        switch (event.key) {
+        const key = event.key.toLowerCase();
+        switch (key) {
             case keyMap.up:
                 state |= CONTROLLER_UP;
                 break;
@@ -69,17 +72,18 @@ function createController() {
             case keyMap.b:
                 state |= CONTROLLER_B;
                 break;
-            case keyMap.start:
+            case keyMap.start.toLowerCase():
                 state |= CONTROLLER_START;
                 break;
-            case keyMap.select:
+            case keyMap.select.toLowerCase():
                 state |= CONTROLLER_SELECT;
                 break;
         }
     });
 
     window.addEventListener('keyup', (event) => {
-        switch (event.key) {
+        const key = event.key.toLowerCase();
+        switch (key) {
             case keyMap.up:
                 state &= ~CONTROLLER_UP;
                 break;
@@ -98,10 +102,10 @@ function createController() {
             case keyMap.b:
                 state &= ~CONTROLLER_B;
                 break;
-            case keyMap.start:
+            case keyMap.start.toLowerCase():
                 state &= ~CONTROLLER_START;
                 break;
-            case keyMap.select:
+            case keyMap.select.toLowerCase():
                 state &= ~CONTROLLER_SELECT;
                 break;
         }
@@ -112,8 +116,98 @@ function createController() {
     };
 }
 
+function createUploadButton() {
+    const button = document.createElement('button');
+    button.textContent = 'Upload ROM or CHR';
+    button.style.fontSize = '24px';
+    button.style.padding = '10px 20px';
+    button.style.marginTop = '20px';
+    return button;
+}
+
+function displayMessage(message) {
+    const msg = document.createElement('div');
+    msg.textContent = message;
+    msg.style.fontSize = '18px';
+    msg.style.marginTop = '10px';
+    return msg;
+}
+
+const CHR_ROM_LOCAL_STORAGE_KEY = 'chr_rom';
+
+async function getCHRROM() {
+    // Check if CHR ROM is in localStorage
+    const chrRomData = localStorage.getItem(CHR_ROM_LOCAL_STORAGE_KEY);
+    
+    if (chrRomData) {
+        // Decode from base64 and convert to Uint8Array
+        const byteString = atob(chrRomData);
+        const array = new Uint8Array(byteString.length);
+        for (let i = 0; i < byteString.length; i++) {
+            array[i] = byteString.charCodeAt(i);
+        }
+        return array;
+    } else {
+        // Create upload button and message
+        const container = document.createElement('div');
+        container.style.textAlign = 'center';
+        const uploadButton = createUploadButton();
+        const instruction = displayMessage('Please upload a NES ROM or CHR ROM dump to extract graphics data from.');
+
+        container.appendChild(instruction);
+        container.appendChild(uploadButton);
+        document.body.appendChild(container);
+
+        return new Promise((resolve, reject) => {
+            uploadButton.addEventListener('click', () => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = '.nes,.chr';
+
+                input.onchange = () => {
+                    const file = input.files[0];
+
+                    if (!file) {
+                        reject(new Error('No file selected'));
+                        return;
+                    }
+
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        const arrayBuffer = reader.result;
+                        const rom = new Uint8Array(arrayBuffer);
+                        if (rom.length < 8192) {
+                            reject(new Error('ROM file is too small'));
+                            return;
+                        }
+                        const chrRom = rom.slice(-8192); // last 8KB of ROM
+                        // Convert Uint8Array to base64 string
+                        let binary = '';
+                        const len = chrRom.byteLength;
+                        for (let i = 0; i < len; i++) {
+                            binary += String.fromCharCode(chrRom[i]);
+                        }
+                        const base64String = btoa(binary);
+                        localStorage.setItem(CHR_ROM_LOCAL_STORAGE_KEY, base64String);
+                        // Remove upload UI
+                        document.body.removeChild(container);
+                        resolve(chrRom);
+                    };
+                    reader.onerror = () => {
+                        reject(new Error('Failed to read file'));
+                    };
+                    reader.readAsArrayBuffer(file);
+                };
+
+                // Trigger the file input dialog
+                input.click();
+            });
+        });
+    }
+}
+
 async function main() {
-    const memory = new WebAssembly.Memory({ initial: 256 });
+    const memory = new WebAssembly.Memory({ initial: 6, maximum: 6 });
     const uint8View = new Uint8Array(memory.buffer);
 
     const { instance } = await WebAssembly.instantiateStreaming(fetch('smb.wasm'), {
@@ -141,17 +235,14 @@ async function main() {
         update_controller1: updateController1,
     } = instance.exports;
 
-    window.nes = instance.exports;
-
-    const rom = new Uint8Array(await (await fetch('Super Mario Bros.nes')).arrayBuffer());
-    const chrRom = rom.slice(-8192); // last 8KB of ROM
+    const chrRom = await getCHRROM();
     uint8View.set(chrRom, chrRomPtr);
-    
+
     const { canvas, context: ctx } = createCanvas();
     document.body.appendChild(canvas);
 
     const imageData = ctx.createImageData(SCREEN_WIDTH, SCREEN_HEIGHT);
-    
+
     const renderFrame = () => {
         for (let i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) {
             imageData.data[i * 4] = uint8View[framePtr + i * 3];
