@@ -2,6 +2,7 @@
 #include "data.h"
 #include "code.h"
 #include "ppu.h"
+#include "apu.h"
 
 uint8_t a;
 uint8_t x;
@@ -95,7 +96,7 @@ void write_byte(uint16_t addr, uint8_t value) {
             controller1_btn_index = 0;
         }
     } else if (addr < 0x4020) {
-        // APU
+        apu_write(addr, value);
     }
 }
 

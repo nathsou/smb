@@ -1,6 +1,7 @@
 #include "ppu.h"
 #include "cpu.h"
 #include "constants.h"
+#include "external.h"
 
 #define SPRITES_PALETTES_OFFSET 0x11
 #define BYTES_PER_PALETTE 4
@@ -46,9 +47,6 @@ uint8_t COLOR_PALETTE[] = {
    0xFF, 0xEF, 0xA6, 0xFF, 0xF7, 0x9C, 0xD7, 0xE8, 0x95, 0xA6, 0xED, 0xAF, 0xA2, 0xF2, 0xDA,
    0x99, 0xFF, 0xFC, 0xDD, 0xDD, 0xDD, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
 };
-
-extern void* memset(void* ptr, int value, size_t num);
-extern void* memcpy(void* dst, const void* src, size_t num);
 
 void clear_frame(void) {
     memset(frame, 0, SCREEN_WIDTH * SCREEN_HEIGHT * 3);
