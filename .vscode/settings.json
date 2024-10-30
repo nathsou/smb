@@ -24,6 +24,8 @@
         "type_traits": "c",
         "utility": "c",
         "compare": "c",
-        "string.h": "c"
+        "string.h": "c",
+        "apu.h": "c",
+        "external.h": "c"
     }
 }

@@ -4,6 +4,7 @@
 #include "code.h"
 #include "cpu.h"
 #include "ppu.h"
+#include "apu.h"
 
 #define ROM_PATH "Super Mario Bros.nes"
 #define CHR_ROM_SIZE 8192
@@ -31,6 +32,8 @@
 #define CONTROLLER1_B_KEY KEY_K
 #define CONTROLLER1_START_KEY KEY_ENTER
 #define CONTROLLER1_SELECT_KEY KEY_SPACE
+
+#define AUDIO_SAMPLE_RATE 44100
 
 int read_chr_rom() {
     FILE *input_file, *output_file;
@@ -129,8 +132,14 @@ void handle_inputs(void) {
     }
 }
 
+void audio_input_callback(void* output_buffer, unsigned int frames) {
+    uint8_t *samples = (uint8_t*)output_buffer;
+    apu_fill_buffer(samples, (size_t)frames);
+}
+
 int main(void) {
     init_cpu();
+    apu_init(AUDIO_SAMPLE_RATE);
 
     if (read_chr_rom()) {
         return 1;
@@ -140,6 +149,12 @@ int main(void) {
 
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "SMB");
     SetTargetFPS(60);
+
+    InitAudioDevice();
+
+    AudioStream stream = LoadAudioStream(AUDIO_SAMPLE_RATE, 8, 1);
+    SetAudioStreamCallback(stream, audio_input_callback);
+    PlayAudioStream(stream);
 
     Image image = {
         .data = frame,
@@ -163,6 +178,7 @@ int main(void) {
         handle_inputs();
         smb(RUN_STATE_NMI_HANDLER);
         render_ppu();
+        apu_step_frame();
         UpdateTexture(texture, frame);
 
         BeginDrawing();
@@ -171,7 +187,9 @@ int main(void) {
         EndDrawing();
     }
 
+    UnloadAudioStream(stream);
     UnloadTexture(texture);
+    CloseAudioDevice();
     CloseWindow();
 
     return 0;
