@@ -1,7 +1,7 @@
 #include "apu.h"
 #include "external.h"
 
-#define BUFFER_SIZE 4096
+#define BUFFER_SIZE 8192
 #define BUFFER_MASK (BUFFER_SIZE - 1)
 #define CPU_FREQUENCY 1789773
 #define FRAME_RATE 60
@@ -21,6 +21,14 @@ typedef struct {
     uint8_t envelope_period;
     uint8_t envelope_divider;
     uint8_t envelope_decay;
+    bool sweep_enabled;
+    uint8_t sweep_period;
+    bool sweep_negate;
+    uint8_t sweep_shift;
+    bool sweep_reload;
+    uint8_t sweep_divider;
+    uint16_t sweep_target_period;
+    bool sweep_mute;
 } Pulse;
 
 size_t sample_rate;
@@ -69,6 +77,22 @@ void pulse_init(Pulse* self) {
     self->envelope_period = 0;
     self->envelope_divider = 0;
     self->envelope_decay = 0;
+    self->sweep_enabled = false;
+    self->sweep_period = 0;
+    self->sweep_negate = false;
+    self->sweep_shift = 0;
+    self->sweep_reload = false;
+    self->sweep_divider = 0;
+    self->sweep_target_period = 0;
+    self->sweep_mute = false;
+}
+
+void pulse_set_enabled(Pulse* self, bool enabled) {
+    self->enabled = enabled;
+
+    if (!enabled) {
+        self->length_counter = 0;
+    }
 }
 
 void pulse_step_timer(Pulse* self) {
@@ -125,11 +149,48 @@ void pulse_write_reload_high(Pulse* self, uint8_t value) {
     self->length_counter = LENGTH_LOOKUP[value >> 3];
 }
 
+void pulse_write_sweep(Pulse* self, uint8_t value) {
+    self->sweep_enabled = (value & 0b10000000) != 0;
+    self->sweep_period = (value >> 4) & 0b111;
+    self->sweep_negate = (value & 0b1000) != 0;
+    self->sweep_shift = value & 0b111;
+    self->sweep_reload = true;
+}
+
+uint16_t pulse_sweep_target_period(Pulse* self) {
+    uint16_t change_amount = self->timer_period >> self->sweep_shift;
+
+    if (self->sweep_negate) {
+        if (change_amount > self->timer_period) {
+            return 0;
+        } else {
+            return self->timer_period - change_amount;
+        }
+    } else {
+        return self->timer_period + change_amount;
+    }
+}
+
+void pulse_step_sweep(Pulse* self) {
+    uint16_t target_period = pulse_sweep_target_period(self);
+    self->sweep_mute = self->timer_period < 8 || target_period > 0x7ff;
+
+    if (self->sweep_divider == 0 && self->sweep_enabled && !self->sweep_mute) {
+        self->timer_period = target_period;
+    }
+
+    if (self->sweep_divider == 0 || self->sweep_reload) {
+        self->sweep_divider = self->sweep_period;
+        self->sweep_reload = false;
+    } else {
+        self->sweep_divider--;
+    }
+}
+
 uint8_t pulse_output(Pulse* self) {
     if (
         !self->enabled ||
-        self->timer_period < 8 ||
-        self->timer_period > 0x7ff ||
+        self->sweep_mute ||
         self->length_counter == 0 ||
         PULSE_DUTY_TABLE[self->duty_mode][self->duty_cycle] == 0
     ) {
@@ -194,16 +255,8 @@ void apu_write(uint16_t addr, uint8_t value) {
         }
         // Control
         case 0x4015: {
-            pulse1.enabled = (value & 1) != 0;
-            pulse2.enabled = (value & 2) != 0;
-
-            if (!pulse1.enabled) {
-                pulse1.length_counter = 0;
-            }
-
-            if (!pulse2.enabled) {
-                pulse2.length_counter = 0;
-            }
+            pulse_set_enabled(&pulse1, (value & 1) != 0);
+            pulse_set_enabled(&pulse2, (value & 2) != 0);
             break;
         }
         // Frame counter
