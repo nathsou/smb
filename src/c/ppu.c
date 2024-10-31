@@ -56,7 +56,7 @@ void clear_bg_mask(void) {
     memset(opaque_bg_mask, false, SCREEN_WIDTH * SCREEN_HEIGHT);
 }
 
-void init_ppu(uint8_t* chr) {
+void ppu_init(uint8_t* chr) {
     // copy CHR ROM
     memcpy(chr_rom, chr, 8192);
     clear_frame();
@@ -64,7 +64,7 @@ void init_ppu(uint8_t* chr) {
 
 bool status_clear = false;
 
-uint8_t read_ppu_register(uint16_t addr) {
+uint8_t ppu_read_register(uint16_t addr) {
     switch (addr) {
         case 0x2002: {
             // in SMB, the status register is only used to:
@@ -80,7 +80,7 @@ uint8_t read_ppu_register(uint16_t addr) {
             status_clear = !status_clear;
             
             ppu_w = 0;
-            // vblank and sprite 0 hit always set
+            // vblank and sprite 0 hit
             return status_clear ? 0 : 0b11000000;
         }
         case 0x2004: {
@@ -88,7 +88,7 @@ uint8_t read_ppu_register(uint16_t addr) {
         }
         case 0x2007: {
             uint8_t value = vram_internal_buffer;
-            vram_internal_buffer = read_ppu(vram_addr);
+            vram_internal_buffer = ppu_read(vram_addr);
             uint16_t increment = ppu_ctrl & 0b100 ? 32 : 1;
             vram_addr += increment;
             return value;
@@ -97,11 +97,11 @@ uint8_t read_ppu_register(uint16_t addr) {
     }
 }
 
-void transfer_oam(uint16_t start_addr) {
+void ppu_transfer_oam(uint16_t start_addr) {
     memcpy(oam, ram + start_addr, 256);
 }
 
-void write_ppu_register(uint16_t addr, uint8_t value) {
+void ppu_write_register(uint16_t addr, uint8_t value) {
     switch (addr) {
         case 0x2000: {
             ppu_ctrl = value;
@@ -143,7 +143,7 @@ void write_ppu_register(uint16_t addr, uint8_t value) {
             break;
         }
         case 0x2007: {
-            write_ppu(vram_addr, value);
+            ppu_write(vram_addr, value);
             uint16_t increment = ppu_ctrl & 0b100 ? 32 : 1;
             vram_addr += increment;
             break;
@@ -152,7 +152,7 @@ void write_ppu_register(uint16_t addr, uint8_t value) {
 }
 
 // https://www.nesdev.org/wiki/PPU_memory_map
-uint8_t read_ppu(uint16_t addr) {
+uint8_t ppu_read(uint16_t addr) {
     if (addr < 0x2000) {
         return chr_rom[addr];
     }
@@ -172,7 +172,7 @@ uint8_t read_ppu(uint16_t addr) {
     return 0;
 }
 
-void write_ppu(uint16_t addr, uint8_t value) {
+void ppu_write(uint16_t addr, uint8_t value) {
     if (addr >= 0x2000 && addr < 0x3f00) {
         nametable[addr - 0x2000] = value;
     } else if (addr == 0x3f10 || addr == 0x3f14 || addr == 0x3f18 || addr == 0x3f1c) {
@@ -376,7 +376,7 @@ void render_sprites(void) {
     }
 }
 
-void render_ppu(void) {
+void ppu_render(void) {
     oam_addr = 0; // reset OAM address
 
     bool render_bg = ppu_mask & 0b00001000;
