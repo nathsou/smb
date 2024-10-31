@@ -5,16 +5,13 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define JSR_STACK_SIZE 64
+
 // registers
-extern uint8_t a;
-extern uint8_t x;
-extern uint8_t y;
-extern uint8_t sp;
+extern uint8_t a, x, y, sp;
 
 // flags
-extern bool carry_flag;  
-extern bool zero_flag;
-extern bool neg_flag;
+extern bool carry_flag, zero_flag, neg_flag; 
 // the overflow flag is never used :)
 
 // memory
@@ -27,7 +24,7 @@ uint16_t read_word(uint16_t addr);
 void write_word(uint16_t addr, uint16_t value);
 
 // jsr return stack
-extern size_t jsr_return_stack[255]; // TODO: experiment with the stack size
+extern size_t jsr_return_stack[JSR_STACK_SIZE]; // TODO: experiment with the stack size
 extern size_t jsr_return_stack_top;
 
 void push_jsr(size_t return_index);
@@ -39,7 +36,7 @@ size_t pop_jsr();
 extern uint8_t controller1_state;
 void update_controller1(uint8_t state);
 
-void init_cpu(void);
+void cpu_init(void);
 
 // addressing mode utils
 

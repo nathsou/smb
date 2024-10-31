@@ -226,10 +226,10 @@ async function main() {
     });
 
     const {
-        init_cpu: initCPU,
-        init_ppu: initPPU,
+        cpu_init: initCPU,
+        ppu_init: initPPU,
         smb,
-        render_ppu: renderPPU,
+        ppu_render: renderPPU,
         frame: framePtr,
         chr_rom: chrRomPtr,
         update_controller1: updateController1,

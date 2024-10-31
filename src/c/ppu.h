@@ -27,18 +27,18 @@ extern uint16_t vram_addr;
 extern uint8_t vram_internal_buffer; // VRAM read/write buffer
 extern uint8_t oam_dma; // OAM DMA: $4014
 
-void transfer_oam(uint16_t start_addr);
+void ppu_transfer_oam(uint16_t start_addr);
 
 // screen
 extern uint8_t frame[SCREEN_WIDTH * SCREEN_HEIGHT * 3]; // 3 bytes per pixel (RGB)
 
-void init_ppu(uint8_t* chr);
+void ppu_init(uint8_t* chr);
 
-uint8_t read_ppu_register(uint16_t addr);
-void write_ppu_register(uint16_t addr, uint8_t value);
+uint8_t ppu_read_register(uint16_t addr);
+void ppu_write_register(uint16_t addr, uint8_t value);
 
-uint8_t read_ppu(uint16_t addr);
-void write_ppu(uint16_t addr, uint8_t value);
-void render_ppu(void);
+uint8_t ppu_read(uint16_t addr);
+void ppu_write(uint16_t addr, uint8_t value);
+void ppu_render(void);
 
 #endif

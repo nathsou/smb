@@ -33,9 +33,9 @@
 #define CONTROLLER1_START_KEY KEY_ENTER
 #define CONTROLLER1_SELECT_KEY KEY_SPACE
 
-#define AUDIO_SAMPLE_RATE 44100
+#define AUDIO_SAMPLE_RATE 48000
 
-int read_chr_rom() {
+int read_chr_rom(void) {
     FILE *input_file, *output_file;
     uint8_t chr_rom[CHR_ROM_SIZE];
     uint8_t header[NES_HEADER_SIZE];
@@ -75,7 +75,7 @@ int read_chr_rom() {
         return 1;
     }
 
-    init_ppu(chr_rom);
+    ppu_init(chr_rom);
     
     fclose(input_file);
 
@@ -138,7 +138,7 @@ void audio_input_callback(void* output_buffer, unsigned int frames) {
 }
 
 int main(void) {
-    init_cpu();
+    cpu_init();
     apu_init(AUDIO_SAMPLE_RATE);
 
     if (read_chr_rom()) {
@@ -177,7 +177,7 @@ int main(void) {
     while (!WindowShouldClose()) {
         handle_inputs();
         smb(RUN_STATE_NMI_HANDLER);
-        render_ppu();
+        ppu_render();
         apu_step_frame();
         UpdateTexture(texture, frame);
 

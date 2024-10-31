@@ -13,7 +13,7 @@ bool carry_flag;
 bool zero_flag;
 bool neg_flag;
 
-size_t jsr_return_stack[255];
+size_t jsr_return_stack[JSR_STACK_SIZE];
 size_t jsr_return_stack_top;
 uint8_t ram[2048];
 
@@ -25,7 +25,7 @@ void update_controller1(uint8_t state) {
     controller1_state = state;
 }
 
-void init_cpu(void) {
+void cpu_init(void) {
     // registers
     a = 0;
     x = 0;
@@ -33,9 +33,9 @@ void init_cpu(void) {
     sp = 0xff;
 
     // flags
-    carry_flag = 0;
-    zero_flag = 0;
-    neg_flag = 0;
+    carry_flag = false;
+    zero_flag = false;
+    neg_flag = false;
 
     // jsr return stack
     jsr_return_stack_top = 0;
@@ -52,7 +52,7 @@ uint8_t read_byte(uint16_t addr) {
     }
 
     if (addr < 0x4000) {
-        return read_ppu_register(0x2000 + (addr & 0b111));
+        return ppu_read_register(0x2000 + (addr & 0b111));
     }
 
     if (addr == 0x4016) {
@@ -84,10 +84,10 @@ void write_byte(uint16_t addr, uint8_t value) {
     if (addr < 0x2000) {
         ram[addr & 0b0000011111111111] = value;
     } else if (addr < 0x4000) {
-        write_ppu_register(0x2000 + (addr & 0b111), value);
+        ppu_write_register(0x2000 + (addr & 0b111), value);
     } else if (addr == 0x4014) {
         uint16_t start_addr = (uint16_t)(value << 8);
-        transfer_oam(start_addr);
+        ppu_transfer_oam(start_addr);
     } else if (addr == 0x4016) {
         // controller 1
         controller1_strobe = (value & 1) == 1;
