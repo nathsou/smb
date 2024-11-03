@@ -1,5 +1,6 @@
 const SCREEN_WIDTH = 256;
 const SCREEN_HEIGHT = 240;
+const AUDIO_CHUNK_SIZE = 2048;
 
 function createCanvas() {
     const canvas = document.createElement('canvas');
@@ -8,16 +9,19 @@ function createCanvas() {
         throw new Error('Failed to create canvas');
     }
 
+    const updateSize = () => {
+        const scalingFactor = Math.min(
+            Math.floor(window.innerWidth / SCREEN_WIDTH),
+            Math.floor(window.innerHeight / SCREEN_HEIGHT),
+        );
+    
+        canvas.style.width = `${SCREEN_WIDTH * scalingFactor}px`;
+        canvas.style.height = `${SCREEN_HEIGHT * scalingFactor}px`;
+    };
+
     canvas.width = SCREEN_WIDTH;
     canvas.height = SCREEN_HEIGHT;
-
-    const scalingFactor = Math.min(
-        Math.floor(window.innerWidth / SCREEN_WIDTH),
-        Math.floor(window.innerHeight / SCREEN_HEIGHT),
-    );
-
-    canvas.style.width = `${SCREEN_WIDTH * scalingFactor}px`;
-    canvas.style.height = `${SCREEN_HEIGHT * scalingFactor}px`;
+    updateSize();
 
     const context = canvas.getContext('2d');
 
@@ -25,7 +29,7 @@ function createCanvas() {
         throw new Error('Failed to get 2d context');
     }
 
-    return { canvas, context };
+    return { canvas, context, updateSize };
 }
 
 function createController(onStart) {
@@ -119,6 +123,7 @@ function createController(onStart) {
     };
 }
 
+// Rest of the utility functions remain the same
 function createUploadButton() {
     const button = document.createElement('button');
     button.textContent = 'Upload ROM or CHR';
@@ -139,11 +144,9 @@ function displayMessage(message) {
 const CHR_ROM_LOCAL_STORAGE_KEY = 'chr_rom';
 
 async function getCHRROM() {
-    // Check if CHR ROM is in localStorage
     const chrRomData = localStorage.getItem(CHR_ROM_LOCAL_STORAGE_KEY);
     
     if (chrRomData) {
-        // Decode from base64 and convert to Uint8Array
         const byteString = atob(chrRomData);
         const array = new Uint8Array(byteString.length);
         for (let i = 0; i < byteString.length; i++) {
@@ -151,7 +154,6 @@ async function getCHRROM() {
         }
         return array;
     } else {
-        // Create upload button and message
         const container = document.createElement('div');
         container.style.textAlign = 'center';
         const uploadButton = createUploadButton();
@@ -183,8 +185,7 @@ async function getCHRROM() {
                             reject(new Error('ROM file is too small'));
                             return;
                         }
-                        const chrRom = rom.slice(-8192); // last 8KB of ROM
-                        // Convert Uint8Array to base64 string
+                        const chrRom = rom.slice(-8192);
                         let binary = '';
                         const len = chrRom.byteLength;
                         for (let i = 0; i < len; i++) {
@@ -192,7 +193,6 @@ async function getCHRROM() {
                         }
                         const base64String = btoa(binary);
                         localStorage.setItem(CHR_ROM_LOCAL_STORAGE_KEY, base64String);
-                        // Remove upload UI
                         document.body.removeChild(container);
                         resolve(chrRom);
                     };
@@ -202,7 +202,6 @@ async function getCHRROM() {
                     reader.readAsArrayBuffer(file);
                 };
 
-                // Trigger the file input dialog
                 input.click();
             });
         });
@@ -252,7 +251,7 @@ async function main() {
     const chrRom = await getCHRROM();
     uint8View.set(chrRom, chrRomPtr);
 
-    const { canvas, context: ctx } = createCanvas();
+    const { canvas, context: ctx, updateSize } = createCanvas();
     document.body.appendChild(canvas);
 
     const imageData = ctx.createImageData(SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -268,29 +267,75 @@ async function main() {
         ctx.putImageData(imageData, 0, 0);
     };
 
+    window.addEventListener('resize', updateSize);
+
+    // silence the audio when the tab is not active
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            audioContext.suspend();
+        } else {
+            audioContext.resume();
+        }
+    });
+
     const audioContext = new AudioContext({
         latencyHint: 'interactive',
     });
 
-    const scriptProcessor = audioContext.createScriptProcessor(1024, 0, 1);
     let audioInitialized = false;
-    scriptProcessor.connect(audioContext.destination);
-
+    let audioWorklet = null;
     const samples = new Uint8Array(uint8View.buffer, webAudioBufferPtr, audioBufferSize);
+    let lastAudioTime = 0;
+
+    const initAudio = async () => {
+        await audioContext.audioWorklet.addModule('audio-worklet.js');
+        audioWorklet = new AudioWorkletNode(audioContext, 'apu-audio-processor', {
+            outputChannelCount: [1],
+            processorOptions: {
+                sampleRate: audioContext.sampleRate
+            }
+        });
+        
+        audioWorklet.port.onmessage = (event) => {
+            if (event.data.type === 'bufferLow') {
+                processAudio();
+            }
+        };
+        
+        audioWorklet.connect(audioContext.destination);
+    };
+
+    const normalizedSamples = new Float32Array(AUDIO_CHUNK_SIZE);
+
+    const processAudio = () => {
+        if (!audioInitialized) return;
+
+        // Calculate how many samples we need based on time elapsed
+        const currentTime = audioContext.currentTime;
+        const timeDelta = currentTime - lastAudioTime;
+        const samplesNeeded = Math.floor(timeDelta * audioContext.sampleRate);
+        const chunkSize = Math.min(AUDIO_CHUNK_SIZE, samplesNeeded);
+
+        fillAPUBuffer(samples.byteOffset, chunkSize);
+
+        for (let i = 0; i < chunkSize; i++) {
+            normalizedSamples[i] = (samples[i] / 255) * 2 - 1;
+        }
+
+        audioWorklet.port.postMessage({
+            type: 'samples',
+            samples: normalizedSamples,
+            chunkSize,
+        });
+
+        lastAudioTime = currentTime;
+    };
 
     const joypad1 = createController(async () => {
         if (!audioInitialized) {
             await audioContext.resume();
-            
-            scriptProcessor.onaudioprocess = event => {
-                const channel = event.outputBuffer.getChannelData(0);
-                fillAPUBuffer(samples.byteOffset, channel.length);
-
-                for (let i = 0; i < channel.length; i++) {
-                    channel[i] = (samples[i] / 255) * 2 - 1;
-                }
-            };
-
+            await initAudio();
+            lastAudioTime = audioContext.currentTime;
             audioInitialized = true;
         }
     });
@@ -302,11 +347,17 @@ async function main() {
     smb(0);
 
     const update = () => {
-        updateController1(joypad1.getState());
+        updateController1(joypad1.getState())
         smb(1);
         stepAPUFrame();
+        
+        if (audioInitialized) {
+            processAudio();
+        }
+        
         renderPPU();
         renderFrame();
+        
         requestAnimationFrame(update);
     };
 
