@@ -28,7 +28,7 @@ function createCanvas() {
     return { canvas, context };
 }
 
-function createController() {
+function createController(onStart) {
     let state = 0;
 
     const CONTROLLER_RIGHT = 0b10000000;
@@ -52,7 +52,8 @@ function createController() {
     };
 
     window.addEventListener('keydown', (event) => {
-        const key = event.key.toLowerCase();
+        const key = event.key;
+
         switch (key) {
             case keyMap.up:
                 state |= CONTROLLER_UP;
@@ -72,17 +73,19 @@ function createController() {
             case keyMap.b:
                 state |= CONTROLLER_B;
                 break;
-            case keyMap.start.toLowerCase():
+            case keyMap.start:
                 state |= CONTROLLER_START;
+                onStart();
                 break;
-            case keyMap.select.toLowerCase():
+            case keyMap.select:
                 state |= CONTROLLER_SELECT;
                 break;
         }
     });
 
     window.addEventListener('keyup', (event) => {
-        const key = event.key.toLowerCase();
+        const key = event.key;
+
         switch (key) {
             case keyMap.up:
                 state &= ~CONTROLLER_UP;
@@ -102,10 +105,10 @@ function createController() {
             case keyMap.b:
                 state &= ~CONTROLLER_B;
                 break;
-            case keyMap.start.toLowerCase():
+            case keyMap.start:
                 state &= ~CONTROLLER_START;
                 break;
-            case keyMap.select.toLowerCase():
+            case keyMap.select:
                 state &= ~CONTROLLER_SELECT;
                 break;
         }
@@ -206,6 +209,10 @@ async function getCHRROM() {
     }
 }
 
+function readUint16(buffer, ptr) {
+    return buffer[ptr] + buffer[ptr + 1] * 256;
+}
+
 async function main() {
     const memory = new WebAssembly.Memory({ initial: 6, maximum: 6 });
     const uint8View = new Uint8Array(memory.buffer);
@@ -228,12 +235,19 @@ async function main() {
     const {
         cpu_init: initCPU,
         ppu_init: initPPU,
+        apu_init: initAPU,
         smb,
         ppu_render: renderPPU,
         frame: framePtr,
-        chr_rom: chrRomPtr,
         update_controller1: updateController1,
+        apu_fill_buffer: fillAPUBuffer,
+        apu_step_frame: stepAPUFrame,
     } = instance.exports;
+
+    const chrRomPtr = instance.exports.chr_rom.value;
+    const audioBufferSizePtr = instance.exports.audio_buffer_size.value;
+    const audioBufferSize = readUint16(uint8View, audioBufferSizePtr);
+    const webAudioBufferPtr = instance.exports.web_audio_buffer.value;
 
     const chrRom = await getCHRROM();
     uint8View.set(chrRom, chrRomPtr);
@@ -254,16 +268,43 @@ async function main() {
         ctx.putImageData(imageData, 0, 0);
     };
 
-    const joypad1 = createController();
+    const audioContext = new AudioContext({
+        latencyHint: 'interactive',
+    });
+
+    const scriptProcessor = audioContext.createScriptProcessor(1024, 0, 1);
+    let audioInitialized = false;
+    scriptProcessor.connect(audioContext.destination);
+
+    const samples = new Uint8Array(uint8View.buffer, webAudioBufferPtr, audioBufferSize);
+
+    const joypad1 = createController(async () => {
+        if (!audioInitialized) {
+            await audioContext.resume();
+            
+            scriptProcessor.onaudioprocess = event => {
+                const channel = event.outputBuffer.getChannelData(0);
+                fillAPUBuffer(samples.byteOffset, channel.length);
+
+                for (let i = 0; i < channel.length; i++) {
+                    channel[i] = (samples[i] / 255) * 2 - 1;
+                }
+            };
+
+            audioInitialized = true;
+        }
+    });
 
     initCPU();
     initPPU(chrRomPtr);
+    initAPU(audioContext.sampleRate);
 
     smb(0);
 
     const update = () => {
         updateController1(joypad1.getState());
         smb(1);
+        stepAPUFrame();
         renderPPU();
         renderFrame();
         requestAnimationFrame(update);
