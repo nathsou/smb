@@ -1,8 +1,7 @@
 #include "apu.h"
 #include "external.h"
 
-#define BUFFER_SIZE 8192
-#define BUFFER_MASK (BUFFER_SIZE - 1)
+#define BUFFER_MASK (AUDIO_BUFFER_SIZE - 1)
 #define CPU_FREQUENCY 1789773
 #define FRAME_RATE 60
 
@@ -32,10 +31,12 @@ typedef struct {
 } Pulse;
 
 size_t sample_rate;
-uint8_t audio_buffer[BUFFER_SIZE];
-size_t buffer_index;
+uint8_t audio_buffer[AUDIO_BUFFER_SIZE];
+uint8_t web_audio_buffer[AUDIO_BUFFER_SIZE];
+uint16_t audio_buffer_index;
 Pulse pulse1, pulse2;
 size_t frame_counter;
+uint16_t audio_buffer_size = AUDIO_BUFFER_SIZE;
 
 const double PULSE_MIXER_LOOKUP[] = {
     0.0, 0.011609139, 0.02293948, 0.034000948,
@@ -205,12 +206,12 @@ uint8_t pulse_output(Pulse* self) {
 }
 
 void apu_init(size_t frequency) {
-    memset(audio_buffer, 0, BUFFER_SIZE);
+    memset(audio_buffer, 0, AUDIO_BUFFER_SIZE);
     pulse_init(&pulse1);
     pulse_init(&pulse2);
 
     sample_rate = frequency;
-    buffer_index = 0;
+    audio_buffer_index = 0;
     frame_counter = 0;
 }
 
@@ -310,8 +311,8 @@ void apu_step_frame(void) {
             double progress_samples = (double)samples_written / (double)samples_to_write;
 
             if (samples_written < samples_to_write && progress_counter > progress_samples) {
-                buffer_index = (buffer_index + 1) & BUFFER_MASK;
-                audio_buffer[buffer_index] = apu_get_sample();
+                audio_buffer_index = (audio_buffer_index + 1) & BUFFER_MASK;
+                audio_buffer[audio_buffer_index] = apu_get_sample();
                 samples_written++;
             }
 
@@ -321,17 +322,14 @@ void apu_step_frame(void) {
 }
 
 void apu_fill_buffer(uint8_t* cb_buffer, size_t size) {
-    size_t len = size > buffer_index ? buffer_index : size;
-    
-    if (len > 0) {
-        if (size > buffer_index) {
-            memcpy(cb_buffer, audio_buffer, buffer_index);
-            buffer_index = 0;
-        } else {
-            memcpy(cb_buffer, audio_buffer, len);
-            // memmove(audio_buffer, audio_buffer + len, buffer_index - len);
-            memcpy(audio_buffer, audio_buffer + len, buffer_index - len);
-            buffer_index -= len;
-        }
+    size_t len = size > audio_buffer_index ? audio_buffer_index : size;
+
+    if (size > audio_buffer_index) {
+        memcpy(cb_buffer, audio_buffer, audio_buffer_index);
+        audio_buffer_index = 0;
+    } else {
+        memcpy(cb_buffer, audio_buffer, len);
+        memcpy(audio_buffer, audio_buffer + len, audio_buffer_index - len);
+        audio_buffer_index -= len;
     }
 }
