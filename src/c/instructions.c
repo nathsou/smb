@@ -204,41 +204,41 @@ void sbc_absy(uint16_t addr) {
 
 // TAX - Transfer Accumulator to X
 
-void tax() {
+void tax(void) {
     x = a;
     update_nz(x);
 }
 
 // TAY - Transfer Accumulator to Y
 
-void tay() {
+void tay(void) {
     y = a;
     update_nz(y);
 }
 
 // TSX - Transfer Stack Pointer to X
 
-void tsx() {
+void tsx(void) {
     x = sp;
     update_nz(x);
 }
 
 // TXA - Transfer X to Accumulator
 
-void txa() {
+void txa(void) {
     a = x;
     update_nz(a);
 }
 
 // TXS - Transfer X to Stack Pointer
 
-void txs() {
+void txs(void) {
     sp = x;
 }
 
 // TYA - Transfer Y to Accumulator
 
-void tya() {
+void tya(void) {
     a = y;
     update_nz(a);
 }
@@ -310,7 +310,7 @@ void eor_zp(uint8_t addr) {
 
 // ASL - Arithmetic Shift Left
 
-void asl_acc() {
+void asl_acc(void) {
     carry_flag = a & 0x80;
     a <<= 1;
     update_nz(a);
@@ -326,7 +326,7 @@ void asl_abs(uint16_t addr) {
 
 // LSR - Logical Shift Right
 
-void lsr_acc() {
+void lsr_acc(void) {
     carry_flag = a & 1;
     a >>= 1;
     update_nz(a);
@@ -375,14 +375,14 @@ void inc_absx(uint16_t addr) {
 
 // INX - Increment X Register
 
-void inx() {
+void inx(void) {
     x++;
     update_nz(x);
 }
 
 // INY - Increment Y Register
 
-void iny() {
+void iny(void) {
     y++;
     update_nz(y);
 }
@@ -414,41 +414,41 @@ void dec_absx(uint16_t addr) {
 
 // DEX - Decrement X Register
 
-void dex() {
+void dex(void) {
     x--;
     update_nz(x);
 }
 
 // DEY - Decrement Y Register
 
-void dey() {
+void dey(void) {
     y--;
     update_nz(y);
 }
 
 // CLC - Clear Carry Flag
 
-void clc() {
+void clc(void) {
     carry_flag = false;
 }
 
 // SEC - Set Carry Flag
 
-void sec() {
+void sec(void) {
     carry_flag = true;
 }
 
 // CLD - Clear Decimal Flag
 
-void cld() {}
+void cld(void) {}
 
 // SED - Set Decimal Flag
 
-void sed() {}
+void sed(void) {}
 
 // SEI - Set Interrupt Disable
 
-void sei() {}
+void sei(void) {}
 
 void cmp_vals(uint8_t lhs, uint8_t rhs) {
     carry_flag = lhs >= rhs;
@@ -511,14 +511,14 @@ void cpy_abs(uint16_t addr) {
 
 // PHA - Push Accumulator
 
-void pha() {
+void pha(void) {
     write_byte(sp | 0x100, a);
     sp--;
 }
 
 // PLA - Pull Accumulator
 
-void pla() {
+void pla(void) {
     sp++;
     a = read_byte(sp | 0x100);
     update_nz(a);
@@ -551,7 +551,7 @@ void _rol(uint16_t addr) {
     update_nz(val);
 }
 
-void rol_acc() {
+void rol_acc(void) {
     bool next_carry_flag = a & 0x80;
     a <<= 1;
     a |= carry_flag;
@@ -569,7 +569,7 @@ void rol_abs(uint16_t addr) {
 
 // ROR - Rotate Right
 
-void ror_acc() {
+void ror_acc(void) {
     bool old_carry = carry_flag;
     carry_flag = a & 1;
     a >>= 1;

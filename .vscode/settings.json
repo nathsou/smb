@@ -26,6 +26,7 @@
         "compare": "c",
         "string.h": "c",
         "apu.h": "c",
-        "external.h": "c"
+        "external.h": "c",
+        "math.h": "c"
     }
 }
