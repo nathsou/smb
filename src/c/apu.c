@@ -1,5 +1,6 @@
 #include "apu.h"
 #include "external.h"
+#define PI 3.14159265358979323846
 
 #define CPU_FREQUENCY 1789773
 #define FRAME_RATE 60
@@ -601,6 +602,46 @@ inline uint8_t dmc_output(const DeltaModulationChannel* dmc) {
     return dmc->output_level;
 }
 
+// Filters
+
+typedef struct {
+    double b0;
+    double b1;
+    double a1;
+    double prev_x;
+    double prev_y;
+} Filter;
+
+void filter_init_low_pass(Filter* f, size_t sample_rate, double cutoff) {
+    double c = (double)sample_rate / (cutoff * PI);
+    double a0 = 1.0 / (1.0 + c);
+
+    f->b0 = a0;
+    f->b1 = a0;
+    f->a1 = (1.0 - c) * a0;
+    f->prev_x = 0.0;
+    f->prev_y = 0.0;
+}
+
+void filter_init_high_pass(Filter* f, size_t sample_rate, double cutoff) {
+    double c = (double)sample_rate / (cutoff * PI);
+    double a0 = 1.0 / (1.0 + c);
+
+    f->b0 = c * a0;
+    f->b1 = -c * a0;
+    f->a1 = (1.0 - c) * a0;
+    f->prev_x = 0.0;
+    f->prev_y = 0.0;
+}
+
+double filter_output(Filter* f, double x) {
+    double y = f->b0 * x + f->b1 * f->prev_x - f->a1 * f->prev_y;
+    f->prev_x = x;
+    f->prev_y = y;
+
+    return (y + 1.0) * 0.5; // Normalize to [0, 1]
+}
+
 // APU
 
 size_t sample_rate;
@@ -611,9 +652,9 @@ Pulse pulse1, pulse2;
 Triangle triangle;
 Noise noise;
 DeltaModulationChannel dmc;
+Filter filter1, filter2, filter3;
 size_t frame_counter;
 uint16_t audio_buffer_size = AUDIO_BUFFER_SIZE;
-bool irq_inhibit;
 
 void apu_init(size_t frequency) {
     memset(audio_buffer, 0, AUDIO_BUFFER_SIZE);
@@ -626,7 +667,10 @@ void apu_init(size_t frequency) {
     sample_rate = frequency;
     audio_buffer_index = 0;
     frame_counter = 0;
-    irq_inhibit = false;
+
+    filter_init_high_pass(&filter1, sample_rate, 90.0);
+    filter_init_high_pass(&filter2, sample_rate, 440.0);
+    filter_init_low_pass(&filter3, sample_rate, 14000.0);
 }
 
 uint8_t apu_get_sample(void) {
@@ -639,8 +683,13 @@ uint8_t apu_get_sample(void) {
 
     double pulse_out = PULSE_MIXER_LOOKUP[p1 + p2];
     double triangle_out = TRIANGLE_MIXER_LOOKUP[3 * t + 2 * n + d];
+    double sample = pulse_out + triangle_out;
 
-    return (uint8_t)(255.0 * (pulse_out + triangle_out));
+    sample = filter_output(&filter1, sample);
+    sample = filter_output(&filter2, sample);
+    sample = filter_output(&filter3, sample);
+
+    return (uint8_t)(255.0 * sample);
 }
 
 void apu_write(uint16_t addr, uint8_t value) {

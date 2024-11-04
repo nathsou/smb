@@ -55,12 +55,12 @@ void sbc_abs(uint16_t addr);
 void sbc_absx(uint16_t addr);
 void sbc_absy(uint16_t addr);
 
-void tax();
-void tay();
-void tsx();
-void txa();
-void txs();
-void tya();
+void tax(void);
+void tay(void);
+void tsx(void);
+void txa(void);
+void txs(void);
+void tya(void);
 
 void and_imm(uint8_t value);
 void and_zp(uint8_t addr);
@@ -91,23 +91,23 @@ void inc_zpx(uint8_t addr);
 void inc_abs(uint16_t addr);
 void inc_absx(uint16_t addr);
 
-void inx();
-void iny();
+void inx(void);
+void iny(void);
 
 void dec_zp(uint8_t addr);
 void dec_zpx(uint8_t addr);
 void dec_abs(uint16_t addr);
 void dec_absx(uint16_t addr);
 
-void dex();
-void dey();
+void dex(void);
+void dey(void);
 
-void clc();
-void cld();
+void clc(void);
+void cld(void);
 
-void sei();
-void sec();
-void sed();
+void sei(void);
+void sec(void);
+void sed(void);
 
 void cmp_imm(uint8_t value);
 void cmp_zp(uint8_t addr);
@@ -124,17 +124,17 @@ void cpy_imm(uint8_t value);
 void cpy_zp(uint8_t addr);
 void cpy_abs(uint16_t addr);
 
-void pha();
-void pla();
+void pha(void);
+void pla(void);
 
 void bit_zp(uint8_t addr);
 void bit_abs(uint16_t addr);
 
-void rol_acc();
+void rol_acc(void);
 void rol_zp(uint8_t addr);
 void rol_abs(uint16_t addr);
 
-void ror_acc();
+void ror_acc(void);
 void ror_absx(uint16_t addr);
 
 #endif
