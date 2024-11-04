@@ -347,7 +347,7 @@ async function main() {
     smb(0);
 
     const update = () => {
-        updateController1(joypad1.getState())
+        updateController1(joypad1.getState());
         smb(1);
         stepAPUFrame();
         
