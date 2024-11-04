@@ -1,7 +1,6 @@
 #include "apu.h"
 #include "external.h"
 
-#define BUFFER_MASK (AUDIO_BUFFER_SIZE - 1)
 #define CPU_FREQUENCY 1789773
 #define FRAME_RATE 60
 
@@ -48,22 +47,80 @@ inline bool length_counter_is_zero(const LengthCounter* lc) {
     return lc->counter == 0;
 }
 
+// Timer
+
+typedef struct {
+    uint16_t counter;
+    uint16_t period;
+} Timer;
+
+void timer_init(Timer* self) {
+    self->counter = 0;
+    self->period = 0;
+}
+
+inline bool timer_step(Timer* self) {
+    if (self->counter == 0) {
+        self->counter = self->period;
+        return true;
+    } else {
+        self->counter -= 1;
+        return false;
+    }
+}
+
+// Envelope
+
+typedef struct {
+    bool constant_mode;
+    bool looping;
+    bool start;
+    uint8_t constant_volume;
+    uint8_t period;
+    uint8_t divider;
+    uint8_t decay;
+} Envelope;
+
+void envelope_init(Envelope* self) {
+    self->constant_mode = false;
+    self->looping = false;
+    self->start = false;
+    self->constant_volume = 0;
+    self->period = 0;
+    self->divider = 0;
+    self->decay = 0;
+}
+
+void envelope_step(Envelope* self) {
+    if (self->start) {
+        self->start = false;
+        self->decay = 15;
+        self->divider = self->period;
+    } else if (self->divider == 0) {
+        if (self->decay > 0) {
+            self->decay -= 1;
+        } else if (self->looping) {
+            self->decay = 15;
+        }
+        self->divider = self->period;
+    } else {
+        self->divider -= 1;
+    }
+}
+
+inline uint8_t envelope_output(const Envelope* self) {
+    return self->constant_mode ? self->constant_volume : self->decay;
+}
+
 // Pulse
 
 typedef struct {
     bool enabled;
     uint8_t duty_mode;
     uint8_t duty_cycle;
-    uint16_t timer;
-    uint16_t timer_period;
+    Timer timer;
     LengthCounter length_counter;
-    bool envelope_constant_mode;
-    uint8_t envelope_constant_volume;
-    bool envelope_loop;
-    bool envelope_start;
-    uint8_t envelope_period;
-    uint8_t envelope_divider;
-    uint8_t envelope_decay;
+    Envelope envelope;
     bool sweep_enabled;
     uint8_t sweep_period;
     bool sweep_negate;
@@ -95,16 +152,9 @@ void pulse_init(Pulse* self) {
     self->enabled = false;
     self->duty_mode = 0;
     self->duty_cycle = 0;
-    self->timer = 0;
-    self->timer_period = 0;
+    timer_init(&self->timer);
     length_counter_init(&self->length_counter);
-    self->envelope_constant_mode = false;
-    self->envelope_constant_volume = 0;
-    self->envelope_loop = false;
-    self->envelope_start = false;
-    self->envelope_period = 0;
-    self->envelope_divider = 0;
-    self->envelope_decay = 0;
+    envelope_init(&self->envelope);
     self->sweep_enabled = false;
     self->sweep_period = 0;
     self->sweep_negate = false;
@@ -123,11 +173,8 @@ void pulse_set_enabled(Pulse* self, bool enabled) {
 }
 
 void pulse_step_timer(Pulse* self) {
-    if (self->timer == 0) {
-        self->timer = self->timer_period;
+    if (timer_step(&self->timer)) {
         self->duty_cycle = (self->duty_cycle + 1) & 7;
-    } else {
-        self->timer--;
     }
 }
 
@@ -135,43 +182,29 @@ inline void pulse_step_length_counter(Pulse* self) {
     length_counter_step(&self->length_counter);
 }
 
-void pulse_step_envelope(Pulse* self) {
-    if (self->envelope_start) {
-        self->envelope_start = false;
-        self->envelope_decay = 15;
-        self->envelope_divider = self->envelope_period;
-    } else if (self->envelope_divider == 0) {
-        if (self->envelope_decay > 0) {
-            self->envelope_decay--;
-        } else if (self->envelope_loop) {
-            self->envelope_decay = 15;
-        }
-
-        self->envelope_divider = self->envelope_period;
-    } else {
-        self->envelope_divider--;
-    }
+inline void pulse_step_envelope(Pulse* self) {
+    envelope_step(&self->envelope);
 }
 
 void pulse_write_control(Pulse* self, uint8_t value) {
     self->duty_mode = (value >> 6) & 0b11;
     bool halt_length_counter = (value & 0b00100000) != 0;
     length_counter_set_enabled(&self->length_counter, !halt_length_counter);
-    self->envelope_loop = halt_length_counter;
-    self->envelope_constant_mode = (value & 0b00010000) != 0;
-    self->envelope_period = value & 0b1111;
-    self->envelope_constant_volume = value & 0b1111;
-    self->envelope_start = true;
+    self->envelope.looping = halt_length_counter;
+    self->envelope.constant_mode = (value & 0b00010000) != 0;
+    self->envelope.period = value & 0b1111;
+    self->envelope.constant_volume = value & 0b1111;
+    self->envelope.start = true;
 }
 
 void pulse_write_reload_low(Pulse* self, uint8_t value) {
-    self->timer_period = (uint16_t)((self->timer_period & 0xff00) | ((uint16_t)value));
+    self->timer.period = (uint16_t)((self->timer.period & 0xff00) | ((uint16_t)value));
 }
 
 void pulse_write_reload_high(Pulse* self, uint8_t value) {
-    self->timer_period = (uint16_t)((self->timer_period & 0x00ff) | (((uint16_t)(value & 7)) << 8));
+    self->timer.period = (uint16_t)((self->timer.period & 0x00ff) | (((uint16_t)(value & 7)) << 8));
     self->duty_cycle = 0;
-    self->envelope_start = true;
+    self->envelope.start = true;
     length_counter_set(&self->length_counter, value >> 3);
 }
 
@@ -184,25 +217,25 @@ void pulse_write_sweep(Pulse* self, uint8_t value) {
 }
 
 uint16_t pulse_sweep_target_period(Pulse* self) {
-    uint16_t change_amount = self->timer_period >> self->sweep_shift;
+    uint16_t change_amount = self->timer.period >> self->sweep_shift;
 
     if (self->sweep_negate) {
-        if (change_amount > self->timer_period) {
+        if (change_amount > self->timer.period) {
             return 0;
         } else {
-            return self->timer_period - change_amount;
+            return self->timer.period - change_amount;
         }
     } else {
-        return self->timer_period + change_amount;
+        return self->timer.period + change_amount;
     }
 }
 
 void pulse_step_sweep(Pulse* self) {
     uint16_t target_period = pulse_sweep_target_period(self);
-    self->sweep_mute = self->timer_period < 8 || target_period > 0x7ff;
+    self->sweep_mute = self->timer.period < 8 || target_period > 0x7ff;
 
     if (self->sweep_divider == 0 && self->sweep_enabled && !self->sweep_mute) {
-        self->timer_period = target_period;
+        self->timer.period = target_period;
     }
 
     if (self->sweep_divider == 0 || self->sweep_reload) {
@@ -223,11 +256,7 @@ uint8_t pulse_output(Pulse* self) {
         return 0;
     }
 
-    if (self->envelope_constant_mode) {
-        return self->envelope_constant_volume;
-    } else {
-        return self->envelope_decay;
-    }
+    return envelope_output(&self->envelope);
 }
 
 // Triangle
@@ -270,8 +299,7 @@ typedef struct {
     bool enabled;
     bool control_flag;
     uint8_t counter_reload;
-    uint16_t timer_period;
-    uint16_t timer;
+    Timer timer;
     LengthCounter length_counter;
     uint8_t linear_counter;
     bool linear_counter_reload;
@@ -282,8 +310,7 @@ void triangle_init(Triangle* tc) {
     tc->enabled = false;
     tc->control_flag = false;
     tc->counter_reload = 0;
-    tc->timer_period = 0;
-    tc->timer = 0;
+    timer_init(&tc->timer);
     length_counter_init(&tc->length_counter);
     tc->linear_counter = 0;
     tc->linear_counter_reload = false;
@@ -296,12 +323,12 @@ void triangle_write_setup(Triangle* tc, uint8_t val) {
 }
 
 void triangle_write_timer_low(Triangle* tc, uint8_t val) {
-    tc->timer_period = (tc->timer_period & 0xFF00) | val;
+    tc->timer.period = (tc->timer.period & 0xFF00) | val;
 }
 
 void triangle_write_timer_high(Triangle* tc, uint8_t val) {
-    tc->timer_period = (tc->timer_period & 0x00FF) | (uint16_t)((uint16_t)(val & 0x07) << 8);
-    tc->timer = tc->timer_period;
+    tc->timer.period = (tc->timer.period & 0x00FF) | (uint16_t)((uint16_t)(val & 0x07) << 8);
+    tc->timer.counter = tc->timer.period;
     length_counter_set(&tc->length_counter, val >> 3);
     tc->linear_counter_reload = true;
 }
@@ -323,13 +350,8 @@ inline void triangle_step_length_counter(Triangle* tc) {
 }
 
 void triangle_step_timer(Triangle* tc) {
-    if (tc->timer == 0) {
-        tc->timer = tc->timer_period;
-        if (tc->linear_counter > 0 && !length_counter_is_zero(&tc->length_counter)) {
-            tc->duty_cycle = (tc->duty_cycle + 1) & 31;
-        }
-    } else {
-        tc->timer--;
+    if (timer_step(&tc->timer) && tc->linear_counter > 0 && !length_counter_is_zero(&tc->length_counter)) {
+        tc->duty_cycle = (tc->duty_cycle + 1) & 31;
     }
 }
 
@@ -344,10 +366,96 @@ uint8_t triangle_output(const Triangle* tc) {
     if (!tc->enabled || 
         length_counter_is_zero(&tc->length_counter) ||
         tc->linear_counter == 0 ||
-        tc->timer_period <= 2) {
+        tc->timer.period <= 2) {
         return 0;
     }
     return SEQUENCER_LOOKUP[tc->duty_cycle & 0x1F];
+}
+
+// Noise
+
+static const uint16_t NOISE_PERIOD_TABLE[16] = {
+    4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068
+};
+
+typedef struct {
+    bool enabled;
+    LengthCounter length_counter;
+    Envelope envelope;
+    Timer timer;
+    uint16_t shift_register;
+    bool mode;
+} Noise;
+
+void noise_init(Noise* self) {
+    self->enabled = false;
+    self->length_counter.counter = 0;
+    self->envelope.constant_mode = false;
+    self->envelope.looping = false;
+    self->envelope.start = false;
+    self->envelope.constant_volume = 0;
+    self->envelope.period = 0;
+    self->envelope.divider = 0;
+    self->envelope.decay = 0;
+    self->timer.counter = 0;
+    self->timer.period = 0;
+    self->shift_register = 1;
+    self->mode = false;
+}
+
+void noise_set_enabled(Noise* self, bool enabled) {
+    self->enabled = enabled;
+    if (!enabled) {
+        self->length_counter.counter = 0;
+    }
+}
+
+void noise_step_timer(Noise* self) {
+    if (timer_step(&self->timer)) {
+        uint8_t bit = self->mode ? 6 : 1;
+        uint16_t bit0 = self->shift_register & 1;
+        uint16_t other_bit = (self->shift_register >> bit) & 1;
+        uint16_t feedback = bit0 ^ other_bit;
+        self->shift_register >>= 1;
+        self->shift_register |= feedback << 14;
+    }
+}
+
+void noise_step_length_counter(Noise* self) {
+    if (self->length_counter.counter > 0) {
+        self->length_counter.counter--;
+    }
+}
+
+void noise_step_envelope(Noise* self) {
+    envelope_step(&self->envelope);
+}
+
+void noise_write_control(Noise* self, uint8_t val) {
+    bool halt_length_counter = (val & 0x20) != 0;
+    self->length_counter.counter = halt_length_counter ? 0 : self->length_counter.counter;
+    self->envelope.looping = halt_length_counter;
+    self->envelope.constant_mode = (val & 0x10) != 0;
+    self->envelope.period = val & 0x0F;
+    self->envelope.constant_volume = val & 0x0F;
+}
+
+void noise_write_period(Noise* self, uint8_t val) {
+    self->mode = (val & 0x80) != 0;
+    self->timer.period = NOISE_PERIOD_TABLE[val & 0x0F];
+}
+
+void noise_write_length(Noise* self, uint8_t val) {
+    self->length_counter.counter = val >> 3;
+    self->envelope.start = true;
+}
+
+uint8_t noise_output(const Noise* self) {
+    if ((self->shift_register & 1) == 1 || self->length_counter.counter == 0) {
+        return 0;
+    } else {
+        return envelope_output(&self->envelope);
+    }
 }
 
 // APU
@@ -358,6 +466,7 @@ uint8_t web_audio_buffer[AUDIO_BUFFER_SIZE];
 uint16_t audio_buffer_index;
 Pulse pulse1, pulse2;
 Triangle triangle;
+Noise noise;
 size_t frame_counter;
 uint16_t audio_buffer_size = AUDIO_BUFFER_SIZE;
 
@@ -366,6 +475,7 @@ void apu_init(size_t frequency) {
     pulse_init(&pulse1);
     pulse_init(&pulse2);
     triangle_init(&triangle);
+    noise_init(&noise);
 
     sample_rate = frequency;
     audio_buffer_index = 0;
@@ -377,8 +487,10 @@ uint8_t apu_get_sample(void) {
     uint8_t p1 = pulse_output(&pulse1);
     uint8_t p2 = pulse_output(&pulse2);
     uint8_t t = triangle_output(&triangle);
+    uint8_t n = noise_output(&noise);
+
     double pulse_out = PULSE_MIXER_LOOKUP[p1 + p2];
-    double triangle_out = TRIANGLE_MIXER_LOOKUP[t * 3];
+    double triangle_out = TRIANGLE_MIXER_LOOKUP[3 * t + 2 * n];
 
     return (uint8_t)(255.0 * (pulse_out + triangle_out));
 }
@@ -435,11 +547,28 @@ void apu_write(uint16_t addr, uint8_t value) {
             triangle_write_timer_high(&triangle, value);
             break;
         }
+        // Noise
+        case 0x400C: {
+            noise_write_control(&noise, value);
+            break;
+        }
+        case 0x400E: {
+            noise_write_period(&noise, value);
+            break;
+        }
+        case 0x400F: {
+            noise_write_length(&noise, value);
+            break;
+        }
+        case 0x400D: {
+            break;
+        }
         // Control
         case 0x4015: {
             pulse_set_enabled(&pulse1, (value & 1) != 0);
             pulse_set_enabled(&pulse2, (value & 2) != 0);
             triangle_set_enabled(&triangle, (value & 4) != 0);
+            noise_set_enabled(&noise, (value & 8) != 0);
             break;
         }
         // Frame counter
@@ -453,6 +582,7 @@ void apu_step_timer(void) {
     pulse_step_timer(&pulse1);
     pulse_step_timer(&pulse2);
     triangle_step_timer(&triangle);
+    noise_step_timer(&noise);
 }
 
 void apu_step_envelope(void) {
@@ -465,6 +595,7 @@ void apu_step_length_counter(void) {
     pulse_step_length_counter(&pulse1);
     pulse_step_length_counter(&pulse2);
     triangle_step_length_counter(&triangle);
+    noise_step_length_counter(&noise);
 }
 
 void apu_step_sweep(void) {
@@ -504,9 +635,14 @@ void apu_step_frame(void) {
             double progress_samples = (double)samples_written / (double)samples_to_write;
 
             if (samples_written < samples_to_write && progress_counter > progress_samples) {
-                audio_buffer_index = (audio_buffer_index + 1) & BUFFER_MASK;
-                audio_buffer[audio_buffer_index] = apu_get_sample();
-                samples_written++;
+                if (audio_buffer_index < AUDIO_BUFFER_SIZE) {
+                    audio_buffer[audio_buffer_index++] = apu_get_sample();
+                    samples_written++;
+                } else {
+                    // avoid popping sounds
+                    memset(audio_buffer, 0, AUDIO_BUFFER_SIZE);
+                    audio_buffer_index = 0;
+                }
             }
 
             apu_step_timer();
