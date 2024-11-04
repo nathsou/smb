@@ -458,6 +458,149 @@ uint8_t noise_output(const Noise* self) {
     }
 }
 
+// DMC
+
+static const uint16_t DELTA_MODULATION_RATES[] = {
+    428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 84, 72, 54,
+};
+
+typedef struct {
+    bool enabled;
+    bool interrupt_flag;
+    bool loop_flag;
+    Timer timer;
+    uint8_t output_level;
+    uint16_t sample_addr;
+    uint16_t sample_len;
+    uint16_t current_addr;
+    uint16_t bytes_remaining;
+    uint8_t shift_register;
+    bool silence_flag;
+    uint8_t output_bits_remaining;
+    bool irq_enabled;
+    uint32_t cpu_stall;
+    uint16_t memory_read_request;
+    bool has_memory_request;
+} DeltaModulationChannel;
+
+void dmc_init(DeltaModulationChannel* dmc) {
+    dmc->enabled = false;
+    dmc->interrupt_flag = false;
+    dmc->loop_flag = false;
+    timer_init(&dmc->timer);
+    dmc->output_level = 0;
+    dmc->sample_addr = 0;
+    dmc->sample_len = 0;
+    dmc->current_addr = 0;
+    dmc->bytes_remaining = 0;
+    dmc->shift_register = 0;
+    dmc->silence_flag = false;
+    dmc->output_bits_remaining = 0;
+    dmc->irq_enabled = false;
+    dmc->cpu_stall = 0;
+    dmc->has_memory_request = false;
+}
+
+void dmc_restart(DeltaModulationChannel* dmc) {
+    dmc->current_addr = dmc->sample_addr;
+    dmc->bytes_remaining = dmc->sample_len;
+}
+
+void dmc_step_shifter(DeltaModulationChannel* dmc) {
+    if (dmc->output_bits_remaining != 0) {
+        if (!dmc->silence_flag) {
+            if (dmc->shift_register & 1) {
+                if (dmc->output_level <= 125) {
+                    dmc->output_level += 2;
+                }
+            } else {
+                if (dmc->output_level >= 2) {
+                    dmc->output_level -= 2;
+                }
+            }
+        }
+        dmc->shift_register >>= 1;
+        dmc->output_bits_remaining--;
+    }
+}
+
+void dmc_step_reader(DeltaModulationChannel* dmc) {
+    if (dmc->output_bits_remaining == 0 && dmc->bytes_remaining > 0) {
+        dmc->cpu_stall += 4;
+        dmc->memory_read_request = dmc->current_addr;
+        dmc->has_memory_request = true;
+        dmc->output_bits_remaining = 8;
+        
+        dmc->current_addr = (dmc->current_addr == 0xFFFF) ? 0x8000 : dmc->current_addr + 1;
+        dmc->bytes_remaining--;
+        
+        if (dmc->bytes_remaining == 0) {
+            if (dmc->loop_flag) {
+                dmc_restart(dmc);
+            } else if (dmc->irq_enabled) {
+                dmc->interrupt_flag = true;
+            }
+        }
+    }
+}
+
+void dmc_step_timer(DeltaModulationChannel* dmc) {
+    if (dmc->enabled) {
+        dmc_step_reader(dmc);
+
+        if (!dmc->has_memory_request && timer_step(&dmc->timer)) {
+            dmc_step_shifter(dmc);
+        }
+    }
+}
+
+void dmc_write_control(DeltaModulationChannel* dmc, uint8_t val) {
+    dmc->irq_enabled = (val & 0x80) != 0;
+    dmc->loop_flag = (val & 0x40) != 0;
+    dmc->timer.period = DELTA_MODULATION_RATES[val & 0x0F];
+}
+
+inline void dmc_write_output(DeltaModulationChannel* dmc, uint8_t val) {
+    dmc->output_level = val & 0x7F;
+}
+
+inline void dmc_write_sample_addr(DeltaModulationChannel* dmc, uint8_t val) {
+    dmc->sample_addr = 0xC000 | (uint16_t)((uint16_t)val << 6);
+}
+
+inline void dmc_write_sample_len(DeltaModulationChannel* dmc, uint8_t val) {
+    dmc->sample_len = (uint16_t)((uint16_t)val << 4) | 1;
+}
+
+inline void dmc_set_memory_read_response(DeltaModulationChannel* dmc, uint8_t val) {
+    dmc->shift_register = val;
+    dmc->has_memory_request = false;
+    if (timer_step(&dmc->timer)) {
+        dmc_step_shifter(dmc);
+    }
+}
+
+inline bool dmc_is_active(const DeltaModulationChannel* dmc) {
+    return dmc->bytes_remaining > 0;
+}
+
+inline void dmc_clear_interrupt_flag(DeltaModulationChannel* dmc) {
+    dmc->interrupt_flag = false;
+}
+
+void dmc_set_enabled(DeltaModulationChannel* dmc, bool enabled) {
+    dmc->enabled = enabled;
+    if (!enabled) {
+        dmc->bytes_remaining = 0;
+    } else if (dmc->bytes_remaining == 0) {
+        dmc_restart(dmc);
+    }
+}
+
+inline uint8_t dmc_output(const DeltaModulationChannel* dmc) {
+    return dmc->output_level;
+}
+
 // APU
 
 size_t sample_rate;
@@ -467,8 +610,10 @@ uint16_t audio_buffer_index;
 Pulse pulse1, pulse2;
 Triangle triangle;
 Noise noise;
+DeltaModulationChannel dmc;
 size_t frame_counter;
 uint16_t audio_buffer_size = AUDIO_BUFFER_SIZE;
+bool irq_inhibit;
 
 void apu_init(size_t frequency) {
     memset(audio_buffer, 0, AUDIO_BUFFER_SIZE);
@@ -476,10 +621,12 @@ void apu_init(size_t frequency) {
     pulse_init(&pulse2);
     triangle_init(&triangle);
     noise_init(&noise);
+    dmc_init(&dmc);
 
     sample_rate = frequency;
     audio_buffer_index = 0;
     frame_counter = 0;
+    irq_inhibit = false;
 }
 
 uint8_t apu_get_sample(void) {
@@ -488,9 +635,10 @@ uint8_t apu_get_sample(void) {
     uint8_t p2 = pulse_output(&pulse2);
     uint8_t t = triangle_output(&triangle);
     uint8_t n = noise_output(&noise);
+    uint8_t d = dmc_output(&dmc);
 
     double pulse_out = PULSE_MIXER_LOOKUP[p1 + p2];
-    double triangle_out = TRIANGLE_MIXER_LOOKUP[3 * t + 2 * n];
+    double triangle_out = TRIANGLE_MIXER_LOOKUP[3 * t + 2 * n + d];
 
     return (uint8_t)(255.0 * (pulse_out + triangle_out));
 }
@@ -563,12 +711,31 @@ void apu_write(uint16_t addr, uint8_t value) {
         case 0x400D: {
             break;
         }
+        // DMC
+        case 0x4010: {
+            dmc_write_control(&dmc, value);
+            break;
+        }
+        case 0x4011: {
+            dmc_write_output(&dmc, value);
+            break;
+        }
+        case 0x4012: {
+            dmc_write_sample_addr(&dmc, value);
+            break;
+        }
+        case 0x4013: {
+            dmc_write_sample_len(&dmc, value);
+            break;
+        }
         // Control
         case 0x4015: {
             pulse_set_enabled(&pulse1, (value & 1) != 0);
             pulse_set_enabled(&pulse2, (value & 2) != 0);
             triangle_set_enabled(&triangle, (value & 4) != 0);
             noise_set_enabled(&noise, (value & 8) != 0);
+            dmc_set_enabled(&dmc, (value & 16) != 0);
+            dmc_clear_interrupt_flag(&dmc);
             break;
         }
         // Frame counter
@@ -583,6 +750,7 @@ void apu_step_timer(void) {
     pulse_step_timer(&pulse2);
     triangle_step_timer(&triangle);
     noise_step_timer(&noise);
+    dmc_step_timer(&dmc);
 }
 
 void apu_step_envelope(void) {
