@@ -1,6 +1,6 @@
 #ifndef SMB_APU_H
 #define SMB_APU_H
-#define AUDIO_BUFFER_SIZE 8192
+#define AUDIO_BUFFER_SIZE (16 * 1024)
 
 #include <stddef.h>
 #include <stdint.h>
