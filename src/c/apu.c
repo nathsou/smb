@@ -639,7 +639,7 @@ double filter_output(Filter* f, double x) {
     f->prev_x = x;
     f->prev_y = y;
 
-    return (y + 1.0) * 0.5; // Normalize to [0, 1]
+    return y;
 }
 
 // APU
@@ -673,6 +673,11 @@ void apu_init(size_t frequency) {
     filter_init_low_pass(&filter3, sample_rate, 14000.0);
 }
 
+double clamp(double d, double min, double max) {
+  const double t = d < min ? min : d;
+  return t > max ? max : t;
+}
+
 uint8_t apu_get_sample(void) {
     // https://www.nesdev.org/wiki/APU_Mixer
     uint8_t p1 = pulse_output(&pulse1);
@@ -688,6 +693,9 @@ uint8_t apu_get_sample(void) {
     sample = filter_output(&filter1, sample);
     sample = filter_output(&filter2, sample);
     sample = filter_output(&filter3, sample);
+
+    // normalize to [0, 1] (constants found by running the game and measuring the output)
+    sample = clamp((sample + 0.325022) * 1.5792998016399449, 0.0, 1.0);
 
     return (uint8_t)(255.0 * sample);
 }
