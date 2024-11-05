@@ -21,10 +21,13 @@ codegen:
 	moon run src/main
 
 build: clean
-	$(CC) $(CFLAGS) -o smb ${MAIN} $(SOURCES) $(RAYLIB_FLAGS) $(OBJECTS)
+	$(CC) $(CFLAGS) -o smb ${MAIN} $(SOURCES) out/common.c $(RAYLIB_FLAGS) $(OBJECTS)
 
-wasm:
-	clang -O3 --target=wasm32 -nostdlib -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined -o web/smb.wasm $(SOURCES)
+wasm: clean
+	$(CC) -O3 --target=wasm32 -nostdlib -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined -o web/smb.wasm $(SOURCES)
+
+playback: clean
+	$(CC) $(CFLAGS) -o playback out/playback.c $(SOURCES) out/rec.c out/common.c $(RAYLIB_FLAGS) $(OBJECTS)
 
 clean:
-	rm -f smb
+	rm -f smb playback smb.wasm
