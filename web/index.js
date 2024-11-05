@@ -10,10 +10,11 @@ function createCanvas() {
     }
 
     const updateSize = () => {
-        const scalingFactor = Math.min(
-            Math.floor(window.innerWidth / SCREEN_WIDTH),
-            Math.floor(window.innerHeight / SCREEN_HEIGHT),
-        );
+        const scalingFactor = Math.max(
+            Math.min(
+                Math.floor(window.innerWidth / SCREEN_WIDTH),
+                Math.floor(window.innerHeight / SCREEN_HEIGHT),
+            ), 1);
     
         canvas.style.width = `${SCREEN_WIDTH * scalingFactor}px`;
         canvas.style.height = `${SCREEN_HEIGHT * scalingFactor}px`;

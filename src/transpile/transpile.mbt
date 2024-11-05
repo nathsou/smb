@@ -372,6 +372,11 @@ pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
   let apu_h = File::read!(name="apu.h", path="src/c/apu.h")
   let apu_c = File::read!(name="apu.c", path="src/c/apu.c")
   let external_h = File::read!(name="external.h", path="src/c/external.h")
+  let rec_h = File::read!(name="rec.h", path="src/c/rec.h")
+  let rec_c = File::read!(name="rec.c", path="src/c/rec.c")
+  let common_h = File::read!(name="common.h", path="src/c/common.h")
+  let common_c = File::read!(name="common.c", path="src/c/common.c")
+  let playback_c = File::read!(name="playback.c", path="src/c/playback.c")
 
   let code_h = {
     name: "code.h",
@@ -403,7 +408,9 @@ pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
       ppu_h, ppu_c,
       apu_h, apu_c,
       external_h,
-      main_c,
+      rec_h, rec_c,
+      common_h, common_c,
+      main_c, playback_c,
     ],
   }
 }

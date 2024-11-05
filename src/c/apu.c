@@ -673,7 +673,7 @@ void apu_init(size_t frequency) {
     filter_init_low_pass(&filter3, sample_rate, 14000.0);
 }
 
-double clamp(double d, double min, double max) {
+inline double clamp(double d, double min, double max) {
   const double t = d < min ? min : d;
   return t > max ? max : t;
 }

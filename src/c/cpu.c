@@ -21,7 +21,7 @@ uint8_t controller1_state;
 bool controller1_strobe;
 uint8_t controller1_btn_index;
 
-void update_controller1(uint8_t state) {
+inline void update_controller1(uint8_t state) {
     controller1_state = state;
 }
 
