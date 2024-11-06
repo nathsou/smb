@@ -26,8 +26,8 @@ build: clean
 wasm: clean
 	$(CC) -O3 --target=wasm32 -nostdlib -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined -o web/smb.wasm $(SOURCES)
 
-playback: clean
-	$(CC) $(CFLAGS) -o playback out/playback.c $(SOURCES) out/rec.c out/common.c $(RAYLIB_FLAGS) $(OBJECTS)
+hash: clean
+	$(CC) $(CFLAGS) -o hash out/hash.c $(SOURCES) out/rec.c out/common.c
 
 clean:
-	rm -f smb playback smb.wasm
+	rm -f smb hash smb.wasm

@@ -376,7 +376,7 @@ pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
   let rec_c = File::read!(name="rec.c", path="src/c/rec.c")
   let common_h = File::read!(name="common.h", path="src/c/common.h")
   let common_c = File::read!(name="common.c", path="src/c/common.c")
-  let playback_c = File::read!(name="playback.c", path="src/c/playback.c")
+  let hash_c = File::read!(name="hash.c", path="src/c/hash.c")
 
   let code_h = {
     name: "code.h",
@@ -410,7 +410,7 @@ pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
       external_h,
       rec_h, rec_c,
       common_h, common_c,
-      main_c, playback_c,
+      main_c, hash_c,
     ],
   }
 }
