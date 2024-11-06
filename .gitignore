@@ -3,7 +3,7 @@ target/
 used_insts.txt
 out/
 smb
-playback
+hash
 smb.wasm
 web/*.nes
 Super Mario Bros.nes

@@ -2,7 +2,10 @@
 #include "rec.h"
 
 #define REC_FILE "rec/warpless.rec"
-#define TARGET_FPS (60 * 1)
+#define HASH_OFFSET_BASIS 2166136261
+#define HASH_PRIME 16777619
+#define RECORDING_FRAME_COUNT 7987
+#define EXPECTED_CUMULATIVE_HASH 788985578
 
 static NESInputRecording recording;
 static uint32_t frame_counter = 0;
@@ -38,6 +41,17 @@ int rec_init(void) {
     return 0;
 }
 
+uint32_t hash_frame(const uint8_t* data, size_t size) {
+    uint32_t hash = HASH_OFFSET_BASIS;
+
+    for (size_t i = 0; i < size; i++) {
+        hash ^= data[i];
+        hash *= HASH_PRIME;
+    }
+
+    return hash;
+}
+
 int main(void) {
     cpu_init();
     rec_init();
@@ -49,46 +63,23 @@ int main(void) {
 
     smb(RUN_STATE_RESET);
 
-    SetTargetFPS(TARGET_FPS);
-    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "SMB");
+    uint32_t cumulative_hash = HASH_OFFSET_BASIS;
 
-    Image image = {
-        .data = frame,
-        .width = SCREEN_WIDTH,
-        .height = SCREEN_HEIGHT,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8,
-        .mipmaps = 1,
-    };
-
-    Texture2D texture = LoadTextureFromImage(image);
-    SetTextureFilter(texture, TEXTURE_FILTER_POINT);
-    SetExitKey(KEY_NULL);
-    SetConfigFlags(FLAG_VSYNC_HINT);
-    SetWindowMaxSize(SCREEN_WIDTH * WINDOW_SCALE, SCREEN_HEIGHT * WINDOW_SCALE);
-    SetWindowMinSize(SCREEN_WIDTH * WINDOW_SCALE, SCREEN_HEIGHT * WINDOW_SCALE);
-
-    Rectangle source = { 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
-    Rectangle dest = { 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT };
-
-    while (!WindowShouldClose()) {
+    for (size_t i = 0; i < RECORDING_FRAME_COUNT; i++) {
         handle_inputs();
         smb(RUN_STATE_NMI_HANDLER);
         ppu_render();
-        apu_step_frame();
-        UpdateTexture(texture, frame);
 
-        BeginDrawing();
-            ClearBackground(WHITE);
-            DrawTexturePro(texture, source, dest, (Vector2){ 0, 0 }, 0.0f, WHITE);
-        EndDrawing();
-
+        // update the cumulative hash
+        uint32_t frame_hash = hash_frame(frame, SCREEN_WIDTH * SCREEN_HEIGHT * 3);
+        cumulative_hash ^= frame_hash;
+        cumulative_hash *= HASH_PRIME;
         frame_counter++;
     }
 
-    UnloadTexture(texture);
-    CloseAudioDevice();
-    CloseWindow();
-    rec_close(&recording);
+    bool matches = cumulative_hash == EXPECTED_CUMULATIVE_HASH;
 
-    return 0;
+    printf("Cumulative hash: %u, expected: %u, matches: %s\n", cumulative_hash, EXPECTED_CUMULATIVE_HASH, matches ? "yes" : "no");
+
+    return matches ? 0 : 1;
 }
