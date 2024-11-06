@@ -1,7 +1,6 @@
 target/
 .mooncakes/
 used_insts.txt
-out/
 smb
 hash
 smb.wasm
