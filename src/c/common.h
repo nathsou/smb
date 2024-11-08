@@ -2,7 +2,6 @@
 #define SMB_COMMON_H
 
 #include <stdlib.h>
-#include "raylib.h"
 #include "code.h"
 #include "cpu.h"
 #include "ppu.h"

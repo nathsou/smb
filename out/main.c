@@ -1,4 +1,5 @@
 #include "common.h"
+#include "raylib.h"
 
 #define CONTROLLER_RIGHT 0b10000000
 #define CONTROLLER_LEFT 0b01000000
@@ -18,11 +19,11 @@
 #define CONTROLLER1_START_KEY KEY_ENTER
 #define CONTROLLER1_SELECT_KEY KEY_SPACE
 
-#define AUDIO_SAMPLE_RATE 48000
+#define AUDIO_SAMPLE_RATE 44100
 
 void handle_inputs(void) {
     uint8_t state = 0;
-    
+
     if (IsKeyDown(CONTROLLER1_UP_KEY)) state |= CONTROLLER_UP;
     if (IsKeyDown(CONTROLLER1_LEFT_KEY)) state |= CONTROLLER_LEFT;
     if (IsKeyDown(CONTROLLER1_DOWN_KEY)) state |= CONTROLLER_DOWN;
@@ -31,7 +32,7 @@ void handle_inputs(void) {
     if (IsKeyDown(CONTROLLER1_B_KEY)) state |= CONTROLLER_B;
     if (IsKeyDown(CONTROLLER1_START_KEY)) state |= CONTROLLER_START;
     if (IsKeyDown(CONTROLLER1_SELECT_KEY)) state |= CONTROLLER_SELECT;
-        
+
     update_controller1(state);
 }
 
