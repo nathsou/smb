@@ -55,6 +55,19 @@ pub enum AsmItem {
   Comment(String)
 } derive (Show)
 
+pub struct BasicBlock {
+  id: Int
+  mut name: String?
+  items: Array[AsmItem]
+  predecessors: Array[BasicBlock]
+  successors: Array[BasicBlock]
+} derive (Show)
+
+pub struct AsmSubroutine {
+  name: String
+  blocks: Array[BasicBlock] 
+} derive (Show)
+
 pub fn ty(self: TypedExpr) -> Type {
   match self {
     Const(base=_, value=_, size=_, ~ty) => ty

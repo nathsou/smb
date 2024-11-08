@@ -275,8 +275,190 @@ fn collect_instructions(self: AsmLowering) -> Unit!LoweringError {
   }
 }
 
+struct JumpTargets {
+  jump_targets: Set[String]
+  subroutines: Set[String]
+}
+
+fn collect_jump_targets(self: AsmLowering) -> JumpTargets {
+  let jump_targets = Set::new()
+  let subroutines = Set::new()
+
+  for item in self.lowered {
+    match item {
+      Inst(~op, mode=Relative(Ident(name=label, ..)), ..) => {
+        if op == JSR {
+          subroutines.insert(label)
+        } else {
+          jump_targets.insert(label)
+        }
+      }
+      _ => ()
+    }
+  }
+
+  { jump_targets, subroutines }
+}
+
+fn contains(self: JumpTargets, label: String) -> Bool {
+  self.jump_targets.contains(label) || self.subroutines.contains(label)
+}
+
+fn collect_basic_block_leaders(self: AsmLowering) -> Set[Int] {
+  let targets = self.collect_jump_targets()
+  let leader_indices = Set::new()
+
+  // the first non-comment instruction is always a leader
+  let first_inst_idx = self.lowered.search_by(fn(item) {
+    match item {
+      Comment(_) => false
+      _ => true
+    }
+  })
+
+  leader_indices.insert(first_inst_idx.unwrap())
+  
+  for i in 0..<self.lowered.length() {
+    match self.lowered[i] {
+      // the target of a jump instruction is a leader
+      Label(label) => {
+        if targets.contains(label) {
+          leader_indices.insert(i)
+        }
+      }
+      Inst(~op, ..) => {
+        if op.is_branching() {
+          // the next instruction after a branching instruction is a leader
+          leader_indices.insert(i + 1)
+        }
+      }
+      JumpEngine(_) => leader_indices.insert(i + 1)
+      _ => ()
+    }
+  }
+
+  leader_indices
+}
+
+fn collect_basic_blocks(self: AsmLowering) -> Array[BasicBlock]!LoweringError {
+  let leader_indices = self.collect_basic_block_leaders()
+  let basic_blocks: Array[BasicBlock] = []
+  let bb_by_label: Map[String, BasicBlock] = {}
+
+  // Starting from a leader, the set of all following instructions until and not including the next leader is the basic block corresponding to the starting leader.
+  for leader in leader_indices {
+    let bb = { id: basic_blocks.length(), name: None, items: [], predecessors: [], successors: [] }
+
+    for i in leader..<self.lowered.length() {
+      match self.lowered[i] {
+        Label(label) => {
+          bb.name = Some(label)
+          bb_by_label[label] = bb
+        }
+        _ => ()
+      }
+
+      bb.items.push(self.lowered[i])
+
+      if leader_indices.contains(i + 1) {
+        break
+      }
+    }
+
+    basic_blocks.push(bb)
+  }
+
+  fn connect(a: BasicBlock, b: BasicBlock) -> Unit {
+    a.successors.push(b)
+    b.predecessors.push(a)
+  }
+
+  // connect basic blocks
+  for bb in basic_blocks {
+    let last_item = bb.items.last().unwrap()
+
+    match last_item {
+      Inst(mode=Relative(Ident(name=label, ..)), ..) => {
+        match bb_by_label[label] {
+          Some(target_bb) => {
+            connect(bb, target_bb)
+          }
+          None => raise LoweringError("Unknown jump target: \{label}")
+        }
+      }
+      JumpEngine(~jump_table) => {
+        for label in jump_table {
+          match bb_by_label[label] {
+            Some(target_bb) => {
+              connect(bb, target_bb)
+            }
+            None => raise LoweringError("Unknown jump target: \{label}")
+          }
+        }
+      }
+      _ => ()
+    }
+
+    // check for fallthrough
+    match bb.items.last() {
+      Some(Inst(~op, ..)) => {
+        match op {
+          RTI | RTS => ()
+          _ => {
+            connect(bb, basic_blocks[bb.id + 1])
+          }
+        }
+      }
+      _ => ()
+    }
+  }
+
+  basic_blocks
+}
+
+fn _build_cfg_dotfile(bbs: Array[BasicBlock]) -> String {
+  let builder = StringBuilder::new()
+
+  builder.write_string("digraph G {\n")
+
+  for bb in bbs {
+    let name = match bb.name {
+      Some(name) => name
+      None => bb.id.to_string()
+    }
+
+    builder.write_string("\t\{name} [label=\"\{name}\"]\n")
+
+    for succ in bb.successors {
+      let succ_name = match succ.name {
+        Some(name) => name
+        None => succ.id.to_string()
+      }
+
+      builder.write_string("\t\{name} -> \{succ_name}\n")
+    }
+  }
+
+  builder.write_string("}\n")
+
+  builder.to_string()
+}
+
+fn _show_bbs(bbs: Array[BasicBlock]) -> Unit {
+  for bb in bbs {
+    println("Basic block \{bb.id} (\{bb.name.or_default()})")
+    for item in bb.items {
+      println("\{item}")
+    }
+    println("")
+  }
+}
+
 pub fn lower(self: AsmLowering) -> Unit!LoweringError {
   self.collect_labels_and_tables!()
   self.collect_defines!()
   self.collect_instructions!()
+  
+  // let bbs = self.collect_basic_blocks!()
+  // println(build_cfg_dotfile(bbs))
 }

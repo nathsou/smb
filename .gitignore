@@ -9,3 +9,7 @@ Super Mario Bros.nes
 raylib-quickstart/
 .idea/
 fm2/
+smb.dSYM
+.clangd
+.DS_Store
+*.dSYM

@@ -55,6 +55,17 @@ pub fn is_relative(self: OpCode) -> Bool {
   }
 }
 
+pub fn is_unconditional_branch(self: OpCode) -> Bool {
+  match self {
+    JMP | JSR | RTS => true
+    _ => false
+  }
+}
+
+pub fn is_branching(self: OpCode) -> Bool {
+  self.is_relative() || self.is_unconditional_branch()
+}
+
 pub fn supports_accumulator_addr_mode(self: OpCode) -> Bool {
   match self {
     ASL | LSR | ROL | ROR => true
