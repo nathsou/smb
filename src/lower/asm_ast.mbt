@@ -61,11 +61,18 @@ pub struct BasicBlock {
   items: Array[AsmItem]
   predecessors: Array[BasicBlock]
   successors: Array[BasicBlock]
+  mut is_subroutine_entry: Bool
+  mut subroutine: AsmSubroutine?
 } derive (Show)
 
 pub struct AsmSubroutine {
   name: String
-  blocks: Array[BasicBlock] 
+  blocks: Array[BasicBlock]
+  entry: BasicBlock
+  exit: BasicBlock
+  internal_labels: Set[String]
+  external_jumps: Set[String]
+  mut is_self_contained: Bool
 } derive (Show)
 
 pub fn ty(self: TypedExpr) -> Type {

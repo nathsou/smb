@@ -7,6 +7,11 @@ pub struct AsmLowering {
   tables: Array[AsmTable]
   tables_by_label: Map[String, AsmTable]
   mut table_offset: Int
+  targets: JumpTargets
+  basic_blocks: Array[BasicBlock]
+  bb_by_label: Map[String, BasicBlock]
+  subroutines: Array[AsmSubroutine]
+  self_contained_subroutine_labels: Set[String]
 } derive (Show)
 
 pub type! LoweringError String derive(Show)
@@ -20,6 +25,11 @@ pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
     table_offset: 0, // in bytes
     jump_target_labels: Set::new(),
     tables_by_label: {},
+    targets: { jump_targets: Set::new(), subroutines: Set::new(), externals: Set::new() },
+    basic_blocks: [],
+    bb_by_label: {},
+    subroutines: [],
+    self_contained_subroutine_labels: Set::new(),
   }
 }
 
@@ -278,26 +288,31 @@ fn collect_instructions(self: AsmLowering) -> Unit!LoweringError {
 struct JumpTargets {
   jump_targets: Set[String]
   subroutines: Set[String]
-}
+  externals: Set[String]
+} derive (Show)
 
-fn collect_jump_targets(self: AsmLowering) -> JumpTargets {
-  let jump_targets = Set::new()
-  let subroutines = Set::new()
-
+fn collect_jump_targets(self: AsmLowering) -> Unit {
   for item in self.lowered {
     match item {
-      Inst(~op, mode=Relative(Ident(name=label, ..)), ..) => {
+      Inst(
+        op=JMP | JSR | BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS as op,
+        mode=Relative(Ident(name=label, ..)) | Absolute(Ident(name=label, ..)),
+        ..
+      ) => {
         if op == JSR {
-          subroutines.insert(label)
+          self.targets.subroutines.insert(label)
         } else {
-          jump_targets.insert(label)
+          self.targets.jump_targets.insert(label)
+        }
+      }
+      JumpEngine(~jump_table) => {
+        for label in jump_table {
+          self.targets.subroutines.insert(label)
         }
       }
       _ => ()
     }
   }
-
-  { jump_targets, subroutines }
 }
 
 fn contains(self: JumpTargets, label: String) -> Bool {
@@ -305,7 +320,7 @@ fn contains(self: JumpTargets, label: String) -> Bool {
 }
 
 fn collect_basic_block_leaders(self: AsmLowering) -> Set[Int] {
-  let targets = self.collect_jump_targets()
+  self.collect_jump_targets()
   let leader_indices = Set::new()
 
   // the first non-comment instruction is always a leader
@@ -322,7 +337,7 @@ fn collect_basic_block_leaders(self: AsmLowering) -> Set[Int] {
     match self.lowered[i] {
       // the target of a jump instruction is a leader
       Label(label) => {
-        if targets.contains(label) {
+        if self.targets.contains(label) {
           leader_indices.insert(i)
         }
       }
@@ -340,20 +355,26 @@ fn collect_basic_block_leaders(self: AsmLowering) -> Set[Int] {
   leader_indices
 }
 
-fn collect_basic_blocks(self: AsmLowering) -> Array[BasicBlock]!LoweringError {
+fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
   let leader_indices = self.collect_basic_block_leaders()
-  let basic_blocks: Array[BasicBlock] = []
-  let bb_by_label: Map[String, BasicBlock] = {}
 
   // Starting from a leader, the set of all following instructions until and not including the next leader is the basic block corresponding to the starting leader.
   for leader in leader_indices {
-    let bb = { id: basic_blocks.length(), name: None, items: [], predecessors: [], successors: [] }
+    let bb = {
+      id: self.basic_blocks.length(),
+      name: None,
+      items: [],
+      predecessors: [],
+      successors: [],
+      is_subroutine_entry: false,
+      subroutine: None,
+    }
 
     for i in leader..<self.lowered.length() {
       match self.lowered[i] {
         Label(label) => {
           bb.name = Some(label)
-          bb_by_label[label] = bb
+          self.bb_by_label[label] = bb
         }
         _ => ()
       }
@@ -365,7 +386,7 @@ fn collect_basic_blocks(self: AsmLowering) -> Array[BasicBlock]!LoweringError {
       }
     }
 
-    basic_blocks.push(bb)
+    self.basic_blocks.push(bb)
   }
 
   fn connect(a: BasicBlock, b: BasicBlock) -> Unit {
@@ -374,12 +395,16 @@ fn collect_basic_blocks(self: AsmLowering) -> Array[BasicBlock]!LoweringError {
   }
 
   // connect basic blocks
-  for bb in basic_blocks {
+  for bb in self.basic_blocks {
     let last_item = bb.items.last().unwrap()
 
     match last_item {
-      Inst(mode=Relative(Ident(name=label, ..)), ..) => {
-        match bb_by_label[label] {
+      Inst(
+        op=JMP | BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS,
+        mode=Relative(Ident(name=label, ..)) | Absolute(Ident(name=label, ..)),
+        ..
+      ) => {
+        match self.bb_by_label[label] {
           Some(target_bb) => {
             connect(bb, target_bb)
           }
@@ -388,7 +413,7 @@ fn collect_basic_blocks(self: AsmLowering) -> Array[BasicBlock]!LoweringError {
       }
       JumpEngine(~jump_table) => {
         for label in jump_table {
-          match bb_by_label[label] {
+          match self.bb_by_label[label] {
             Some(target_bb) => {
               connect(bb, target_bb)
             }
@@ -399,29 +424,162 @@ fn collect_basic_blocks(self: AsmLowering) -> Array[BasicBlock]!LoweringError {
       _ => ()
     }
 
-    // check for fallthrough
+    // check for fallthrough to the next basic block
     match bb.items.last() {
       Some(Inst(~op, ..)) => {
         match op {
-          RTI | RTS => ()
+          RTI | RTS | BRK | JMP => ()
           _ => {
-            connect(bb, basic_blocks[bb.id + 1])
+            if bb.id + 1 < self.basic_blocks.length() {
+              connect(bb, self.basic_blocks[bb.id + 1])
+            }
           }
         }
       }
       _ => ()
     }
   }
-
-  basic_blocks
 }
 
-fn _build_cfg_dotfile(bbs: Array[BasicBlock]) -> String {
+fn collect_labels(self: BasicBlock, labels: Set[String]) -> Unit {
+  for item in self.items {
+    match item {
+      Label(name) => labels.insert(name)
+      _ => ()
+    }
+  }
+}
+
+fn collect_external_labels(self: BasicBlock, internal_labels: Set[String], external_labels: Set[String]) -> Unit {
+    for item in self.items {
+      match item {
+      Inst(
+        op=JSR | JMP | BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS,
+        mode=Relative(Ident(name=label, ..)) | Absolute(Ident(name=label, ..)),
+        ..
+      ) => {
+        if not(internal_labels.contains(label)) {
+          external_labels.insert(label)
+        }
+      }
+      JumpEngine(~jump_table) => {
+        for label in jump_table {
+          if not(internal_labels.contains(label)) {
+            external_labels.insert(label)
+          }
+        }
+      }
+        _ => ()
+      }
+  }
+}
+
+fn collect_external_labels(self: AsmSubroutine, targets: JumpTargets) -> Unit {
+  for bb in self.blocks {
+      bb.collect_external_labels(self.internal_labels, self.external_jumps)
+
+      for label in self.external_jumps {
+        targets.externals.insert(label)
+      }
+  }
+}
+
+fn collect_subroutines(self: AsmLowering) -> Unit {
+  let mut idx = 0
+
+  while idx < self.basic_blocks.length() {
+    let bb = self.basic_blocks[idx]
+
+    match bb.name {
+      Some(name) => {
+        if self.targets.subroutines.contains(name) {
+          let sub = {
+            name,
+            blocks: [bb],
+            entry: bb,
+            exit: bb,
+            internal_labels: Set::new(),
+            external_jumps: Set::new(),
+            is_self_contained: false,
+          }
+
+          let mut exit_bb = bb
+          bb.is_subroutine_entry = true
+          bb.subroutine = Some(sub)
+
+          for i in (idx + 1)..<self.basic_blocks.length() {
+            let bb = self.basic_blocks[i]
+            bb.subroutine = Some(sub)
+            sub.blocks.push(bb)
+            bb.collect_labels(sub.internal_labels)
+
+            if bb.successors.length() == 0 {
+              exit_bb = bb
+              break
+            }
+          }
+
+          sub.collect_external_labels(self.targets)
+
+          self.subroutines.push(sub)
+          idx = exit_bb.id
+        } else {
+          idx += 1
+        }
+      }
+      _ => {
+        idx += 1
+      }
+    }
+  }
+}
+
+// a subroutine is considered self-contained if it doesn't call any external labels
+// and if it doesn't contain any labels that are called from outside
+fn is_self_contained(self: AsmSubroutine, targets: JumpTargets) -> Bool {
+  if self.external_jumps.size() > 0 {
+    return false
+  }
+
+  for label in self.internal_labels {
+    if targets.externals.contains(label) {
+      return false
+    }
+  }
+
+  true
+}
+
+// as a first step, only convert self-contained subroutines into functions
+fn collect_self_contained_subroutines(self: AsmLowering) -> Unit {
+  let global_labels = Set::new()
+
+  for bb in self.basic_blocks {
+    if bb.subroutine.is_empty() {
+      bb.collect_labels(global_labels)
+      bb.collect_external_labels(global_labels, self.targets.externals)
+    }
+  }
+
+  for sub in self.subroutines {
+    if sub.is_self_contained(self.targets) {
+      self.self_contained_subroutine_labels.insert(sub.name)
+      sub.is_self_contained = true
+
+      // insert a jump instruction in place of automatic fallthroughs to subroutines
+      for pred in sub.entry.predecessors {
+        pred.items.push(Inst(op=JMP, mode=Absolute(Ident(name=sub.name, ty=LabelTy)), comment=Some("<gen: fallthrough>")))
+      }
+    }
+  }
+}
+
+fn _build_cfg_dotfile(self: AsmLowering) -> String {
   let builder = StringBuilder::new()
 
   builder.write_string("digraph G {\n")
 
-  for bb in bbs {
+  for bb in self.basic_blocks {
     let name = match bb.name {
       Some(name) => name
       None => bb.id.to_string()
@@ -444,8 +602,8 @@ fn _build_cfg_dotfile(bbs: Array[BasicBlock]) -> String {
   builder.to_string()
 }
 
-fn _show_bbs(bbs: Array[BasicBlock]) -> Unit {
-  for bb in bbs {
+fn _show_bbs(self: AsmLowering) -> Unit {
+  for bb in self.basic_blocks {
     println("Basic block \{bb.id} (\{bb.name.or_default()})")
     for item in bb.items {
       println("\{item}")
@@ -458,7 +616,7 @@ pub fn lower(self: AsmLowering) -> Unit!LoweringError {
   self.collect_labels_and_tables!()
   self.collect_defines!()
   self.collect_instructions!()
-  
-  // let bbs = self.collect_basic_blocks!()
-  // println(build_cfg_dotfile(bbs))
+  self.collect_basic_blocks!()
+  self.collect_subroutines()
+  self.collect_self_contained_subroutines()
 }
