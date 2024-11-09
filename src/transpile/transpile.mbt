@@ -2,12 +2,14 @@
 pub struct Emitter {
   output: StringBuilder
   mut indentation: Int
+  mut jsr_return_index: Int
 }
 
 pub fn Emitter::new() -> Emitter {
   {
     output: StringBuilder::new(),
     indentation: 0,
+    jsr_return_index: 0,
   }
 }
 
@@ -163,7 +165,7 @@ fn emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
     self.emit("};\n")
 }
 
-fn emit_code_h(self: Emitter) -> Unit {
+fn emit_code_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#ifndef SMB_CODE_H")
   self.emit("#define SMB_CODE_H")
   self.emit("")
@@ -174,42 +176,39 @@ fn emit_code_h(self: Emitter) -> Unit {
   self.emit("")
   self.emit("void smb(RunState state);")
   self.emit("")
+
+  for sub in low.subroutines {
+    if sub.is_self_contained {
+      self.emit("void \{sub.name}(void);")
+    }
+  }
+
+  self.emit("")
+
   self.emit("#endif")
 }
 
-fn emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
-  self.emit("#include \"code.h\"")
-  self.emit("")
-  self.emit("void smb(RunState state) {")
-  self.indentation += 1
+fn gen_jump(target: String, low: @lower.AsmLowering) -> String {
+  if low.self_contained_subroutine_labels.contains(target) {
+    "\{target}(); goto rts;"
+  } else {
+    "goto \{target};"
+  }
+}
 
-  self.emit("switch (state) {")
-  self.indentation += 1
-  self.emit("case RUN_STATE_RESET: goto Start;")
-  self.emit("case RUN_STATE_NMI_HANDLER: goto NonMaskableInterrupt;")
-  self.indentation -= 1
-  self.emit("}\n")
-
-  let mut jsr_return_index = 0
-  let mut is_inside_jump_engine = false
-
-  for item in low.lowered {
+fn emit_item(self: Emitter, item: @lower.AsmItem, bb: @lower.BasicBlock, low: @lower.AsmLowering) -> Unit {
     match item {
       Label(name) => {
-        is_inside_jump_engine = name == "JumpEngine"
-
-        if not(is_inside_jump_engine) {
-          is_inside_jump_engine = false
+        // do not output labels for subroutines
+        let is_standalone_subroutine_label = match bb.subroutine { Some(sub) => sub.is_self_contained && sub.name == name; _ => false }
+        
+        if not(is_standalone_subroutine_label) {
           self.indentation = 1
           self.emit("\n\{name}:")
           self.indentation = 2
         }
       }
       Inst(~op, ~mode, ~comment) => {
-        if is_inside_jump_engine {
-          continue
-        }
-
         let args = match mode {
           Accumulator => ""
           Implied => ""
@@ -250,25 +249,36 @@ fn emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
               _ => abort("unreachable")
             }
 
-            "if (\{cond}) goto \{target};"
+            "if (\{cond}) { \{gen_jump(target, low)} }"
           }
           (JMP, _) => {
-            match args {
-              "EndlessLoop" => "return;"
-              _ => "goto \{args};"
-            }
+            gen_jump(args, low)
           }
           (JSR, _) => {
-            jsr_return_index += 1
-
             let target = match mode {
               Absolute(Ident(~name, ty=_)) => name
               _ => ""
             }
-            
-            "jsr(\{target}, \{jsr_return_index - 1});"
+
+            if low.self_contained_subroutine_labels.contains(target) {
+              "\{target}();"
+            } else {
+              self.jsr_return_index += 1
+              "jsr(\{target}, \{self.jsr_return_index - 1});"
+            }
           }
-          (RTS, _) => "goto rts;"
+          (RTS, _) => {
+            match bb.subroutine {
+              Some(sub) => {
+                if low.self_contained_subroutine_labels.contains(sub.name) {
+                  "return; // rts"
+                } else {
+                  "goto rts;"
+                }
+              }
+              None => "goto rts;"
+            }
+          }
           (RTI, _) => "return; // rti"
           _ => "\{op.to_string().to_lower()}\{mode.suffix()}(\{args});"
         }
@@ -291,12 +301,50 @@ fn emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
         self.indentation += 1
 
         for idx, label in jump_table {
-          self.emit("case \{idx}: goto \{label};")
+          self.emit("case \{idx}: \{gen_jump(label, low)}")
         }
 
         self.indentation -= 1
         self.emit("}")
       }
+    }
+}
+
+fn emit_basic_block(self: Emitter, bb: @lower.BasicBlock, low: @lower.AsmLowering) -> Unit {
+  for item in bb.items {
+    self.emit_item(item, bb, low)
+  }
+}
+
+fn emit_subroutine(self: Emitter, subroutine: @lower.AsmSubroutine, low: @lower.AsmLowering) -> Unit {
+  self.indentation = 0
+  self.emit("void \{subroutine.name}(void) {")
+  self.indentation = 1
+
+  for block in subroutine.blocks {
+    self.emit_basic_block(block, low)
+  }
+
+  self.indentation = 0
+  self.emit("}\n")
+}
+
+fn emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
+self.emit("#include \"code.h\"")
+  self.emit("")
+  self.emit("void smb(RunState state) {")
+  self.indentation += 1
+
+  self.emit("switch (state) {")
+  self.indentation += 1
+  self.emit("case RUN_STATE_RESET: goto Start;")
+  self.emit("case RUN_STATE_NMI_HANDLER: goto NonMaskableInterrupt;")
+  self.indentation -= 1
+  self.emit("}\n")
+  
+  for bb in low.basic_blocks {
+    if bb.subroutine.is_empty() || not(low.self_contained_subroutine_labels.contains(bb.subroutine.unwrap().name)) {
+      self.emit_basic_block(bb, low)
     }
   }
 
@@ -307,7 +355,7 @@ fn emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("switch (pop_jsr()) {")
   self.indentation += 1
 
-  for i in 0..<jsr_return_index {
+  for i in 0..<self.jsr_return_index {
     self.emit("case \{i}: goto jsr_ret_\{i};")
   }
 
@@ -315,6 +363,16 @@ fn emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("}")
   self.indentation = 0
   self.emit("}")
+
+  self.emit("")
+
+  for sub in low.subroutines {
+    if sub.is_self_contained {
+      self.emit_subroutine(sub, low)
+    }
+  }
+
+  self.emit("")
 }
 
 pub struct File {
@@ -382,7 +440,7 @@ pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
     name: "code.h",
     contents: {
       let emitter = Emitter::new()
-      emitter.emit_code_h()
+      emitter.emit_code_h(low)
       emitter.output.to_string()
     }
   }

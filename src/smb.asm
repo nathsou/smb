@@ -710,7 +710,7 @@ ColdBoot:    jsr InitializeMemory         ;clear memory using pointer in Y
              lda Mirror_PPU_CTRL_REG1
              ora #%10000000               ;enable NMIs
              jsr WritePPUReg1
-             jmp EndlessLoop ; EndlessLoop: jmp EndlessLoop ; endless loop, need I say more?
+             rti ; EndlessLoop: jmp EndlessLoop ; endless loop, need I say more?
 
 ;-------------------------------------------------------------------------------------
 ;$00 - vram buffer address table low, also used for pseudorandom bit
@@ -2370,20 +2370,20 @@ WorldSelectMessage2:
 ;$06 - jump address low
 ;$07 - jump address high
 
-JumpEngine:
-       asl          ;shift bit from contents of A
-       tay
-       pla          ;pull saved return address from stack
-       sta $04      ;save to indirect
-       pla
-       sta $05
-       iny
-       lda ($04),y  ;load pointer from indirect
-       sta $06      ;note that if an RTS is performed in next routine
-       iny          ;it will return to the execution before the sub
-       lda ($04),y  ;that called this routine
-       sta $07
-       jmp ($06)    ;jump to the address we loaded
+; JumpEngine:
+;        asl          ;shift bit from contents of A
+;        tay
+;        pla          ;pull saved return address from stack
+;        sta $04      ;save to indirect
+;        pla
+;        sta $05
+;        iny
+;        lda ($04),y  ;load pointer from indirect
+;        sta $06      ;note that if an RTS is performed in next routine
+;        iny          ;it will return to the execution before the sub
+;        lda ($04),y  ;that called this routine
+;        sta $07
+;        jmp ($06)    ;jump to the address we loaded
 
 ;-------------------------------------------------------------------------------------
 
@@ -2538,6 +2538,8 @@ PrintStatusBarNumbers:
       lsr
       lsr
       lsr
+      jsr OutputNumbers
+      rts
 
 OutputNumbers:
              clc                      ;add 1 to low nybble
@@ -2618,6 +2620,8 @@ UpdateTopScore:
       ldx #$05          ;start with mario's score
       jsr TopScoreCheck
       ldx #$0b          ;now do luigi's score
+      jsr TopScoreCheck
+      rts
 
 TopScoreCheck:
               ldy #$05                 ;start with the lowest digit
