@@ -24,22 +24,6 @@ void ldy_zpx(uint8_t addr);
 void ldy_abs(uint16_t addr);
 void ldy_absx(uint16_t addr);
 
-void sta_zp(uint8_t addr);
-void sta_zpx(uint8_t addr);
-void sta_zpy(uint8_t addr);
-void sta_abs(uint16_t addr);
-void sta_absx(uint16_t addr);
-void sta_absy(uint16_t addr);
-void sta_indy(uint8_t addr);
-
-void stx_zp(uint8_t addr);
-void stx_zpy(uint8_t addr);
-void stx_abs(uint16_t addr);
-
-void sty_zp(uint8_t addr);
-void sty_zpx(uint8_t addr);
-void sty_abs(uint16_t addr);
-
 void adc_imm(uint8_t value);
 void adc_zp(uint8_t addr);
 void adc_zpx(uint8_t addr);

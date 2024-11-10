@@ -830,62 +830,62 @@ void apu_step_sweep(void) {
 
 const size_t CYCLES_PER_FRAME = CPU_FREQUENCY / FRAME_RATE;
 
+void apu_step_quarter_frame(void) {
+    static size_t quarter_frame_counter = 0;
+    size_t samples_per_quarter_frame = sample_rate / (4 * FRAME_RATE);
+    double cycles_per_quarter_frame = (double)CYCLES_PER_FRAME / 4.0;
+    frame_counter = (frame_counter + 1) % 5; // TODO: confirm that 4-step sequence is never used
+
+    if (frame_counter & 1) {
+        apu_step_envelope();
+    } else {
+        apu_step_length_counter();
+        apu_step_envelope();
+        apu_step_sweep();
+    }
+
+    size_t samples_written = 0;
+    size_t samples_to_write = samples_per_quarter_frame;
+    // on the final step of the sequencer, output the remaining samples for this frame
+    if (quarter_frame_counter == 3) {
+        samples_to_write = (sample_rate / FRAME_RATE) - 3 * samples_per_quarter_frame;
+    }
+
+    for (size_t i = 0; i < (size_t)cycles_per_quarter_frame; i++) {
+        double progress_counter = (double)i / cycles_per_quarter_frame;
+        double progress_samples = (double)samples_written / (double)samples_to_write;
+
+        if (samples_written < samples_to_write && progress_counter > progress_samples) {
+            if (audio_buffer_index < AUDIO_BUFFER_SIZE) {
+                audio_buffer[audio_buffer_index++] = apu_get_sample();
+                samples_written++;
+            }
+        }
+
+        apu_step_timer();
+    }
+
+    quarter_frame_counter = (quarter_frame_counter + 1) & 3;
+}
+
 void apu_step_frame(void) {
     // step the frame sequencer 4 times per frame
     // https://www.nesdev.org/wiki/APU_Frame_Counter
-    size_t samples_per_quarter_frame = sample_rate / (4 * FRAME_RATE);
 
+    
     for (size_t i = 0; i < 4; i++) {
-        frame_counter = (frame_counter + 1) % 5; // TODO: confirm that 4-step sequence is never used
-
-
-        if (frame_counter & 1) {
-            apu_step_envelope();
-        } else {
-            apu_step_length_counter();
-            apu_step_envelope();
-            apu_step_sweep();
-        }
-
-        size_t samples_to_write = samples_per_quarter_frame;
-        size_t samples_written = 0;
-
-        // on the final step of the sequencer, output the remaining samples for this frame
-        if (i == 3) {
-            samples_to_write = (sample_rate / FRAME_RATE) - 3 * samples_per_quarter_frame;
-        }
-
-        double cycles_per_quarter_frame = (double)CYCLES_PER_FRAME / 4.0;
-
-        for (size_t i = 0; i < cycles_per_quarter_frame; i++) {
-            double progress_counter = (double)i / cycles_per_quarter_frame;
-            double progress_samples = (double)samples_written / (double)samples_to_write;
-
-            if (samples_written < samples_to_write && progress_counter > progress_samples) {
-                if (audio_buffer_index < AUDIO_BUFFER_SIZE) {
-                    audio_buffer[audio_buffer_index++] = apu_get_sample();
-                    samples_written++;
-                } else {
-                    // avoid popping sounds
-                    memset(audio_buffer, 0, AUDIO_BUFFER_SIZE);
-                    audio_buffer_index = 0;
-                }
-            }
-
-            apu_step_timer();
-        }
+        apu_step_quarter_frame();
     }
 }
 
 void apu_fill_buffer(uint8_t* cb_buffer, size_t size) {
+    while (audio_buffer_index < size) {
+        apu_step_quarter_frame();
+    }
+
     size_t len = size > audio_buffer_index ? audio_buffer_index : size;
 
-    if (size > audio_buffer_index) {
-        memcpy(cb_buffer, audio_buffer, audio_buffer_index);
-        audio_buffer_index = 0;
-    } else {
-        memcpy(cb_buffer, audio_buffer, len);
-        memcpy(audio_buffer, audio_buffer + len, audio_buffer_index - len);
-        audio_buffer_index -= len;
-    }
+    memcpy(cb_buffer, audio_buffer, len);
+    audio_buffer_index -= len;
+    memcpy(audio_buffer, audio_buffer + len, audio_buffer_index);
 }

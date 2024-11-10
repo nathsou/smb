@@ -390,8 +390,13 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
   }
 
   fn connect(a: BasicBlock, b: BasicBlock) -> Unit {
-    a.successors.push(b)
-    b.predecessors.push(a)
+    if not(a.successors.iter().any(fn(bb) { bb.id == b.id })) {
+      a.successors.push(b)
+    }
+
+    if not(b.predecessors.iter().any(fn(bb) { bb.id == a.id })) {
+      b.predecessors.push(a)
+    }
   }
 
   // connect basic blocks
@@ -568,7 +573,7 @@ fn collect_self_contained_subroutines(self: AsmLowering) -> Unit {
 
       // insert a jump instruction in place of automatic fallthroughs to subroutines
       for pred in sub.entry.predecessors {
-        pred.items.push(Inst(op=JMP, mode=Absolute(Ident(name=sub.name, ty=LabelTy)), comment=Some("<gen: fallthrough>")))
+        pred.items.push(Inst(op=JMP, mode=Absolute(Ident(name=sub.name, ty=LabelTy)), comment=Some("<fallthrough>")))
       }
     }
   }
