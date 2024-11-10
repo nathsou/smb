@@ -11,9 +11,9 @@ Start:
     sei(); // pretty standard 6502 type init here
     cld();
     lda_imm(0b00010000); // init PPU control register 1 
-    sta_abs(PPU_CTRL_REG1);
+    write_byte(PPU_CTRL_REG1, a);
     ldx_imm(0xff); // reset stack pointer
-    txs();
+    sp = x;
   
 VBlank1:
     lda_abs(PPU_STATUS); // wait two frames
@@ -38,22 +38,22 @@ WBootCheck:
   
 ColdBoot:
     InitializeMemory(); // clear memory using pointer in Y
-    sta_abs(SND_DELTA_REG + 1); // reset delta counter load register
-    sta_abs(OperMode); // reset primary mode of operation
+    write_byte(SND_DELTA_REG + 1, a);
+    write_byte(OperMode, a);
     lda_imm(0xa5); // set warm boot flag
-    sta_abs(WarmBootValidation);
-    sta_abs(PseudoRandomBitReg); // set seed for pseudorandom register
+    write_byte(WarmBootValidation, a);
+    write_byte(PseudoRandomBitReg, a);
     lda_imm(0b00001111);
-    sta_abs(SND_MASTERCTRL_REG); // enable all sound channels except dmc
+    write_byte(SND_MASTERCTRL_REG, a);
     lda_imm(0b00000110);
-    sta_abs(PPU_CTRL_REG2); // turn off clipping for OAM and background
+    write_byte(PPU_CTRL_REG2, a);
     jsr(MoveAllSpritesOffscreen, 0);
     jsr(InitializeNameTables, 1); // initialize both name tables
     inc_abs(DisableScreenFlag); // set flag to disable screen output
     lda_abs(Mirror_PPU_CTRL_REG1);
     ora_imm(0b10000000); // enable NMIs
     WritePPUReg1();
-    return; // rti //  EndlessLoop: jmp EndlessLoop ; endless loop, need I say more?
+    return; // <rti>
     // -------------------------------------------------------------------------------------
     // $00 - vram buffer address table low, also used for pseudorandom bit
     // $01 - vram buffer address table high
@@ -61,9 +61,9 @@ ColdBoot:
 NonMaskableInterrupt:
     lda_abs(Mirror_PPU_CTRL_REG1); // disable NMIs in mirror reg
     and_imm(0b01111111); // save all other bits
-    sta_abs(Mirror_PPU_CTRL_REG1);
+    write_byte(Mirror_PPU_CTRL_REG1, a);
     and_imm(0b01111110); // alter name table address to be $2800
-    sta_abs(PPU_CTRL_REG1); // (essentially $2000) but save other bits
+    write_byte(PPU_CTRL_REG1, a);
     lda_abs(Mirror_PPU_CTRL_REG2); // disable OAM and background display by default
     and_imm(0b11100110);
     ldy_abs(DisableScreenFlag); // get screen disable flag
@@ -72,20 +72,20 @@ NonMaskableInterrupt:
     ora_imm(0b00011110);
   
 ScreenOff:
-    sta_abs(Mirror_PPU_CTRL_REG2); // save bits for later but not in register at the moment
+    write_byte(Mirror_PPU_CTRL_REG2, a);
     and_imm(0b11100111); // disable screen for now
-    sta_abs(PPU_CTRL_REG2);
+    write_byte(PPU_CTRL_REG2, a);
     ldx_abs(PPU_STATUS); // reset flip-flop and reset scroll registers to zero
     lda_imm(0x0);
     InitScroll();
-    sta_abs(PPU_SPR_ADDR); // reset spr-ram address register
+    write_byte(PPU_SPR_ADDR, a);
     lda_imm(0x2); // perform spr-ram DMA access on $0200-$02ff
-    sta_abs(SPR_DMA);
+    write_byte(SPR_DMA, a);
     ldx_abs(VRAM_Buffer_AddrCtrl); // load control for pointer to buffer contents
     lda_absx(VRAM_AddrTable_Low); // set indirect at $00 to pointer
-    sta_zp(0x0);
+    write_byte(0x0, a);
     lda_absx(VRAM_AddrTable_High);
-    sta_zp(0x1);
+    write_byte(0x1, a);
     jsr(UpdateScreen, 2); // update screen with buffer contents
     ldy_imm(0x0);
     ldx_abs(VRAM_Buffer_AddrCtrl); // check for usage of $0341
@@ -96,11 +96,11 @@ ScreenOff:
 InitBuffer:
     ldx_absy(VRAM_Buffer_Offset);
     lda_imm(0x0); // clear buffer header at last location
-    sta_absx(VRAM_Buffer1_Offset);
-    sta_absx(VRAM_Buffer1);
-    sta_abs(VRAM_Buffer_AddrCtrl); // reinit address control to $0301
+    write_byte(VRAM_Buffer1_Offset + x, a);
+    write_byte(VRAM_Buffer1 + x, a);
+    write_byte(VRAM_Buffer_AddrCtrl, a);
     lda_abs(Mirror_PPU_CTRL_REG2); // copy mirror of $2001 to register
-    sta_abs(PPU_CTRL_REG2);
+    write_byte(PPU_CTRL_REG2, a);
     jsr(SoundEngine, 3); // play sound
     jsr(ReadJoypads, 4); // read joypads
     jsr(PauseRoutine, 5); // handle pause
@@ -118,7 +118,7 @@ DecTimers:
     dec_abs(IntervalTimerControl); // decrement interval timer control,
     if (!neg_flag) { goto DecTimersLoop; } // if not expired, only frame timers will decrement
     lda_imm(0x14);
-    sta_abs(IntervalTimerControl); // if control for interval timers expired,
+    write_byte(IntervalTimerControl, a);
     ldx_imm(0x23); // interval timers will decrement along with frame timers
   
 DecTimersLoop:
@@ -138,13 +138,13 @@ PauseSkip:
     ldy_imm(0x7);
     lda_abs(PseudoRandomBitReg); // get first memory location of LSFR bytes
     and_imm(0b00000010); // mask out all but d1
-    sta_zp(0x0); // save here
+    write_byte(0x0, a);
     lda_abs(PseudoRandomBitReg + 1); // get second memory location
     and_imm(0b00000010); // mask out all but d1
     eor_zp(0x0); // perform exclusive-OR on d1 from first and second bytes
-    clc(); // if neither or both are set, carry will be clear
+    carry_flag = false;
     if (zero_flag) { goto RotPRandomBit; }
-    sec(); // if one or the other is set, carry will be set
+    carry_flag = true;
   
 RotPRandomBit:
     ror_absx(PseudoRandomBitReg); // rotate carry into d7, and rotate last bit into carry
@@ -176,12 +176,12 @@ HBlankDelay:
   
 SkipSprite0:
     lda_abs(HorizontalScroll); // set scroll registers from variables
-    sta_abs(PPU_SCROLL_REG);
+    write_byte(PPU_SCROLL_REG, a);
     lda_abs(VerticalScroll);
-    sta_abs(PPU_SCROLL_REG);
+    write_byte(PPU_SCROLL_REG, a);
     lda_abs(Mirror_PPU_CTRL_REG1); // load saved mirror of $2000
     pha();
-    sta_abs(PPU_CTRL_REG1);
+    write_byte(PPU_CTRL_REG1, a);
     lda_abs(GamePauseStatus); // if in pause mode, do not perform operation mode stuff
     lsr_acc();
     if (carry_flag) { goto SkipMainOper; }
@@ -191,8 +191,8 @@ SkipMainOper:
     lda_abs(PPU_STATUS); // reset flip-flop
     pla();
     ora_imm(0b10000000); // reactivate NMIs
-    sta_abs(PPU_CTRL_REG1);
-    return; // rti // we are done until the next frame!
+    write_byte(PPU_CTRL_REG1, a);
+    return; // <rti>
     // -------------------------------------------------------------------------------------
   
 PauseRoutine:
@@ -219,11 +219,11 @@ ChkStart:
     and_imm(0b10000000); // and if so, do not reset timer (residual,
     if (!zero_flag) { goto ExitPause; } // joypad reading routine makes this unnecessary)
     lda_imm(0x2b); // set pause timer
-    sta_abs(GamePauseTimer);
+    write_byte(GamePauseTimer, a);
     lda_abs(GamePauseStatus);
     tay();
     iny(); // set pause sfx queue for next pause mode
-    sty_zp(PauseSoundQueue);
+    write_byte(PauseSoundQueue, y);
     eor_imm(0b00000001); // invert d0 and set d7
     ora_imm(0b10000000);
     if (!zero_flag) { goto SetPause; } // unconditional branch
@@ -233,7 +233,7 @@ ClrPauseTimer:
     and_imm(0b01111111); // is not pressed
   
 SetPause:
-    sta_abs(GamePauseStatus);
+    write_byte(GamePauseStatus, a);
   
 ExitPause:
     goto rts;
@@ -263,7 +263,7 @@ MoveSpritesOffscreenSkip:
     lda_imm(0xf8); // off the screen
   
 SprInitLoop:
-    sta_absy(Sprite_Y_Position); // write 248 into OAM data's Y coordinate
+    write_byte(Sprite_Y_Position + y, a);
     iny(); // which will move it off the screen
     iny();
     iny();
@@ -299,7 +299,7 @@ ChkSelect:
     if (zero_flag) { goto SelectBLogic; } // if so, branch reset demo timer
     ldx_abs(DemoTimer); // otherwise check demo timer
     if (!zero_flag) { goto ChkWorldSel; } // if demo timer not expired, branch to check world selection
-    sta_abs(SelectTimer); // set controller bits here if running demo
+    write_byte(SelectTimer, a);
     DemoEngine(); // run through the demo actions
     if (carry_flag) { goto ResetTitle; } // if carry flag set, demo over, thus branch
     goto RunDemo; // otherwise, run game engine for demo
@@ -315,16 +315,16 @@ SelectBLogic:
     lda_abs(DemoTimer); // if select or B pressed, check demo timer one last time
     if (zero_flag) { goto ResetTitle; } // if demo timer expired, branch to reset title screen mode
     lda_imm(0x18); // otherwise reset demo timer
-    sta_abs(DemoTimer);
+    write_byte(DemoTimer, a);
     lda_abs(SelectTimer); // check select/B button timer
     if (!zero_flag) { goto NullJoypad; } // if not expired, branch
     lda_imm(0x10); // otherwise reset select button timer
-    sta_abs(SelectTimer);
+    write_byte(SelectTimer, a);
     cpy_imm(0x1); // was the B button pressed earlier?  if so, branch
     if (zero_flag) { goto IncWorldSel; } // note this will not be run if world selection is disabled
     lda_abs(NumberOfPlayers); // if no, must have been the select button, therefore
     eor_imm(0b00000001); // change number of players and draw icon accordingly
-    sta_abs(NumberOfPlayers);
+    write_byte(NumberOfPlayers, a);
     DrawMushroomIcon();
     goto NullJoypad;
   
@@ -333,22 +333,22 @@ IncWorldSel:
     inx();
     txa();
     and_imm(0b00000111); // mask out higher bits
-    sta_abs(WorldSelectNumber); // store as current world select number
+    write_byte(WorldSelectNumber, a);
     GoContinue();
   
 UpdateShroom:
     lda_absx(WSelectBufferTemplate); // write template for world select in vram buffer
-    sta_absx(VRAM_Buffer1 - 1); // do this until all bytes are written
+    write_byte(VRAM_Buffer1 - 1 + x, a);
     inx();
     cpx_imm(0x6);
     if (neg_flag) { goto UpdateShroom; }
     ldy_abs(WorldNumber); // get world number from variable and increment for
     iny(); // proper display, and put in blank byte before
-    sty_abs(VRAM_Buffer1 + 3); // null terminator
+    write_byte(VRAM_Buffer1 + 3, y);
   
 NullJoypad:
     lda_imm(0x0); // clear joypad bits for player 1
-    sta_abs(SavedJoypad1Bits);
+    write_byte(SavedJoypad1Bits, a);
   
 RunDemo:
     jsr(GameCoreRoutine, 9); // run game engine
@@ -358,9 +358,9 @@ RunDemo:
   
 ResetTitle:
     lda_imm(0x0); // reset game modes, disable
-    sta_abs(OperMode); // sprite 0 check and disable
-    sta_abs(OperMode_Task); // screen output
-    sta_abs(Sprite0HitDetectFlag);
+    write_byte(OperMode, a);
+    write_byte(OperMode_Task, a);
+    write_byte(Sprite0HitDetectFlag, a);
     inc_abs(DisableScreenFlag);
     goto rts;
   
@@ -379,15 +379,15 @@ StartWorld1:
     inc_abs(FetchNewGameTimerFlag); // set fetch new game timer flag
     inc_abs(OperMode); // set next game mode
     lda_abs(WorldSelectEnableFlag); // if world select flag is on, then primary
-    sta_abs(PrimaryHardMode); // hard mode must be on as well
+    write_byte(PrimaryHardMode, a);
     lda_imm(0x0);
-    sta_abs(OperMode_Task); // set game mode here, and clear demo timer
-    sta_abs(DemoTimer);
+    write_byte(OperMode_Task, a);
+    write_byte(DemoTimer, a);
     ldx_imm(0x17);
     lda_imm(0x0);
   
 InitScores:
-    sta_absx(ScoreAndCoinDisplay); // clear player scores and coin displays
+    write_byte(ScoreAndCoinDisplay + x, a);
     dex();
     if (!neg_flag) { goto InitScores; }
   
@@ -401,7 +401,7 @@ VictoryMode:
     lda_abs(OperMode_Task); // get current task of victory mode
     if (zero_flag) { goto AutoPlayer; } // if on bridge collapse, skip enemy processing
     ldx_imm(0x0);
-    stx_zp(ObjectOffset); // otherwise reset enemy object offset 
+    write_byte(ObjectOffset, x);
     jsr(EnemiesAndLoopsCore, 12); // and run enemy code
   
 AutoPlayer:
@@ -422,15 +422,15 @@ VictoryModeSubroutines:
 SetupVictoryMode:
     ldx_abs(ScreenRight_PageLoc); // get page location of right side of screen
     inx(); // increment to next page
-    stx_zp(DestinationPageLoc); // store here
+    write_byte(DestinationPageLoc, x);
     lda_imm(EndOfCastleMusic);
-    sta_zp(EventMusicQueue); // play win castle music
+    write_byte(EventMusicQueue, a);
     goto IncModeTask_B; // jump to set next major task in victory mode
     // -------------------------------------------------------------------------------------
   
 PlayerVictoryWalk:
     ldy_imm(0x0); // set value here to not walk player by default
-    sty_zp(VictoryWalkControl);
+    write_byte(VictoryWalkControl, y);
     lda_zp(Player_PageLoc); // get player's page location
     cmp_zp(DestinationPageLoc); // compare with destination page location
     if (!zero_flag) { goto PerformWalk; } // if page locations don't match, branch
@@ -449,9 +449,9 @@ DontWalk:
     cmp_zp(DestinationPageLoc); // against set value here
     if (zero_flag) { goto ExitVWalk; } // branch if equal to change modes if necessary
     lda_abs(ScrollFractional);
-    clc(); // do fixed point math on fractional part of scroll
+    carry_flag = false;
     adc_imm(0x80);
-    sta_abs(ScrollFractional); // save fractional movement amount
+    write_byte(ScrollFractional, a);
     lda_imm(0x1); // set 1 pixel per frame
     adc_imm(0x0); // add carry from previous addition
     tay(); // use as scroll amount
@@ -507,28 +507,28 @@ EvalForMusic:
     cpy_imm(0x3); // if counter not yet at 3 (world 8 only), branch
     if (!zero_flag) { goto PrintMsg; } // to print message only (note world 1-7 will only
     lda_imm(VictoryMusic); // reach this code if counter = 0, and will always branch)
-    sta_zp(EventMusicQueue); // otherwise load victory music first (world 8 only)
+    write_byte(EventMusicQueue, a);
   
 PrintMsg:
     tya(); // put primary message counter in A
-    clc(); // add $0c or 12 to counter thus giving an appropriate value,
+    carry_flag = false;
     adc_imm(0xc); // ($0c-$0d = first), ($0e = world 1-7's), ($0f-$12 = world 8's)
-    sta_abs(VRAM_Buffer_AddrCtrl); // write message counter to vram address controller
+    write_byte(VRAM_Buffer_AddrCtrl, a);
   
 IncMsgCounter:
     lda_abs(SecondaryMsgCounter);
-    clc();
+    carry_flag = false;
     adc_imm(0x4); // add four to secondary message counter
-    sta_abs(SecondaryMsgCounter);
+    write_byte(SecondaryMsgCounter, a);
     lda_abs(PrimaryMsgCounter);
     adc_imm(0x0); // add carry to primary message counter
-    sta_abs(PrimaryMsgCounter);
+    write_byte(PrimaryMsgCounter, a);
     cmp_imm(0x7); // check primary counter one more time
   
 SetEndTimer:
     if (!carry_flag) { goto ExitMsgs; } // if not reached value yet, branch to leave
     lda_imm(0x6);
-    sta_abs(WorldEndTimer); // otherwise set world end timer
+    write_byte(WorldEndTimer, a);
   
 IncModeTask_A:
     inc_abs(OperMode_Task); // move onto next task in mode
@@ -544,14 +544,14 @@ PlayerEndWorld:
     cpy_imm(World8); // if on world 8, player is done with game, 
     if (carry_flag) { goto EndChkBButton; } // thus branch to read controller
     lda_imm(0x0);
-    sta_abs(AreaNumber); // otherwise initialize area number used as offset
-    sta_abs(LevelNumber); // and level number control to start at area 1
-    sta_abs(OperMode_Task); // initialize secondary mode of operation
+    write_byte(AreaNumber, a);
+    write_byte(LevelNumber, a);
+    write_byte(OperMode_Task, a);
     inc_abs(WorldNumber); // increment world number to move onto the next world
     jsr(LoadAreaPointer, 17); // get area address offset for the next area
     inc_abs(FetchNewGameTimerFlag); // set flag to load game timer from header
     lda_imm(GameModeValue);
-    sta_abs(OperMode); // set mode of operation to game mode
+    write_byte(OperMode, a);
   
 EndExitOne:
     goto rts; // and leave
@@ -562,9 +562,9 @@ EndChkBButton:
     and_imm(B_Button); // either controller
     if (zero_flag) { goto EndExitTwo; } // branch to leave if not
     lda_imm(0x1); // otherwise set world selection flag
-    sta_abs(WorldSelectEnableFlag);
+    write_byte(WorldSelectEnableFlag, a);
     lda_imm(0xff); // remove onscreen player's lives
-    sta_abs(NumberofLives);
+    write_byte(NumberofLives, a);
     jsr(TerminateGame, 18); // do sub to continue other player or end game
   
 EndExitTwo:
@@ -579,13 +579,13 @@ FloateyNumbersRoutine:
     cmp_imm(0xb); // if less than $0b, branch
     if (!carry_flag) { goto ChkNumTimer; }
     lda_imm(0xb); // otherwise set to $0b, thus keeping
-    sta_absx(FloateyNum_Control); // it in range
+    write_byte(FloateyNum_Control + x, a);
   
 ChkNumTimer:
     tay(); // use as Y
     lda_absx(FloateyNum_Timer); // check value here
     if (!zero_flag) { goto DecNumTimer; } // if nonzero, branch ahead
-    sta_absx(FloateyNum_Control); // initialize floatey number control and leave
+    write_byte(FloateyNum_Control + x, a);
     goto rts;
   
 DecNumTimer:
@@ -596,7 +596,7 @@ DecNumTimer:
     if (!zero_flag) { goto LoadNumTiles; } // branch ahead if not found
     inc_abs(NumberofLives); // give player one extra life (1-up)
     lda_imm(Sfx_ExtraLife);
-    sta_zp(Square2SoundQueue); // and play the 1-up sound
+    write_byte(Square2SoundQueue, a);
   
 LoadNumTiles:
     lda_absy(ScoreUpdateData); // load point value here
@@ -607,7 +607,7 @@ LoadNumTiles:
     tax(); // use as X offset, essentially the digit
     lda_absy(ScoreUpdateData); // load again and this time
     and_imm(0b00001111); // mask out the high nybble
-    sta_absx(DigitModifier); // store as amount to add to the digit
+    write_byte(DigitModifier + x, a);
     jsr(AddToScore, 19); // update the score accordingly
   
 ChkTallEnemy:
@@ -639,27 +639,27 @@ FloateyPart:
     cmp_imm(0x18); // floatey number, if coordinate in the
     if (!carry_flag) { goto SetupNumSpr; } // status bar, branch
     sbc_imm(0x1);
-    sta_absx(FloateyNum_Y_Pos); // otherwise subtract one and store as new
+    write_byte(FloateyNum_Y_Pos + x, a);
   
 SetupNumSpr:
     lda_absx(FloateyNum_Y_Pos); // get vertical coordinate
     sbc_imm(0x8); // subtract eight and dump into the
     jsr(DumpTwoSpr, 20); // left and right sprite's Y coordinates
     lda_absx(FloateyNum_X_Pos); // get horizontal coordinate
-    sta_absy(Sprite_X_Position); // store into X coordinate of left sprite
-    clc();
+    write_byte(Sprite_X_Position + y, a);
+    carry_flag = false;
     adc_imm(0x8); // add eight pixels and store into X
-    sta_absy(Sprite_X_Position + 4); // coordinate of right sprite
+    write_byte(Sprite_X_Position + 4 + y, a);
     lda_imm(0x2);
-    sta_absy(Sprite_Attributes); // set palette control in attribute bytes
-    sta_absy(Sprite_Attributes + 4); // of left and right sprites
+    write_byte(Sprite_Attributes + y, a);
+    write_byte(Sprite_Attributes + 4 + y, a);
     lda_absx(FloateyNum_Control);
     asl_acc(); // multiply our floatey number control by 2
     tax(); // and use as offset for look-up table
     lda_absx(FloateyNumTileData);
-    sta_absy(Sprite_Tilenumber); // display first half of number of points
+    write_byte(Sprite_Tilenumber + y, a);
     lda_absx(FloateyNumTileData + 1);
-    sta_absy(Sprite_Tilenumber + 4); // display the second half
+    write_byte(Sprite_Tilenumber + 4 + y, a);
     ldx_zp(ObjectOffset); // get enemy object offset and leave
     goto rts;
     // -------------------------------------------------------------------------------------
@@ -700,14 +700,14 @@ SetupIntermediate:
     lda_abs(PlayerStatus);
     pha();
     lda_imm(0x0); // set background color to black
-    sta_abs(PlayerStatus); // and player status to not fiery
+    write_byte(PlayerStatus, a);
     lda_imm(0x2); // this is the ONLY time background color control
-    sta_abs(BackgroundColorCtrl); // is set to less than 4
+    write_byte(BackgroundColorCtrl, a);
     jsr(GetPlayerColors, 23);
     pla(); // we only execute this routine for
-    sta_abs(PlayerStatus); // the intermediate lives display
+    write_byte(PlayerStatus, a);
     pla(); // and once we're done, we return bg
-    sta_abs(BackgroundColorCtrl); // color ctrl and player status from stack
+    write_byte(BackgroundColorCtrl, a);
     goto IncSubtask; // then move onto the next task
     // -------------------------------------------------------------------------------------
   
@@ -716,7 +716,7 @@ GetAreaPalette:
     ldx_absy(AreaPalette); // based on area type
   
 SetVRAMAddr_A:
-    stx_abs(VRAM_Buffer_AddrCtrl); // store offset into buffer control
+    write_byte(VRAM_Buffer_AddrCtrl, x);
   
 NextSubtask:
     goto IncSubtask; // move onto next task
@@ -727,7 +727,7 @@ GetBackgroundColor:
     ldy_abs(BackgroundColorCtrl); // check background color control
     if (zero_flag) { goto NoBGColor; } // if not set, increment task and fetch palette
     lda_absy(BGColorCtrl_Addr - 4); // put appropriate palette into vram
-    sta_abs(VRAM_Buffer_AddrCtrl); // note that if set to 5-7, $0301 will not be read
+    write_byte(VRAM_Buffer_AddrCtrl, a);
   
 NoBGColor:
     inc_abs(ScreenRoutineTask); // increment to next subtask and plod on through
@@ -747,11 +747,11 @@ ChkFiery:
   
 StartClrGet:
     lda_imm(0x3); // do four colors
-    sta_zp(0x0);
+    write_byte(0x0, a);
   
 ClrGetLoop:
     lda_absy(PlayerColors); // fetch player colors and store them
-    sta_absx(VRAM_Buffer1 + 3); // in the buffer
+    write_byte(VRAM_Buffer1 + 3 + x, a);
     iny();
     inx();
     dec_zp(0x0);
@@ -763,21 +763,21 @@ ClrGetLoop:
   
 SetBGColor:
     lda_absy(BackgroundColors); // to background color instead
-    sta_absx(VRAM_Buffer1 + 3);
+    write_byte(VRAM_Buffer1 + 3 + x, a);
     lda_imm(0x3f); // set for sprite palette address
-    sta_absx(VRAM_Buffer1); // save to buffer
+    write_byte(VRAM_Buffer1 + x, a);
     lda_imm(0x10);
-    sta_absx(VRAM_Buffer1 + 1);
+    write_byte(VRAM_Buffer1 + 1 + x, a);
     lda_imm(0x4); // write length byte to buffer
-    sta_absx(VRAM_Buffer1 + 2);
+    write_byte(VRAM_Buffer1 + 2 + x, a);
     lda_imm(0x0); // now the null terminator
-    sta_absx(VRAM_Buffer1 + 7);
+    write_byte(VRAM_Buffer1 + 7 + x, a);
     txa(); // move the buffer pointer ahead 7 bytes
-    clc(); // in case we want to write anything else later
+    carry_flag = false;
     adc_imm(0x7);
   
 SetVRAMOffset:
-    sta_abs(VRAM_Buffer1_Offset); // store as new vram buffer offset
+    write_byte(VRAM_Buffer1_Offset, a);
     goto rts;
     // -------------------------------------------------------------------------------------
   
@@ -788,7 +788,7 @@ GetAlternatePalette1:
     lda_imm(0xb); // if found, load appropriate palette
   
 SetVRAMAddr_B:
-    sta_abs(VRAM_Buffer_AddrCtrl);
+    write_byte(VRAM_Buffer_AddrCtrl, a);
   
 NoAltPal:
     goto IncSubtask; // now onto the next task
@@ -804,27 +804,27 @@ WriteBottomStatusLine:
     jsr(GetSBNybbles, 25); // write player's score and coin tally to screen
     ldx_abs(VRAM_Buffer1_Offset);
     lda_imm(0x20); // write address for world-area number on screen
-    sta_absx(VRAM_Buffer1);
+    write_byte(VRAM_Buffer1 + x, a);
     lda_imm(0x73);
-    sta_absx(VRAM_Buffer1 + 1);
+    write_byte(VRAM_Buffer1 + 1 + x, a);
     lda_imm(0x3); // write length for it
-    sta_absx(VRAM_Buffer1 + 2);
+    write_byte(VRAM_Buffer1 + 2 + x, a);
     ldy_abs(WorldNumber); // first the world number
     iny();
     tya();
-    sta_absx(VRAM_Buffer1 + 3);
+    write_byte(VRAM_Buffer1 + 3 + x, a);
     lda_imm(0x28); // next the dash
-    sta_absx(VRAM_Buffer1 + 4);
+    write_byte(VRAM_Buffer1 + 4 + x, a);
     ldy_abs(LevelNumber); // next the level number
     iny(); // increment for proper number display
     tya();
-    sta_absx(VRAM_Buffer1 + 5);
+    write_byte(VRAM_Buffer1 + 5 + x, a);
     lda_imm(0x0); // put null terminator on
-    sta_absx(VRAM_Buffer1 + 6);
+    write_byte(VRAM_Buffer1 + 6 + x, a);
     txa(); // move the buffer offset up by 6 bytes
-    clc();
+    carry_flag = false;
     adc_imm(0x6);
-    sta_abs(VRAM_Buffer1_Offset);
+    write_byte(VRAM_Buffer1_Offset, a);
     goto IncSubtask;
     // -------------------------------------------------------------------------------------
   
@@ -832,7 +832,7 @@ DisplayTimeUp:
     lda_abs(GameTimerExpiredFlag); // if game timer not expired, increment task
     if (zero_flag) { goto NoTimeUp; } // control 2 tasks forward, otherwise, stay here
     lda_imm(0x0);
-    sta_abs(GameTimerExpiredFlag); // reset timer expiration flag
+    write_byte(GameTimerExpiredFlag, a);
     lda_imm(0x2); // output time-up screen to buffer
     goto OutputInter;
   
@@ -862,19 +862,19 @@ OutputInter:
     jsr(WriteGameText, 27);
     jsr(ResetScreenTimer, 28);
     lda_imm(0x0);
-    sta_abs(DisableScreenFlag); // reenable screen output
+    write_byte(DisableScreenFlag, a);
     goto rts;
   
 GameOverInter:
     lda_imm(0x12); // set screen timer
-    sta_abs(ScreenTimer);
+    write_byte(ScreenTimer, a);
     lda_imm(0x3); // output game over screen to buffer
     jsr(WriteGameText, 29);
     goto IncModeTask_B;
   
 NoInter:
     lda_imm(0x8); // set for specific task and leave
-    sta_abs(ScreenRoutineTask);
+    write_byte(ScreenRoutineTask, a);
     goto rts;
     // -------------------------------------------------------------------------------------
   
@@ -891,7 +891,7 @@ TaskLoop:
   
 OutputCol:
     lda_imm(0x6); // set vram buffer to output rendered column set
-    sta_abs(VRAM_Buffer_AddrCtrl); // on next NMI
+    write_byte(VRAM_Buffer_AddrCtrl, a);
     goto rts;
     // -------------------------------------------------------------------------------------
     // $00 - vram buffer address table low
@@ -901,18 +901,18 @@ DrawTitleScreen:
     lda_abs(OperMode); // are we in title screen mode?
     if (!zero_flag) { goto IncModeTask_B; } // if not, exit
     lda_imm(HIGH_BYTE(TitleScreenDataOffset)); // load address $1ec0 into
-    sta_abs(PPU_ADDRESS); // the vram address register
+    write_byte(PPU_ADDRESS, a);
     lda_imm(LOW_BYTE(TitleScreenDataOffset));
-    sta_abs(PPU_ADDRESS);
+    write_byte(PPU_ADDRESS, a);
     lda_imm(0x3); // put address $0300 into
-    sta_zp(0x1); // the indirect at $00
+    write_byte(0x1, a);
     ldy_imm(0x0);
-    sty_zp(0x0);
+    write_byte(0x0, y);
     lda_abs(PPU_DATA); // do one garbage read
   
 OutputTScr:
     lda_abs(PPU_DATA); // get title screen from chr-rom
-    sta_indy(0x0); // store 256 bytes into buffer
+    write_byte(read_word(0x0) + y, a);
     iny();
     if (!zero_flag) { goto ChkHiByte; } // if not past 256 bytes, do not increment
     inc_zp(0x1); // otherwise increment high byte of indirect
@@ -933,8 +933,8 @@ ClearBuffersDrawIcon:
     ldx_imm(0x0); // otherwise, clear buffer space
   
 TScrClear:
-    sta_absx(VRAM_Buffer1 - 1);
-    sta_absx(VRAM_Buffer1 - 1 + 0x100);
+    write_byte(VRAM_Buffer1 - 1 + x, a);
+    write_byte(VRAM_Buffer1 - 1 + 0x100 + x, a);
     dex();
     if (!zero_flag) { goto TScrClear; }
     DrawMushroomIcon(); // draw player select icon
@@ -976,14 +976,14 @@ GameTextLoop:
     lda_absx(GameText); // load message data
     cmp_imm(0xff); // check for terminator
     if (zero_flag) { goto EndGameText; } // branch to end text if found
-    sta_absy(VRAM_Buffer1); // otherwise write data to buffer
+    write_byte(VRAM_Buffer1 + y, a);
     inx(); // and increment increment
     iny();
     if (!zero_flag) { goto GameTextLoop; } // do this for 256 bytes if no terminator found
   
 EndGameText:
     lda_imm(0x0); // put null terminator at end
-    sta_absy(VRAM_Buffer1);
+    write_byte(VRAM_Buffer1 + y, a);
     pla(); // pull original text number from stack
     tax();
     cmp_imm(0x4); // are we printing warp zone?
@@ -991,22 +991,22 @@ EndGameText:
     dex(); // are we printing the world/lives display?
     if (!zero_flag) { goto CheckPlayerName; } // if not, branch to check player's name
     lda_abs(NumberofLives); // otherwise, check number of lives
-    clc(); // and increment by one for display
+    carry_flag = false;
     adc_imm(0x1);
     cmp_imm(10); // more than 9 lives?
     if (!carry_flag) { goto PutLives; }
     sbc_imm(10); // if so, subtract 10 and put a crown tile
     ldy_imm(0x9f); // next to the difference...strange things happen if
-    sty_abs(VRAM_Buffer1 + 7); // the number of lives exceeds 19
+    write_byte(VRAM_Buffer1 + 7, y);
   
 PutLives:
-    sta_abs(VRAM_Buffer1 + 8);
+    write_byte(VRAM_Buffer1 + 8, a);
     ldy_abs(WorldNumber); // write world and level numbers (incremented for display)
     iny(); // to the buffer in the spaces surrounding the dash
-    sty_abs(VRAM_Buffer1 + 19);
+    write_byte(VRAM_Buffer1 + 19, y);
     ldy_abs(LevelNumber);
     iny();
-    sty_abs(VRAM_Buffer1 + 21); // we're done here
+    write_byte(VRAM_Buffer1 + 21, y);
     goto rts;
   
 CheckPlayerName:
@@ -1027,7 +1027,7 @@ ChkLuigi:
   
 NameLoop:
     lda_absy(LuigiName); // otherwise, replace "MARIO" with "LUIGI"
-    sta_absy(VRAM_Buffer1 + 3);
+    write_byte(VRAM_Buffer1 + 3 + y, a);
     dey();
     if (!neg_flag) { goto NameLoop; } // do this until each letter is replaced
   
@@ -1043,7 +1043,7 @@ PrintWarpZoneNumbers:
   
 WarpNumLoop:
     lda_absx(WarpZoneNumbers); // print warp zone numbers into the
-    sta_absy(VRAM_Buffer1 + 27); // placeholders from earlier
+    write_byte(VRAM_Buffer1 + 27 + y, a);
     inx();
     iny(); // put a number in every fourth space
     iny();
@@ -1062,7 +1062,7 @@ ResetSpritesAndScreenTimer:
   
 ResetScreenTimer:
     lda_imm(0x7); // reset timer again
-    sta_abs(ScreenTimer);
+    write_byte(ScreenTimer, a);
     inc_abs(ScreenRoutineTask); // move onto next task
   
 NoReset:
@@ -1080,36 +1080,36 @@ NoReset:
 RenderAreaGraphics:
     lda_abs(CurrentColumnPos); // store LSB of where we're at
     and_imm(0x1);
-    sta_zp(0x5);
+    write_byte(0x5, a);
     ldy_abs(VRAM_Buffer2_Offset); // store vram buffer offset
-    sty_zp(0x0);
+    write_byte(0x0, y);
     lda_abs(CurrentNTAddr_Low); // get current name table address we're supposed to render
-    sta_absy(VRAM_Buffer2 + 1);
+    write_byte(VRAM_Buffer2 + 1 + y, a);
     lda_abs(CurrentNTAddr_High);
-    sta_absy(VRAM_Buffer2);
+    write_byte(VRAM_Buffer2 + y, a);
     lda_imm(0x9a); // store length byte of 26 here with d7 set
-    sta_absy(VRAM_Buffer2 + 2); // to increment by 32 (in columns)
+    write_byte(VRAM_Buffer2 + 2 + y, a);
     lda_imm(0x0); // init attribute row
-    sta_zp(0x4);
+    write_byte(0x4, a);
     tax();
   
 DrawMTLoop:
-    stx_zp(0x1); // store init value of 0 or incremented offset for buffer
+    write_byte(0x1, x);
     lda_absx(MetatileBuffer); // get first metatile number, and mask out all but 2 MSB
     and_imm(0b11000000);
-    sta_zp(0x3); // store attribute table bits here
+    write_byte(0x3, a);
     asl_acc(); // note that metatile format is:
     rol_acc(); // %xx000000 - attribute table bits, 
     rol_acc(); // %00xxxxxx - metatile number
     tay(); // rotate bits to d1-d0 and use as offset here
     lda_absy(MetatileGraphics_Low); // get address to graphics table from here
-    sta_zp(0x6);
+    write_byte(0x6, a);
     lda_absy(MetatileGraphics_High);
-    sta_zp(0x7);
+    write_byte(0x7, a);
     lda_absx(MetatileBuffer); // get metatile number again
     asl_acc(); // multiply by 4 and use as tile offset
     asl_acc();
-    sta_zp(0x2);
+    write_byte(0x2, a);
     lda_abs(AreaParserTaskNum); // get current task number for level processing and
     and_imm(0b00000001); // mask out all but LSB, then invert LSB, multiply by 2
     eor_imm(0b00000001); // to get the correct column position in the metatile,
@@ -1118,10 +1118,10 @@ DrawMTLoop:
     tay();
     ldx_zp(0x0); // use vram buffer offset from before as X
     lda_indy(0x6);
-    sta_absx(VRAM_Buffer2 + 3); // get first tile number (top left or top right) and store
+    write_byte(VRAM_Buffer2 + 3 + x, a);
     iny();
     lda_indy(0x6); // now get the second (bottom left or bottom right) and store
-    sta_absx(VRAM_Buffer2 + 4);
+    write_byte(VRAM_Buffer2 + 4 + x, a);
     ldy_zp(0x4); // get current attribute row
     lda_zp(0x5); // get LSB of current column where we're at, and
     if (!zero_flag) { goto RightCheck; } // branch if set (clear = left attrib, set = right)
@@ -1153,7 +1153,7 @@ NextMTRow:
 SetAttrib:
     lda_absy(AttributeBuffer); // get previously saved bits from before
     ora_zp(0x3); // if any, and put new bits, if any, onto
-    sta_absy(AttributeBuffer); // the old, and store
+    write_byte(AttributeBuffer + y, a);
     inc_zp(0x0); // increment vram buffer offset by 2
     inc_zp(0x0);
     ldx_zp(0x1); // get current gfx buffer row, and check for
@@ -1165,17 +1165,17 @@ SetAttrib:
     iny();
     iny();
     lda_imm(0x0);
-    sta_absy(VRAM_Buffer2); // put null terminator at end of data for name table
-    sty_abs(VRAM_Buffer2_Offset); // store new buffer offset
+    write_byte(VRAM_Buffer2 + y, a);
+    write_byte(VRAM_Buffer2_Offset, y);
     inc_abs(CurrentNTAddr_Low); // increment name table address low
     lda_abs(CurrentNTAddr_Low); // check current low byte
     and_imm(0b00011111); // if no wraparound, just skip this part
     if (!zero_flag) { goto ExitDrawM; }
     lda_imm(0x80); // if wraparound occurs, make sure low byte stays
-    sta_abs(CurrentNTAddr_Low); // just under the status bar
+    write_byte(CurrentNTAddr_Low, a);
     lda_abs(CurrentNTAddr_High); // and then invert d2 of the name table address high
     eor_imm(0b00000100); // to move onto the next appropriate name table
-    sta_abs(CurrentNTAddr_High);
+    write_byte(CurrentNTAddr_High, a);
   
 ExitDrawM:
     goto SetVRAMCtrl; // jump to set buffer to $0341 and leave
@@ -1186,10 +1186,10 @@ ExitDrawM:
 RenderAttributeTables:
     lda_abs(CurrentNTAddr_Low); // get low byte of next name table address
     and_imm(0b00011111); // to be written to, mask out all but 5 LSB,
-    sec(); // subtract four 
+    carry_flag = true;
     sbc_imm(0x4);
     and_imm(0b00011111); // mask out bits again and store
-    sta_zp(0x1);
+    write_byte(0x1, a);
     lda_abs(CurrentNTAddr_High); // get high byte and branch if borrow not set
     if (carry_flag) { goto SetATHigh; }
     eor_imm(0b00000100); // otherwise invert d2
@@ -1197,29 +1197,29 @@ RenderAttributeTables:
 SetATHigh:
     and_imm(0b00000100); // mask out all other bits
     ora_imm(0x23); // add $2300 to the high byte and store
-    sta_zp(0x0);
+    write_byte(0x0, a);
     lda_zp(0x1); // get low byte - 4, divide by 4, add offset for
     lsr_acc(); // attribute table and store
     lsr_acc();
     adc_imm(0xc0); // we should now have the appropriate block of
-    sta_zp(0x1); // attribute table in our temp address
+    write_byte(0x1, a);
     ldx_imm(0x0);
     ldy_abs(VRAM_Buffer2_Offset); // get buffer offset
   
 AttribLoop:
     lda_zp(0x0);
-    sta_absy(VRAM_Buffer2); // store high byte of attribute table address
+    write_byte(VRAM_Buffer2 + y, a);
     lda_zp(0x1);
-    clc(); // get low byte, add 8 because we want to start
+    carry_flag = false;
     adc_imm(0x8); // below the status bar, and store
-    sta_absy(VRAM_Buffer2 + 1);
-    sta_zp(0x1); // also store in temp again
+    write_byte(VRAM_Buffer2 + 1 + y, a);
+    write_byte(0x1, a);
     lda_absx(AttributeBuffer); // fetch current attribute table byte and store
-    sta_absy(VRAM_Buffer2 + 3); // in the buffer
+    write_byte(VRAM_Buffer2 + 3 + y, a);
     lda_imm(0x1);
-    sta_absy(VRAM_Buffer2 + 2); // store length of 1 in buffer
+    write_byte(VRAM_Buffer2 + 2 + y, a);
     lsr_acc();
-    sta_absx(AttributeBuffer); // clear current byte in attribute buffer
+    write_byte(AttributeBuffer + x, a);
     iny(); // increment buffer offset by 4 bytes
     iny();
     iny();
@@ -1227,12 +1227,12 @@ AttribLoop:
     inx(); // increment attribute offset and check to see
     cpx_imm(0x7); // if we're at the end yet
     if (!carry_flag) { goto AttribLoop; }
-    sta_absy(VRAM_Buffer2); // put null terminator at the end
-    sty_abs(VRAM_Buffer2_Offset); // store offset in case we want to do any more
+    write_byte(VRAM_Buffer2 + y, a);
+    write_byte(VRAM_Buffer2_Offset, y);
   
 SetVRAMCtrl:
     lda_imm(0x6);
-    sta_abs(VRAM_Buffer_AddrCtrl); // set buffer to $0341 and leave
+    write_byte(VRAM_Buffer_AddrCtrl, a);
     goto rts;
     // -------------------------------------------------------------------------------------
     // $00 - used as temporary counter in ColorRotation
@@ -1254,7 +1254,7 @@ RemoveCoin_Axe:
 WriteBlankMT:
     jsr(PutBlockMetatile, 33); // do a sub to write blank metatile to vram buffer
     lda_imm(0x6);
-    sta_abs(VRAM_Buffer_AddrCtrl); // set vram address controller to $0341 and leave
+    write_byte(VRAM_Buffer_AddrCtrl, a);
     goto rts;
   
 ReplaceBlockMetatile:
@@ -1291,13 +1291,13 @@ UseBOffset:
 MoveVOffset:
     dey(); // decrement vram buffer offset
     tya(); // add 10 bytes to it
-    clc();
+    carry_flag = false;
     adc_imm(10);
     goto SetVRAMOffset; // branch to store as new vram buffer offset
   
 PutBlockMetatile:
-    stx_zp(0x0); // store control bit from SprDataOffset_Ctrl
-    sty_zp(0x1); // store vram buffer offset for next byte
+    write_byte(0x0, x);
+    write_byte(0x1, y);
     asl_acc();
     asl_acc(); // multiply A by four and use as X
     tax();
@@ -1308,28 +1308,28 @@ PutBlockMetatile:
     ldy_imm(0x24); // otherwise load high byte for name table 1
   
 SaveHAdder:
-    sty_zp(0x3); // save high byte here
+    write_byte(0x3, y);
     and_imm(0xf); // mask out high nybble of block buffer pointer
     asl_acc(); // multiply by 2 to get appropriate name table low byte
-    sta_zp(0x4); // and then store it here
+    write_byte(0x4, a);
     lda_imm(0x0);
-    sta_zp(0x5); // initialize temp high byte
+    write_byte(0x5, a);
     lda_zp(0x2); // get vertical high nybble offset used in block buffer routine
-    clc();
+    carry_flag = false;
     adc_imm(0x20); // add 32 pixels for the status bar
     asl_acc();
     rol_zp(0x5); // shift and rotate d7 onto d0 and d6 into carry
     asl_acc();
     rol_zp(0x5); // shift and rotate d6 onto d0 and d5 into carry
     adc_zp(0x4); // add low byte of name table and carry to vertical high nybble
-    sta_zp(0x4); // and store here
+    write_byte(0x4, a);
     lda_zp(0x5); // get whatever was in d7 and d6 of vertical high nybble
     adc_imm(0x0); // add carry
-    clc();
+    carry_flag = false;
     adc_zp(0x3); // then add high byte of name table
-    sta_zp(0x5); // store here
+    write_byte(0x5, a);
     ldy_zp(0x1); // get vram buffer offset to be used
-    RemBridge(); goto rts; // <gen: fallthrough>
+    RemBridge(); goto rts; // <fallthrough>
   
 InitializeNameTables:
     lda_abs(PPU_STATUS); // reset flip-flop
@@ -1342,41 +1342,41 @@ InitializeNameTables:
     lda_imm(0x20); // and then set it to name table 0
   
 WriteNTAddr:
-    sta_abs(PPU_ADDRESS);
+    write_byte(PPU_ADDRESS, a);
     lda_imm(0x0);
-    sta_abs(PPU_ADDRESS);
+    write_byte(PPU_ADDRESS, a);
     ldx_imm(0x4); // clear name table with blank tile #24
     ldy_imm(0xc0);
     lda_imm(0x24);
   
 InitNTLoop:
-    sta_abs(PPU_DATA); // count out exactly 768 tiles
+    write_byte(PPU_DATA, a);
     dey();
     if (!zero_flag) { goto InitNTLoop; }
     dex();
     if (!zero_flag) { goto InitNTLoop; }
     ldy_imm(64); // now to clear the attribute table (with zero this time)
     txa();
-    sta_abs(VRAM_Buffer1_Offset); // init vram buffer 1 offset
-    sta_abs(VRAM_Buffer1); // init vram buffer 1
+    write_byte(VRAM_Buffer1_Offset, a);
+    write_byte(VRAM_Buffer1, a);
   
 InitATLoop:
-    sta_abs(PPU_DATA);
+    write_byte(PPU_DATA, a);
     dey();
     if (!zero_flag) { goto InitATLoop; }
-    sta_abs(HorizontalScroll); // reset scroll variables
-    sta_abs(VerticalScroll);
+    write_byte(HorizontalScroll, a);
+    write_byte(VerticalScroll, a);
     InitScroll(); goto rts; // initialize scroll registers to zero
-    InitScroll(); goto rts; // <gen: fallthrough>
+    InitScroll(); goto rts; // <fallthrough>
     // -------------------------------------------------------------------------------------
     // $00 - temp joypad bit
   
 ReadJoypads:
     lda_imm(0x1); // reset and clear strobe of joypad ports
-    sta_abs(JOYPAD_PORT);
+    write_byte(JOYPAD_PORT, a);
     lsr_acc();
     tax(); // start with joypad 1's port
-    sta_abs(JOYPAD_PORT);
+    write_byte(JOYPAD_PORT, a);
     jsr(ReadPortBits, 37);
     inx(); // increment for joypad 2's port
   
@@ -1386,7 +1386,7 @@ ReadPortBits:
 PortLoop:
     pha(); // push previous bit onto stack
     lda_absx(JOYPAD_PORT); // read current bit on joypad port
-    sta_zp(0x0); // check d1 and d0 of port output
+    write_byte(0x0, a);
     lsr_acc(); // this is necessary on the old
     ora_zp(0x0); // famicom systems in japan
     lsr_acc();
@@ -1394,29 +1394,29 @@ PortLoop:
     rol_acc(); // rotate bit from carry flag
     dey();
     if (!zero_flag) { goto PortLoop; } // count down bits left
-    sta_absx(SavedJoypadBits); // save controller status here always
+    write_byte(SavedJoypadBits + x, a);
     pha();
     and_imm(0b00110000); // check for select or start
     and_absx(JoypadBitMask); // if neither saved state nor current state
     if (zero_flag) { goto Save8Bits; } // have any of these two set, branch
     pla();
     and_imm(0b11001111); // otherwise store without select
-    sta_absx(SavedJoypadBits); // or start bits and leave
+    write_byte(SavedJoypadBits + x, a);
     goto rts;
   
 Save8Bits:
     pla();
-    sta_absx(JoypadBitMask); // save with all bits in another place and leave
+    write_byte(JoypadBitMask + x, a);
     goto rts;
     // -------------------------------------------------------------------------------------
     // $00 - vram buffer address table low
     // $01 - vram buffer address table high
   
 WriteBufferToScreen:
-    sta_abs(PPU_ADDRESS); // store high byte of vram address
+    write_byte(PPU_ADDRESS, a);
     iny();
     lda_indy(0x0); // load next byte (second)
-    sta_abs(PPU_ADDRESS); // store low byte of vram address
+    write_byte(PPU_ADDRESS, a);
     iny();
     lda_indy(0x0); // load next byte (third)
     asl_acc(); // shift to left and save in stack
@@ -1445,32 +1445,32 @@ OutputToVRAM:
   
 RepeatByte:
     lda_indy(0x0); // load more data from buffer and write to vram
-    sta_abs(PPU_DATA);
+    write_byte(PPU_DATA, a);
     dex(); // done writing?
     if (!zero_flag) { goto OutputToVRAM; }
-    sec();
+    carry_flag = true;
     tya();
     adc_zp(0x0); // add end length plus one to the indirect at $00
-    sta_zp(0x0); // to allow this routine to read another set of updates
+    write_byte(0x0, a);
     lda_imm(0x0);
     adc_zp(0x1);
-    sta_zp(0x1);
+    write_byte(0x1, a);
     lda_imm(0x3f); // sets vram address to $3f00
-    sta_abs(PPU_ADDRESS);
+    write_byte(PPU_ADDRESS, a);
     lda_imm(0x0);
-    sta_abs(PPU_ADDRESS);
-    sta_abs(PPU_ADDRESS); // then reinitializes it for some reason
-    sta_abs(PPU_ADDRESS);
+    write_byte(PPU_ADDRESS, a);
+    write_byte(PPU_ADDRESS, a);
+    write_byte(PPU_ADDRESS, a);
   
 UpdateScreen:
     ldx_abs(PPU_STATUS); // reset flip-flop
     ldy_imm(0x0); // load first byte from indirect as a pointer
     lda_indy(0x0);
     if (!zero_flag) { goto WriteBufferToScreen; } // if byte is zero we have no further updates to make here
-    InitScroll(); goto rts; // <gen: fallthrough>
+    InitScroll(); goto rts; // <fallthrough>
   
 PrintStatusBarNumbers:
-    sta_zp(0x0); // store player-specific offset
+    write_byte(0x0, a);
     OutputNumbers(); // use first nybble to print the coin display
     lda_zp(0x0); // move high nybble to low
     lsr_acc(); // and print to score display
@@ -1489,14 +1489,14 @@ DigitsMathRoutine:
   
 AddModLoop:
     lda_absx(DigitModifier); // load digit amount to increment
-    clc();
+    carry_flag = false;
     adc_absy(DisplayDigits); // add to current digit
     if (neg_flag) { goto BorrowOne; } // if result is a negative number, branch to subtract
     cmp_imm(10);
     if (carry_flag) { goto CarryOne; } // if digit greater than $09, branch to add
   
 StoreNewD:
-    sta_absy(DisplayDigits); // store as new score or game timer digit
+    write_byte(DisplayDigits + y, a);
     dey(); // move onto next digits in score or game timer
     dex(); // and digit amounts to increment
     if (!neg_flag) { goto AddModLoop; } // loop back if we're not done yet
@@ -1506,7 +1506,7 @@ EraseDMods:
     ldx_imm(0x6); // start with the last digit
   
 EraseMLoop:
-    sta_absx(DigitModifier - 1); // initialize the digit amounts to increment
+    write_byte(DigitModifier - 1 + x, a);
     dex();
     if (!neg_flag) { goto EraseMLoop; } // do this until they're all reset, then leave
     goto rts;
@@ -1517,7 +1517,7 @@ BorrowOne:
     if (!zero_flag) { goto StoreNewD; } // the one", then do an unconditional branch back
   
 CarryOne:
-    sec(); // subtract ten from our digit to make it a
+    carry_flag = true;
     sbc_imm(10); // proper BCD number, then increment the digit
     inc_absx(DigitModifier - 1); // preceding current digit to "carry the one" properly
     goto StoreNewD; // go back to just after we branched here
@@ -1537,11 +1537,11 @@ InitializeGame:
     ldy_imm(0x1f);
   
 ClrSndLoop:
-    sta_absy(SoundMemory); // clear out memory used
+    write_byte(SoundMemory + y, a);
     dey(); // by the sound engines
     if (!neg_flag) { goto ClrSndLoop; }
     lda_imm(0x18); // set demo timer
-    sta_abs(DemoTimer);
+    write_byte(DemoTimer, a);
     jsr(LoadAreaPointer, 38);
   
 InitializeArea:
@@ -1551,7 +1551,7 @@ InitializeArea:
     lda_imm(0x0);
   
 ClrTimersLoop:
-    sta_absx(Timers); // clear out memory between
+    write_byte(Timers + x, a);
     dex(); // $0780 and $07a1
     if (!neg_flag) { goto ClrTimersLoop; }
     lda_abs(HalfwayPage);
@@ -1560,9 +1560,9 @@ ClrTimersLoop:
     lda_abs(EntrancePage); // otherwise use saved entry page number here
   
 StartPage:
-    sta_abs(ScreenLeft_PageLoc); // set as value here
-    sta_abs(CurrentPageLoc); // also set as current page
-    sta_abs(BackloadingFlag); // set flag here if halfway page or saved entry page number found
+    write_byte(ScreenLeft_PageLoc, a);
+    write_byte(CurrentPageLoc, a);
+    write_byte(BackloadingFlag, a);
     GetScreenPosition(); // get pixel coordinates for screen borders
     ldy_imm(0x20); // if on odd numbered page, use $2480 as start of rendering
     and_imm(0b00000001); // otherwise use $2080, this address used later as name table
@@ -1570,19 +1570,19 @@ StartPage:
     ldy_imm(0x24);
   
 SetInitNTHigh:
-    sty_abs(CurrentNTAddr_High); // store name table address
+    write_byte(CurrentNTAddr_High, y);
     ldy_imm(0x80);
-    sty_abs(CurrentNTAddr_Low);
+    write_byte(CurrentNTAddr_Low, y);
     asl_acc(); // store LSB of page number in high nybble
     asl_acc(); // of block buffer column position
     asl_acc();
     asl_acc();
-    sta_abs(BlockBufferColumnPos);
+    write_byte(BlockBufferColumnPos, a);
     dec_abs(AreaObjectLength); // set area object lengths for all empty
     dec_abs(AreaObjectLength + 1);
     dec_abs(AreaObjectLength + 2);
     lda_imm(0xb); // set value for renderer to update 12 column sets
-    sta_abs(ColumnSets); // 12 column sets = 24 metatile columns = 1 1/2 screens
+    write_byte(ColumnSets, a);
     jsr(GetAreaDataAddrs, 39); // get enemy and level addresses and load header
     lda_abs(PrimaryHardMode); // check to see if primary hard mode has been activated
     if (!zero_flag) { goto SetSecHard; } // if so, activate the secondary no matter where we're at
@@ -1601,39 +1601,39 @@ CheckHalfway:
     lda_abs(HalfwayPage);
     if (zero_flag) { goto DoneInitArea; }
     lda_imm(0x2); // if halfway page set, overwrite start position from header
-    sta_abs(PlayerEntranceCtrl);
+    write_byte(PlayerEntranceCtrl, a);
   
 DoneInitArea:
     lda_imm(Silence); // silence music
-    sta_zp(AreaMusicQueue);
+    write_byte(AreaMusicQueue, a);
     lda_imm(0x1); // disable screen output
-    sta_abs(DisableScreenFlag);
+    write_byte(DisableScreenFlag, a);
     inc_abs(OperMode_Task); // increment one of the modes
     goto rts;
     // -------------------------------------------------------------------------------------
   
 PrimaryGameSetup:
     lda_imm(0x1);
-    sta_abs(FetchNewGameTimerFlag); // set flag to load game timer from header
-    sta_abs(PlayerSize); // set player's size to small
+    write_byte(FetchNewGameTimerFlag, a);
+    write_byte(PlayerSize, a);
     lda_imm(0x2);
-    sta_abs(NumberofLives); // give each player three lives
-    sta_abs(OffScr_NumberofLives);
+    write_byte(NumberofLives, a);
+    write_byte(OffScr_NumberofLives, a);
   
 SecondaryGameSetup:
     lda_imm(0x0);
-    sta_abs(DisableScreenFlag); // enable screen output
+    write_byte(DisableScreenFlag, a);
     tay();
   
 ClearVRLoop:
-    sta_absy(VRAM_Buffer1 - 1); // clear buffer at $0300-$03ff
+    write_byte(VRAM_Buffer1 - 1 + y, a);
     iny();
     if (!zero_flag) { goto ClearVRLoop; }
-    sta_abs(GameTimerExpiredFlag); // clear game timer exp flag
-    sta_abs(DisableIntermediate); // clear skip lives display flag
-    sta_abs(BackloadingFlag); // clear value here
+    write_byte(GameTimerExpiredFlag, a);
+    write_byte(DisableIntermediate, a);
+    write_byte(BackloadingFlag, a);
     lda_imm(0xff);
-    sta_abs(BalPlatformAlignment); // initialize balance platform assignment flag
+    write_byte(BalPlatformAlignment, a);
     lda_abs(ScreenLeft_PageLoc); // get left side page location
     lsr_abs(Mirror_PPU_CTRL_REG1); // shift LSB of ppu register #1 mirror out
     and_imm(0x1); // mask out all but LSB of page location
@@ -1641,23 +1641,23 @@ ClearVRLoop:
     rol_abs(Mirror_PPU_CTRL_REG1); // this is to set the proper PPU name table
     GetAreaMusic(); // load proper music into queue
     lda_imm(0x38); // load sprite shuffle amounts to be used later
-    sta_abs(SprShuffleAmt + 2);
+    write_byte(SprShuffleAmt + 2, a);
     lda_imm(0x48);
-    sta_abs(SprShuffleAmt + 1);
+    write_byte(SprShuffleAmt + 1, a);
     lda_imm(0x58);
-    sta_abs(SprShuffleAmt);
+    write_byte(SprShuffleAmt, a);
     ldx_imm(0xe); // load default OAM offsets into $06e4-$06f2
   
 ShufAmtLoop:
     lda_absx(DefaultSprOffsets);
-    sta_absx(SprDataOffset);
+    write_byte(SprDataOffset + x, a);
     dex(); // do this until they're all set
     if (!neg_flag) { goto ShufAmtLoop; }
     ldy_imm(0x3); // set up sprite #0
   
 ISpr0Loop:
     lda_absy(Sprite0Data);
-    sta_absy(Sprite_Data);
+    write_byte(Sprite_Data + y, a);
     dey();
     if (!neg_flag) { goto ISpr0Loop; }
     DoNothing2(); // these jsrs doesn't do anything useful
@@ -1673,23 +1673,23 @@ ISpr0Loop:
   
 Entrance_GameTimerSetup:
     lda_abs(ScreenLeft_PageLoc); // set current page for area objects
-    sta_zp(Player_PageLoc); // as page location for player
+    write_byte(Player_PageLoc, a);
     lda_imm(0x28); // store value here
-    sta_abs(VerticalForceDown); // for fractional movement downwards if necessary
+    write_byte(VerticalForceDown, a);
     lda_imm(0x1); // set high byte of player position and
-    sta_zp(PlayerFacingDir); // set facing direction so that player faces right
-    sta_zp(Player_Y_HighPos);
+    write_byte(PlayerFacingDir, a);
+    write_byte(Player_Y_HighPos, a);
     lda_imm(0x0); // set player state to on the ground by default
-    sta_zp(Player_State);
+    write_byte(Player_State, a);
     dec_abs(Player_CollisionBits); // initialize player's collision bits
     ldy_imm(0x0); // initialize halfway page
-    sty_abs(HalfwayPage);
+    write_byte(HalfwayPage, y);
     lda_abs(AreaType); // check area type
     if (!zero_flag) { goto ChkStPos; } // if water type, set swimming flag, otherwise do not set
     iny();
   
 ChkStPos:
-    sty_abs(SwimmingFlag);
+    write_byte(SwimmingFlag, y);
     ldx_abs(PlayerEntranceCtrl); // get starting position loaded from header
     ldy_abs(AltEntranceControl); // check alternate mode of entry flag for 0 or 1
     if (zero_flag) { goto SetStPos; }
@@ -1699,34 +1699,34 @@ ChkStPos:
   
 SetStPos:
     lda_absy(PlayerStarting_X_Pos); // load appropriate horizontal position
-    sta_zp(Player_X_Position); // and vertical positions for the player, using
+    write_byte(Player_X_Position, a);
     lda_absx(PlayerStarting_Y_Pos); // AltEntranceControl as offset for horizontal and either $0710
-    sta_zp(Player_Y_Position); // or value that overwrote $0710 as offset for vertical
+    write_byte(Player_Y_Position, a);
     lda_absx(PlayerBGPriorityData);
-    sta_abs(Player_SprAttrib); // set player sprite attributes using offset in X
+    write_byte(Player_SprAttrib, a);
     jsr(GetPlayerColors, 41); // get appropriate player palette
     ldy_abs(GameTimerSetting); // get timer control value from header
     if (zero_flag) { goto ChkOverR; } // if set to zero, branch (do not use dummy byte for this)
     lda_abs(FetchNewGameTimerFlag); // do we need to set the game timer? if not, use 
     if (zero_flag) { goto ChkOverR; } // old game timer setting
     lda_absy(GameTimerData); // if game timer is set and game timer flag is also set,
-    sta_abs(GameTimerDisplay); // use value of game timer control for first digit of game timer
+    write_byte(GameTimerDisplay, a);
     lda_imm(0x1);
-    sta_abs(GameTimerDisplay + 2); // set last digit of game timer to 1
+    write_byte(GameTimerDisplay + 2, a);
     lsr_acc();
-    sta_abs(GameTimerDisplay + 1); // set second digit of game timer
-    sta_abs(FetchNewGameTimerFlag); // clear flag for game timer reset
-    sta_abs(StarInvincibleTimer); // clear star mario timer
+    write_byte(GameTimerDisplay + 1, a);
+    write_byte(FetchNewGameTimerFlag, a);
+    write_byte(StarInvincibleTimer, a);
   
 ChkOverR:
     ldy_abs(JoypadOverride); // if controller bits not set, branch to skip this part
     if (zero_flag) { goto ChkSwimE; }
     lda_imm(0x3); // set player state to climbing
-    sta_zp(Player_State);
+    write_byte(Player_State, a);
     ldx_imm(0x0); // set offset for first slot, for block object
     InitBlock_XY_Pos();
     lda_imm(0xf0); // set vertical coordinate for block object
-    sta_zp(Block_Y_Position);
+    write_byte(Block_Y_Position, a);
     ldx_imm(0x5); // set offset in X for last enemy object buffer slot
     ldy_imm(0x0); // set offset in Y for object coordinates used earlier
     Setup_Vine(); // do a sub to grow vine
@@ -1738,7 +1738,7 @@ ChkSwimE:
   
 SetPESub:
     lda_imm(0x7); // set to run player entrance subroutine
-    sta_zp(GameEngineSubroutine); // on the next frame of game engine
+    write_byte(GameEngineSubroutine, a);
     goto rts;
     // -------------------------------------------------------------------------------------
     // page numbers are in order from -1 to -4
@@ -1746,15 +1746,15 @@ SetPESub:
 PlayerLoseLife:
     inc_abs(DisableScreenFlag); // disable screen and sprite 0 check
     lda_imm(0x0);
-    sta_abs(Sprite0HitDetectFlag);
+    write_byte(Sprite0HitDetectFlag, a);
     lda_imm(Silence); // silence music
-    sta_zp(EventMusicQueue);
+    write_byte(EventMusicQueue, a);
     dec_abs(NumberofLives); // take one life from player
     if (!neg_flag) { goto StillInGame; } // if player still has lives, branch
     lda_imm(0x0);
-    sta_abs(OperMode_Task); // initialize mode task,
+    write_byte(OperMode_Task, a);
     lda_imm(GameOverModeValue); // switch to game over mode
-    sta_abs(OperMode); // and leave
+    write_byte(OperMode, a);
     goto rts;
   
 StillInGame:
@@ -1785,7 +1785,7 @@ MaskHPNyb:
     lda_imm(0x0); // beginning of the level
   
 SetHalfway:
-    sta_abs(HalfwayPage); // store as halfway page for player
+    write_byte(HalfwayPage, a);
     TransposePlayers(); // switch players around if 2-player game
     goto ContinueGame; // continue the game
     // -------------------------------------------------------------------------------------
@@ -1798,11 +1798,11 @@ GameOverMode:
       case 1: goto ScreenRoutines;
       case 2: goto RunGameOver;
     }
-    SetupGameOver(); goto rts; // <gen: fallthrough>
+    SetupGameOver(); goto rts; // <fallthrough>
   
 RunGameOver:
     lda_imm(0x0); // reenable screen
-    sta_abs(DisableScreenFlag);
+    write_byte(DisableScreenFlag, a);
     lda_abs(SavedJoypad1Bits); // check controller for start pressed
     and_imm(Start_Button);
     if (!zero_flag) { goto TerminateGame; }
@@ -1811,30 +1811,30 @@ RunGameOver:
   
 TerminateGame:
     lda_imm(Silence); // silence music
-    sta_zp(EventMusicQueue);
+    write_byte(EventMusicQueue, a);
     TransposePlayers(); // check if other player can keep
     if (!carry_flag) { goto ContinueGame; } // going, and do so if possible
     lda_abs(WorldNumber); // otherwise put world number of current
-    sta_abs(ContinueWorld); // player into secret continue function variable
+    write_byte(ContinueWorld, a);
     lda_imm(0x0);
     asl_acc(); // residual ASL instruction
-    sta_abs(OperMode_Task); // reset all modes to title screen and
-    sta_abs(ScreenTimer); // leave
-    sta_abs(OperMode);
+    write_byte(OperMode_Task, a);
+    write_byte(ScreenTimer, a);
+    write_byte(OperMode, a);
     goto rts;
   
 ContinueGame:
     jsr(LoadAreaPointer, 43); // update level pointer with
     lda_imm(0x1); // actual world and area numbers, then
-    sta_abs(PlayerSize); // reset player's size, status, and
+    write_byte(PlayerSize, a);
     inc_abs(FetchNewGameTimerFlag); // set game timer flag to reload
     lda_imm(0x0); // game timer from header
-    sta_abs(TimerControl); // also set flag for timers to count again
-    sta_abs(PlayerStatus);
-    sta_zp(GameEngineSubroutine); // reset task for game core
-    sta_abs(OperMode_Task); // set modes and leave
+    write_byte(TimerControl, a);
+    write_byte(PlayerStatus, a);
+    write_byte(GameEngineSubroutine, a);
+    write_byte(OperMode_Task, a);
     lda_imm(0x1); // if in game over mode, switch back to
-    sta_abs(OperMode); // game mode, because game is still on
+    write_byte(OperMode, a);
   
 GameIsOn:
     goto rts;
@@ -1842,14 +1842,14 @@ GameIsOn:
   
 DoNothing1:
     lda_imm(0xff); // this is residual code, this value is
-    sta_abs(0x6c9); // not used anywhere in the program
-    DoNothing2(); goto rts; // <gen: fallthrough>
+    write_byte(0x6c9, a);
+    DoNothing2(); goto rts; // <fallthrough>
   
 AreaParserTaskHandler:
     ldy_abs(AreaParserTaskNum); // check number of tasks here
     if (!zero_flag) { goto DoAPTasks; } // if already set, go ahead
     ldy_imm(0x8);
-    sty_abs(AreaParserTaskNum); // otherwise, set eight by default
+    write_byte(AreaParserTaskNum, y);
   
 DoAPTasks:
     dey();
@@ -1880,14 +1880,14 @@ IncrementColumnPos:
     lda_abs(CurrentColumnPos);
     and_imm(0b00001111); // mask out higher nybble
     if (!zero_flag) { goto NoColWrap; }
-    sta_abs(CurrentColumnPos); // if no bits left set, wrap back to zero (0-f)
+    write_byte(CurrentColumnPos, a);
     inc_abs(CurrentPageLoc); // and increment page number where we're at
   
 NoColWrap:
     inc_abs(BlockBufferColumnPos); // increment column offset where we're at
     lda_abs(BlockBufferColumnPos);
     and_imm(0b00011111); // mask out all but 5 LSB (0-1f)
-    sta_abs(BlockBufferColumnPos); // and save
+    write_byte(BlockBufferColumnPos, a);
     goto rts;
     // -------------------------------------------------------------------------------------
     // $00 - used as counter, store for low nybble for background, ceiling byte for terrain
@@ -1905,7 +1905,7 @@ RenderSceneryTerrain:
     lda_imm(0x0);
   
 ClrMTBuf:
-    sta_absx(MetatileBuffer); // clear out metatile buffer
+    write_byte(MetatileBuffer + x, a);
     dex();
     if (!neg_flag) { goto ClrMTBuf; }
     ldy_abs(BackgroundScenery); // do we need to render the background scenery?
@@ -1915,7 +1915,7 @@ ClrMTBuf:
 ThirdP:
     cmp_imm(0x3);
     if (neg_flag) { goto RendBack; } // if less than three we're there
-    sec();
+    carry_flag = true;
     sbc_imm(0x3); // if 3 or more, subtract 3 and 
     if (!neg_flag) { goto ThirdP; } // do an unconditional branch
   
@@ -1931,9 +1931,9 @@ RendBack:
     if (zero_flag) { goto RendFore; } // if zero, no scenery for that part
     pha();
     and_imm(0xf); // save to stack and clear high nybble
-    sec();
+    carry_flag = true;
     sbc_imm(0x1); // subtract one (because low nybble is $01-$0c)
-    sta_zp(0x0); // save low nybble
+    write_byte(0x0, a);
     asl_acc(); // multiply by three (shift to left and add result to old one)
     adc_zp(0x0); // note that since d7 was nulled, the carry flag is always clear
     tax(); // save as offset for background scenery metatile data
@@ -1944,11 +1944,11 @@ RendBack:
     lsr_acc();
     tay(); // use as second offset (used to determine height)
     lda_imm(0x3); // use previously saved memory location for counter
-    sta_zp(0x0);
+    write_byte(0x0, a);
   
 SceLoop1:
     lda_absx(BackSceneryMetatiles); // load metatile data from offset of (lsb - 1) * 3
-    sta_absy(MetatileBuffer); // store into buffer from offset of (msb / 16)
+    write_byte(MetatileBuffer + y, a);
     inx();
     iny();
     cpy_imm(0xb); // if at this location, leave loop
@@ -1965,7 +1965,7 @@ RendFore:
 SceLoop2:
     lda_absy(ForeSceneryData); // load data until counter expires
     if (zero_flag) { goto NoFore; } // do not store if zero found
-    sta_absx(MetatileBuffer);
+    write_byte(MetatileBuffer + x, a);
   
 NoFore:
     iny();
@@ -1989,7 +1989,7 @@ TerMTile:
     lda_imm(0x88); // use cloud block terrain
   
 StoreMT:
-    sta_zp(0x7); // store value here
+    write_byte(0x7, a);
     ldx_imm(0x0); // initialize X, use as metatile buffer offset
     lda_abs(TerrainControl); // use yet another value from the header
     asl_acc(); // multiply by 2 and use as yet another offset
@@ -1997,16 +1997,16 @@ StoreMT:
   
 TerrLoop:
     lda_absy(TerrainRenderBits); // get one of the terrain rendering bit data
-    sta_zp(0x0);
+    write_byte(0x0, a);
     iny(); // increment Y and use as offset next time around
-    sty_zp(0x1);
+    write_byte(0x1, y);
     lda_abs(CloudTypeOverride); // skip if value here is zero
     if (zero_flag) { goto NoCloud2; }
     cpx_imm(0x0); // otherwise, check if we're doing the ceiling byte
     if (zero_flag) { goto NoCloud2; }
     lda_zp(0x0); // if not, mask out all but d3
     and_imm(0b00001000);
-    sta_zp(0x0);
+    write_byte(0x0, a);
   
 NoCloud2:
     ldy_imm(0x0); // start at beginning of bitmasks
@@ -2016,7 +2016,7 @@ TerrBChk:
     bit_zp(0x0);
     if (zero_flag) { goto NextTBit; } // if not set, skip this part (do not write terrain to buffer)
     lda_zp(0x7);
-    sta_absx(MetatileBuffer); // load terrain type metatile number and store into buffer here
+    write_byte(MetatileBuffer + x, a);
   
 NextTBit:
     inx(); // continue until end of buffer
@@ -2028,7 +2028,7 @@ NextTBit:
     cpx_imm(0xb);
     if (!zero_flag) { goto EndUChk; } // if we're at the bottom of the screen, override
     lda_imm(0x54); // old terrain type with ground level terrain type
-    sta_zp(0x7);
+    write_byte(0x7, a);
   
 EndUChk:
     iny(); // increment bitmasks offset in Y
@@ -2045,7 +2045,7 @@ RendBBuf:
     ldy_imm(0x0); // init index regs and start at beginning of smaller buffer
   
 ChkMTLow:
-    sty_zp(0x0);
+    write_byte(0x0, y);
     lda_absx(MetatileBuffer); // load stored metatile number
     and_imm(0b11000000); // mask out all but 2 MSB
     asl_acc();
@@ -2059,9 +2059,9 @@ ChkMTLow:
   
 StrBlock:
     ldy_zp(0x0); // get offset for block buffer
-    sta_indy(0x6); // store value into block buffer
+    write_byte(read_word(0x6) + y, a);
     tya();
-    clc(); // add 16 (move down one row) to offset
+    carry_flag = false;
     adc_imm(0x10);
     tay();
     inx(); // increment column value
@@ -2075,9 +2075,9 @@ ProcessAreaData:
     ldx_imm(0x2); // start at the end of area object buffer
   
 ProcADLoop:
-    stx_zp(ObjectOffset);
+    write_byte(ObjectOffset, x);
     lda_imm(0x0); // reset flag
-    sta_abs(BehindAreaParserFlag);
+    write_byte(BehindAreaParserFlag, a);
     ldy_abs(AreaDataOffset); // get offset of area data pointer
     lda_indy(AreaData); // get first byte of area object
     cmp_imm(0xfd); // if end-of-area, skip all this crap
@@ -2109,7 +2109,7 @@ Chk1Row13:
     iny(); // if d6 not set, reread second byte
     lda_indy(AreaData);
     and_imm(0b00011111); // mask out all but 5 LSB and store in page control
-    sta_abs(AreaObjectPageLoc);
+    write_byte(AreaObjectPageLoc, a);
     inc_abs(AreaObjectPageSel); // increment page select
     goto NextAObj;
   
@@ -2155,7 +2155,7 @@ IncAreaObjOffset:
     inc_abs(AreaDataOffset); // increment offset of level pointer
     inc_abs(AreaDataOffset);
     lda_imm(0x0); // reset page select
-    sta_abs(AreaObjectPageSel);
+    write_byte(AreaObjectPageSel, a);
     goto rts;
   
 DecodeAreaData:
@@ -2177,12 +2177,12 @@ Chk1stB:
     ldx_imm(0x0); // otherwise nullify value by default
   
 ChkRow14:
-    stx_zp(0x7); // store whatever value we just loaded here
+    write_byte(0x7, x);
     ldx_zp(ObjectOffset); // get object offset again
     cmp_imm(0xe); // row 14?
     if (!zero_flag) { goto ChkRow13; }
     lda_imm(0x0); // if so, load offset with $00
-    sta_zp(0x7);
+    write_byte(0x7, a);
     lda_imm(0x2e); // and load A with another value
     if (!zero_flag) { goto NormObj; } // unconditional branch
   
@@ -2190,7 +2190,7 @@ ChkRow13:
     cmp_imm(0xd); // row 13?
     if (!zero_flag) { goto ChkSRows; }
     lda_imm(0x22); // if so, load offset with 34
-    sta_zp(0x7);
+    write_byte(0x7, a);
     iny(); // get next byte
     lda_indy(AreaData);
     and_imm(0b01000000); // mask out all but d6 (page control obj bit)
@@ -2213,20 +2213,20 @@ ChkSRows:
     and_imm(0b01110000); // mask out all but d6-d4
     if (!zero_flag) { goto LrgObj; } // if any bits set, branch to handle large object
     lda_imm(0x16);
-    sta_zp(0x7); // otherwise set offset of 24 for small object
+    write_byte(0x7, a);
     lda_indy(AreaData); // reload second byte of level object
     and_imm(0b00001111); // mask out higher nybble and jump
     goto NormObj;
   
 LrgObj:
-    sta_zp(0x0); // store value here (branch for large objects)
+    write_byte(0x0, a);
     cmp_imm(0x70); // check for vertical pipe object
     if (!zero_flag) { goto NotWPipe; }
     lda_indy(AreaData); // if not, reload second byte
     and_imm(0b00001000); // mask out all but d3 (usage control bit)
     if (zero_flag) { goto NotWPipe; } // if d3 clear, branch to get original value
     lda_imm(0x0); // otherwise, nullify value for warp pipe
-    sta_zp(0x0);
+    write_byte(0x0, a);
   
 NotWPipe:
     lda_zp(0x0); // get value and jump ahead
@@ -2244,7 +2244,7 @@ MoveAOId:
     lsr_acc();
   
 NormObj:
-    sta_zp(0x0); // store value here (branch for small objects and rows 13 and 14)
+    write_byte(0x0, a);
     lda_absx(AreaObjectLength); // is there something stored here already?
     if (!neg_flag) { goto RunAObj; } // if so, branch to do its particular sub
     lda_abs(AreaObjectPageLoc); // otherwise check to see if the object we've loaded is on the
@@ -2265,9 +2265,9 @@ InitRear:
     lda_abs(BackloadingFlag); // check backloading flag to see if it's been initialized
     if (zero_flag) { goto BackColC; } // branch to column-wise check
     lda_imm(0x0); // if not, initialize both backloading and 
-    sta_abs(BackloadingFlag); // behind-renderer flags and leave
-    sta_abs(BehindAreaParserFlag);
-    sta_zp(ObjectOffset);
+    write_byte(BackloadingFlag, a);
+    write_byte(BehindAreaParserFlag, a);
+    write_byte(ObjectOffset, a);
   
 LoopCmdE:
     goto rts;
@@ -2285,12 +2285,12 @@ BackColC:
   
 StrAObj:
     lda_abs(AreaDataOffset); // if so, load area obj offset and store in buffer
-    sta_absx(AreaObjOffsetBuffer);
+    write_byte(AreaObjOffsetBuffer + x, a);
     jsr(IncAreaObjOffset, 50); // do sub to increment to next object data
   
 RunAObj:
     lda_zp(0x0); // get stored value and add offset to it
-    clc(); // then use the jump engine with current contents of A
+    carry_flag = false;
     adc_zp(0x7);
     // jsr JumpEngine
     switch (a) {
@@ -2342,11 +2342,8 @@ RunAObj:
       case 45: goto LoopCmdE;
       case 46: goto AlterAreaAttributes;
     }
-    ScrollLockObject(); goto rts; // <gen: fallthrough>
-    ScrollLockObject(); goto rts; // <gen: fallthrough>
-    AreaFrenzy(); goto rts; // <gen: fallthrough>
-    AreaFrenzy(); goto rts; // <gen: fallthrough>
-    AreaFrenzy(); goto rts; // <gen: fallthrough>
+    ScrollLockObject(); goto rts; // <fallthrough>
+    AreaFrenzy(); goto rts; // <fallthrough>
   
 AlterAreaAttributes:
     ldy_absx(AreaObjOffsetBuffer); // load offset for level object data saved in buffer
@@ -2358,14 +2355,14 @@ AlterAreaAttributes:
     pla();
     pha(); // pull and push offset to copy to A
     and_imm(0b00001111); // mask out high nybble and store as
-    sta_abs(TerrainControl); // new terrain height type bits
+    write_byte(TerrainControl, a);
     pla();
     and_imm(0b00110000); // pull and mask out all but d5 and d4
     lsr_acc(); // move bits to lower nybble and store
     lsr_acc(); // as new background scenery bits
     lsr_acc();
     lsr_acc();
-    sta_abs(BackgroundScenery); // then leave
+    write_byte(BackgroundScenery, a);
     goto rts;
   
 Alter2:
@@ -2373,11 +2370,11 @@ Alter2:
     and_imm(0b00000111); // mask out all but 3 LSB
     cmp_imm(0x4); // if four or greater, set color control bits
     if (!carry_flag) { goto SetFore; } // and nullify foreground scenery bits
-    sta_abs(BackgroundColorCtrl);
+    write_byte(BackgroundColorCtrl, a);
     lda_imm(0x0);
   
 SetFore:
-    sta_abs(ForegroundScenery); // otherwise set new foreground scenery bits
+    write_byte(ForegroundScenery, a);
     goto rts;
     // --------------------------------
   
@@ -2393,11 +2390,11 @@ ScrollLockObject_Warp:
   
 WarpNum:
     txa();
-    sta_abs(WarpZoneControl); // store number here to be used by warp zone routine
+    write_byte(WarpZoneControl, a);
     jsr(WriteGameText, 51); // print text and warp zone numbers
     lda_imm(PiranhaPlant);
     KillEnemies(); // load identifier for piranha plants and do sub
-    ScrollLockObject(); goto rts; // <gen: fallthrough>
+    ScrollLockObject(); goto rts; // <fallthrough>
     // --------------------------------
     // --------------------------------
     // $06 - used by MushroomLedge to store length
@@ -2417,7 +2414,7 @@ TreeLedge:
     if (zero_flag) { goto EndTreeL; }
     if (!neg_flag) { goto MidTreeL; }
     tya();
-    sta_absx(AreaObjectLength); // store lower nybble into buffer flag as length of ledge
+    write_byte(AreaObjectLength + x, a);
     lda_abs(CurrentPageLoc);
     ora_abs(CurrentColumnPos); // are we at the start of the level?
     if (zero_flag) { goto MidTreeL; }
@@ -2427,7 +2424,7 @@ TreeLedge:
 MidTreeL:
     ldx_zp(0x7);
     lda_imm(0x17); // render middle of tree ledge
-    sta_absx(MetatileBuffer); // note that this is also used if ledge position is
+    write_byte(MetatileBuffer + x, a);
     lda_imm(0x4c); // at the start of level for continuous effect
     goto AllUnder; // now render the part underneath
   
@@ -2437,11 +2434,11 @@ EndTreeL:
   
 MushroomLedge:
     jsr(ChkLrgObjLength, 52); // get shroom dimensions
-    sty_zp(0x6); // store length here for now
+    write_byte(0x6, y);
     if (!carry_flag) { goto EndMushL; }
     lda_absx(AreaObjectLength); // divide length by 2 and store elsewhere
     lsr_acc();
-    sta_absx(MushroomLedgeHalfLen);
+    write_byte(MushroomLedgeHalfLen + x, a);
     lda_imm(0x19); // render start of mushroom
     goto NoUnder;
   
@@ -2450,15 +2447,15 @@ EndMushL:
     ldy_absx(AreaObjectLength);
     if (zero_flag) { goto NoUnder; }
     lda_absx(MushroomLedgeHalfLen); // get divided length and store where length
-    sta_zp(0x6); // was stored originally
+    write_byte(0x6, a);
     ldx_zp(0x7);
     lda_imm(0x1a);
-    sta_absx(MetatileBuffer); // render middle of mushroom
+    write_byte(MetatileBuffer + x, a);
     cpy_zp(0x6); // are we smack dab in the center?
     if (!zero_flag) { goto MushLExit; } // if not, branch to leave
     inx();
     lda_imm(0x4f);
-    sta_absx(MetatileBuffer); // render stem top of mushroom underneath the middle
+    write_byte(MetatileBuffer + x, a);
     lda_imm(0x50);
   
 AllUnder:
@@ -2484,7 +2481,7 @@ PulleyRopeObject:
   
 RenderPul:
     lda_absy(PulleyRopeMetatiles);
-    sta_abs(MetatileBuffer); // render at the top of the screen
+    write_byte(MetatileBuffer, a);
   
 MushLExit:
     goto rts; // and leave
@@ -2493,7 +2490,7 @@ MushLExit:
   
 CastleObject:
     GetLrgObjAttrib(); // save lower nybble as starting row
-    sty_zp(0x7); // if starting row is above $0a, game will crash!!!
+    write_byte(0x7, y);
     ldy_imm(0x4);
     jsr(ChkLrgObjFixedLength, 54); // load length of castle if not already loaded
     txa();
@@ -2501,11 +2498,11 @@ CastleObject:
     ldy_absx(AreaObjectLength); // use current length as offset for castle data
     ldx_zp(0x7); // begin at starting row
     lda_imm(0xb);
-    sta_zp(0x6); // load upper limit of number of rows to print
+    write_byte(0x6, a);
   
 CRendLoop:
     lda_absy(CastleMetatiles); // load current byte using offset
-    sta_absx(MetatileBuffer);
+    write_byte(MetatileBuffer + x, a);
     inx(); // store in buffer and increment buffer offset
     lda_zp(0x6);
     if (zero_flag) { goto ChkCFloor; } // have we reached upper limit yet?
@@ -2538,21 +2535,21 @@ NotTall:
     pha();
     FindEmptyEnemySlot(); // find an empty place on the enemy object buffer
     pla();
-    sta_zpx(Enemy_X_Position); // then write horizontal coordinate for star flag
+    write_byte(Enemy_X_Position + x, a);
     lda_abs(CurrentPageLoc);
-    sta_zpx(Enemy_PageLoc); // set page location for star flag
+    write_byte(Enemy_PageLoc + x, a);
     lda_imm(0x1);
-    sta_zpx(Enemy_Y_HighPos); // set vertical high byte
-    sta_zpx(Enemy_Flag); // set flag for buffer
+    write_byte(Enemy_Y_HighPos + x, a);
+    write_byte(Enemy_Flag + x, a);
     lda_imm(0x90);
-    sta_zpx(Enemy_Y_Position); // set vertical coordinate
+    write_byte(Enemy_Y_Position + x, a);
     lda_imm(StarFlagObject); // set star flag value in buffer itself
-    sta_zpx(Enemy_ID);
+    write_byte(Enemy_ID + x, a);
     goto rts;
   
 PlayerStop:
     ldy_imm(0x52); // put brick at floor to stop player at end of level
-    sty_abs(MetatileBuffer + 10); // this is only done if we're on the second column
+    write_byte(MetatileBuffer + 10, y);
   
 ExitCastle:
     goto rts;
@@ -2563,9 +2560,9 @@ WaterPipe:
     ldy_absx(AreaObjectLength); // get length (residual code, water pipe is 1 col thick)
     ldx_zp(0x7); // get row
     lda_imm(0x6b);
-    sta_absx(MetatileBuffer); // draw something here and below it
+    write_byte(MetatileBuffer + x, a);
     lda_imm(0x6c);
-    sta_absx(MetatileBuffer + 1);
+    write_byte(MetatileBuffer + 1 + x, a);
     goto rts;
     // --------------------------------
     // $05 - used to store length of vertical shaft in RenderSidewaysPipe
@@ -2582,11 +2579,11 @@ IntroPipe:
   
 VPipeSectLoop:
     lda_imm(0x0); // all the way to the top of the screen
-    sta_absx(MetatileBuffer); // because otherwise it will look like exit pipe
+    write_byte(MetatileBuffer + x, a);
     dex();
     if (!neg_flag) { goto VPipeSectLoop; }
     lda_absy(VerticalPipeData); // draw the end of the vertical pipe part
-    sta_abs(MetatileBuffer + 7);
+    write_byte(MetatileBuffer + 7, a);
   
 NoBlankP:
     goto rts;
@@ -2599,9 +2596,9 @@ ExitPipe:
 RenderSidewaysPipe:
     dey(); // decrement twice to make room for shaft at bottom
     dey(); // and store here for now as vertical length
-    sty_zp(0x5);
+    write_byte(0x5, y);
     ldy_absx(AreaObjectLength); // get length left over and store here
-    sty_zp(0x6);
+    write_byte(0x6, y);
     ldx_zp(0x5); // get vertical length plus one, use as buffer offset
     inx();
     lda_absy(SidePipeShaftData); // check for value $00 based on horizontal offset
@@ -2610,14 +2607,14 @@ RenderSidewaysPipe:
     ldx_imm(0x0);
     ldy_zp(0x5); // init buffer offset and get vertical length
     jsr(RenderUnderPart, 58); // and render vertical shaft using tile number in A
-    clc(); // clear carry flag to be used by IntroPipe
+    carry_flag = false;
   
 DrawSidePart:
     ldy_zp(0x6); // render side pipe part at the bottom
     lda_absy(SidePipeTopPart);
-    sta_absx(MetatileBuffer); // note that the pipe parts are stored
+    write_byte(MetatileBuffer + x, a);
     lda_absy(SidePipeBottomPart); // backwards horizontally
-    sta_absx(MetatileBuffer + 1);
+    write_byte(MetatileBuffer + 1 + x, a);
     goto rts;
   
 VerticalPipe:
@@ -2640,19 +2637,19 @@ WarpPipe:
     FindEmptyEnemySlot(); // check for an empty moving data buffer space
     if (carry_flag) { goto DrawPipe; } // if not found, too many enemies, thus skip
     GetAreaObjXPosition(); // get horizontal pixel coordinate
-    clc();
+    carry_flag = false;
     adc_imm(0x8); // add eight to put the piranha plant in the center
-    sta_zpx(Enemy_X_Position); // store as enemy's horizontal coordinate
+    write_byte(Enemy_X_Position + x, a);
     lda_abs(CurrentPageLoc); // add carry to current page number
     adc_imm(0x0);
-    sta_zpx(Enemy_PageLoc); // store as enemy's page coordinate
+    write_byte(Enemy_PageLoc + x, a);
     lda_imm(0x1);
-    sta_zpx(Enemy_Y_HighPos);
-    sta_zpx(Enemy_Flag); // activate enemy flag
+    write_byte(Enemy_Y_HighPos + x, a);
+    write_byte(Enemy_Flag + x, a);
     GetAreaObjYPosition(); // get piranha plant's vertical coordinate and store here
-    sta_zpx(Enemy_Y_Position);
+    write_byte(Enemy_Y_Position + x, a);
     lda_imm(PiranhaPlant); // write piranha plant's value into buffer
-    sta_zpx(Enemy_ID);
+    write_byte(Enemy_ID + x, a);
     jsr(InitPiranhaPlant, 60);
   
 DrawPipe:
@@ -2660,7 +2657,7 @@ DrawPipe:
     tay();
     ldx_zp(0x7); // get buffer offset
     lda_absy(VerticalPipeData); // draw the appropriate pipe with the Y we loaded earlier
-    sta_absx(MetatileBuffer); // render the top of the pipe
+    write_byte(MetatileBuffer + x, a);
     inx();
     lda_absy(VerticalPipeData + 2); // render the rest of the pipe
     ldy_zp(0x6); // subtract one from length and render the part underneath
@@ -2673,7 +2670,7 @@ GetPipeHeight:
     GetLrgObjAttrib();
     tya(); // get saved lower nybble as height
     and_imm(0x7); // save only the three lower bits as
-    sta_zp(0x6); // vertical length, then load Y with
+    write_byte(0x6, a);
     ldy_absx(AreaObjectLength); // length left over
     goto rts;
     // --------------------------------
@@ -2681,7 +2678,7 @@ GetPipeHeight:
 Hole_Water:
     jsr(ChkLrgObjLength, 62); // get low nybble and save as length
     lda_imm(0x86); // render waves
-    sta_abs(MetatileBuffer + 10);
+    write_byte(MetatileBuffer + 10, a);
     ldx_imm(0xb);
     ldy_imm(0x1); // now render the water underneath
     lda_imm(0x87);
@@ -2701,7 +2698,7 @@ QuestionBlockRow_LowSkip:
     pla();
     tax(); // render question boxes with coins
     lda_imm(0xc0);
-    sta_absx(MetatileBuffer);
+    write_byte(MetatileBuffer + x, a);
     goto rts;
     // --------------------------------
   
@@ -2722,7 +2719,7 @@ Bridge_LowSkip:
     pla();
     tax(); // render bridge railing
     lda_imm(0xb);
-    sta_absx(MetatileBuffer);
+    write_byte(MetatileBuffer + x, a);
     inx();
     ldy_imm(0x0); // now render the bridge itself
     lda_imm(0x63);
@@ -2738,26 +2735,26 @@ FlagBalls_Residual:
   
 FlagpoleObject:
     lda_imm(0x24); // render flagpole ball on top
-    sta_abs(MetatileBuffer);
+    write_byte(MetatileBuffer, a);
     ldx_imm(0x1); // now render the flagpole shaft
     ldy_imm(0x8);
     lda_imm(0x25);
     jsr(RenderUnderPart, 65);
     lda_imm(0x61); // render solid block at the bottom
-    sta_abs(MetatileBuffer + 10);
+    write_byte(MetatileBuffer + 10, a);
     GetAreaObjXPosition();
-    sec(); // get pixel coordinate of where the flagpole is,
+    carry_flag = true;
     sbc_imm(0x8); // subtract eight pixels and use as horizontal
-    sta_zp(Enemy_X_Position + 5); // coordinate for the flag
+    write_byte(Enemy_X_Position + 5, a);
     lda_abs(CurrentPageLoc);
     sbc_imm(0x0); // subtract borrow from page location and use as
-    sta_zp(Enemy_PageLoc + 5); // page location for the flag
+    write_byte(Enemy_PageLoc + 5, a);
     lda_imm(0x30);
-    sta_zp(Enemy_Y_Position + 5); // set vertical coordinate for flag
+    write_byte(Enemy_Y_Position + 5, a);
     lda_imm(0xb0);
-    sta_abs(FlagpoleFNum_Y_Pos); // set initial vertical coordinate for flagpole's floatey number
+    write_byte(FlagpoleFNum_Y_Pos, a);
     lda_imm(FlagpoleFlagObject);
-    sta_zp(Enemy_ID + 5); // set flag identifier, note that identifier and coordinates
+    write_byte(Enemy_ID + 5, a);
     inc_zp(Enemy_Flag + 5); // use last space in enemy object buffer
     goto rts;
     // --------------------------------
@@ -2797,7 +2794,7 @@ CastleBridgeObj:
   
 AxeObj:
     lda_imm(0x8); // load bowser's palette into sprite portion of palette
-    sta_abs(VRAM_Buffer_AddrCtrl);
+    write_byte(VRAM_Buffer_AddrCtrl, a);
   
 ChainObj:
     ldy_zp(0x0); // get value loaded earlier from decoder
@@ -2860,12 +2857,12 @@ BulletBillCannon:
     GetLrgObjAttrib(); // get row and length of bullet bill cannon
     ldx_zp(0x7); // start at first row
     lda_imm(0x64); // render bullet bill cannon
-    sta_absx(MetatileBuffer);
+    write_byte(MetatileBuffer + x, a);
     inx();
     dey(); // done yet?
     if (neg_flag) { goto SetupCannon; }
     lda_imm(0x65); // if not, render middle part
-    sta_absx(MetatileBuffer);
+    write_byte(MetatileBuffer + x, a);
     inx();
     dey(); // done yet?
     if (neg_flag) { goto SetupCannon; }
@@ -2875,18 +2872,18 @@ BulletBillCannon:
 SetupCannon:
     ldx_abs(Cannon_Offset); // get offset for data used by cannons and whirlpools
     GetAreaObjYPosition(); // get proper vertical coordinate for cannon
-    sta_absx(Cannon_Y_Position); // and store it here
+    write_byte(Cannon_Y_Position + x, a);
     lda_abs(CurrentPageLoc);
-    sta_absx(Cannon_PageLoc); // store page number for cannon here
+    write_byte(Cannon_PageLoc + x, a);
     GetAreaObjXPosition(); // get proper horizontal coordinate for cannon
-    sta_absx(Cannon_X_Position); // and store it here
+    write_byte(Cannon_X_Position + x, a);
     inx();
     cpx_imm(0x6); // increment and check offset
     if (!carry_flag) { goto StrCOffset; } // if not yet reached sixth cannon, branch to save offset
     ldx_imm(0x0); // otherwise initialize it
   
 StrCOffset:
-    stx_abs(Cannon_Offset); // save new offset and leave
+    write_byte(Cannon_Offset, x);
     goto rts;
     // --------------------------------
   
@@ -2894,7 +2891,7 @@ StaircaseObject:
     jsr(ChkLrgObjLength, 70); // check and load length
     if (!carry_flag) { goto NextStair; } // if length already loaded, skip init part
     lda_imm(0x9); // start past the end for the bottom
-    sta_abs(StaircaseControl); // of the staircase
+    write_byte(StaircaseControl, a);
   
 NextStair:
     dec_abs(StaircaseControl); // move onto next step (or first if starting)
@@ -2910,22 +2907,22 @@ Jumpspring:
     GetLrgObjAttrib();
     FindEmptyEnemySlot(); // find empty space in enemy object buffer
     GetAreaObjXPosition(); // get horizontal coordinate for jumpspring
-    sta_zpx(Enemy_X_Position); // and store
+    write_byte(Enemy_X_Position + x, a);
     lda_abs(CurrentPageLoc); // store page location of jumpspring
-    sta_zpx(Enemy_PageLoc);
+    write_byte(Enemy_PageLoc + x, a);
     GetAreaObjYPosition(); // get vertical coordinate for jumpspring
-    sta_zpx(Enemy_Y_Position); // and store
-    sta_zpx(Jumpspring_FixedYPos); // store as permanent coordinate here
+    write_byte(Enemy_Y_Position + x, a);
+    write_byte(Jumpspring_FixedYPos + x, a);
     lda_imm(JumpspringObject);
-    sta_zpx(Enemy_ID); // write jumpspring object to enemy object buffer
+    write_byte(Enemy_ID + x, a);
     ldy_imm(0x1);
-    sty_zpx(Enemy_Y_HighPos); // store vertical high byte
+    write_byte(Enemy_Y_HighPos + x, y);
     inc_zpx(Enemy_Flag); // set flag for enemy object buffer
     ldx_zp(0x7);
     lda_imm(0x67); // draw metatiles in two rows where jumpspring is
-    sta_absx(MetatileBuffer);
+    write_byte(MetatileBuffer + x, a);
     lda_imm(0x68);
-    sta_absx(MetatileBuffer + 1);
+    write_byte(MetatileBuffer + 1 + x, a);
     goto rts;
     // --------------------------------
     // $07 - used to save ID of brick object
@@ -2934,7 +2931,7 @@ Hidden1UpBlock:
     lda_abs(Hidden1UpFlag); // if flag not set, do not render object
     if (zero_flag) { goto ExitDecBlock; }
     lda_imm(0x0); // if set, init for the next one
-    sta_abs(Hidden1UpFlag);
+    write_byte(Hidden1UpFlag, a);
     goto BrickWithItem; // jump to code shared with unbreakable bricks
   
 QuestionBlock:
@@ -2943,11 +2940,11 @@ QuestionBlock:
   
 BrickWithCoins:
     lda_imm(0x0); // initialize multi-coin timer flag
-    sta_abs(BrickCoinTimerFlag);
+    write_byte(BrickCoinTimerFlag, a);
   
 BrickWithItem:
     jsr(GetAreaObjectID, 72); // save area object ID
-    sty_zp(0x7);
+    write_byte(0x7, y);
     lda_imm(0x0); // load default adder for bricks with lines
     ldy_abs(AreaType); // check level type for ground level
     dey();
@@ -2955,7 +2952,7 @@ BrickWithItem:
     lda_imm(0x5); // otherwise use adder for bricks without lines
   
 BWithL:
-    clc(); // add object ID to adder
+    carry_flag = false;
     adc_zp(0x7);
     tay(); // use as offset for metatile
   
@@ -2967,7 +2964,7 @@ DrawQBlk:
   
 GetAreaObjectID:
     lda_zp(0x0); // get value saved from area parser routine
-    sec();
+    carry_flag = true;
     sbc_imm(0x0); // possibly residual code
     tay(); // save to Y
   
@@ -2982,12 +2979,12 @@ Hole_Empty:
     if (!zero_flag) { goto NoWhirlP; } // if not water type, skip this part
     ldx_abs(Whirlpool_Offset); // get offset for data used by cannons and whirlpools
     GetAreaObjXPosition(); // get proper vertical coordinate of where we're at
-    sec();
+    carry_flag = true;
     sbc_imm(0x10); // subtract 16 pixels
-    sta_absx(Whirlpool_LeftExtent); // store as left extent of whirlpool
+    write_byte(Whirlpool_LeftExtent + x, a);
     lda_abs(CurrentPageLoc); // get page location of where we're at
     sbc_imm(0x0); // subtract borrow
-    sta_absx(Whirlpool_PageLoc); // save as page location of whirlpool
+    write_byte(Whirlpool_PageLoc + x, a);
     iny();
     iny(); // increment length by 2
     tya();
@@ -2995,14 +2992,14 @@ Hole_Empty:
     asl_acc(); // note that whirlpool will always be
     asl_acc(); // two blocks bigger than actual size of hole
     asl_acc(); // and extend one block beyond each edge
-    sta_absx(Whirlpool_Length); // save size of whirlpool here
+    write_byte(Whirlpool_Length + x, a);
     inx();
     cpx_imm(0x5); // increment and check offset
     if (!carry_flag) { goto StrWOffset; } // if not yet reached fifth whirlpool, branch to save offset
     ldx_imm(0x0); // otherwise initialize it
   
 StrWOffset:
-    stx_abs(Whirlpool_Offset); // save new offset here
+    write_byte(Whirlpool_Offset, x);
   
 NoWhirlP:
     ldx_abs(AreaType); // get appropriate metatile, then
@@ -3012,7 +3009,7 @@ NoWhirlP:
     // --------------------------------
   
 RenderUnderPart:
-    sty_abs(AreaObjectHeight); // store vertical length to render
+    write_byte(AreaObjectHeight, y);
     ldy_absx(MetatileBuffer); // check current spot to see if there's something
     if (zero_flag) { goto DrawThisRow; } // we need to keep, if nothing, go ahead
     cpy_imm(0x17);
@@ -3029,7 +3026,7 @@ RenderUnderPart:
     if (zero_flag) { goto WaitOneRow; } // if stem top of mushroom, wait until next row
   
 DrawThisRow:
-    sta_absx(MetatileBuffer); // render contents of A from routine that called this
+    write_byte(MetatileBuffer + x, a);
   
 WaitOneRow:
     inx();
@@ -3048,18 +3045,18 @@ ChkLrgObjLength:
   
 ChkLrgObjFixedLength:
     lda_absx(AreaObjectLength); // check for set length counter
-    clc(); // clear carry flag for not just starting
+    carry_flag = false;
     if (!neg_flag) { goto LenSet; } // if counter not set, load it, otherwise leave alone
     tya(); // save length into length counter
-    sta_absx(AreaObjectLength);
-    sec(); // set carry flag if just starting
+    write_byte(AreaObjectLength + x, a);
+    carry_flag = true;
   
 LenSet:
     goto rts;
   
 LoadAreaPointer:
     jsr(FindAreaPointer, 74); // find it and store it here
-    sta_abs(AreaPointer);
+    write_byte(AreaPointer, a);
   
 GetAreaType:
     and_imm(0b01100000); // mask out all but d6 and d5
@@ -3067,13 +3064,13 @@ GetAreaType:
     rol_acc();
     rol_acc();
     rol_acc(); // make %0xx00000 into %000000xx
-    sta_abs(AreaType); // save 2 MSB as area type
+    write_byte(AreaType, a);
     goto rts;
   
 FindAreaPointer:
     ldy_abs(WorldNumber); // load offset from world variable
     lda_absy(WorldAddrOffsets);
-    clc(); // add area number used to find data
+    carry_flag = false;
     adc_abs(AreaNumber);
     tay();
     lda_absy(AreaAddrOffsets); // from there we have our area pointer
@@ -3085,54 +3082,54 @@ GetAreaDataAddrs:
     tay();
     lda_abs(AreaPointer); // mask out all but 5 LSB
     and_imm(0b00011111);
-    sta_abs(AreaAddrsLOffset); // save as low offset
+    write_byte(AreaAddrsLOffset, a);
     lda_absy(EnemyAddrHOffsets); // load base value with 2 altered MSB,
-    clc(); // then add base value to 5 LSB, result
+    carry_flag = false;
     adc_abs(AreaAddrsLOffset); // becomes offset for level data
     tay();
     lda_absy(EnemyDataAddrLow); // use offset to load pointer
-    sta_zp(EnemyDataLow);
+    write_byte(EnemyDataLow, a);
     lda_absy(EnemyDataAddrHigh);
-    sta_zp(EnemyDataHigh);
+    write_byte(EnemyDataHigh, a);
     ldy_abs(AreaType); // use area type as offset
     lda_absy(AreaDataHOffsets); // do the same thing but with different base value
-    clc();
+    carry_flag = false;
     adc_abs(AreaAddrsLOffset);
     tay();
     lda_absy(AreaDataAddrLow); // use this offset to load another pointer
-    sta_zp(AreaDataLow);
+    write_byte(AreaDataLow, a);
     lda_absy(AreaDataAddrHigh);
-    sta_zp(AreaDataHigh);
+    write_byte(AreaDataHigh, a);
     ldy_imm(0x0); // load first byte of header
     lda_indy(AreaData);
     pha(); // save it to the stack for now
     and_imm(0b00000111); // save 3 LSB for foreground scenery or bg color control
     cmp_imm(0x4);
     if (!carry_flag) { goto StoreFore; }
-    sta_abs(BackgroundColorCtrl); // if 4 or greater, save value here as bg color control
+    write_byte(BackgroundColorCtrl, a);
     lda_imm(0x0);
   
 StoreFore:
-    sta_abs(ForegroundScenery); // if less, save value here as foreground scenery
+    write_byte(ForegroundScenery, a);
     pla(); // pull byte from stack and push it back
     pha();
     and_imm(0b00111000); // save player entrance control bits
     lsr_acc(); // shift bits over to LSBs
     lsr_acc();
     lsr_acc();
-    sta_abs(PlayerEntranceCtrl); // save value here as player entrance control
+    write_byte(PlayerEntranceCtrl, a);
     pla(); // pull byte again but do not push it back
     and_imm(0b11000000); // save 2 MSB for game timer setting
-    clc();
+    carry_flag = false;
     rol_acc(); // rotate bits over to LSBs
     rol_acc();
     rol_acc();
-    sta_abs(GameTimerSetting); // save value here as game timer setting
+    write_byte(GameTimerSetting, a);
     iny();
     lda_indy(AreaData); // load second byte of header
     pha(); // save to stack
     and_imm(0b00001111); // mask out all but lower nybble
-    sta_abs(TerrainControl);
+    write_byte(TerrainControl, a);
     pla(); // pull and push byte to copy it to A
     pha();
     and_imm(0b00110000); // save 2 MSB for background scenery type
@@ -3140,27 +3137,27 @@ StoreFore:
     lsr_acc(); // shift bits to LSBs
     lsr_acc();
     lsr_acc();
-    sta_abs(BackgroundScenery); // save as background scenery
+    write_byte(BackgroundScenery, a);
     pla();
     and_imm(0b11000000);
-    clc();
+    carry_flag = false;
     rol_acc(); // rotate bits over to LSBs
     rol_acc();
     rol_acc();
     cmp_imm(0b00000011); // if set to 3, store here
     if (!zero_flag) { goto StoreStyle; } // and nullify other value
-    sta_abs(CloudTypeOverride); // otherwise store value in other place
+    write_byte(CloudTypeOverride, a);
     lda_imm(0x0);
   
 StoreStyle:
-    sta_abs(AreaStyle);
+    write_byte(AreaStyle, a);
     lda_zp(AreaDataLow); // increment area data address by 2 bytes
-    clc();
+    carry_flag = false;
     adc_imm(0x2);
-    sta_zp(AreaDataLow);
+    write_byte(AreaDataLow, a);
     lda_zp(AreaDataHigh);
     adc_imm(0x0);
-    sta_zp(AreaDataHigh);
+    write_byte(AreaDataHigh, a);
     goto rts;
     // -------------------------------------------------------------------------------------
     // GAME LEVELS DATA
@@ -3178,7 +3175,7 @@ GameMode:
 GameCoreRoutine:
     ldx_abs(CurrentPlayer); // get which player is on the screen
     lda_absx(SavedJoypadBits); // use appropriate player's controller bits
-    sta_abs(SavedJoypadBits); // as the master controller bits
+    write_byte(SavedJoypadBits, a);
     jsr(GameRoutines, 76); // execute one of many possible subs
     lda_abs(OperMode_Task); // check major task of operating mode
     cmp_imm(0x3); // if we are supposed to be here,
@@ -3190,7 +3187,7 @@ GameEngine:
     ldx_imm(0x0);
   
 ProcELoop:
-    stx_zp(ObjectOffset); // put incremented offset in X as enemy object offset
+    write_byte(ObjectOffset, x);
     jsr(EnemiesAndLoopsCore, 78); // process enemy objects
     jsr(FloateyNumbersRoutine, 79); // process floatey numbers
     inx();
@@ -3201,10 +3198,10 @@ ProcELoop:
     jsr(PlayerGfxHandler, 82); // draw the player
     jsr(BlockObjMT_Updater, 83); // replace block objects with metatiles if necessary
     ldx_imm(0x1);
-    stx_zp(ObjectOffset); // set offset for second
+    write_byte(ObjectOffset, x);
     jsr(BlockObjectsCore, 84); // process second block object
     dex();
-    stx_zp(ObjectOffset); // set offset for first
+    write_byte(ObjectOffset, x);
     jsr(BlockObjectsCore, 85); // process first block object
     jsr(MiscObjectsCore, 86); // process misc objects (hammer, jumping coins)
     jsr(ProcessCannons, 87); // process bullet bill cannons
@@ -3241,9 +3238,9 @@ ClrPlrPal:
   
 SaveAB:
     lda_zp(A_B_Buttons); // save current A and B button
-    sta_zp(PreviousA_B_Buttons); // into temp variable to be used on next frame
+    write_byte(PreviousA_B_Buttons, a);
     lda_imm(0x0);
-    sta_zp(Left_Right_Buttons); // nullify left and right buttons temp variable
+    write_byte(Left_Right_Buttons, a);
   
 UpdScrollVar:
     lda_abs(VRAM_Buffer_AddrCtrl);
@@ -3256,9 +3253,9 @@ UpdScrollVar:
     if (neg_flag) { goto ExitEng; } // branch to leave if not
     lda_abs(ScrollThirtyTwo);
     sbc_imm(0x20); // otherwise subtract $20 to set appropriately
-    sta_abs(ScrollThirtyTwo); // and store
+    write_byte(ScrollThirtyTwo, a);
     lda_imm(0x0); // reset vram buffer offset used in conjunction with
-    sta_abs(VRAM_Buffer2_Offset); // level graphics buffer at $0341-$035f
+    write_byte(VRAM_Buffer2_Offset, a);
   
 RunParser:
     jsr(AreaParserTaskHandler, 93); // update the name table with more level graphics
@@ -3269,9 +3266,9 @@ ExitEng:
   
 ScrollHandler:
     lda_abs(Player_X_Scroll); // load value saved here
-    clc();
+    carry_flag = false;
     adc_abs(Platform_X_Scroll); // add value used by left/right platforms
-    sta_abs(Player_X_Scroll); // save as new value here to impose force on scroll
+    write_byte(Player_X_Scroll, a);
     lda_abs(ScrollLock); // check scroll lock flag
     if (!zero_flag) { goto InitScrlAmt; } // skip a bunch of code here if set
     lda_abs(Player_Pos_ForScroll);
@@ -3295,37 +3292,37 @@ ChkNearMid:
   
 ScrollScreen:
     tya();
-    sta_abs(ScrollAmount); // save value here
-    clc();
+    write_byte(ScrollAmount, a);
+    carry_flag = false;
     adc_abs(ScrollThirtyTwo); // add to value already set here
-    sta_abs(ScrollThirtyTwo); // save as new value here
+    write_byte(ScrollThirtyTwo, a);
     tya();
-    clc();
+    carry_flag = false;
     adc_abs(ScreenLeft_X_Pos); // add to left side coordinate
-    sta_abs(ScreenLeft_X_Pos); // save as new left side coordinate
-    sta_abs(HorizontalScroll); // save here also
+    write_byte(ScreenLeft_X_Pos, a);
+    write_byte(HorizontalScroll, a);
     lda_abs(ScreenLeft_PageLoc);
     adc_imm(0x0); // add carry to page location for left
-    sta_abs(ScreenLeft_PageLoc); // side of the screen
+    write_byte(ScreenLeft_PageLoc, a);
     and_imm(0x1); // get LSB of page location
-    sta_zp(0x0); // save as temp variable for PPU register 1 mirror
+    write_byte(0x0, a);
     lda_abs(Mirror_PPU_CTRL_REG1); // get PPU register 1 mirror
     and_imm(0b11111110); // save all bits except d0
     ora_zp(0x0); // get saved bit here and save in PPU register 1
-    sta_abs(Mirror_PPU_CTRL_REG1); // mirror to be used to set name table later
+    write_byte(Mirror_PPU_CTRL_REG1, a);
     GetScreenPosition(); // figure out where the right side is
     lda_imm(0x8);
-    sta_abs(ScrollIntervalTimer); // set scroll timer (residual, not used elsewhere)
+    write_byte(ScrollIntervalTimer, a);
     goto ChkPOffscr; // skip this part
   
 InitScrlAmt:
     lda_imm(0x0);
-    sta_abs(ScrollAmount); // initialize value here
+    write_byte(ScrollAmount, a);
   
 ChkPOffscr:
     ldx_imm(0x0); // set X for player offset
     jsr(GetXOffscreenBits, 94); // get horizontal offscreen bits for player
-    sta_zp(0x0); // save them here
+    write_byte(0x0, a);
     ldy_imm(0x0); // load default offset (left side)
     asl_acc(); // if d7 of offscreen bits are set,
     if (carry_flag) { goto KeepOnscr; } // branch with default offset
@@ -3336,21 +3333,21 @@ ChkPOffscr:
   
 KeepOnscr:
     lda_absy(ScreenEdge_X_Pos); // get left or right side coordinate based on offset
-    sec();
+    carry_flag = true;
     sbc_absy(X_SubtracterData); // subtract amount based on offset
-    sta_zp(Player_X_Position); // store as player position to prevent movement further
+    write_byte(Player_X_Position, a);
     lda_absy(ScreenEdge_PageLoc); // get left or right page location based on offset
     sbc_imm(0x0); // subtract borrow
-    sta_zp(Player_PageLoc); // save as player's page location
+    write_byte(Player_PageLoc, a);
     lda_zp(Left_Right_Buttons); // check saved controller bits
     cmp_absy(OffscrJoypadBitsData); // against bits based on offset
     if (zero_flag) { goto InitPlatScrl; } // if not equal, branch
     lda_imm(0x0);
-    sta_zp(Player_X_Speed); // otherwise nullify horizontal speed of player
+    write_byte(Player_X_Speed, a);
   
 InitPlatScrl:
     lda_imm(0x0); // nullify platform force imposed on scroll
-    sta_abs(Platform_X_Scroll);
+    write_byte(Platform_X_Scroll, a);
     goto rts;
   
 GameRoutines:
@@ -3419,13 +3416,13 @@ VineEntr:
     lda_imm(0x1); // this value moves player to the right off the vine
     if (!carry_flag) { goto OffVine; } // if vertical coordinate < preset value, use defaults
     lda_imm(0x3);
-    sta_zp(Player_State); // otherwise set player state to climbing
+    write_byte(Player_State, a);
     iny(); // increment value in Y
     lda_imm(0x8); // set block in block buffer to cover hole, then 
-    sta_abs(Block_Buffer_1 + 0xb4); // use same value to force player to climb
+    write_byte(Block_Buffer_1 + 0xb4, a);
   
 OffVine:
-    sty_abs(DisableCollisionDet); // set collision detection disable flag
+    write_byte(DisableCollisionDet, y);
     jsr(AutoControlPlayer, 96); // use contents of A to move player up or right, execute sub
     lda_zp(Player_X_Position);
     cmp_imm(0x48); // check player's horizontal position
@@ -3433,13 +3430,13 @@ OffVine:
   
 PlayerRdy:
     lda_imm(0x8); // set routine to be executed by game engine next frame
-    sta_zp(GameEngineSubroutine);
+    write_byte(GameEngineSubroutine, a);
     lda_imm(0x1); // set to face player to the right
-    sta_zp(PlayerFacingDir);
+    write_byte(PlayerFacingDir, a);
     lsr_acc(); // init A
-    sta_abs(AltEntranceControl); // init mode of entry
-    sta_abs(DisableCollisionDet); // init collision detection disable flag
-    sta_abs(JoypadOverride); // nullify controller override bits
+    write_byte(AltEntranceControl, a);
+    write_byte(DisableCollisionDet, a);
+    write_byte(JoypadOverride, a);
   
 ExitEntr:
     goto rts; // leave!
@@ -3447,7 +3444,7 @@ ExitEntr:
     // $07 - used to hold upper limit of high byte when player falls down hole
   
 AutoControlPlayer:
-    sta_abs(SavedJoypadBits); // override controller bits with contents of A if executing here
+    write_byte(SavedJoypadBits, a);
   
 PlayerCtrlRoutine:
     lda_zp(GameEngineSubroutine); // check task here
@@ -3464,18 +3461,18 @@ PlayerCtrlRoutine:
   
 DisJoyp:
     lda_imm(0x0); // disable controller bits
-    sta_abs(SavedJoypadBits);
+    write_byte(SavedJoypadBits, a);
   
 SaveJoyp:
     lda_abs(SavedJoypadBits); // otherwise store A and B buttons in $0a
     and_imm(0b11000000);
-    sta_zp(A_B_Buttons);
+    write_byte(A_B_Buttons, a);
     lda_abs(SavedJoypadBits); // store left and right buttons in $0c
     and_imm(0b00000011);
-    sta_zp(Left_Right_Buttons);
+    write_byte(Left_Right_Buttons, a);
     lda_abs(SavedJoypadBits); // store up and down buttons in $0b
     and_imm(0b00001100);
-    sta_zp(Up_Down_Buttons);
+    write_byte(Up_Down_Buttons, a);
     and_imm(0b00000100); // check for pressing down
     if (zero_flag) { goto SizeChk; } // if not, branch
     lda_zp(Player_State); // check player's state
@@ -3483,8 +3480,8 @@ SaveJoyp:
     ldy_zp(Left_Right_Buttons); // check left and right
     if (zero_flag) { goto SizeChk; } // if neither pressed, branch
     lda_imm(0x0);
-    sta_zp(Left_Right_Buttons); // if pressing down while on the ground,
-    sta_zp(Up_Down_Buttons); // nullify directional bits
+    write_byte(Left_Right_Buttons, a);
+    write_byte(Up_Down_Buttons, a);
   
 SizeChk:
     jsr(PlayerMovementSubs, 97); // run movement subroutines
@@ -3497,7 +3494,7 @@ SizeChk:
     ldy_imm(0x2); // if big and crouching, load y with 2
   
 ChkMoveDir:
-    sty_abs(Player_BoundBoxCtrl); // set contents of Y as player's bounding box size control
+    write_byte(Player_BoundBoxCtrl, y);
     lda_imm(0x1); // set moving direction to right by default
     ldy_zp(Player_X_Speed); // check player's horizontal speed
     if (zero_flag) { goto PlayerSubs; } // if not moving at all horizontally, skip this part
@@ -3505,7 +3502,7 @@ ChkMoveDir:
     asl_acc(); // otherwise change to move to the left
   
 SetMoveDir:
-    sta_zp(Player_MovingDir); // set moving direction
+    write_byte(Player_MovingDir, a);
   
 PlayerSubs:
     jsr(ScrollHandler, 98); // move the screen if necessary
@@ -3526,16 +3523,16 @@ PlayerSubs:
     if (!carry_flag) { goto PlayerHole; }
     lda_abs(Player_SprAttrib);
     and_imm(0b11011111); // otherwise nullify player's
-    sta_abs(Player_SprAttrib); // background priority flag
+    write_byte(Player_SprAttrib, a);
   
 PlayerHole:
     lda_zp(Player_Y_HighPos); // check player's vertical high byte
     cmp_imm(0x2); // for below the screen
     if (neg_flag) { goto ExitCtrl; } // branch to leave if not that far down
     ldx_imm(0x1);
-    stx_abs(ScrollLock); // set scroll lock
+    write_byte(ScrollLock, x);
     ldy_imm(0x4);
-    sty_zp(0x7); // set value here
+    write_byte(0x7, y);
     ldx_imm(0x0); // use X as flag, and clear for cloud level
     ldy_abs(GameTimerExpiredFlag); // check game timer expiration flag
     if (!zero_flag) { goto HoleDie; } // if set, branch
@@ -3550,12 +3547,12 @@ HoleDie:
     ldy_abs(DeathMusicLoaded); // check value here
     if (!zero_flag) { goto HoleBottom; } // if already set, branch to next part
     iny();
-    sty_zp(EventMusicQueue); // otherwise play death music
-    sty_abs(DeathMusicLoaded); // and set value here
+    write_byte(EventMusicQueue, y);
+    write_byte(DeathMusicLoaded, y);
   
 HoleBottom:
     ldy_imm(0x6);
-    sty_zp(0x7); // change value here
+    write_byte(0x7, y);
   
 ChkHoleX:
     cmp_zp(0x7); // compare vertical high byte with value set here
@@ -3565,14 +3562,14 @@ ChkHoleX:
     ldy_abs(EventMusicBuffer); // check to see if music is still playing
     if (!zero_flag) { goto ExitCtrl; } // branch to leave if so
     lda_imm(0x6); // otherwise set to run lose life routine
-    sta_zp(GameEngineSubroutine); // on next frame
+    write_byte(GameEngineSubroutine, a);
   
 ExitCtrl:
     goto rts; // leave
   
 CloudExit:
     lda_imm(0x0);
-    sta_abs(JoypadOverride); // clear controller override bits if any are set
+    write_byte(JoypadOverride, a);
     jsr(SetEntr, 103); // do sub to set secondary mode
     inc_abs(AltEntranceControl); // set mode of entry to 3
     goto rts;
@@ -3587,14 +3584,14 @@ Vine_AutoClimb:
   
 AutoClimb:
     lda_imm(0b00001000); // set controller bits override to up
-    sta_abs(JoypadOverride);
+    write_byte(JoypadOverride, a);
     ldy_imm(0x3); // set player state to climbing
-    sty_zp(Player_State);
+    write_byte(Player_State, y);
     goto AutoControlPlayer;
   
 SetEntr:
     lda_imm(0x2); // set starting position to override
-    sta_abs(AltEntranceControl);
+    write_byte(AltEntranceControl, a);
     goto ChgAreaMode; // set modes
     // -------------------------------------------------------------------------------------
   
@@ -3619,25 +3616,25 @@ SideExitPipeEntry:
 ChgAreaPipe:
     dec_abs(ChangeAreaTimer); // decrement timer for change of area
     if (!zero_flag) { goto ExitCAPipe; }
-    sty_abs(AltEntranceControl); // when timer expires set mode of alternate entry
+    write_byte(AltEntranceControl, y);
   
 ChgAreaMode:
     inc_abs(DisableScreenFlag); // set flag to disable screen output
     lda_imm(0x0);
-    sta_abs(OperMode_Task); // set secondary mode of operation
-    sta_abs(Sprite0HitDetectFlag); // disable sprite 0 check
+    write_byte(OperMode_Task, a);
+    write_byte(Sprite0HitDetectFlag, a);
   
 ExitCAPipe:
     goto rts; // leave
   
 EnterSidePipe:
     lda_imm(0x8); // set player's horizontal speed
-    sta_zp(Player_X_Speed);
+    write_byte(Player_X_Speed, a);
     ldy_imm(0x1); // set controller right button by default
     lda_zp(Player_X_Position); // mask out higher nybble of player's
     and_imm(0b00001111); // horizontal position
     if (!zero_flag) { goto RightPipe; }
-    sta_zp(Player_X_Speed); // if lower nybble = 0, set as horizontal speed
+    write_byte(Player_X_Speed, a);
     tay(); // and nullify controller bit override here
   
 RightPipe:
@@ -3675,11 +3672,11 @@ ExitBlink:
 InitChangeSize:
     ldy_abs(PlayerChangeSizeFlag); // if growing/shrinking flag already set
     if (!zero_flag) { goto ExitBoth; } // then branch to leave
-    sty_abs(PlayerAnimCtrl); // otherwise initialize player's animation frame control
+    write_byte(PlayerAnimCtrl, y);
     inc_abs(PlayerChangeSizeFlag); // set growing/shrinking flag
     lda_abs(PlayerSize);
     eor_imm(0x1); // invert player's size
-    sta_abs(PlayerSize);
+    write_byte(PlayerSize, a);
   
 ExitBoth:
     goto rts; // leave
@@ -3694,9 +3691,9 @@ PlayerDeath:
   
 DonePlayerTask:
     lda_imm(0x0);
-    sta_abs(TimerControl); // initialize master timer control to continue timers
+    write_byte(TimerControl, a);
     lda_imm(0x8);
-    sta_zp(GameEngineSubroutine); // set player control routine to run next frame
+    write_byte(GameEngineSubroutine, a);
     goto rts; // leave
   
 PlayerFireFlower:
@@ -3709,11 +3706,11 @@ PlayerFireFlower:
   
 CyclePlayerPalette:
     and_imm(0x3); // mask out all but d1-d0 (previously d3-d2)
-    sta_zp(0x0); // store result here to use as palette bits
+    write_byte(0x0, a);
     lda_abs(Player_SprAttrib); // get player attributes
     and_imm(0b11111100); // save any other bits but palette bits
     ora_zp(0x0); // add palette bits
-    sta_abs(Player_SprAttrib); // store as new player attributes
+    write_byte(Player_SprAttrib, a);
     goto rts; // and leave
   
 ResetPalFireFlower:
@@ -3722,7 +3719,7 @@ ResetPalFireFlower:
 ResetPalStar:
     lda_abs(Player_SprAttrib); // get player attributes
     and_imm(0b11111100); // mask out palette bits to force palette 0
-    sta_abs(Player_SprAttrib); // store as new player attributes
+    write_byte(Player_SprAttrib, a);
     goto rts; // and leave
   
 ExitDeath:
@@ -3734,9 +3731,9 @@ FlagpoleSlide:
     cmp_imm(FlagpoleFlagObject); // for flagpole flag object
     if (!zero_flag) { goto NoFPObj; } // if not found, branch to something residual
     lda_abs(FlagpoleSoundQueue); // load flagpole sound
-    sta_zp(Square1SoundQueue); // into square 1's sfx queue
+    write_byte(Square1SoundQueue, a);
     lda_imm(0x0);
-    sta_abs(FlagpoleSoundQueue); // init flagpole sound queue
+    write_byte(FlagpoleSoundQueue, a);
     ldy_zp(Player_Y_Position);
     cpy_imm(0x9e); // check to see if player has slid down
     if (carry_flag) { goto SlidePlayer; } // far enough, and if so, branch with no controller bits set
@@ -3759,9 +3756,9 @@ PlayerEndLevel:
     lda_abs(ScrollLock); // if scroll lock not set, branch ahead to next part
     if (zero_flag) { goto ChkStop; } // because we only need to do this part once
     lda_imm(EndOfLevelMusic);
-    sta_zp(EventMusicQueue); // load win level music in event music queue
+    write_byte(EventMusicQueue, a);
     lda_imm(0x0);
-    sta_abs(ScrollLock); // turn off scroll lock to skip this part later
+    write_byte(ScrollLock, a);
   
 ChkStop:
     lda_abs(Player_CollisionBits); // get player collision bits
@@ -3773,7 +3770,7 @@ ChkStop:
   
 InCastle:
     lda_imm(0b00100000); // set player's background priority bit to
-    sta_abs(Player_SprAttrib); // give illusion of being inside the castle
+    write_byte(Player_SprAttrib, a);
   
 RdyNextA:
     lda_abs(StarFlagTaskControl);
@@ -3794,9 +3791,9 @@ NextArea:
     jsr(LoadAreaPointer, 110); // get new level pointer
     inc_abs(FetchNewGameTimerFlag); // set flag to load new game timer
     jsr(ChgAreaMode, 111); // do sub to set secondary mode, disable screen and sprite 0
-    sta_abs(HalfwayPage); // reset halfway page to 0 (beginning)
+    write_byte(HalfwayPage, a);
     lda_imm(Silence);
-    sta_zp(EventMusicQueue); // silence music and leave
+    write_byte(EventMusicQueue, a);
   
 ExitNA:
     goto rts;
@@ -3812,7 +3809,7 @@ PlayerMovementSubs:
     and_imm(0b00000100); // single out bit for down button
   
 SetCrouch:
-    sta_abs(CrouchingFlag); // store value in crouch flag
+    write_byte(CrouchingFlag, a);
   
 ProcMove:
     jsr(PlayerPhysicsSub, 112); // run sub related to jumping and swimming
@@ -3822,7 +3819,7 @@ ProcMove:
     cmp_imm(0x3); // get player state
     if (zero_flag) { goto MoveSubs; } // if climbing, branch ahead, leave timer unset
     ldy_imm(0x18);
-    sty_abs(ClimbSideTimer); // otherwise reset timer now
+    write_byte(ClimbSideTimer, y);
   
 MoveSubs:
     // jsr JumpEngine
@@ -3842,18 +3839,18 @@ OnGroundStateSub:
     GetPlayerAnimSpeed(); // do a sub to set animation frame timing
     lda_zp(Left_Right_Buttons);
     if (zero_flag) { goto GndMove; } // if left/right controller bits not set, skip instruction
-    sta_zp(PlayerFacingDir); // otherwise set new facing direction
+    write_byte(PlayerFacingDir, a);
   
 GndMove:
     ImposeFriction(); // do a sub to impose friction on player's walk/run
     jsr(MovePlayerHorizontally, 113); // do another sub to move player horizontally
-    sta_abs(Player_X_Scroll); // set returned value as player's movement speed for scroll
+    write_byte(Player_X_Scroll, a);
     goto rts;
     // --------------------------------
   
 FallingSub:
     lda_abs(VerticalForceDown);
-    sta_abs(VerticalForce); // dump vertical movement force for falling into main one
+    write_byte(VerticalForce, a);
     goto LRAir; // movement force, then skip ahead to process left/right movement
     // --------------------------------
   
@@ -3865,14 +3862,14 @@ JumpSwimSub:
     and_zp(PreviousA_B_Buttons); // and was pressed in previous frame
     if (!zero_flag) { goto ProcSwim; } // if so, branch elsewhere
     lda_abs(JumpOrigin_Y_Position); // get vertical position player jumped from
-    sec();
+    carry_flag = true;
     sbc_zp(Player_Y_Position); // subtract current from original vertical coordinate
     cmp_abs(DiffToHaltJump); // compare to value set here to see if player is in mid-jump
     if (!carry_flag) { goto ProcSwim; } // or just starting to jump, if just starting, skip ahead
   
 DumpFall:
     lda_abs(VerticalForceDown); // otherwise dump falling into main fractional
-    sta_abs(VerticalForce);
+    write_byte(VerticalForce, a);
   
 ProcSwim:
     lda_abs(SwimmingFlag); // if swimming flag not set,
@@ -3882,12 +3879,12 @@ ProcSwim:
     cmp_imm(0x14); // check vertical position against preset value
     if (carry_flag) { goto LRWater; } // if not yet reached a certain position, branch ahead
     lda_imm(0x18);
-    sta_abs(VerticalForce); // otherwise set fractional
+    write_byte(VerticalForce, a);
   
 LRWater:
     lda_zp(Left_Right_Buttons); // check left/right controller bits (check for swimming)
     if (zero_flag) { goto LRAir; } // if not pressing any, skip
-    sta_zp(PlayerFacingDir); // otherwise set facing direction accordingly
+    write_byte(PlayerFacingDir, a);
   
 LRAir:
     lda_zp(Left_Right_Buttons); // check left/right controller bits (check for jumping/falling)
@@ -3896,12 +3893,12 @@ LRAir:
   
 JSMove:
     jsr(MovePlayerHorizontally, 114); // do a sub to move player horizontally
-    sta_abs(Player_X_Scroll); // set player's speed here, to be used for scroll later
+    write_byte(Player_X_Scroll, a);
     lda_zp(GameEngineSubroutine);
     cmp_imm(0xb); // check for specific routine selected
     if (!zero_flag) { goto ExitMov1; } // branch if not set to run
     lda_imm(0x28);
-    sta_abs(VerticalForce); // otherwise set fractional
+    write_byte(VerticalForce, a);
   
 ExitMov1:
     goto MovePlayerVertically; // jump to move player vertically, then leave
@@ -3909,28 +3906,28 @@ ExitMov1:
   
 ClimbingSub:
     lda_abs(Player_YMF_Dummy);
-    clc(); // add movement force to dummy variable
+    carry_flag = false;
     adc_abs(Player_Y_MoveForce); // save with carry
-    sta_abs(Player_YMF_Dummy);
+    write_byte(Player_YMF_Dummy, a);
     ldy_imm(0x0); // set default adder here
     lda_zp(Player_Y_Speed); // get player's vertical speed
     if (!neg_flag) { goto MoveOnVine; } // if not moving upwards, branch
     dey(); // otherwise set adder to $ff
   
 MoveOnVine:
-    sty_zp(0x0); // store adder here
+    write_byte(0x0, y);
     adc_zp(Player_Y_Position); // add carry to player's vertical position
-    sta_zp(Player_Y_Position); // and store to move player up or down
+    write_byte(Player_Y_Position, a);
     lda_zp(Player_Y_HighPos);
     adc_zp(0x0); // add carry to player's page location
-    sta_zp(Player_Y_HighPos); // and store
+    write_byte(Player_Y_HighPos, a);
     lda_zp(Left_Right_Buttons); // compare left/right controller bits
     and_abs(Player_CollisionBits); // to collision flag
     if (zero_flag) { goto InitCSTimer; } // if not set, skip to end
     ldy_abs(ClimbSideTimer); // otherwise check timer 
     if (!zero_flag) { goto ExitCSub; } // if timer not expired, branch to leave
     ldy_imm(0x18);
-    sty_abs(ClimbSideTimer); // otherwise set timer now
+    write_byte(ClimbSideTimer, y);
     ldx_imm(0x0); // set default offset here
     ldy_zp(PlayerFacingDir); // get facing direction
     lsr_acc(); // move right button controller bit to carry
@@ -3945,21 +3942,21 @@ ClimbFD:
   
 CSetFDir:
     lda_zp(Player_X_Position);
-    clc(); // add or subtract from player's horizontal position
+    carry_flag = false;
     adc_absx(ClimbAdderLow); // using value here as adder and X as offset
-    sta_zp(Player_X_Position);
+    write_byte(Player_X_Position, a);
     lda_zp(Player_PageLoc); // add or subtract carry or borrow using value here
     adc_absx(ClimbAdderHigh); // from the player's page location
-    sta_zp(Player_PageLoc);
+    write_byte(Player_PageLoc, a);
     lda_zp(Left_Right_Buttons); // get left/right controller bits again
     eor_imm(0b00000011); // invert them and store them while player
-    sta_zp(PlayerFacingDir); // is on vine to face player in opposite direction
+    write_byte(PlayerFacingDir, a);
   
 ExitCSub:
     goto rts; // then leave
   
 InitCSTimer:
-    sta_abs(ClimbSideTimer); // initialize timer here
+    write_byte(ClimbSideTimer, a);
     goto rts;
     // -------------------------------------------------------------------------------------
     // $00 - used to store offset to friction data
@@ -3979,15 +3976,15 @@ PlayerPhysicsSub:
   
 ProcClimb:
     ldx_absy(Climb_Y_MForceData); // load value here
-    stx_abs(Player_Y_MoveForce); // store as vertical movement force
+    write_byte(Player_Y_MoveForce, x);
     lda_imm(0x8); // load default animation timing
     ldx_absy(Climb_Y_SpeedData); // load some other value here
-    stx_zp(Player_Y_Speed); // store as vertical speed
+    write_byte(Player_Y_Speed, x);
     if (neg_flag) { goto SetCAnim; } // if climbing down, use default animation timing value
     lsr_acc(); // otherwise divide timer setting by 2
   
 SetCAnim:
-    sta_abs(PlayerAnimTimerSet); // store animation timer setting and leave
+    write_byte(PlayerAnimTimerSet, a);
     goto rts;
   
 CheckForJumping:
@@ -4015,16 +4012,16 @@ ProcJumping:
   
 InitJS:
     lda_imm(0x20); // set jump/swim timer
-    sta_abs(JumpSwimTimer);
+    write_byte(JumpSwimTimer, a);
     ldy_imm(0x0); // initialize vertical force and dummy variable
-    sty_abs(Player_YMF_Dummy);
-    sty_abs(Player_Y_MoveForce);
+    write_byte(Player_YMF_Dummy, y);
+    write_byte(Player_Y_MoveForce, y);
     lda_zp(Player_Y_HighPos); // get vertical high and low bytes of jump origin
-    sta_abs(JumpOrigin_Y_HighPos); // and store them next to each other here
+    write_byte(JumpOrigin_Y_HighPos, a);
     lda_zp(Player_Y_Position);
-    sta_abs(JumpOrigin_Y_Position);
+    write_byte(JumpOrigin_Y_Position, a);
     lda_imm(0x1); // set player state to jumping/swimming
-    sta_zp(Player_State);
+    write_byte(Player_State, a);
     lda_abs(Player_XSpeedAbsolute); // check value related to walking/running speed
     cmp_imm(0x9);
     if (!carry_flag) { goto ChkWtr; } // branch if below certain values, increment Y
@@ -4041,7 +4038,7 @@ InitJS:
   
 ChkWtr:
     lda_imm(0x1); // set value here (apparently always set to 1)
-    sta_abs(DiffToHaltJump);
+    write_byte(DiffToHaltJump, a);
     lda_abs(SwimmingFlag); // if swimming flag disabled, branch
     if (zero_flag) { goto GetYPhy; }
     ldy_imm(0x5); // otherwise set Y to 5, range is 5-6
@@ -4051,22 +4048,22 @@ ChkWtr:
   
 GetYPhy:
     lda_absy(JumpMForceData); // store appropriate jump/swim
-    sta_abs(VerticalForce); // data here
+    write_byte(VerticalForce, a);
     lda_absy(FallMForceData);
-    sta_abs(VerticalForceDown);
+    write_byte(VerticalForceDown, a);
     lda_absy(InitMForceData);
-    sta_abs(Player_Y_MoveForce);
+    write_byte(Player_Y_MoveForce, a);
     lda_absy(PlayerYSpdData);
-    sta_zp(Player_Y_Speed);
+    write_byte(Player_Y_Speed, a);
     lda_abs(SwimmingFlag); // if swimming flag disabled, branch
     if (zero_flag) { goto PJumpSnd; }
     lda_imm(Sfx_EnemyStomp); // load swim/goomba stomp sound into
-    sta_zp(Square1SoundQueue); // square 1's sfx queue
+    write_byte(Square1SoundQueue, a);
     lda_zp(Player_Y_Position);
     cmp_imm(0x14); // check vertical low byte of player position
     if (carry_flag) { goto X_Physics; } // if below a certain point, branch
     lda_imm(0x0); // otherwise reset player's vertical speed
-    sta_zp(Player_Y_Speed); // and jump to something else to keep player
+    write_byte(Player_Y_Speed, a);
     goto X_Physics; // from swimming above water level
   
 PJumpSnd:
@@ -4076,11 +4073,11 @@ PJumpSnd:
     lda_imm(Sfx_SmallJump); // if not, load small mario's jump sound
   
 SJumpSnd:
-    sta_zp(Square1SoundQueue); // store appropriate jump sound in square 1 sfx queue
+    write_byte(Square1SoundQueue, a);
   
 X_Physics:
     ldy_imm(0x0);
-    sty_zp(0x0); // init value here
+    write_byte(0x0, y);
     lda_zp(Player_State); // if mario is on the ground, branch
     if (zero_flag) { goto ProcPRun; }
     lda_abs(Player_XSpeedAbsolute); // check something that seems to be related
@@ -4117,11 +4114,11 @@ FastXSp:
   
 SetRTmr:
     lda_imm(0xa); // if b button pressed, set running timer
-    sta_abs(RunningTimer);
+    write_byte(RunningTimer, a);
   
 GetXPhy:
     lda_absy(MaxLeftXSpdData); // get maximum speed to the left
-    sta_abs(MaximumLeftSpeed);
+    write_byte(MaximumLeftSpeed, a);
     lda_zp(GameEngineSubroutine); // check for specific routine running
     cmp_imm(0x7); // (player entrance)
     if (!zero_flag) { goto GetXPhy2; } // if not running, skip and use old value of Y
@@ -4129,12 +4126,12 @@ GetXPhy:
   
 GetXPhy2:
     lda_absy(MaxRightXSpdData); // get maximum speed to the right
-    sta_abs(MaximumRightSpeed);
+    write_byte(MaximumRightSpeed, a);
     ldy_zp(0x0); // get other value in memory
     lda_absy(FrictionData); // get value using value in memory as offset
-    sta_abs(FrictionAdderLow);
+    write_byte(FrictionAdderLow, a);
     lda_imm(0x0);
-    sta_abs(FrictionAdderHigh); // init something here
+    write_byte(FrictionAdderHigh, a);
     lda_zp(PlayerFacingDir);
     cmp_zp(Player_MovingDir); // check facing direction against moving direction
     if (zero_flag) { goto ExitPhy; } // if the same, branch to leave
@@ -4173,13 +4170,13 @@ ProcFireball_Bubble:
     cmp_imm(0x3);
     if (zero_flag) { goto ProcFireballs; }
     lda_imm(Sfx_Fireball); // play fireball sound effect
-    sta_zp(Square1SoundQueue);
+    write_byte(Square1SoundQueue, a);
     lda_imm(0x2); // load state
-    sta_zpx(Fireball_State);
+    write_byte(Fireball_State + x, a);
     ldy_abs(PlayerAnimTimerSet); // copy animation frame timer setting
-    sty_abs(FireballThrowingTimer); // into fireball throwing timer
+    write_byte(FireballThrowingTimer, y);
     dey();
-    sty_abs(PlayerAnimTimer); // decrement and store in player's animation timer
+    write_byte(PlayerAnimTimer, y);
     inc_abs(FireballCounter); // increment fireball counter
   
 ProcFireballs:
@@ -4194,7 +4191,7 @@ ProcAirBubbles:
     ldx_imm(0x2); // otherwise load counter and use as offset
   
 BublLoop:
-    stx_zp(ObjectOffset); // store offset
+    write_byte(ObjectOffset, x);
     jsr(BubbleCheck, 117); // check timers and coordinates, create air bubble
     jsr(RelativeBubblePosition, 118); // get relative coordinates
     jsr(GetBubbleOffscreenBits, 119); // get offscreen information
@@ -4206,7 +4203,7 @@ BublExit:
     goto rts; // then leave
   
 FireballObjCore:
-    stx_zp(ObjectOffset); // store offset as current object
+    write_byte(ObjectOffset, x);
     lda_zpx(Fireball_State); // check for d7 = 1
     asl_acc();
     if (carry_flag) { goto FireballExplosion; } // if so, branch to get relative coordinates and draw explosion
@@ -4216,33 +4213,33 @@ FireballObjCore:
     if (zero_flag) { goto RunFB; }
     lda_zp(Player_X_Position); // get player's horizontal position
     adc_imm(0x4); // add four pixels and store as fireball's horizontal position
-    sta_zpx(Fireball_X_Position);
+    write_byte(Fireball_X_Position + x, a);
     lda_zp(Player_PageLoc); // get player's page location
     adc_imm(0x0); // add carry and store as fireball's page location
-    sta_zpx(Fireball_PageLoc);
+    write_byte(Fireball_PageLoc + x, a);
     lda_zp(Player_Y_Position); // get player's vertical position and store
-    sta_zpx(Fireball_Y_Position);
+    write_byte(Fireball_Y_Position + x, a);
     lda_imm(0x1); // set high byte of vertical position
-    sta_zpx(Fireball_Y_HighPos);
+    write_byte(Fireball_Y_HighPos + x, a);
     ldy_zp(PlayerFacingDir); // get player's facing direction
     dey(); // decrement to use as offset here
     lda_absy(FireballXSpdData); // set horizontal speed of fireball accordingly
-    sta_zpx(Fireball_X_Speed);
+    write_byte(Fireball_X_Speed + x, a);
     lda_imm(0x4); // set vertical speed of fireball
-    sta_zpx(Fireball_Y_Speed);
+    write_byte(Fireball_Y_Speed + x, a);
     lda_imm(0x7);
-    sta_absx(Fireball_BoundBoxCtrl); // set bounding box size control for fireball
+    write_byte(Fireball_BoundBoxCtrl + x, a);
     dec_zpx(Fireball_State); // decrement state to 1 to skip this part from now on
   
 RunFB:
     txa(); // add 7 to offset to use
-    clc(); // as fireball offset for next routines
+    carry_flag = false;
     adc_imm(0x7);
     tax();
     lda_imm(0x50); // set downward movement force here
-    sta_zp(0x0);
+    write_byte(0x0, a);
     lda_imm(0x3); // set maximum speed here
-    sta_zp(0x2);
+    write_byte(0x2, a);
     lda_imm(0x0);
     ImposeGravity(); // do sub here to impose gravity on fireball and move vertically
     jsr(MoveObjectHorizontally, 120); // do another sub to move it horizontally
@@ -4259,7 +4256,7 @@ RunFB:
   
 EraseFB:
     lda_imm(0x0); // erase fireball state
-    sta_zpx(Fireball_State);
+    write_byte(Fireball_State + x, a);
   
 NoFBall:
     goto rts; // leave
@@ -4271,7 +4268,7 @@ FireballExplosion:
 BubbleCheck:
     lda_absx(PseudoRandomBitReg + 1); // get part of LSFR
     and_imm(0x1);
-    sta_zp(0x7); // store pseudorandom bit here
+    write_byte(0x7, a);
     lda_zpx(Bubble_Y_Position); // get vertical coordinate for air bubble
     cmp_imm(0xf8); // if offscreen coordinate not set,
     if (!zero_flag) { goto MoveBubl; } // branch to move air bubble
@@ -4288,26 +4285,26 @@ SetupBubble:
 PosBubl:
     tya(); // use value loaded as adder
     adc_zp(Player_X_Position); // add to player's horizontal position
-    sta_zpx(Bubble_X_Position); // save as horizontal position for airbubble
+    write_byte(Bubble_X_Position + x, a);
     lda_zp(Player_PageLoc);
     adc_imm(0x0); // add carry to player's page location
-    sta_zpx(Bubble_PageLoc); // save as page location for airbubble
+    write_byte(Bubble_PageLoc + x, a);
     lda_zp(Player_Y_Position);
-    clc(); // add eight pixels to player's vertical position
+    carry_flag = false;
     adc_imm(0x8);
-    sta_zpx(Bubble_Y_Position); // save as vertical position for air bubble
+    write_byte(Bubble_Y_Position + x, a);
     lda_imm(0x1);
-    sta_zpx(Bubble_Y_HighPos); // set vertical high byte for air bubble
+    write_byte(Bubble_Y_HighPos + x, a);
     ldy_zp(0x7); // get pseudorandom bit, use as offset
     lda_absy(BubbleTimerData); // get data for air bubble timer
-    sta_abs(AirBubbleTimer); // set air bubble timer
+    write_byte(AirBubbleTimer, a);
   
 MoveBubl:
     ldy_zp(0x7); // get pseudorandom bit again, use as offset
     lda_absx(Bubble_YMF_Dummy);
-    sec(); // subtract pseudorandom amount from dummy variable
+    carry_flag = true;
     sbc_absy(Bubble_MForceData);
-    sta_absx(Bubble_YMF_Dummy); // save dummy variable
+    write_byte(Bubble_YMF_Dummy + x, a);
     lda_zpx(Bubble_Y_Position);
     sbc_imm(0x0); // subtract borrow from airbubble's vertical coordinate
     cmp_imm(0x20); // if below the status bar,
@@ -4315,7 +4312,7 @@ MoveBubl:
     lda_imm(0xf8); // otherwise set offscreen coordinate
   
 Y_Bubl:
-    sta_zpx(Bubble_Y_Position); // store as new vertical coordinate for air bubble
+    write_byte(Bubble_Y_Position + x, a);
   
 ExitBubl:
     goto rts; // leave
@@ -4344,20 +4341,20 @@ RunGameTimer:
     ora_abs(GameTimerDisplay + 2);
     if (!zero_flag) { goto ResGTCtrl; } // if timer not at 100, branch to reset game timer control
     lda_imm(TimeRunningOutMusic);
-    sta_zp(EventMusicQueue); // otherwise load time running out music
+    write_byte(EventMusicQueue, a);
   
 ResGTCtrl:
     lda_imm(0x18); // reset game timer control
-    sta_abs(GameTimerCtrlTimer);
+    write_byte(GameTimerCtrlTimer, a);
     ldy_imm(0x23); // set offset for last digit
     lda_imm(0xff); // set value to decrement game timer digit
-    sta_abs(DigitModifier + 5);
+    write_byte(DigitModifier + 5, a);
     jsr(DigitsMathRoutine, 127); // do sub to decrement game timer slowly
     lda_imm(0xa4); // set status nybbles to update game timer display
     goto PrintStatusBarNumbers; // do sub to update the display
   
 TimeUpOn:
-    sta_abs(PlayerStatus); // init player status (note A will always be zero here)
+    write_byte(PlayerStatus, a);
     jsr(ForceInjury, 128); // do sub to kill the player (note player is small here)
     inc_abs(GameTimerExpiredFlag); // set game timer expiration flag
   
@@ -4371,10 +4368,10 @@ WarpZoneObject:
     lda_zp(Player_Y_Position); // check to see if player's vertical coordinate has
     and_zp(Player_Y_HighPos); // same bits set as in vertical high byte (why?)
     if (!zero_flag) { goto ExGTimer; } // if so, branch to leave
-    sta_abs(ScrollLock); // otherwise nullify scroll lock flag
+    write_byte(ScrollLock, a);
     inc_abs(WarpZoneControl); // increment warp zone flag to make warp pipes for warp zone
     EraseEnemyObject(); goto rts; // kill this object
-    EraseEnemyObject(); goto rts; // <gen: fallthrough>
+    EraseEnemyObject(); goto rts; // <fallthrough>
     // -------------------------------------------------------------------------------------
     // $00 - used in WhirlpoolActivate to store whirlpool length / 2, page location of center of whirlpool
     // and also to store movement force exerted on player
@@ -4386,28 +4383,28 @@ WarpZoneObject:
 ProcessWhirlpools:
     lda_abs(AreaType); // check for water type level
     if (!zero_flag) { goto ExitWh; } // branch to leave if not found
-    sta_abs(Whirlpool_Flag); // otherwise initialize whirlpool flag
+    write_byte(Whirlpool_Flag, a);
     lda_abs(TimerControl); // if master timer control set,
     if (!zero_flag) { goto ExitWh; } // branch to leave
     ldy_imm(0x4); // otherwise start with last whirlpool data
   
 WhLoop:
     lda_absy(Whirlpool_LeftExtent); // get left extent of whirlpool
-    clc();
+    carry_flag = false;
     adc_absy(Whirlpool_Length); // add length of whirlpool
-    sta_zp(0x2); // store result as right extent here
+    write_byte(0x2, a);
     lda_absy(Whirlpool_PageLoc); // get page location
     if (zero_flag) { goto NextWh; } // if none or page 0, branch to get next data
     adc_imm(0x0); // add carry
-    sta_zp(0x1); // store result as page location of right extent here
+    write_byte(0x1, a);
     lda_zp(Player_X_Position); // get player's horizontal position
-    sec();
+    carry_flag = true;
     sbc_absy(Whirlpool_LeftExtent); // subtract left extent
     lda_zp(Player_PageLoc); // get player's page location
     sbc_absy(Whirlpool_PageLoc); // subtract borrow
     if (neg_flag) { goto NextWh; } // if player too far left, branch to get next data
     lda_zp(0x2); // otherwise get right extent
-    sec();
+    carry_flag = true;
     sbc_zp(Player_X_Position); // subtract player's horizontal coordinate
     lda_zp(0x1); // get right extent's page location
     sbc_zp(Player_PageLoc); // subtract borrow
@@ -4423,27 +4420,27 @@ ExitWh:
 WhirlpoolActivate:
     lda_absy(Whirlpool_Length); // get length of whirlpool
     lsr_acc(); // divide by 2
-    sta_zp(0x0); // save here
+    write_byte(0x0, a);
     lda_absy(Whirlpool_LeftExtent); // get left extent of whirlpool
-    clc();
+    carry_flag = false;
     adc_zp(0x0); // add length divided by 2
-    sta_zp(0x1); // save as center of whirlpool
+    write_byte(0x1, a);
     lda_absy(Whirlpool_PageLoc); // get page location
     adc_imm(0x0); // add carry
-    sta_zp(0x0); // save as page location of whirlpool center
+    write_byte(0x0, a);
     lda_zp(FrameCounter); // get frame counter
     lsr_acc(); // shift d0 into carry (to run on every other frame)
     if (!carry_flag) { goto WhPull; } // if d0 not set, branch to last part of code
     lda_zp(0x1); // get center
-    sec();
+    carry_flag = true;
     sbc_zp(Player_X_Position); // subtract player's horizontal coordinate
     lda_zp(0x0); // get page location of center
     sbc_zp(Player_PageLoc); // subtract borrow
     if (!neg_flag) { goto LeftWh; } // if player to the left of center, branch
     lda_zp(Player_X_Position); // otherwise slowly pull player left, towards the center
-    sec();
+    carry_flag = true;
     sbc_imm(0x1); // subtract one pixel
-    sta_zp(Player_X_Position); // set player's new horizontal coordinate
+    write_byte(Player_X_Position, a);
     lda_zp(Player_PageLoc);
     sbc_imm(0x0); // subtract borrow
     goto SetPWh; // jump to set player's new page location
@@ -4453,30 +4450,30 @@ LeftWh:
     lsr_acc(); // shift d0 into carry
     if (!carry_flag) { goto WhPull; } // if d0 not set, branch
     lda_zp(Player_X_Position); // otherwise slowly pull player right, towards the center
-    clc();
+    carry_flag = false;
     adc_imm(0x1); // add one pixel
-    sta_zp(Player_X_Position); // set player's new horizontal coordinate
+    write_byte(Player_X_Position, a);
     lda_zp(Player_PageLoc);
     adc_imm(0x0); // add carry
   
 SetPWh:
-    sta_zp(Player_PageLoc); // set player's new page location
+    write_byte(Player_PageLoc, a);
   
 WhPull:
     lda_imm(0x10);
-    sta_zp(0x0); // set vertical movement force
+    write_byte(0x0, a);
     lda_imm(0x1);
-    sta_abs(Whirlpool_Flag); // set whirlpool flag to be used later
-    sta_zp(0x2); // also set maximum vertical speed
+    write_byte(Whirlpool_Flag, a);
+    write_byte(0x2, a);
     lsr_acc();
     tax(); // set X for player offset
     ImposeGravity(); goto rts; // jump to put whirlpool effect on player vertically, do not return
-    ImposeGravity(); goto rts; // <gen: fallthrough>
+    ImposeGravity(); goto rts; // <fallthrough>
     // -------------------------------------------------------------------------------------
   
 FlagpoleRoutine:
     ldx_imm(0x5); // set enemy object offset
-    stx_zp(ObjectOffset); // to special use slot
+    write_byte(ObjectOffset, x);
     lda_zpx(Enemy_ID);
     cmp_imm(FlagpoleFlagObject); // if flagpole flag not found,
     if (!zero_flag) { goto ExitFlagP; } // branch to leave
@@ -4494,17 +4491,17 @@ FlagpoleRoutine:
     if (carry_flag) { goto GiveFPScr; } // branch to end the level
     lda_absx(Enemy_YMF_Dummy);
     adc_imm(0xff); // add movement amount to dummy variable
-    sta_absx(Enemy_YMF_Dummy); // save dummy variable
+    write_byte(Enemy_YMF_Dummy + x, a);
     lda_zpx(Enemy_Y_Position); // get flag's vertical coordinate
     adc_imm(0x1); // add 1 plus carry to move flag, and
-    sta_zpx(Enemy_Y_Position); // store vertical coordinate
+    write_byte(Enemy_Y_Position + x, a);
     lda_abs(FlagpoleFNum_YMFDummy);
-    sec(); // subtract movement amount from dummy variable
+    carry_flag = true;
     sbc_imm(0xff);
-    sta_abs(FlagpoleFNum_YMFDummy); // save dummy variable
+    write_byte(FlagpoleFNum_YMFDummy, a);
     lda_abs(FlagpoleFNum_Y_Pos);
     sbc_imm(0x1); // subtract one plus borrow to move floatey number,
-    sta_abs(FlagpoleFNum_Y_Pos); // and store vertical coordinate here
+    write_byte(FlagpoleFNum_Y_Pos, a);
   
 SkipScore:
     goto FPGfx; // jump to skip ahead and draw flag and floatey number
@@ -4513,10 +4510,10 @@ GiveFPScr:
     ldy_abs(FlagpoleScore); // get score offset from earlier (when player touched flagpole)
     lda_absy(FlagpoleScoreMods); // get amount to award player points
     ldx_absy(FlagpoleScoreDigits); // get digit with which to award points
-    sta_absx(DigitModifier); // store in digit modifier
+    write_byte(DigitModifier + x, a);
     jsr(AddToScore, 129); // do sub to award player points depending on height of collision
     lda_imm(0x5);
-    sta_zp(GameEngineSubroutine); // set to run end-of-level subroutine on next frame
+    write_byte(GameEngineSubroutine, a);
   
 FPGfx:
     jsr(GetEnemyOffscreenBits, 130); // get offscreen information
@@ -4548,9 +4545,9 @@ DownJSpr:
   
 PosJSpr:
     lda_zpx(Jumpspring_FixedYPos); // get permanent vertical position
-    clc();
+    carry_flag = false;
     adc_absy(Jumpspring_Y_PosData); // add value using frame control as offset
-    sta_zpx(Enemy_Y_Position); // store as new vertical position
+    write_byte(Enemy_Y_Position + x, a);
     cpy_imm(0x1); // check frame control offset (second frame is $00)
     if (!carry_flag) { goto BounceJS; } // if offset not yet at third frame ($01), skip to next part
     lda_zp(A_B_Buttons);
@@ -4559,15 +4556,15 @@ PosJSpr:
     and_zp(PreviousA_B_Buttons); // check for A button pressed in previous frame
     if (!zero_flag) { goto BounceJS; } // skip to next part if so
     lda_imm(0xf4);
-    sta_abs(JumpspringForce); // otherwise write new jumpspring force here
+    write_byte(JumpspringForce, a);
   
 BounceJS:
     cpy_imm(0x3); // check frame control offset again
     if (!zero_flag) { goto DrawJSpr; } // skip to last part if not yet at fifth frame ($03)
     lda_abs(JumpspringForce);
-    sta_zp(Player_Y_Speed); // store jumpspring force as player's new vertical speed
+    write_byte(Player_Y_Speed, a);
     lda_imm(0x0);
-    sta_abs(JumpspringAnimCtrl); // initialize jumpspring frame control
+    write_byte(JumpspringAnimCtrl, a);
   
 DrawJSpr:
     jsr(RelativeEnemyPosition, 134); // get jumpspring's relative coordinates
@@ -4578,7 +4575,7 @@ DrawJSpr:
     lda_abs(JumpspringTimer);
     if (!zero_flag) { goto ExJSpring; } // if jumpspring timer not expired yet, leave
     lda_imm(0x4);
-    sta_abs(JumpspringTimer); // otherwise initialize jumpspring timer
+    write_byte(JumpspringTimer, a);
     inc_abs(JumpspringAnimCtrl); // increment frame control to animate jumpspring
   
 ExJSpring:
@@ -4602,7 +4599,7 @@ VineObjectHandler:
     if (!carry_flag) { goto RunVSubs; } // if d1 not set (2 frames every 4) skip this part
     lda_zp(Enemy_Y_Position + 5);
     sbc_imm(0x1); // subtract vertical position of vine
-    sta_zp(Enemy_Y_Position + 5); // one pixel every frame it's time
+    write_byte(Enemy_Y_Position + 5, a);
     inc_abs(VineHeight); // increment vine height
   
 RunVSubs:
@@ -4628,8 +4625,8 @@ KillVine:
     EraseEnemyObject(); // kill this vine object
     dey(); // decrement Y
     if (!neg_flag) { goto KillVine; } // if any vine objects left, loop back to kill it
-    sta_abs(VineFlagOffset); // initialize vine flag/offset
-    sta_abs(VineHeight); // initialize vine height
+    write_byte(VineFlagOffset, a);
+    write_byte(VineHeight, a);
   
 WrCMTile:
     lda_abs(VineHeight); // check vine height
@@ -4645,7 +4642,7 @@ WrCMTile:
     lda_indy(0x6); // otherwise check contents of block buffer at 
     if (!zero_flag) { goto ExitVH; } // current offset, if not empty, branch to leave
     lda_imm(0x26);
-    sta_indy(0x6); // otherwise, write climbing metatile to block buffer
+    write_byte(read_word(0x6) + y, a);
   
 ExitVH:
     ldx_zp(ObjectOffset); // get enemy object offset and leave
@@ -4658,7 +4655,7 @@ ProcessCannons:
     ldx_imm(0x2);
   
 ThreeSChk:
-    stx_zp(ObjectOffset); // start at third enemy slot
+    write_byte(ObjectOffset, x);
     lda_zpx(Enemy_Flag); // check enemy buffer flag
     if (!zero_flag) { goto Chk_BB; } // if set, branch to check enemy
     lda_absx(PseudoRandomBitReg + 1); // otherwise get part of LSFR
@@ -4672,31 +4669,31 @@ ThreeSChk:
     lda_absy(Cannon_Timer); // get cannon timer
     if (zero_flag) { goto FireCannon; } // if expired, branch to fire cannon
     sbc_imm(0x0); // otherwise subtract borrow (note carry will always be clear here)
-    sta_absy(Cannon_Timer); // to count timer down
+    write_byte(Cannon_Timer + y, a);
     goto Chk_BB; // then jump ahead to check enemy
   
 FireCannon:
     lda_abs(TimerControl); // if master timer control set,
     if (!zero_flag) { goto Chk_BB; } // branch to check enemy
     lda_imm(0xe); // otherwise we start creating one
-    sta_absy(Cannon_Timer); // first, reset cannon timer
+    write_byte(Cannon_Timer + y, a);
     lda_absy(Cannon_PageLoc); // get page location of cannon
-    sta_zpx(Enemy_PageLoc); // save as page location of bullet bill
+    write_byte(Enemy_PageLoc + x, a);
     lda_absy(Cannon_X_Position); // get horizontal coordinate of cannon
-    sta_zpx(Enemy_X_Position); // save as horizontal coordinate of bullet bill
+    write_byte(Enemy_X_Position + x, a);
     lda_absy(Cannon_Y_Position); // get vertical coordinate of cannon
-    sec();
+    carry_flag = true;
     sbc_imm(0x8); // subtract eight pixels (because enemies are 24 pixels tall)
-    sta_zpx(Enemy_Y_Position); // save as vertical coordinate of bullet bill
+    write_byte(Enemy_Y_Position + x, a);
     lda_imm(0x1);
-    sta_zpx(Enemy_Y_HighPos); // set vertical high byte of bullet bill
-    sta_zpx(Enemy_Flag); // set buffer flag
+    write_byte(Enemy_Y_HighPos + x, a);
+    write_byte(Enemy_Flag + x, a);
     lsr_acc(); // shift right once to init A
-    sta_zpx(Enemy_State); // then initialize enemy's state
+    write_byte(Enemy_State + x, a);
     lda_imm(0x9);
-    sta_absx(Enemy_BoundBoxCtrl); // set bounding box size control for bullet bill
+    write_byte(Enemy_BoundBoxCtrl + x, a);
     lda_imm(BulletBill_CannonVar);
-    sta_zpx(Enemy_ID); // load identifier for bullet bill (cannon variant)
+    write_byte(Enemy_ID + x, a);
     goto Next3Slt; // move onto next slot
   
 Chk_BB:
@@ -4732,20 +4729,20 @@ BulletBillHandler:
     iny(); // otherwise increment to move left
   
 SetupBB:
-    sty_zpx(Enemy_MovingDir); // set bullet bill's moving direction
+    write_byte(Enemy_MovingDir + x, y);
     dey(); // decrement to use as offset
     lda_absy(BulletBillXSpdData); // get horizontal speed based on moving direction
-    sta_zpx(Enemy_X_Speed); // and store it
+    write_byte(Enemy_X_Speed + x, a);
     lda_zp(0x0); // get horizontal difference
     adc_imm(0x28); // add 40 pixels
     cmp_imm(0x50); // if less than a certain amount, player is too close
     if (!carry_flag) { goto KillBB; } // to cannon either on left or right side, thus branch
     lda_imm(0x1);
-    sta_zpx(Enemy_State); // otherwise set bullet bill's state
+    write_byte(Enemy_State + x, a);
     lda_imm(0xa);
-    sta_absx(EnemyFrameTimer); // set enemy frame timer
+    write_byte(EnemyFrameTimer + x, a);
     lda_imm(Sfx_Blast);
-    sta_zp(Square2SoundQueue); // play fireworks/gunfire sound
+    write_byte(Square2SoundQueue, a);
   
 ChkDSte:
     lda_zpx(Enemy_State); // check enemy state for d5 set
@@ -4784,17 +4781,17 @@ SetMOfs:
     if (!zero_flag) { goto NoHammer; } // if buffer flag set, branch to leave with carry clear
     ldx_zp(ObjectOffset); // get original enemy object offset
     txa();
-    sta_absy(HammerEnemyOffset); // save here
+    write_byte(HammerEnemyOffset + y, a);
     lda_imm(0x90);
-    sta_zpy(Misc_State); // save hammer's state here
+    write_byte(Misc_State + y, a);
     lda_imm(0x7);
-    sta_absy(Misc_BoundBoxCtrl); // set something else entirely, here
-    sec(); // return with carry set
+    write_byte(Misc_BoundBoxCtrl + y, a);
+    carry_flag = true;
     goto rts;
   
 NoHammer:
     ldx_zp(ObjectOffset); // get original enemy object offset
-    clc(); // return with carry clear
+    carry_flag = false;
     goto rts;
     // --------------------------------
     // $00 - used to set downward force
@@ -4811,15 +4808,15 @@ ProcHammerObj:
     if (zero_flag) { goto SetHSpd; } // if currently at 2, branch
     if (carry_flag) { goto SetHPos; } // if greater than 2, branch elsewhere
     txa();
-    clc(); // add 13 bytes to use
+    carry_flag = false;
     adc_imm(0xd); // proper misc object
     tax(); // return offset to X
     lda_imm(0x10);
-    sta_zp(0x0); // set downward movement force
+    write_byte(0x0, a);
     lda_imm(0xf);
-    sta_zp(0x1); // set upward movement force (not used)
+    write_byte(0x1, a);
     lda_imm(0x4);
-    sta_zp(0x2); // set maximum vertical speed
+    write_byte(0x2, a);
     lda_imm(0x0); // set A to impose gravity on hammer
     ImposeGravity(); // do sub to impose gravity on hammer and move vertically
     jsr(MoveObjectHorizontally, 150); // do sub to move it horizontally
@@ -4828,31 +4825,31 @@ ProcHammerObj:
   
 SetHSpd:
     lda_imm(0xfe);
-    sta_zpx(Misc_Y_Speed); // set hammer's vertical speed
+    write_byte(Misc_Y_Speed + x, a);
     lda_zpy(Enemy_State); // get enemy object state
     and_imm(0b11110111); // mask out d3
-    sta_zpy(Enemy_State); // store new state
+    write_byte(Enemy_State + y, a);
     ldx_zpy(Enemy_MovingDir); // get enemy's moving direction
     dex(); // decrement to use as offset
     lda_absx(HammerXSpdData); // get proper speed to use based on moving direction
     ldx_zp(ObjectOffset); // reobtain hammer's buffer offset
-    sta_zpx(Misc_X_Speed); // set hammer's horizontal speed
+    write_byte(Misc_X_Speed + x, a);
   
 SetHPos:
     dec_zpx(Misc_State); // decrement hammer's state
     lda_zpy(Enemy_X_Position); // get enemy's horizontal position
-    clc();
+    carry_flag = false;
     adc_imm(0x2); // set position 2 pixels to the right
-    sta_zpx(Misc_X_Position); // store as hammer's horizontal position
+    write_byte(Misc_X_Position + x, a);
     lda_zpy(Enemy_PageLoc); // get enemy's page location
     adc_imm(0x0); // add carry
-    sta_zpx(Misc_PageLoc); // store as hammer's page location
+    write_byte(Misc_PageLoc + x, a);
     lda_zpy(Enemy_Y_Position); // get enemy's vertical position
-    sec();
+    carry_flag = true;
     sbc_imm(0xa); // move position 10 pixels upward
-    sta_zpx(Misc_Y_Position); // store as hammer's vertical position
+    write_byte(Misc_Y_Position + x, a);
     lda_imm(0x1);
-    sta_zpx(Misc_Y_HighPos); // set hammer's vertical high byte
+    write_byte(Misc_Y_HighPos + x, a);
     if (!zero_flag) { goto RunHSubs; } // unconditional branch to skip first routine
   
 RunAllH:
@@ -4871,38 +4868,38 @@ RunHSubs:
 CoinBlock:
     FindEmptyMiscSlot(); // set offset for empty or last misc object buffer slot
     lda_zpx(Block_PageLoc); // get page location of block object
-    sta_zpy(Misc_PageLoc); // store as page location of misc object
+    write_byte(Misc_PageLoc + y, a);
     lda_zpx(Block_X_Position); // get horizontal coordinate of block object
     ora_imm(0x5); // add 5 pixels
-    sta_zpy(Misc_X_Position); // store as horizontal coordinate of misc object
+    write_byte(Misc_X_Position + y, a);
     lda_zpx(Block_Y_Position); // get vertical coordinate of block object
     sbc_imm(0x10); // subtract 16 pixels
-    sta_zpy(Misc_Y_Position); // store as vertical coordinate of misc object
+    write_byte(Misc_Y_Position + y, a);
     goto JCoinC; // jump to rest of code as applies to this misc object
   
 SetupJumpCoin:
     FindEmptyMiscSlot(); // set offset for empty or last misc object buffer slot
     lda_absx(Block_PageLoc2); // get page location saved earlier
-    sta_zpy(Misc_PageLoc); // and save as page location for misc object
+    write_byte(Misc_PageLoc + y, a);
     lda_zp(0x6); // get low byte of block buffer offset
     asl_acc();
     asl_acc(); // multiply by 16 to use lower nybble
     asl_acc();
     asl_acc();
     ora_imm(0x5); // add five pixels
-    sta_zpy(Misc_X_Position); // save as horizontal coordinate for misc object
+    write_byte(Misc_X_Position + y, a);
     lda_zp(0x2); // get vertical high nybble offset from earlier
     adc_imm(0x20); // add 32 pixels for the status bar
-    sta_zpy(Misc_Y_Position); // store as vertical coordinate
+    write_byte(Misc_Y_Position + y, a);
   
 JCoinC:
     lda_imm(0xfb);
-    sta_zpy(Misc_Y_Speed); // set vertical speed
+    write_byte(Misc_Y_Speed + y, a);
     lda_imm(0x1);
-    sta_zpy(Misc_Y_HighPos); // set vertical high byte
-    sta_zpy(Misc_State); // set state for misc object
-    sta_zp(Square2SoundQueue); // load coin grab sound
-    stx_zp(ObjectOffset); // store current control bit as misc object offset 
+    write_byte(Misc_Y_HighPos + y, a);
+    write_byte(Misc_State + y, a);
+    write_byte(Square2SoundQueue, a);
+    write_byte(ObjectOffset, x);
     jsr(GiveOneCoin, 156); // update coin tally on the screen and coin amount variable
     inc_abs(CoinTallyFor1Ups); // increment coin tally used to activate 1-up block flag
     goto rts;
@@ -4912,7 +4909,7 @@ MiscObjectsCore:
     ldx_imm(0x8); // set at end of misc object buffer
   
 MiscLoop:
-    stx_zp(ObjectOffset); // store misc object offset here
+    write_byte(ObjectOffset, x);
     lda_zpx(Misc_State); // check misc object state
     if (zero_flag) { goto MiscLoopBack; } // branch to check next slot
     asl_acc(); // otherwise shift d7 into carry
@@ -4930,30 +4927,30 @@ ProcJumpCoin:
     if (zero_flag) { goto JCoinRun; } // if so, branch to handle jumping coin
     inc_zpx(Misc_State); // otherwise increment state to either start off or as timer
     lda_zpx(Misc_X_Position); // get horizontal coordinate for misc object
-    clc(); // whether its jumping coin (state 0 only) or floatey number
+    carry_flag = false;
     adc_abs(ScrollAmount); // add current scroll speed
-    sta_zpx(Misc_X_Position); // store as new horizontal coordinate
+    write_byte(Misc_X_Position + x, a);
     lda_zpx(Misc_PageLoc); // get page location
     adc_imm(0x0); // add carry
-    sta_zpx(Misc_PageLoc); // store as new page location
+    write_byte(Misc_PageLoc + x, a);
     lda_zpx(Misc_State);
     cmp_imm(0x30); // check state of object for preset value
     if (!zero_flag) { goto RunJCSubs; } // if not yet reached, branch to subroutines
     lda_imm(0x0);
-    sta_zpx(Misc_State); // otherwise nullify object state
+    write_byte(Misc_State + x, a);
     goto MiscLoopBack; // and move onto next slot
   
 JCoinRun:
     txa();
-    clc(); // add 13 bytes to offset for next subroutine
+    carry_flag = false;
     adc_imm(0xd);
     tax();
     lda_imm(0x50); // set downward movement amount
-    sta_zp(0x0);
+    write_byte(0x0, a);
     lda_imm(0x6); // set maximum vertical speed
-    sta_zp(0x2);
+    write_byte(0x2, a);
     lsr_acc(); // divide by 2 and set
-    sta_zp(0x1); // as upward movement amount (apparently residual)
+    write_byte(0x1, a);
     lda_imm(0x0); // set A to impose gravity on jumping coin
     ImposeGravity(); // do sub to move coin vertically and impose gravity on it
     ldx_zp(ObjectOffset); // get original misc object offset
@@ -4976,7 +4973,7 @@ MiscLoopBack:
   
 GiveOneCoin:
     lda_imm(0x1); // set digit modifier to add 1 coin
-    sta_abs(DigitModifier + 5); // to the current player's coin tally
+    write_byte(DigitModifier + 5, a);
     ldx_abs(CurrentPlayer); // get current player on the screen
     ldy_absx(CoinTallyOffsets); // get offset for player's coin tally
     jsr(DigitsMathRoutine, 162); // update the coin tally
@@ -4985,14 +4982,14 @@ GiveOneCoin:
     cmp_imm(100); // does player have 100 coins yet?
     if (!zero_flag) { goto CoinPoints; } // if not, skip all of this
     lda_imm(0x0);
-    sta_abs(CoinTally); // otherwise, reinitialize coin amount
+    write_byte(CoinTally, a);
     inc_abs(NumberofLives); // give the player an extra life
     lda_imm(Sfx_ExtraLife);
-    sta_zp(Square2SoundQueue); // play 1-up sound
+    write_byte(Square2SoundQueue, a);
   
 CoinPoints:
     lda_imm(0x2); // set digit modifier to award
-    sta_abs(DigitModifier + 4); // 200 points to the player
+    write_byte(DigitModifier + 4, a);
   
 AddToScore:
     ldx_abs(CurrentPlayer); // get current player
@@ -5009,7 +5006,7 @@ UpdateNumber:
     lda_absy(VRAM_Buffer1 - 6); // check highest digit of score
     if (!zero_flag) { goto NoZSup; } // if zero, overwrite with space tile for zero suppression
     lda_imm(0x24);
-    sta_absy(VRAM_Buffer1 - 6);
+    write_byte(VRAM_Buffer1 - 6 + y, a);
   
 NoZSup:
     ldx_zp(ObjectOffset); // get enemy object buffer offset
@@ -5018,23 +5015,23 @@ NoZSup:
   
 SetupPowerUp:
     lda_imm(PowerUpObject); // load power-up identifier into
-    sta_zp(Enemy_ID + 5); // special use slot of enemy object buffer
+    write_byte(Enemy_ID + 5, a);
     lda_zpx(Block_PageLoc); // store page location of block object
-    sta_zp(Enemy_PageLoc + 5); // as page location of power-up object
+    write_byte(Enemy_PageLoc + 5, a);
     lda_zpx(Block_X_Position); // store horizontal coordinate of block object
-    sta_zp(Enemy_X_Position + 5); // as horizontal coordinate of power-up object
+    write_byte(Enemy_X_Position + 5, a);
     lda_imm(0x1);
-    sta_zp(Enemy_Y_HighPos + 5); // set vertical high byte of power-up object
+    write_byte(Enemy_Y_HighPos + 5, a);
     lda_zpx(Block_Y_Position); // get vertical coordinate of block object
-    sec();
+    carry_flag = true;
     sbc_imm(0x8); // subtract 8 pixels
-    sta_zp(Enemy_Y_Position + 5); // and use as vertical coordinate of power-up object
-    PwrUpJmp(); goto rts; // <gen: fallthrough>
+    write_byte(Enemy_Y_Position + 5, a);
+    PwrUpJmp(); goto rts; // <fallthrough>
     // -------------------------------------------------------------------------------------
   
 PowerUpObjHandler:
     ldx_imm(0x5); // set object offset for last slot in enemy object buffer
-    stx_zp(ObjectOffset);
+    write_byte(ObjectOffset, x);
     lda_zp(Enemy_State + 5); // check power-up object's state
     if (zero_flag) { goto ExitPUp; } // if not set, branch to leave
     asl_acc(); // shift to check if d7 was set in object state
@@ -5066,13 +5063,13 @@ GrowThePowerUp:
     cmp_imm(0x11); // if power-up object state not yet past 16th pixel,
     if (!carry_flag) { goto ChkPUSte; } // branch ahead to last part here
     lda_imm(0x10);
-    sta_zpx(Enemy_X_Speed); // otherwise set horizontal speed
+    write_byte(Enemy_X_Speed + x, a);
     lda_imm(0b10000000);
-    sta_zp(Enemy_State + 5); // and then set d7 in power-up object's state
+    write_byte(Enemy_State + 5, a);
     asl_acc(); // shift once to init A
-    sta_abs(Enemy_SprAttrib + 5); // initialize background priority bit set here
+    write_byte(Enemy_SprAttrib + 5, a);
     rol_acc(); // rotate A to set right moving direction
-    sta_zpx(Enemy_MovingDir); // set moving direction
+    write_byte(Enemy_MovingDir + x, a);
   
 ChkPUSte:
     lda_zp(Enemy_State + 5); // check power-up object's state
@@ -5105,17 +5102,17 @@ PlayerHeadCollision:
     lda_imm(0x12); // otherwise load breakable block object state
   
 DBlockSte:
-    sta_zpx(Block_State); // store into block object buffer
+    write_byte(Block_State + x, a);
     jsr(DestroyBlockMetatile, 175); // store blank metatile in vram buffer to write to name table
     ldx_abs(SprDataOffset_Ctrl); // load offset control bit
     lda_zp(0x2); // get vertical high nybble offset used in block buffer routine
-    sta_absx(Block_Orig_YPos); // set as vertical coordinate for block object
+    write_byte(Block_Orig_YPos + x, a);
     tay();
     lda_zp(0x6); // get low byte of block buffer address used in same routine
-    sta_absx(Block_BBuf_Low); // save as offset here to be used later
+    write_byte(Block_BBuf_Low + x, a);
     lda_indy(0x6); // get contents of block buffer at old address at $06, $07
     BlockBumpedChk(); // do a sub to check which block player bumped head on
-    sta_zp(0x0); // store metatile here
+    write_byte(0x0, a);
     ldy_abs(PlayerSize); // check player's size
     if (!zero_flag) { goto ChkBrick; } // if small, use metatile itself as contents of A
     tya(); // otherwise init A (note: big = 0)
@@ -5123,7 +5120,7 @@ DBlockSte:
 ChkBrick:
     if (!carry_flag) { goto PutMTileB; } // if no match was found in previous sub, skip ahead
     ldy_imm(0x11); // otherwise load unbreakable state into block object buffer
-    sty_zpx(Block_State); // note this applies to both player sizes
+    write_byte(Block_State + x, y);
     lda_imm(0xc4); // load empty block metatile into A for now
     ldy_zp(0x0); // get metatile from before
     cpy_imm(0x58); // is it brick with coins (with line)?
@@ -5135,7 +5132,7 @@ StartBTmr:
     lda_abs(BrickCoinTimerFlag); // check brick coin timer flag
     if (!zero_flag) { goto ContBTmr; } // if set, timer expired or counting down, thus branch
     lda_imm(0xb);
-    sta_abs(BrickCoinTimer); // if not set, set brick coin timer
+    write_byte(BrickCoinTimer, a);
     inc_abs(BrickCoinTimerFlag); // and set flag linked to it
   
 ContBTmr:
@@ -5147,15 +5144,15 @@ PutOldMT:
     tya(); // put metatile into A
   
 PutMTileB:
-    sta_absx(Block_Metatile); // store whatever metatile be appropriate here
+    write_byte(Block_Metatile + x, a);
     InitBlock_XY_Pos(); // get block object horizontal coordinates saved
     ldy_zp(0x2); // get vertical high nybble offset
     lda_imm(0x23);
-    sta_indy(0x6); // write blank metatile $23 to block buffer
+    write_byte(read_word(0x6) + y, a);
     lda_imm(0x10);
-    sta_abs(BlockBounceTimer); // set block bounce timer
+    write_byte(BlockBounceTimer, a);
     pla(); // pull original metatile from stack
-    sta_zp(0x5); // and save here
+    write_byte(0x5, a);
     ldy_imm(0x0); // set default offset
     lda_abs(CrouchingFlag); // is player crouching?
     if (!zero_flag) { goto SmallBP; } // if so, branch to increment offset
@@ -5167,10 +5164,10 @@ SmallBP:
   
 BigBP:
     lda_zp(Player_Y_Position); // get player's vertical coordinate
-    clc();
+    carry_flag = false;
     adc_absy(BlockYPosAdderData); // add value determined by size
     and_imm(0xf0); // mask out low nybble to get 16-pixel correspondence
-    sta_zpx(Block_Y_Position); // save as vertical coordinate for block object
+    write_byte(Block_Y_Position + x, a);
     ldy_zpx(Block_State); // get block object state
     cpy_imm(0x11);
     if (zero_flag) { goto Unbreak; } // if set to value loaded for unbreakable, branch
@@ -5183,20 +5180,20 @@ Unbreak:
 InvOBit:
     lda_abs(SprDataOffset_Ctrl); // invert control bit used by block objects
     eor_imm(0x1); // and floatey numbers
-    sta_abs(SprDataOffset_Ctrl);
+    write_byte(SprDataOffset_Ctrl, a);
     goto rts; // leave!
     // --------------------------------
   
 BumpBlock:
     jsr(CheckTopOfBlock, 178); // check to see if there's a coin directly above this block
     lda_imm(Sfx_Bump);
-    sta_zp(Square1SoundQueue); // play bump sound
+    write_byte(Square1SoundQueue, a);
     lda_imm(0x0);
-    sta_zpx(Block_X_Speed); // initialize horizontal speed for block object
-    sta_absx(Block_Y_MoveForce); // init fractional movement force
-    sta_zp(Player_Y_Speed); // init player's vertical speed
+    write_byte(Block_X_Speed + x, a);
+    write_byte(Block_Y_MoveForce + x, a);
+    write_byte(Player_Y_Speed, a);
     lda_imm(0xfe);
-    sta_zpx(Block_Y_Speed); // set vertical speed for block object
+    write_byte(Block_Y_Speed + x, a);
     lda_zp(0x5); // get original metatile from stack
     BlockBumpedChk(); // do a sub to check which block player bumped head on
     if (!carry_flag) { goto ExitBlockChk; } // if no match was found, branch to leave
@@ -5231,7 +5228,7 @@ ExtraLifeMushBlock:
     lda_imm(0x3); // load 1-up mushroom into power-up type
   
 ExtraLifeMushBlockSkip:
-    sta_zp(0x39); // store correct power-up type
+    write_byte(0x39, a);
     goto SetupPowerUp;
   
 VineBlock:
@@ -5247,13 +5244,13 @@ ExitBlockChk:
 BrickShatter:
     jsr(CheckTopOfBlock, 179); // check to see if there's a coin directly above this block
     lda_imm(Sfx_BrickShatter);
-    sta_absx(Block_RepFlag); // set flag for block object to immediately replace metatile
-    sta_zp(NoiseSoundQueue); // load brick shatter sound
+    write_byte(Block_RepFlag + x, a);
+    write_byte(NoiseSoundQueue, a);
     SpawnBrickChunks(); // create brick chunk objects
     lda_imm(0xfe);
-    sta_zp(Player_Y_Speed); // set vertical speed for player
+    write_byte(Player_Y_Speed, a);
     lda_imm(0x5);
-    sta_abs(DigitModifier + 5); // set digit modifier to give player 50 points
+    write_byte(DigitModifier + 5, a);
     jsr(AddToScore, 180); // do sub to update the score
     ldx_abs(SprDataOffset_Ctrl); // load control bit and leave
     goto rts;
@@ -5264,15 +5261,15 @@ CheckTopOfBlock:
     ldy_zp(0x2); // get vertical high nybble offset used in block buffer
     if (zero_flag) { goto TopEx; } // branch to leave if set to zero, because we're at the top
     tya(); // otherwise set to A
-    sec();
+    carry_flag = true;
     sbc_imm(0x10); // subtract $10 to move up one row in the block buffer
-    sta_zp(0x2); // store as new vertical high nybble offset
+    write_byte(0x2, a);
     tay();
     lda_indy(0x6); // get contents of block buffer in same column, one row up
     cmp_imm(0xc2); // is it a coin? (not underwater)
     if (!zero_flag) { goto TopEx; } // if not, branch to leave
     lda_imm(0x0);
-    sta_indy(0x6); // otherwise put blank metatile where coin was
+    write_byte(read_word(0x6) + y, a);
     jsr(RemoveCoin_Axe, 181); // write blank metatile to vram buffer
     ldx_abs(SprDataOffset_Ctrl); // get control bit
     jsr(SetupJumpCoin, 182); // create jumping coin object and update coin variables
@@ -5288,7 +5285,7 @@ BlockObjectsCore:
     pha(); // push to stack
     tay(); // put in Y for now
     txa();
-    clc();
+    carry_flag = false;
     adc_imm(0x9); // add 9 bytes to offset (note two block objects are created
     tax(); // when using brick chunks, but only one offset for both)
     dey(); // decrement Y to check for solid block state
@@ -5296,7 +5293,7 @@ BlockObjectsCore:
     jsr(ImposeGravityBlock, 183); // do sub to impose gravity on one block object object
     jsr(MoveObjectHorizontally, 184); // do another sub to move horizontally
     txa();
-    clc(); // move onto next block object
+    carry_flag = false;
     adc_imm(0x2);
     tax();
     jsr(ImposeGravityBlock, 185); // do sub to impose gravity on other block object
@@ -5312,7 +5309,7 @@ BlockObjectsCore:
     lda_imm(0xf0);
     cmp_zpx(Block_Y_Position + 2); // check to see if bottom block object went
     if (carry_flag) { goto ChkTop; } // to the bottom of the screen, and branch if not
-    sta_zpx(Block_Y_Position + 2); // otherwise set offscreen coordinate
+    write_byte(Block_Y_Position + 2 + x, a);
   
 ChkTop:
     lda_zpx(Block_Y_Position); // get top block object's vertical coordinate
@@ -5333,13 +5330,13 @@ BouncingBlockHandler:
     pla(); // pull state from stack
     if (carry_flag) { goto UpdSte; } // if still above amount, not time to kill block yet, thus branch
     lda_imm(0x1);
-    sta_absx(Block_RepFlag); // otherwise set flag to replace metatile
+    write_byte(Block_RepFlag + x, a);
   
 KillBlock:
     lda_imm(0x0); // if branched here, nullify object state
   
 UpdSte:
-    sta_zpx(Block_State); // store contents of A in block object state
+    write_byte(Block_State + x, a);
     goto rts;
     // -------------------------------------------------------------------------------------
     // $02 - used to store offset to block buffer
@@ -5349,23 +5346,23 @@ BlockObjMT_Updater:
     ldx_imm(0x1); // set offset to start with second block object
   
 UpdateLoop:
-    stx_zp(ObjectOffset); // set offset here
+    write_byte(ObjectOffset, x);
     lda_abs(VRAM_Buffer1); // if vram buffer already being used here,
     if (!zero_flag) { goto NextBUpd; } // branch to move onto next block object
     lda_absx(Block_RepFlag); // if flag for block object already clear,
     if (zero_flag) { goto NextBUpd; } // branch to move onto next block object
     lda_absx(Block_BBuf_Low); // get low byte of block buffer
-    sta_zp(0x6); // store into block buffer address
+    write_byte(0x6, a);
     lda_imm(0x5);
-    sta_zp(0x7); // set high byte of block buffer address
+    write_byte(0x7, a);
     lda_absx(Block_Orig_YPos); // get original vertical coordinate of block object
-    sta_zp(0x2); // store here and use as offset to block buffer
+    write_byte(0x2, a);
     tay();
     lda_absx(Block_Metatile); // get metatile to be written
-    sta_indy(0x6); // write it to the block buffer
+    write_byte(read_word(0x6) + y, a);
     jsr(ReplaceBlockMetatile, 194); // do sub to replace metatile where block object is
     lda_imm(0x0);
-    sta_absx(Block_RepFlag); // clear block object flag
+    write_byte(Block_RepFlag + x, a);
   
 NextBUpd:
     dex(); // decrement block object offset
@@ -5393,7 +5390,7 @@ MoveObjectHorizontally:
     asl_acc(); // and move low nybble to high
     asl_acc();
     asl_acc();
-    sta_zp(0x1); // store result here
+    write_byte(0x1, a);
     lda_zpx(SprObject_X_Speed); // get saved value again
     lsr_acc(); // move high nybble to low
     lsr_acc();
@@ -5404,30 +5401,30 @@ MoveObjectHorizontally:
     ora_imm(0b11110000); // otherwise alter high nybble
   
 SaveXSpd:
-    sta_zp(0x0); // save result here
+    write_byte(0x0, a);
     ldy_imm(0x0); // load default Y value here
     cmp_imm(0x0); // if result positive, leave Y alone
     if (!neg_flag) { goto UseAdder; }
     dey(); // otherwise decrement Y
   
 UseAdder:
-    sty_zp(0x2); // save Y here
+    write_byte(0x2, y);
     lda_absx(SprObject_X_MoveForce); // get whatever number's here
-    clc();
+    carry_flag = false;
     adc_zp(0x1); // add low nybble moved to high
-    sta_absx(SprObject_X_MoveForce); // store result here
+    write_byte(SprObject_X_MoveForce + x, a);
     lda_imm(0x0); // init A
     rol_acc(); // rotate carry into d0
     pha(); // push onto stack
     ror_acc(); // rotate d0 back onto carry
     lda_zpx(SprObject_X_Position);
     adc_zp(0x0); // add carry plus saved value (high nybble moved to low
-    sta_zpx(SprObject_X_Position); // plus $f0 if necessary) to object's horizontal position
+    write_byte(SprObject_X_Position + x, a);
     lda_zpx(SprObject_PageLoc);
     adc_zp(0x2); // add carry plus other saved value to the
-    sta_zpx(SprObject_PageLoc); // object's page location and save
+    write_byte(SprObject_PageLoc + x, a);
     pla();
-    clc(); // pull old carry from stack and add
+    carry_flag = false;
     adc_zp(0x0); // to high nybble moved to low
   
 ExXMove:
@@ -5446,7 +5443,7 @@ MovePlayerVertically:
   
 NoJSChk:
     lda_abs(VerticalForce); // dump vertical force 
-    sta_zp(0x0);
+    write_byte(0x0, a);
     lda_imm(0x4); // set maximum vertical speed here
     goto ImposeGravitySprObj; // then jump to move player vertically
     // --------------------------------
@@ -5474,11 +5471,11 @@ MoveRedPTroopaUp:
 MoveRedPTroopa:
     inx(); // increment X for enemy offset
     lda_imm(0x3);
-    sta_zp(0x0); // set downward movement amount here
+    write_byte(0x0, a);
     lda_imm(0x6);
-    sta_zp(0x1); // set upward movement amount here
+    write_byte(0x1, a);
     lda_imm(0x2);
-    sta_zp(0x2); // set maximum speed here
+    write_byte(0x2, a);
     tya(); // set movement direction in A, and
     goto RedPTroopaGrav; // jump to move this thing
     // --------------------------------
@@ -5502,7 +5499,7 @@ SetHiMax:
     lda_imm(0x3); // set maximum speed in A
   
 SetXMoveAmt:
-    sty_zp(0x0); // set movement amount here
+    write_byte(0x0, y);
     inx(); // increment X for enemy offset
     jsr(ImposeGravitySprObj, 196); // do a sub to move enemy object downwards
     ldx_zp(ObjectOffset); // get enemy object buffer offset and leave
@@ -5512,14 +5509,14 @@ SetXMoveAmt:
 ImposeGravityBlock:
     ldy_imm(0x1); // set offset for maximum speed
     lda_imm(0x50); // set movement amount here
-    sta_zp(0x0);
+    write_byte(0x0, a);
     lda_absy(MaxSpdBlockData); // get maximum speed
   
 ImposeGravitySprObj:
-    sta_zp(0x2); // set maximum speed here
+    write_byte(0x2, a);
     lda_imm(0x0); // set value to move downwards
     ImposeGravity(); goto rts; // jump to the code that actually moves it
-    ImposeGravity(); goto rts; // <gen: fallthrough>
+    ImposeGravity(); goto rts; // <fallthrough>
     // --------------------------------
   
 MovePlatformDown:
@@ -5539,11 +5536,11 @@ MovePlatformUpSkip:
     lda_imm(0x9); // residual code
   
 SetDplSpd:
-    sta_zp(0x0); // save downward movement amount here
+    write_byte(0x0, a);
     lda_imm(0xa); // save upward movement amount here
-    sta_zp(0x1);
+    write_byte(0x1, a);
     lda_imm(0x3); // save maximum vertical speed here
-    sta_zp(0x2);
+    write_byte(0x2, a);
     pla(); // get value from stack
     tay(); // use as Y, then move onto code shared by red koopa
   
@@ -5579,7 +5576,7 @@ ChkBowserF:
     tay();
     lda_zpy(Enemy_Flag); // use as pointer and load same place with different offset
     if (!zero_flag) { goto ExitELCore; }
-    sta_zpx(Enemy_Flag); // if second enemy flag not set, also clear first one
+    write_byte(Enemy_Flag + x, a);
   
 ExitELCore:
     goto rts;
@@ -5588,32 +5585,32 @@ ExitELCore:
   
 ExecGameLoopback:
     lda_zp(Player_PageLoc); // send player back four pages
-    sec();
+    carry_flag = true;
     sbc_imm(0x4);
-    sta_zp(Player_PageLoc);
+    write_byte(Player_PageLoc, a);
     lda_abs(CurrentPageLoc); // send current page back four pages
-    sec();
+    carry_flag = true;
     sbc_imm(0x4);
-    sta_abs(CurrentPageLoc);
+    write_byte(CurrentPageLoc, a);
     lda_abs(ScreenLeft_PageLoc); // subtract four from page location
-    sec(); // of screen's left border
+    carry_flag = true;
     sbc_imm(0x4);
-    sta_abs(ScreenLeft_PageLoc);
+    write_byte(ScreenLeft_PageLoc, a);
     lda_abs(ScreenRight_PageLoc); // do the same for the page location
-    sec(); // of screen's right border
+    carry_flag = true;
     sbc_imm(0x4);
-    sta_abs(ScreenRight_PageLoc);
+    write_byte(ScreenRight_PageLoc, a);
     lda_abs(AreaObjectPageLoc); // subtract four from page control
-    sec(); // for area objects
+    carry_flag = true;
     sbc_imm(0x4);
-    sta_abs(AreaObjectPageLoc);
+    write_byte(AreaObjectPageLoc, a);
     lda_imm(0x0); // initialize page select for both
-    sta_abs(EnemyObjectPageSel); // area and enemy objects
-    sta_abs(AreaObjectPageSel);
-    sta_abs(EnemyDataOffset); // initialize enemy object data offset
-    sta_abs(EnemyObjectPageLoc); // and enemy object page control
+    write_byte(EnemyObjectPageSel, a);
+    write_byte(AreaObjectPageSel, a);
+    write_byte(EnemyDataOffset, a);
+    write_byte(EnemyObjectPageLoc, a);
     lda_absy(AreaDataOfsLoopback); // adjust area object offset based on
-    sta_abs(AreaDataOffset); // which loop command we encountered
+    write_byte(AreaDataOffset, a);
     goto rts;
   
 ProcLoopCommand:
@@ -5664,23 +5661,23 @@ DoLpBack:
   
 InitMLp:
     lda_imm(0x0); // initialize counters used for multi-part loop commands
-    sta_abs(MultiLoopPassCntr);
-    sta_abs(MultiLoopCorrectCntr);
+    write_byte(MultiLoopPassCntr, a);
+    write_byte(MultiLoopCorrectCntr, a);
   
 InitLCmd:
     lda_imm(0x0); // initialize loop command flag
-    sta_abs(LoopCommand);
+    write_byte(LoopCommand, a);
     // --------------------------------
   
 ChkEnemyFrenzy:
     lda_abs(EnemyFrenzyQueue); // check for enemy object in frenzy queue
     if (zero_flag) { goto ProcessEnemyData; } // if not, skip this part
-    sta_zpx(Enemy_ID); // store as enemy object identifier here
+    write_byte(Enemy_ID + x, a);
     lda_imm(0x1);
-    sta_zpx(Enemy_Flag); // activate enemy object flag
+    write_byte(Enemy_Flag + x, a);
     lda_imm(0x0);
-    sta_zpx(Enemy_State); // initialize state and frenzy queue
-    sta_abs(EnemyFrenzyQueue);
+    write_byte(Enemy_State + x, a);
+    write_byte(EnemyFrenzyQueue, a);
     goto InitEnemyObject; // and then jump to deal with this enemy
     // --------------------------------
     // $06 - used to hold page location of extended right boundary
@@ -5708,13 +5705,13 @@ CheckEndofBuffer:
   
 CheckRightBounds:
     lda_abs(ScreenRight_X_Pos); // add 48 to pixel coordinate of right boundary
-    clc();
+    carry_flag = false;
     adc_imm(0x30);
     and_imm(0b11110000); // store high nybble
-    sta_zp(0x7);
+    write_byte(0x7, a);
     lda_abs(ScreenRight_PageLoc); // add carry to page location of right boundary
     adc_imm(0x0);
-    sta_zp(0x6); // store page location + carry
+    write_byte(0x6, a);
     ldy_abs(EnemyDataOffset);
     iny();
     lda_indy(EnemyData); // if MSB of enemy object is clear, branch to check for row $0f
@@ -5736,7 +5733,7 @@ CheckPageCtrlRow:
     iny();
     lda_indy(EnemyData); // otherwise, get second byte, mask out 2 MSB
     and_imm(0b00111111);
-    sta_abs(EnemyObjectPageLoc); // store as page control for enemy object data
+    write_byte(EnemyObjectPageLoc, a);
     inc_abs(EnemyDataOffset); // increment enemy object data offset 2 bytes
     inc_abs(EnemyDataOffset);
     inc_abs(EnemyObjectPageSel); // set page select for enemy object data and 
@@ -5744,10 +5741,10 @@ CheckPageCtrlRow:
   
 PositionEnemyObj:
     lda_abs(EnemyObjectPageLoc); // store page control as page location
-    sta_zpx(Enemy_PageLoc); // for enemy object
+    write_byte(Enemy_PageLoc + x, a);
     lda_indy(EnemyData); // get first byte of enemy object
     and_imm(0b11110000);
-    sta_zpx(Enemy_X_Position); // store column position
+    write_byte(Enemy_X_Position + x, a);
     cmp_abs(ScreenRight_X_Pos); // check column position against right boundary
     lda_zpx(Enemy_PageLoc); // without subtracting, then subtract borrow
     sbc_abs(ScreenRight_PageLoc); // from page location
@@ -5765,13 +5762,13 @@ CheckRightExtBounds:
     sbc_zpx(Enemy_PageLoc); // plus carry
     if (!carry_flag) { goto CheckFrenzyBuffer; } // if enemy object beyond extended boundary, branch
     lda_imm(0x1); // store value in vertical high byte
-    sta_zpx(Enemy_Y_HighPos);
+    write_byte(Enemy_Y_HighPos + x, a);
     lda_indy(EnemyData); // get first byte again
     asl_acc(); // multiply by four to get the vertical
     asl_acc(); // coordinate
     asl_acc();
     asl_acc();
-    sta_zpx(Enemy_Y_Position);
+    write_byte(Enemy_Y_Position + x, a);
     cmp_imm(0xe0); // do one last check for special row $0e
     if (zero_flag) { goto ParseRow0e; } // (necessary if branched to $c1cb)
     iny();
@@ -5797,9 +5794,9 @@ BuzzyBeetleMutate:
     lda_imm(BuzzyBeetle);
   
 StrID:
-    sta_zpx(Enemy_ID); // store enemy object number into buffer
+    write_byte(Enemy_ID + x, a);
     lda_imm(0x1);
-    sta_zpx(Enemy_Flag); // set flag for enemy in buffer
+    write_byte(Enemy_Flag + x, a);
     jsr(InitEnemyObject, 199);
     lda_zpx(Enemy_Flag); // check to see if flag is set
     if (!zero_flag) { goto Inc2B; } // if not, leave, otherwise branch
@@ -5814,11 +5811,11 @@ CheckFrenzyBuffer:
     lda_imm(VineObject); // otherwise put vine in enemy identifier
   
 StrFre:
-    sta_zpx(Enemy_ID); // store contents of frenzy buffer into enemy identifier value
+    write_byte(Enemy_ID + x, a);
   
 InitEnemyObject:
     lda_imm(0x0); // initialize enemy state
-    sta_zpx(Enemy_State);
+    write_byte(Enemy_State + x, a);
     jsr(CheckpointEnemyID, 200); // jump ahead to run jump engine and subroutines
   
 ExEPar:
@@ -5840,11 +5837,11 @@ ParseRow0e:
     if (!zero_flag) { goto NotUse; } // if not, do not use (this allows multiple uses
     dey(); // of the same area, like the underground bonus areas)
     lda_indy(EnemyData); // otherwise, get second byte and use as offset
-    sta_abs(AreaPointer); // to addresses for level and enemy object data
+    write_byte(AreaPointer, a);
     iny();
     lda_indy(EnemyData); // get third byte again, and this time mask out
     and_imm(0b00011111); // the 3 MSB from before, save as page number to be
-    sta_abs(EntrancePage); // used upon entry to area, if area is entered
+    write_byte(EntrancePage, a);
   
 NotUse:
     goto Inc3B;
@@ -5863,7 +5860,7 @@ Inc2B:
     inc_abs(EnemyDataOffset); // otherwise increment two bytes
     inc_abs(EnemyDataOffset);
     lda_imm(0x0); // init page select for enemy objects
-    sta_abs(EnemyObjectPageSel);
+    write_byte(EnemyObjectPageSel, a);
     ldx_zp(ObjectOffset); // reload current offset in enemy buffers
     goto rts; // and leave
   
@@ -5874,9 +5871,9 @@ CheckpointEnemyID:
     tay(); // save identifier in Y register for now
     lda_zpx(Enemy_Y_Position);
     adc_imm(0x8); // add eight pixels to what will eventually be the
-    sta_zpx(Enemy_Y_Position); // enemy object's vertical coordinate ($00-$14 only)
+    write_byte(Enemy_Y_Position + x, a);
     lda_imm(0x1);
-    sta_absx(EnemyOffscrBitsMasked); // set offscreen masked bit
+    write_byte(EnemyOffscrBitsMasked + x, a);
     tya(); // get identifier back and use as offset for jump engine
   
 InitEnemyRoutines:
@@ -5938,27 +5935,14 @@ InitEnemyRoutines:
       case 53: InitRetainerObj(); goto rts;
       case 54: EndOfEnemyInitCode(); goto rts;
     }
-    Setup_Vine(); goto rts; // <gen: fallthrough>
-    PwrUpJmp(); goto rts; // <gen: fallthrough>
-    NoInitCode(); goto rts; // <gen: fallthrough>
-    NoInitCode(); goto rts; // <gen: fallthrough>
-    NoInitCode(); goto rts; // <gen: fallthrough>
-    NoInitCode(); goto rts; // <gen: fallthrough>
-    NoInitCode(); goto rts; // <gen: fallthrough>
-    NoInitCode(); goto rts; // <gen: fallthrough>
-    NoInitCode(); goto rts; // <gen: fallthrough>
-    NoInitCode(); goto rts; // <gen: fallthrough>
-    NoInitCode(); goto rts; // <gen: fallthrough>
-    NoInitCode(); goto rts; // <gen: fallthrough>
-    NoInitCode(); goto rts; // <gen: fallthrough>
-    NoInitCode(); goto rts; // <gen: fallthrough>
-    NoInitCode(); goto rts; // <gen: fallthrough>
-    NoInitCode(); goto rts; // <gen: fallthrough>
-    InitRetainerObj(); goto rts; // <gen: fallthrough>
-    InitBulletBill(); goto rts; // <gen: fallthrough>
-    EndFrenzy(); goto rts; // <gen: fallthrough>
-    InitVertPlatform(); goto rts; // <gen: fallthrough>
-    EndOfEnemyInitCode(); goto rts; // <gen: fallthrough>
+    Setup_Vine(); goto rts; // <fallthrough>
+    PwrUpJmp(); goto rts; // <fallthrough>
+    NoInitCode(); goto rts; // <fallthrough>
+    InitRetainerObj(); goto rts; // <fallthrough>
+    InitBulletBill(); goto rts; // <fallthrough>
+    EndFrenzy(); goto rts; // <fallthrough>
+    InitVertPlatform(); goto rts; // <fallthrough>
+    EndOfEnemyInitCode(); goto rts; // <fallthrough>
   
 InitGoomba:
     jsr(InitNormalEnemy, 201); // set appropriate horizontal speed
@@ -5967,12 +5951,12 @@ InitGoomba:
   
 InitPodoboo:
     lda_imm(0x2); // set enemy position to below
-    sta_zpx(Enemy_Y_HighPos); // the bottom of the screen
-    sta_zpx(Enemy_Y_Position);
+    write_byte(Enemy_Y_HighPos + x, a);
+    write_byte(Enemy_Y_Position + x, a);
     lsr_acc();
-    sta_absx(EnemyIntervalTimer); // set timer for enemy
+    write_byte(EnemyIntervalTimer + x, a);
     lsr_acc();
-    sta_zpx(Enemy_State); // initialize enemy state, then jump to use
+    write_byte(Enemy_State + x, a);
     goto SmallBBox; // $09 as bounding box size and set other things
     // --------------------------------
   
@@ -5986,24 +5970,24 @@ GetESpd:
     lda_absy(NormalXSpdData); // get appropriate horizontal speed
   
 SetESpd:
-    sta_zpx(Enemy_X_Speed); // store as speed for enemy object
+    write_byte(Enemy_X_Speed + x, a);
     goto TallBBox; // branch to set bounding box control and other data
     // --------------------------------
   
 InitRedKoopa:
     jsr(InitNormalEnemy, 202); // load appropriate horizontal speed
     lda_imm(0x1); // set enemy state for red koopa troopa $03
-    sta_zpx(Enemy_State);
+    write_byte(Enemy_State + x, a);
     goto rts;
     // --------------------------------
   
 InitHammerBro:
     lda_imm(0x0); // init horizontal speed and timer used by hammer bro
-    sta_absx(HammerThrowingTimer); // apparently to time hammer throwing
-    sta_zpx(Enemy_X_Speed);
+    write_byte(HammerThrowingTimer + x, a);
+    write_byte(Enemy_X_Speed + x, a);
     ldy_abs(SecondaryHardMode); // get secondary hard mode flag
     lda_absy(HBroWalkingTimerData);
-    sta_absx(EnemyIntervalTimer); // set value as delay for hammer bro to walk left
+    write_byte(EnemyIntervalTimer + x, a);
     lda_imm(0xb); // set specific value for bounding box size control
     goto SetBBox;
     // --------------------------------
@@ -6015,7 +5999,7 @@ InitHorizFlySwimEnemy:
   
 InitBloober:
     lda_imm(0x0); // initialize horizontal speed
-    sta_zpx(BlooperMoveSpeed);
+    write_byte(BlooperMoveSpeed + x, a);
   
 SmallBBox:
     lda_imm(0x9); // set specific bounding box size control
@@ -6025,31 +6009,31 @@ SmallBBox:
 InitRedPTroopa:
     ldy_imm(0x30); // load central position adder for 48 pixels down
     lda_zpx(Enemy_Y_Position); // set vertical coordinate into location to
-    sta_absx(RedPTroopaOrigXPos); // be used as original vertical coordinate
+    write_byte(RedPTroopaOrigXPos + x, a);
     if (!neg_flag) { goto GetCent; } // if vertical coordinate < $80
     ldy_imm(0xe0); // if => $80, load position adder for 32 pixels up
   
 GetCent:
     tya(); // send central position adder to A
     adc_zpx(Enemy_Y_Position); // add to current vertical coordinate
-    sta_zpx(RedPTroopaCenterYPos); // store as central vertical coordinate
+    write_byte(RedPTroopaCenterYPos + x, a);
   
 TallBBox:
     lda_imm(0x3); // set specific bounding box size control
   
 SetBBox:
-    sta_absx(Enemy_BoundBoxCtrl); // set bounding box control here
+    write_byte(Enemy_BoundBoxCtrl + x, a);
     lda_imm(0x2); // set moving direction for left
-    sta_zpx(Enemy_MovingDir);
-    InitVStf(); goto rts; // <gen: fallthrough>
+    write_byte(Enemy_MovingDir + x, a);
+    InitVStf(); goto rts; // <fallthrough>
   
 InitCheepCheep:
     jsr(SmallBBox, 203); // set vertical bounding box, speed, init others
     lda_absx(PseudoRandomBitReg); // check one portion of LSFR
     and_imm(0b00010000); // get d4 from it
-    sta_zpx(CheepCheepMoveMFlag); // save as movement flag of some sort
+    write_byte(CheepCheepMoveMFlag + x, a);
     lda_zpx(Enemy_Y_Position);
-    sta_absx(CheepCheepOrigYPos); // save original vertical coordinate here
+    write_byte(CheepCheepOrigYPos + x, a);
     goto rts;
     // --------------------------------
   
@@ -6059,13 +6043,13 @@ InitLakitu:
   
 SetupLakitu:
     lda_imm(0x0); // erase counter for lakitu's reappearance
-    sta_abs(LakituReappearTimer);
+    write_byte(LakituReappearTimer, a);
     jsr(InitHorizFlySwimEnemy, 204); // set $03 as bounding box, set other attributes
     goto TallBBox2; // set $03 as bounding box again (not necessary) and leave
   
 KillLakitu:
     EraseEnemyObject(); goto rts;
-    EraseEnemyObject(); goto rts; // <gen: fallthrough>
+    EraseEnemyObject(); goto rts; // <fallthrough>
     // --------------------------------
     // $01-$03 - used to hold pseudorandom difference adjusters
   
@@ -6075,7 +6059,7 @@ LakituAndSpinyHandler:
     cpx_imm(0x5); // if we are on the special use slot, leave
     if (carry_flag) { goto ExLSHand; }
     lda_imm(0x80); // set timer
-    sta_abs(FrenzyEnemyTimer);
+    write_byte(FrenzyEnemyTimer, a);
     ldy_imm(0x4); // start with the last enemy slot
   
 ChkLak:
@@ -6099,9 +6083,9 @@ ChkNoEn:
   
 CreateL:
     lda_imm(0x0); // initialize enemy state
-    sta_zpx(Enemy_State);
+    write_byte(Enemy_State + x, a);
     lda_imm(Lakitu); // create lakitu enemy object
-    sta_zpx(Enemy_ID);
+    write_byte(Enemy_ID + x, a);
     jsr(SetupLakitu, 205); // do a sub to set up lakitu
     lda_imm(0x20);
     jsr(PutAtRightExtent, 206); // finish setting up lakitu
@@ -6120,15 +6104,15 @@ CreateSpiny:
     lda_zpy(Enemy_State); // if lakitu is not in normal state, branch to leave
     if (!zero_flag) { goto ExLSHand; }
     lda_zpy(Enemy_PageLoc); // store horizontal coordinates (high and low) of lakitu
-    sta_zpx(Enemy_PageLoc); // into the coordinates of the spiny we're going to create
+    write_byte(Enemy_PageLoc + x, a);
     lda_zpy(Enemy_X_Position);
-    sta_zpx(Enemy_X_Position);
+    write_byte(Enemy_X_Position + x, a);
     lda_imm(0x1); // put spiny within vertical screen unit
-    sta_zpx(Enemy_Y_HighPos);
+    write_byte(Enemy_Y_HighPos + x, a);
     lda_zpy(Enemy_Y_Position); // put spiny eight pixels above where lakitu is
-    sec();
+    carry_flag = true;
     sbc_imm(0x8);
-    sta_zpx(Enemy_Y_Position);
+    write_byte(Enemy_Y_Position + x, a);
     lda_absx(PseudoRandomBitReg); // get 2 LSB of LSFR and save to Y
     and_imm(0b00000011);
     tay();
@@ -6136,7 +6120,7 @@ CreateSpiny:
   
 DifLoop:
     lda_absy(PRDiffAdjustData); // get three values and save them
-    sta_zpx(0x1); // to $01-$03
+    write_byte(0x1 + x, a);
     iny();
     iny(); // increment Y four bytes for each value
     iny();
@@ -6163,19 +6147,19 @@ UsePosv:
 SetSpSpd:
     jsr(SmallBBox, 208); // set bounding box control, init attributes, lose contents of A
     ldy_imm(0x2);
-    sta_zpx(Enemy_X_Speed); // set horizontal speed to zero because previous contents
+    write_byte(Enemy_X_Speed + x, a);
     cmp_imm(0x0); // of A were lost...branch here will never be taken for
     if (neg_flag) { goto SpinyRte; } // the same reason
     dey();
   
 SpinyRte:
-    sty_zpx(Enemy_MovingDir); // set moving direction to the right
+    write_byte(Enemy_MovingDir + x, y);
     lda_imm(0xfd);
-    sta_zpx(Enemy_Y_Speed); // set vertical speed to move upwards
+    write_byte(Enemy_Y_Speed + x, a);
     lda_imm(0x1);
-    sta_zpx(Enemy_Flag); // enable enemy object by setting flag
+    write_byte(Enemy_Flag + x, a);
     lda_imm(0x5);
-    sta_zpx(Enemy_State); // put spiny in egg state and leave
+    write_byte(Enemy_State + x, a);
   
 ChpChpEx:
     goto rts;
@@ -6186,26 +6170,26 @@ InitLongFirebar:
   
 InitShortFirebar:
     lda_imm(0x0); // initialize low byte of spin state
-    sta_zpx(FirebarSpinState_Low);
+    write_byte(FirebarSpinState_Low + x, a);
     lda_zpx(Enemy_ID); // subtract $1b from enemy identifier
-    sec(); // to get proper offset for firebar data
+    carry_flag = true;
     sbc_imm(0x1b);
     tay();
     lda_absy(FirebarSpinSpdData); // get spinning speed of firebar
-    sta_absx(FirebarSpinSpeed);
+    write_byte(FirebarSpinSpeed + x, a);
     lda_absy(FirebarSpinDirData); // get spinning direction of firebar
-    sta_zpx(FirebarSpinDirection);
+    write_byte(FirebarSpinDirection + x, a);
     lda_zpx(Enemy_Y_Position);
-    clc(); // add four pixels to vertical coordinate
+    carry_flag = false;
     adc_imm(0x4);
-    sta_zpx(Enemy_Y_Position);
+    write_byte(Enemy_Y_Position + x, a);
     lda_zpx(Enemy_X_Position);
-    clc(); // add four pixels to horizontal coordinate
+    carry_flag = false;
     adc_imm(0x4);
-    sta_zpx(Enemy_X_Position);
+    write_byte(Enemy_X_Position + x, a);
     lda_zpx(Enemy_PageLoc);
     adc_imm(0x0); // add carry to page location
-    sta_zpx(Enemy_PageLoc);
+    write_byte(Enemy_PageLoc + x, a);
     goto TallBBox2; // set bounding box control (not used) and leave
     // --------------------------------
     // $00-$01 - used to hold pseudorandom bits
@@ -6218,22 +6202,22 @@ InitFlyingCheepCheep:
     and_imm(0b00000011); // set pseudorandom offset here
     tay();
     lda_absy(FlyCCTimerData); // load timer with pseudorandom offset
-    sta_abs(FrenzyEnemyTimer);
+    write_byte(FrenzyEnemyTimer, a);
     ldy_imm(0x3); // load Y with default value
     lda_abs(SecondaryHardMode);
     if (zero_flag) { goto MaxCC; } // if secondary hard mode flag not set, do not increment Y
     iny(); // otherwise, increment Y to allow as many as four onscreen
   
 MaxCC:
-    sty_zp(0x0); // store whatever pseudorandom bits are in Y
+    write_byte(0x0, y);
     cpx_zp(0x0); // compare enemy object buffer offset with Y
     if (carry_flag) { goto ChpChpEx; } // if X => Y, branch to leave
     lda_absx(PseudoRandomBitReg);
     and_imm(0b00000011); // get last two bits of LSFR, first part
-    sta_zp(0x0); // and store in two places
-    sta_zp(0x1);
+    write_byte(0x0, a);
+    write_byte(0x1, a);
     lda_imm(0xfb); // set vertical speed for cheep-cheep
-    sta_zpx(Enemy_Y_Speed);
+    write_byte(Enemy_Y_Speed + x, a);
     lda_imm(0x0); // load default value
     ldy_zp(Player_X_Speed); // check player's horizontal speed
     if (zero_flag) { goto GSeed; } // if player not moving left or right, skip this part
@@ -6244,25 +6228,25 @@ MaxCC:
   
 GSeed:
     pha(); // save to stack
-    clc();
+    carry_flag = false;
     adc_zp(0x0); // add to last two bits of LSFR we saved earlier
-    sta_zp(0x0); // save it there
+    write_byte(0x0, a);
     lda_absx(PseudoRandomBitReg + 1);
     and_imm(0b00000011); // if neither of the last two bits of second LSFR set,
     if (zero_flag) { goto RSeed; } // skip this part and save contents of $00
     lda_absx(PseudoRandomBitReg + 2);
     and_imm(0b00001111); // otherwise overwrite with lower nybble of
-    sta_zp(0x0); // third LSFR part
+    write_byte(0x0, a);
   
 RSeed:
     pla(); // get value from stack we saved earlier
-    clc();
+    carry_flag = false;
     adc_zp(0x1); // add to last two bits of LSFR we saved in other place
     tay(); // use as pseudorandom offset here
     lda_absy(FlyCCXSpeedData); // get horizontal speed using pseudorandom offset
-    sta_zpx(Enemy_X_Speed);
+    write_byte(Enemy_X_Speed + x, a);
     lda_imm(0x1); // set to move towards the right
-    sta_zpx(Enemy_MovingDir);
+    write_byte(Enemy_MovingDir + x, a);
     lda_zp(Player_X_Speed); // if player moving left or right, branch ahead of this part
     if (!zero_flag) { goto D2XPos1; }
     ldy_zp(0x0); // get first LSFR or third LSFR lower nybble
@@ -6271,9 +6255,9 @@ RSeed:
     if (zero_flag) { goto D2XPos1; } // if d1 not set, branch
     lda_zpx(Enemy_X_Speed);
     eor_imm(0xff); // if d1 set, change horizontal speed
-    clc(); // into two's compliment, thus moving in the opposite
+    carry_flag = false;
     adc_imm(0x1); // direction
-    sta_zpx(Enemy_X_Speed);
+    write_byte(Enemy_X_Speed + x, a);
     inc_zpx(Enemy_MovingDir); // increment to move towards the left
   
 D2XPos1:
@@ -6281,49 +6265,49 @@ D2XPos1:
     and_imm(0b00000010);
     if (zero_flag) { goto D2XPos2; } // check for d1 set again, branch again if not set
     lda_zp(Player_X_Position); // get player's horizontal position
-    clc();
+    carry_flag = false;
     adc_absy(FlyCCXPositionData); // if d1 set, add value obtained from pseudorandom offset
-    sta_zpx(Enemy_X_Position); // and save as enemy's horizontal position
+    write_byte(Enemy_X_Position + x, a);
     lda_zp(Player_PageLoc); // get player's page location
     adc_imm(0x0); // add carry and jump past this part
     goto FinCCSt;
   
 D2XPos2:
     lda_zp(Player_X_Position); // get player's horizontal position
-    sec();
+    carry_flag = true;
     sbc_absy(FlyCCXPositionData); // if d1 not set, subtract value obtained from pseudorandom
-    sta_zpx(Enemy_X_Position); // offset and save as enemy's horizontal position
+    write_byte(Enemy_X_Position + x, a);
     lda_zp(Player_PageLoc); // get player's page location
     sbc_imm(0x0); // subtract borrow
   
 FinCCSt:
-    sta_zpx(Enemy_PageLoc); // save as enemy's page location
+    write_byte(Enemy_PageLoc + x, a);
     lda_imm(0x1);
-    sta_zpx(Enemy_Flag); // set enemy's buffer flag
-    sta_zpx(Enemy_Y_HighPos); // set enemy's high vertical byte
+    write_byte(Enemy_Flag + x, a);
+    write_byte(Enemy_Y_HighPos + x, a);
     lda_imm(0xf8);
-    sta_zpx(Enemy_Y_Position); // put enemy below the screen, and we are done
+    write_byte(Enemy_Y_Position + x, a);
     goto rts;
     // --------------------------------
   
 InitBowser:
     jsr(DuplicateEnemyObj, 211); // jump to create another bowser object
-    stx_abs(BowserFront_Offset); // save offset of first here
+    write_byte(BowserFront_Offset, x);
     lda_imm(0x0);
-    sta_abs(BowserBodyControls); // initialize bowser's body controls
-    sta_abs(BridgeCollapseOffset); // and bridge collapse offset
+    write_byte(BowserBodyControls, a);
+    write_byte(BridgeCollapseOffset, a);
     lda_zpx(Enemy_X_Position);
-    sta_abs(BowserOrigXPos); // store original horizontal position here
+    write_byte(BowserOrigXPos, a);
     lda_imm(0xdf);
-    sta_abs(BowserFireBreathTimer); // store something here
-    sta_zpx(Enemy_MovingDir); // and in moving direction
+    write_byte(BowserFireBreathTimer, a);
+    write_byte(Enemy_MovingDir + x, a);
     lda_imm(0x20);
-    sta_abs(BowserFeetCounter); // set bowser's feet timer and in enemy timer
-    sta_absx(EnemyFrameTimer);
+    write_byte(BowserFeetCounter, a);
+    write_byte(EnemyFrameTimer + x, a);
     lda_imm(0x5);
-    sta_abs(BowserHitPoints); // give bowser 5 hit points
+    write_byte(BowserHitPoints, a);
     lsr_acc();
-    sta_abs(BowserMovementSpeed); // set default movement speed here
+    write_byte(BowserMovementSpeed, a);
     goto rts;
     // --------------------------------
   
@@ -6334,19 +6318,19 @@ FSLoop:
     iny(); // increment one slot
     lda_zpy(Enemy_Flag); // check enemy buffer flag for empty slot
     if (!zero_flag) { goto FSLoop; } // if set, branch and keep checking
-    sty_abs(DuplicateObj_Offset); // otherwise set offset here
+    write_byte(DuplicateObj_Offset, y);
     txa(); // transfer original enemy buffer offset
     ora_imm(0b10000000); // store with d7 set as flag in new enemy
-    sta_zpy(Enemy_Flag); // slot as well as enemy offset
+    write_byte(Enemy_Flag + y, a);
     lda_zpx(Enemy_PageLoc);
-    sta_zpy(Enemy_PageLoc); // copy page location and horizontal coordinates
+    write_byte(Enemy_PageLoc + y, a);
     lda_zpx(Enemy_X_Position); // from original enemy to new enemy
-    sta_zpy(Enemy_X_Position);
+    write_byte(Enemy_X_Position + y, a);
     lda_imm(0x1);
-    sta_zpx(Enemy_Flag); // set flag as normal for original enemy
-    sta_zpy(Enemy_Y_HighPos); // set high vertical byte for new enemy
+    write_byte(Enemy_Flag + x, a);
+    write_byte(Enemy_Y_HighPos + y, a);
     lda_zpx(Enemy_Y_Position);
-    sta_zpy(Enemy_Y_Position); // copy vertical coordinate from original to new
+    write_byte(Enemy_Y_Position + y, a);
   
 FlmEx:
     goto rts; // and then leave
@@ -6355,55 +6339,55 @@ FlmEx:
 InitBowserFlame:
     lda_abs(FrenzyEnemyTimer); // if timer not expired yet, branch to leave
     if (!zero_flag) { goto FlmEx; }
-    sta_absx(Enemy_Y_MoveForce); // reset something here
+    write_byte(Enemy_Y_MoveForce + x, a);
     lda_zp(NoiseSoundQueue);
     ora_imm(Sfx_BowserFlame); // load bowser's flame sound into queue
-    sta_zp(NoiseSoundQueue);
+    write_byte(NoiseSoundQueue, a);
     ldy_abs(BowserFront_Offset); // get bowser's buffer offset
     lda_zpy(Enemy_ID); // check for bowser
     cmp_imm(Bowser);
     if (zero_flag) { goto SpawnFromMouth; } // branch if found
     jsr(SetFlameTimer, 212); // get timer data based on flame counter
-    clc();
+    carry_flag = false;
     adc_imm(0x20); // add 32 frames by default
     ldy_abs(SecondaryHardMode);
     if (zero_flag) { goto SetFrT; } // if secondary mode flag not set, use as timer setting
-    sec();
+    carry_flag = true;
     sbc_imm(0x10); // otherwise subtract 16 frames for secondary hard mode
   
 SetFrT:
-    sta_abs(FrenzyEnemyTimer); // set timer accordingly
+    write_byte(FrenzyEnemyTimer, a);
     lda_absx(PseudoRandomBitReg);
     and_imm(0b00000011); // get 2 LSB from first part of LSFR
-    sta_absx(BowserFlamePRandomOfs); // set here
+    write_byte(BowserFlamePRandomOfs + x, a);
     tay(); // use as offset
     lda_absy(FlameYPosData); // load vertical position based on pseudorandom offset
   
 PutAtRightExtent:
-    sta_zpx(Enemy_Y_Position); // set vertical position
+    write_byte(Enemy_Y_Position + x, a);
     lda_abs(ScreenRight_X_Pos);
-    clc();
+    carry_flag = false;
     adc_imm(0x20); // place enemy 32 pixels beyond right side of screen
-    sta_zpx(Enemy_X_Position);
+    write_byte(Enemy_X_Position + x, a);
     lda_abs(ScreenRight_PageLoc);
     adc_imm(0x0); // add carry
-    sta_zpx(Enemy_PageLoc);
+    write_byte(Enemy_PageLoc + x, a);
     goto FinishFlame; // skip this part to finish setting values
   
 SpawnFromMouth:
     lda_zpy(Enemy_X_Position); // get bowser's horizontal position
-    sec();
+    carry_flag = true;
     sbc_imm(0xe); // subtract 14 pixels
-    sta_zpx(Enemy_X_Position); // save as flame's horizontal position
+    write_byte(Enemy_X_Position + x, a);
     lda_zpy(Enemy_PageLoc);
-    sta_zpx(Enemy_PageLoc); // copy page location from bowser to flame
+    write_byte(Enemy_PageLoc + x, a);
     lda_zpy(Enemy_Y_Position);
-    clc(); // add 8 pixels to bowser's vertical position
+    carry_flag = false;
     adc_imm(0x8);
-    sta_zpx(Enemy_Y_Position); // save as flame's vertical position
+    write_byte(Enemy_Y_Position + x, a);
     lda_absx(PseudoRandomBitReg);
     and_imm(0b00000011); // get 2 LSB from first part of LSFR
-    sta_absx(Enemy_YMF_Dummy); // save here
+    write_byte(Enemy_YMF_Dummy + x, a);
     tay(); // use as offset
     lda_absy(FlameYPosData); // get value here using bits as offset
     ldy_imm(0x0); // load default offset
@@ -6413,19 +6397,19 @@ SpawnFromMouth:
   
 SetMF:
     lda_absy(FlameYMFAdderData); // get value here and save
-    sta_absx(Enemy_Y_MoveForce); // to vertical movement force
+    write_byte(Enemy_Y_MoveForce + x, a);
     lda_imm(0x0);
-    sta_abs(EnemyFrenzyBuffer); // clear enemy frenzy buffer
+    write_byte(EnemyFrenzyBuffer, a);
   
 FinishFlame:
     lda_imm(0x8); // set $08 for bounding box control
-    sta_absx(Enemy_BoundBoxCtrl);
+    write_byte(Enemy_BoundBoxCtrl + x, a);
     lda_imm(0x1); // set high byte of vertical and
-    sta_zpx(Enemy_Y_HighPos); // enemy buffer flag
-    sta_zpx(Enemy_Flag);
+    write_byte(Enemy_Y_HighPos + x, a);
+    write_byte(Enemy_Flag + x, a);
     lsr_acc();
-    sta_absx(Enemy_X_MoveForce); // initialize horizontal movement force, and
-    sta_zpx(Enemy_State); // enemy state
+    write_byte(Enemy_X_MoveForce + x, a);
+    write_byte(Enemy_State + x, a);
     goto rts;
     // --------------------------------
     // --------------------------------
@@ -6456,12 +6440,12 @@ Get17ID:
     lda_absy(SwimCC_IDData); // load identifier for cheep-cheeps
   
 Set17ID:
-    sta_zpx(Enemy_ID); // store whatever's in A as enemy identifier
+    write_byte(Enemy_ID + x, a);
     lda_abs(BitMFilter);
     cmp_imm(0xff); // if not all bits set, skip init part and compare bits
     if (!zero_flag) { goto GetRBit; }
     lda_imm(0x0); // initialize vertical position filter
-    sta_abs(BitMFilter);
+    write_byte(BitMFilter, a);
   
 GetRBit:
     lda_absx(PseudoRandomBitReg); // get first part of LSFR
@@ -6479,12 +6463,12 @@ ChkRBit:
   
 AddFBit:
     ora_abs(BitMFilter); // add bit to already set bits in filter
-    sta_abs(BitMFilter); // and store
+    write_byte(BitMFilter, a);
     lda_absy(Enemy17YPosData); // load vertical position using offset
     jsr(PutAtRightExtent, 213); // set vertical position and other values
-    sta_absx(Enemy_YMF_Dummy); // initialize dummy variable
+    write_byte(Enemy_YMF_Dummy + x, a);
     lda_imm(0x20); // set timer
-    sta_abs(FrenzyEnemyTimer);
+    write_byte(FrenzyEnemyTimer, a);
     goto CheckpointEnemyID; // process our new enemy object
   
 DoBulletBills:
@@ -6506,7 +6490,7 @@ ExF17:
 FireBulletBill:
     lda_zp(Square2SoundQueue);
     ora_imm(Sfx_Blast); // play fireworks/gunfire sound
-    sta_zp(Square2SoundQueue);
+    write_byte(Square2SoundQueue, a);
     lda_imm(BulletBill_FrenzyVar); // load identifier for bullet bill object
     if (!zero_flag) { goto Set17ID; } // unconditional branch
     // --------------------------------
@@ -6517,7 +6501,7 @@ FireBulletBill:
   
 HandleGroupEnemies:
     ldy_imm(0x0); // load value for green koopa troopa
-    sec();
+    carry_flag = true;
     sbc_imm(0x37); // subtract $37 from second byte read
     pha(); // save result in stack for now
     cmp_imm(0x4); // was byte in $3b-$3e range?
@@ -6532,18 +6516,18 @@ PullID:
     pla(); // get second copy from stack
   
 SnglID:
-    sty_zp(0x1); // save enemy id here
+    write_byte(0x1, y);
     ldy_imm(0xb0); // load default y coordinate
     and_imm(0x2); // check to see if d1 was set
     if (zero_flag) { goto SetYGp; } // if so, move y coordinate up,
     ldy_imm(0x70); // otherwise branch and use default
   
 SetYGp:
-    sty_zp(0x0); // save y coordinate here
+    write_byte(0x0, y);
     lda_abs(ScreenRight_PageLoc); // get page number of right edge of screen
-    sta_zp(0x2); // save here
+    write_byte(0x2, a);
     lda_abs(ScreenRight_X_Pos); // get pixel coordinate of right edge
-    sta_zp(0x3); // save here
+    write_byte(0x3, a);
     ldy_imm(0x2); // load two enemies by default
     pla(); // get first copy from stack
     lsr_acc(); // check to see if d0 was set
@@ -6551,7 +6535,7 @@ SetYGp:
     iny(); // otherwise increment to three enemies
   
 CntGrp:
-    sty_abs(NumberofGroupEnemies); // save number of enemies here
+    write_byte(NumberofGroupEnemies, y);
   
 GrLoop:
     ldx_imm(0xff); // start at beginning of enemy buffers
@@ -6563,22 +6547,22 @@ GSltLp:
     lda_zpx(Enemy_Flag); // check to see if enemy is already
     if (!zero_flag) { goto GSltLp; } // stored in buffer, and branch if so
     lda_zp(0x1);
-    sta_zpx(Enemy_ID); // store enemy object identifier
+    write_byte(Enemy_ID + x, a);
     lda_zp(0x2);
-    sta_zpx(Enemy_PageLoc); // store page location for enemy object
+    write_byte(Enemy_PageLoc + x, a);
     lda_zp(0x3);
-    sta_zpx(Enemy_X_Position); // store x coordinate for enemy object
-    clc();
+    write_byte(Enemy_X_Position + x, a);
+    carry_flag = false;
     adc_imm(0x18); // add 24 pixels for next enemy
-    sta_zp(0x3);
+    write_byte(0x3, a);
     lda_zp(0x2); // add carry to page location for
     adc_imm(0x0); // next enemy
-    sta_zp(0x2);
+    write_byte(0x2, a);
     lda_zp(0x0); // store y coordinate for enemy object
-    sta_zpx(Enemy_Y_Position);
+    write_byte(Enemy_Y_Position + x, a);
     lda_imm(0x1); // activate flag for buffer, and
-    sta_zpx(Enemy_Y_HighPos); // put enemy within the screen vertically
-    sta_zpx(Enemy_Flag);
+    write_byte(Enemy_Y_HighPos + x, a);
+    write_byte(Enemy_Flag + x, a);
     jsr(CheckpointEnemyID, 214); // process each enemy object separately
     dec_abs(NumberofGroupEnemies); // do this until we run out of enemy objects
     if (!zero_flag) { goto GrLoop; }
@@ -6589,23 +6573,23 @@ NextED:
   
 InitPiranhaPlant:
     lda_imm(0x1); // set initial speed
-    sta_zpx(PiranhaPlant_Y_Speed);
+    write_byte(PiranhaPlant_Y_Speed + x, a);
     lsr_acc();
-    sta_zpx(Enemy_State); // initialize enemy state and what would normally
-    sta_zpx(PiranhaPlant_MoveFlag); // be used as vertical speed, but not in this case
+    write_byte(Enemy_State + x, a);
+    write_byte(PiranhaPlant_MoveFlag + x, a);
     lda_zpx(Enemy_Y_Position);
-    sta_absx(PiranhaPlantDownYPos); // save original vertical coordinate here
-    sec();
+    write_byte(PiranhaPlantDownYPos + x, a);
+    carry_flag = true;
     sbc_imm(0x18);
-    sta_absx(PiranhaPlantUpYPos); // save original vertical coordinate - 24 pixels here
+    write_byte(PiranhaPlantUpYPos + x, a);
     lda_imm(0x9);
     goto SetBBox2; // set specific value for bounding box control
     // --------------------------------
   
 InitEnemyFrenzy:
     lda_zpx(Enemy_ID); // load enemy identifier
-    sta_abs(EnemyFrenzyBuffer); // save in enemy frenzy buffer
-    sec();
+    write_byte(EnemyFrenzyBuffer, a);
+    carry_flag = true;
     sbc_imm(0x12); // subtract 12 and use as offset for jump engine
     // jsr JumpEngine
     switch (a) {
@@ -6616,21 +6600,21 @@ InitEnemyFrenzy:
       case 4: InitFireworks(); goto rts;
       case 5: goto BulletBillCheepCheep;
     }
-    InitFireworks(); goto rts; // <gen: fallthrough>
-    NoFrenzyCode(); goto rts; // <gen: fallthrough>
+    InitFireworks(); goto rts; // <fallthrough>
+    NoFrenzyCode(); goto rts; // <fallthrough>
     // --------------------------------
   
 InitJumpGPTroopa:
     lda_imm(0x2); // set for movement to the left
-    sta_zpx(Enemy_MovingDir);
+    write_byte(Enemy_MovingDir + x, a);
     lda_imm(0xf8); // set horizontal speed
-    sta_zpx(Enemy_X_Speed);
+    write_byte(Enemy_X_Speed + x, a);
   
 TallBBox2:
     lda_imm(0x3); // set specific value for bounding box control
   
 SetBBox2:
-    sta_absx(Enemy_BoundBoxCtrl); // set bounding box control then leave
+    write_byte(Enemy_BoundBoxCtrl + x, a);
     goto rts;
     // --------------------------------
   
@@ -6645,28 +6629,28 @@ InitBalPlatform:
 AlignP:
     ldy_imm(0xff); // set default value here for now
     lda_abs(BalPlatformAlignment); // get current balance platform alignment
-    sta_zpx(Enemy_State); // set platform alignment to object state here
+    write_byte(Enemy_State + x, a);
     if (!neg_flag) { goto SetBPA; } // if old alignment $ff, put $ff as alignment for negative
     txa(); // if old contents already $ff, put
     tay(); // object offset as alignment to make next positive
   
 SetBPA:
-    sty_abs(BalPlatformAlignment); // store whatever value's in Y here
+    write_byte(BalPlatformAlignment, y);
     lda_imm(0x0);
-    sta_zpx(Enemy_MovingDir); // init moving direction
+    write_byte(Enemy_MovingDir + x, a);
     tay(); // init Y
     PosPlatform(); // do a sub to add 8 pixels, then run shared code here
     // --------------------------------
   
 InitDropPlatform:
     lda_imm(0xff);
-    sta_absx(PlatformCollisionFlag); // set some value here
+    write_byte(PlatformCollisionFlag + x, a);
     goto CommonPlatCode; // then jump ahead to execute more code
     // --------------------------------
   
 InitHoriPlatform:
     lda_imm(0x0);
-    sta_zpx(XMoveSecondaryCounter); // init one of the moving counters
+    write_byte(XMoveSecondaryCounter + x, a);
     goto CommonPlatCode; // jump ahead to execute more code
     // --------------------------------
   
@@ -6683,7 +6667,7 @@ SPBBox:
     lda_imm(0x6); // use alternate value if not castle or secondary not set
   
 CasPBB:
-    sta_absx(Enemy_BoundBoxCtrl); // set bounding box size control here and leave
+    write_byte(Enemy_BoundBoxCtrl + x, a);
     goto rts;
     // --------------------------------
   
@@ -6700,24 +6684,24 @@ LargeLiftBBox:
   
 PlatLiftUp:
     lda_imm(0x10); // set movement amount here
-    sta_absx(Enemy_Y_MoveForce);
+    write_byte(Enemy_Y_MoveForce + x, a);
     lda_imm(0xff); // set moving speed for platforms going up
-    sta_zpx(Enemy_Y_Speed);
+    write_byte(Enemy_Y_Speed + x, a);
     goto CommonSmallLift; // skip ahead to part we should be executing
     // --------------------------------
   
 PlatLiftDown:
     lda_imm(0xf0); // set movement amount here
-    sta_absx(Enemy_Y_MoveForce);
+    write_byte(Enemy_Y_MoveForce + x, a);
     lda_imm(0x0); // set moving speed for platforms going down
-    sta_zpx(Enemy_Y_Speed);
+    write_byte(Enemy_Y_Speed + x, a);
     // --------------------------------
   
 CommonSmallLift:
     ldy_imm(0x1);
     PosPlatform(); // do a sub to add 12 pixels due to preset value  
     lda_imm(0x4);
-    sta_absx(Enemy_BoundBoxCtrl); // set bounding box control for small platforms
+    write_byte(Enemy_BoundBoxCtrl + x, a);
     goto rts;
     // --------------------------------
   
@@ -6768,13 +6752,7 @@ JmpEO:
       case 32: goto WarpZoneObject;
       case 33: goto RunRetainerObj;
     }
-    NoRunCode(); goto rts; // <gen: fallthrough>
-    NoRunCode(); goto rts; // <gen: fallthrough>
-    NoRunCode(); goto rts; // <gen: fallthrough>
-    NoRunCode(); goto rts; // <gen: fallthrough>
-    NoRunCode(); goto rts; // <gen: fallthrough>
-    NoRunCode(); goto rts; // <gen: fallthrough>
-    NoRunCode(); goto rts; // <gen: fallthrough>
+    NoRunCode(); goto rts; // <fallthrough>
   
 RunRetainerObj:
     jsr(GetEnemyOffscreenBits, 217);
@@ -6784,7 +6762,7 @@ RunRetainerObj:
   
 RunNormalEnemies:
     lda_imm(0x0); // init sprite attributes
-    sta_absx(Enemy_SprAttrib);
+    write_byte(Enemy_SprAttrib + x, a);
     jsr(GetEnemyOffscreenBits, 219);
     jsr(RelativeEnemyPosition, 220);
     jsr(EnemyGfxHandler, 221);
@@ -6825,8 +6803,7 @@ EnemyMovementSubs:
       case 19: NoMoveCode(); goto rts;
       case 20: goto MoveFlyingCheepCheep;
     }
-    NoMoveCode(); goto rts; // <gen: fallthrough>
-    NoMoveCode(); goto rts; // <gen: fallthrough>
+    NoMoveCode(); goto rts; // <fallthrough>
   
 RunBowserFlame:
     jsr(ProcBowserFlame, 227);
@@ -6870,7 +6847,7 @@ SkipPT:
   
 LargePlatformSubroutines:
     lda_zpx(Enemy_ID); // subtract $24 to get proper offset for jump table
-    sec();
+    carry_flag = true;
     sbc_imm(0x24);
     // jsr JumpEngine
     switch (a) {
@@ -6889,12 +6866,12 @@ MovePodoboo:
     jsr(InitPodoboo, 247); // otherwise set up podoboo again
     lda_absx(PseudoRandomBitReg + 1); // get part of LSFR
     ora_imm(0b10000000); // set d7
-    sta_absx(Enemy_Y_MoveForce); // store as movement force
+    write_byte(Enemy_Y_MoveForce + x, a);
     and_imm(0b00001111); // mask out high nybble
     ora_imm(0x6); // set for at least six intervals
-    sta_absx(EnemyIntervalTimer); // store as new enemy timer
+    write_byte(EnemyIntervalTimer + x, a);
     lda_imm(0xf9);
-    sta_zpx(Enemy_Y_Speed); // set vertical speed to move podoboo upwards
+    write_byte(Enemy_Y_Speed + x, a);
   
 PdbM:
     goto MoveJ_EnemyVertically; // branch to impose gravity on podoboo
@@ -6918,12 +6895,12 @@ ChkJH:
     if (!zero_flag) { goto DecHT; } // if not expired, skip ahead, do not throw hammer
     ldy_abs(SecondaryHardMode); // otherwise get secondary hard mode flag
     lda_absy(HammerThrowTmrData); // get timer data using flag as offset
-    sta_absx(HammerThrowingTimer); // set as new timer
+    write_byte(HammerThrowingTimer + x, a);
     jsr(SpawnHammerObj, 248); // do a sub here to spawn hammer object
     if (!carry_flag) { goto DecHT; } // if carry clear, hammer not spawned, skip to decrement timer
     lda_zpx(Enemy_State);
     ora_imm(0b00001000); // set d3 in enemy state for hammer throw
-    sta_zpx(Enemy_State);
+    write_byte(Enemy_State + x, a);
     goto MoveHammerBroXDir; // jump to move hammer bro
   
 DecHT:
@@ -6936,7 +6913,7 @@ HammerBroJumpCode:
     cmp_imm(0x1); // check for d0 set (for jumping)
     if (zero_flag) { goto MoveHammerBroXDir; } // if set, branch ahead to moving code
     lda_imm(0x0); // load default value here
-    sta_zp(0x0); // save into temp variable for now
+    write_byte(0x0, a);
     ldy_imm(0xfa); // set default vertical speed
     lda_zpx(Enemy_Y_Position); // check hammer bro's vertical coordinate
     if (neg_flag) { goto SetHJ; } // if on the bottom half of the screen, use current speed
@@ -6951,10 +6928,10 @@ HammerBroJumpCode:
     ldy_imm(0xfa); // otherwise reset to default vertical speed
   
 SetHJ:
-    sty_zpx(Enemy_Y_Speed); // set vertical speed for jumping
+    write_byte(Enemy_Y_Speed + x, y);
     lda_zpx(Enemy_State); // set d0 in enemy state for jumping
     ora_imm(0x1);
-    sta_zpx(Enemy_State);
+    write_byte(Enemy_State + x, a);
     lda_zp(0x0); // load preset value here to use as bitmask
     and_absx(PseudoRandomBitReg + 2); // and do bit-wise comparison with part of LSFR
     tay(); // then use as offset
@@ -6964,10 +6941,10 @@ SetHJ:
   
 HJump:
     lda_absy(HammerBroJumpLData); // get jump length timer data using offset from before
-    sta_absx(EnemyFrameTimer); // save in enemy timer
+    write_byte(EnemyFrameTimer + x, a);
     lda_absx(PseudoRandomBitReg + 1);
     ora_imm(0b11000000); // get contents of part of LSFR, set d7 and d6, then
-    sta_zpx(HammerBroJumpTimer); // store in jump timer
+    write_byte(HammerBroJumpTimer + x, a);
   
 MoveHammerBroXDir:
     ldy_imm(0xfc); // move hammer bro a little to the left
@@ -6977,7 +6954,7 @@ MoveHammerBroXDir:
     ldy_imm(0x4); // if d6 set in counter, move him a little to the right
   
 Shimmy:
-    sty_zpx(Enemy_X_Speed); // store horizontal speed
+    write_byte(Enemy_X_Speed + x, y);
     ldy_imm(0x1); // set to face right by default
     PlayerEnemyDiff(); // get horizontal difference between player and hammer bro
     if (neg_flag) { goto SetShim; } // if enemy to the left of player, skip this part
@@ -6985,10 +6962,10 @@ Shimmy:
     lda_absx(EnemyIntervalTimer); // check walking timer
     if (!zero_flag) { goto SetShim; } // if not yet expired, skip to set moving direction
     lda_imm(0xf8);
-    sta_zpx(Enemy_X_Speed); // otherwise, make the hammer bro walk left towards player
+    write_byte(Enemy_X_Speed + x, a);
   
 SetShim:
-    sty_zpx(Enemy_MovingDir); // set moving direction
+    write_byte(Enemy_MovingDir + x, y);
   
 MoveNormalEnemy:
     ldy_imm(0x0); // init Y to leave horizontal movement as-is 
@@ -7036,23 +7013,23 @@ SteadM:
     iny(); // otherwise increment Y to next data
   
 AddHS:
-    clc();
+    carry_flag = false;
     adc_absy(XSpeedAdderData); // add value here to slow enemy down if necessary
-    sta_zpx(Enemy_X_Speed); // save as horizontal speed temporarily
+    write_byte(Enemy_X_Speed + x, a);
     jsr(MoveEnemyHorizontally, 250); // then do a sub to move horizontally
     pla();
-    sta_zpx(Enemy_X_Speed); // get old horizontal speed from stack and return to
+    write_byte(Enemy_X_Speed + x, a);
     goto rts; // original memory location, then leave
   
 ReviveStunned:
     lda_absx(EnemyIntervalTimer); // if enemy timer not expired yet,
     if (!zero_flag) { goto ChkKillGoomba; } // skip ahead to something else
-    sta_zpx(Enemy_State); // otherwise initialize enemy state to normal
+    write_byte(Enemy_State + x, a);
     lda_zp(FrameCounter);
     and_imm(0x1); // get d0 of frame counter
     tay(); // use as Y and increment for movement direction
     iny();
-    sty_zpx(Enemy_MovingDir); // store as pseudorandom movement direction
+    write_byte(Enemy_MovingDir + x, y);
     dey(); // decrement for use as pointer
     lda_abs(PrimaryHardMode); // check primary hard mode flag
     if (zero_flag) { goto SetRSpd; } // if not set, use pointer as-is
@@ -7061,7 +7038,7 @@ ReviveStunned:
   
 SetRSpd:
     lda_absy(RevivedXSpeed); // load and store new horizontal speed
-    sta_zpx(Enemy_X_Speed); // and leave
+    write_byte(Enemy_X_Speed + x, a);
     goto rts;
   
 MoveDefeatedEnemy:
@@ -7089,7 +7066,7 @@ ProcMoveRedPTroopa:
     lda_zpx(Enemy_Y_Speed);
     ora_absx(Enemy_Y_MoveForce); // check for any vertical force or speed
     if (!zero_flag) { goto MoveRedPTUpOrDown; } // branch if any found
-    sta_absx(Enemy_YMF_Dummy); // initialize something here
+    write_byte(Enemy_YMF_Dummy + x, a);
     lda_zpx(Enemy_Y_Position); // check current vs. original vertical coordinate
     cmp_absx(RedPTroopaOrigXPos);
     if (carry_flag) { goto MoveRedPTUpOrDown; } // if current => original, skip ahead to more code
@@ -7126,11 +7103,11 @@ MoveFlyGreenPTroopa:
     ldy_imm(0xff); // otherwise set Y to move green paratroopa up
   
 YSway:
-    sty_zp(0x0); // store adder here
+    write_byte(0x0, y);
     lda_zpx(Enemy_Y_Position);
-    clc(); // add or subtract from vertical position
+    carry_flag = false;
     adc_zp(0x0); // to give green paratroopa a wavy flight
-    sta_zpx(Enemy_Y_Position);
+    write_byte(Enemy_Y_Position + x, a);
   
 NoMGPT:
     goto rts; // leave!
@@ -7139,7 +7116,7 @@ XMoveCntr_GreenPTroopa:
     lda_imm(0x13); // load preset maximum value for secondary counter
   
 XMoveCntr_Platform:
-    sta_zp(0x1); // store value here
+    write_byte(0x1, a);
     lda_zp(FrameCounter);
     and_imm(0b00000011); // branch to leave if not on
     if (!zero_flag) { goto NoIncXM; } // every fourth frame
@@ -7173,17 +7150,17 @@ MoveWithXMCntrs:
     if (!zero_flag) { goto XMRight; } // set, branch ahead of this part here
     lda_zpx(XMoveSecondaryCounter);
     eor_imm(0xff); // otherwise change secondary
-    clc(); // counter to two's compliment
+    carry_flag = false;
     adc_imm(0x1);
-    sta_zpx(XMoveSecondaryCounter);
+    write_byte(XMoveSecondaryCounter + x, a);
     ldy_imm(0x2); // load alternate value here
   
 XMRight:
-    sty_zpx(Enemy_MovingDir); // store as moving direction
+    write_byte(Enemy_MovingDir + x, y);
     jsr(MoveEnemyHorizontally, 255);
-    sta_zp(0x0); // save value obtained from sub here
+    write_byte(0x0, a);
     pla(); // get secondary counter from stack
-    sta_zpx(XMoveSecondaryCounter); // and return to original place
+    write_byte(XMoveSecondaryCounter + x, a);
     goto rts;
     // --------------------------------
   
@@ -7208,38 +7185,38 @@ FBLeft:
     dey(); // otherwise decrement to set right moving direction
   
 SBMDir:
-    sty_zpx(Enemy_MovingDir); // set moving direction of bloober, then continue on here
+    write_byte(Enemy_MovingDir + x, y);
   
 BlooberSwim:
     jsr(ProcSwimmingB, 256); // execute sub to make bloober swim characteristically
     lda_zpx(Enemy_Y_Position); // get vertical coordinate
-    sec();
+    carry_flag = true;
     sbc_absx(Enemy_Y_MoveForce); // subtract movement force
     cmp_imm(0x20); // check to see if position is above edge of status bar
     if (!carry_flag) { goto SwimX; } // if so, don't do it
-    sta_zpx(Enemy_Y_Position); // otherwise, set new vertical position, make bloober swim
+    write_byte(Enemy_Y_Position + x, a);
   
 SwimX:
     ldy_zpx(Enemy_MovingDir); // check moving direction
     dey();
     if (!zero_flag) { goto LeftSwim; } // if moving to the left, branch to second part
     lda_zpx(Enemy_X_Position);
-    clc(); // add movement speed to horizontal coordinate
+    carry_flag = false;
     adc_zpx(BlooperMoveSpeed);
-    sta_zpx(Enemy_X_Position); // store result as new horizontal coordinate
+    write_byte(Enemy_X_Position + x, a);
     lda_zpx(Enemy_PageLoc);
     adc_imm(0x0); // add carry to page location
-    sta_zpx(Enemy_PageLoc); // store as new page location and leave
+    write_byte(Enemy_PageLoc + x, a);
     goto rts;
   
 LeftSwim:
     lda_zpx(Enemy_X_Position);
-    sec(); // subtract movement speed from horizontal coordinate
+    carry_flag = true;
     sbc_zpx(BlooperMoveSpeed);
-    sta_zpx(Enemy_X_Position); // store result as new horizontal coordinate
+    write_byte(Enemy_X_Position + x, a);
     lda_zpx(Enemy_PageLoc);
     sbc_imm(0x0); // subtract borrow from page location
-    sta_zpx(Enemy_PageLoc); // store as new page location and leave
+    write_byte(Enemy_PageLoc + x, a);
     goto rts;
   
 MoveDefeatedBloober:
@@ -7258,10 +7235,10 @@ ProcSwimmingB:
     pla(); // pull 3 LSB of frame counter from the stack
     if (!zero_flag) { goto BSwimE; } // branch to leave, execute code only every eighth frame
     lda_absx(Enemy_Y_MoveForce);
-    clc(); // add to movement force to speed up swim
+    carry_flag = false;
     adc_imm(0x1);
-    sta_absx(Enemy_Y_MoveForce); // set movement force
-    sta_zpx(BlooperMoveSpeed); // set as movement speed
+    write_byte(Enemy_Y_MoveForce + x, a);
+    write_byte(BlooperMoveSpeed + x, a);
     cmp_imm(0x2);
     if (!zero_flag) { goto BSwimE; } // if certain horizontal speed, branch to leave
     inc_zpx(BlooperMoveCounter); // otherwise increment movement counter
@@ -7273,14 +7250,14 @@ SlowSwim:
     pla(); // pull 3 LSB of frame counter from the stack
     if (!zero_flag) { goto NoSSw; } // branch to leave, execute code only every eighth frame
     lda_absx(Enemy_Y_MoveForce);
-    sec(); // subtract from movement force to slow swim
+    carry_flag = true;
     sbc_imm(0x1);
-    sta_absx(Enemy_Y_MoveForce); // set movement force
-    sta_zpx(BlooperMoveSpeed); // set as movement speed
+    write_byte(Enemy_Y_MoveForce + x, a);
+    write_byte(BlooperMoveSpeed + x, a);
     if (!zero_flag) { goto NoSSw; } // if any speed, branch to leave
     inc_zpx(BlooperMoveCounter); // otherwise increment movement counter
     lda_imm(0x2);
-    sta_absx(EnemyIntervalTimer); // set enemy's timer
+    write_byte(EnemyIntervalTimer + x, a);
   
 NoSSw:
     goto rts; // leave
@@ -7304,7 +7281,7 @@ ChkNearPlayer:
     cmp_zp(Player_Y_Position); // compare result with player's vertical coordinate
     if (!carry_flag) { goto Floatdown; } // if modified vertical less than player's, branch
     lda_imm(0x0);
-    sta_zpx(BlooperMoveCounter); // otherwise nullify movement counter
+    write_byte(BlooperMoveCounter + x, a);
     goto rts;
     // --------------------------------
   
@@ -7316,7 +7293,7 @@ MoveBulletBill:
   
 NotDefB:
     lda_imm(0xe8); // set bullet bill's horizontal speed
-    sta_zpx(Enemy_X_Speed); // and move it accordingly (note: this bullet bill
+    write_byte(Enemy_X_Speed + x, a);
     goto MoveEnemyHorizontally; // object occurs in frenzy object $17, not from cannons)
     // --------------------------------
     // $02 - used to hold preset values
@@ -7329,69 +7306,69 @@ MoveSwimmingCheepCheep:
     goto MoveEnemySlowVert; // otherwise jump to move defeated cheep-cheep downwards
   
 CCSwim:
-    sta_zp(0x3); // save enemy state in $03
+    write_byte(0x3, a);
     lda_zpx(Enemy_ID); // get enemy identifier
-    sec();
+    carry_flag = true;
     sbc_imm(0xa); // subtract ten for cheep-cheep identifiers
     tay(); // use as offset
     lda_absy(SwimCCXMoveData); // load value here
-    sta_zp(0x2);
+    write_byte(0x2, a);
     lda_absx(Enemy_X_MoveForce); // load horizontal force
-    sec();
+    carry_flag = true;
     sbc_zp(0x2); // subtract preset value from horizontal force
-    sta_absx(Enemy_X_MoveForce); // store as new horizontal force
+    write_byte(Enemy_X_MoveForce + x, a);
     lda_zpx(Enemy_X_Position); // get horizontal coordinate
     sbc_imm(0x0); // subtract borrow (thus moving it slowly)
-    sta_zpx(Enemy_X_Position); // and save as new horizontal coordinate
+    write_byte(Enemy_X_Position + x, a);
     lda_zpx(Enemy_PageLoc);
     sbc_imm(0x0); // subtract borrow again, this time from the
-    sta_zpx(Enemy_PageLoc); // page location, then save
+    write_byte(Enemy_PageLoc + x, a);
     lda_imm(0x20);
-    sta_zp(0x2); // save new value here
+    write_byte(0x2, a);
     cpx_imm(0x2); // check enemy object offset
     if (!carry_flag) { goto ExSwCC; } // if in first or second slot, branch to leave
     lda_zpx(CheepCheepMoveMFlag); // check movement flag
     cmp_imm(0x10); // if movement speed set to $00,
     if (!carry_flag) { goto CCSwimUpwards; } // branch to move upwards
     lda_absx(Enemy_YMF_Dummy);
-    clc();
+    carry_flag = false;
     adc_zp(0x2); // add preset value to dummy variable to get carry
-    sta_absx(Enemy_YMF_Dummy); // and save dummy
+    write_byte(Enemy_YMF_Dummy + x, a);
     lda_zpx(Enemy_Y_Position); // get vertical coordinate
     adc_zp(0x3); // add carry to it plus enemy state to slowly move it downwards
-    sta_zpx(Enemy_Y_Position); // save as new vertical coordinate
+    write_byte(Enemy_Y_Position + x, a);
     lda_zpx(Enemy_Y_HighPos);
     adc_imm(0x0); // add carry to page location and
     goto ChkSwimYPos; // jump to end of movement code
   
 CCSwimUpwards:
     lda_absx(Enemy_YMF_Dummy);
-    sec();
+    carry_flag = true;
     sbc_zp(0x2); // subtract preset value to dummy variable to get borrow
-    sta_absx(Enemy_YMF_Dummy); // and save dummy
+    write_byte(Enemy_YMF_Dummy + x, a);
     lda_zpx(Enemy_Y_Position); // get vertical coordinate
     sbc_zp(0x3); // subtract borrow to it plus enemy state to slowly move it upwards
-    sta_zpx(Enemy_Y_Position); // save as new vertical coordinate
+    write_byte(Enemy_Y_Position + x, a);
     lda_zpx(Enemy_Y_HighPos);
     sbc_imm(0x0); // subtract borrow from page location
   
 ChkSwimYPos:
-    sta_zpx(Enemy_Y_HighPos); // save new page location here
+    write_byte(Enemy_Y_HighPos + x, a);
     ldy_imm(0x0); // load movement speed to upwards by default
     lda_zpx(Enemy_Y_Position); // get vertical coordinate
-    sec();
+    carry_flag = true;
     sbc_absx(CheepCheepOrigYPos); // subtract original coordinate from current
     if (!neg_flag) { goto YPDiff; } // if result positive, skip to next part
     ldy_imm(0x10); // otherwise load movement speed to downwards
     eor_imm(0xff);
-    clc(); // get two's compliment of result
+    carry_flag = false;
     adc_imm(0x1); // to obtain total difference of original vs. current
   
 YPDiff:
     cmp_imm(0xf); // if difference between original vs. current vertical
     if (!carry_flag) { goto ExSwCC; } // coordinates < 15 pixels, leave movement speed alone
     tya();
-    sta_zpx(CheepCheepMoveMFlag); // otherwise change movement speed
+    write_byte(CheepCheepMoveMFlag + x, a);
   
 ExSwCC:
     goto rts; // leave
@@ -7420,7 +7397,7 @@ ProcFirebar:
     lda_absx(FirebarSpinSpeed); // load spinning speed of firebar
     jsr(FirebarSpin, 258); // modify current spinstate
     and_imm(0b00011111); // mask out all but 5 LSB
-    sta_zpx(FirebarSpinState_High); // and store as new high byte of spinstate
+    write_byte(FirebarSpinState_High + x, a);
   
 SusFbar:
     lda_zpx(FirebarSpinState_High); // get high byte of spinstate
@@ -7433,23 +7410,23 @@ SusFbar:
     if (!zero_flag) { goto SetupGFB; } // if not at twenty-four branch to not change
   
 SkpFSte:
-    clc();
+    carry_flag = false;
     adc_imm(0x1); // add one to spinning thing to avoid horizontal state
-    sta_zpx(FirebarSpinState_High);
+    write_byte(FirebarSpinState_High + x, a);
   
 SetupGFB:
-    sta_zp(0xef); // save high byte of spinning thing, modified or otherwise
+    write_byte(0xef, a);
     jsr(RelativeEnemyPosition, 259); // get relative coordinates to screen
     GetFirebarPosition(); // do a sub here (residual, too early to be used now)
     ldy_absx(Enemy_SprDataOffset); // get OAM data offset
     lda_abs(Enemy_Rel_YPos); // get relative vertical coordinate
-    sta_absy(Sprite_Y_Position); // store as Y in OAM data
-    sta_zp(0x7); // also save here
+    write_byte(Sprite_Y_Position + y, a);
+    write_byte(0x7, a);
     lda_abs(Enemy_Rel_XPos); // get relative horizontal coordinate
-    sta_absy(Sprite_X_Position); // store as X in OAM data
-    sta_zp(0x6); // also save here
+    write_byte(Sprite_X_Position + y, a);
+    write_byte(0x6, a);
     lda_imm(0x1);
-    sta_zp(0x0); // set $01 value here (not necessary)
+    write_byte(0x0, a);
     jsr(FirebarCollision, 260); // draw fireball part and do collision detection
     ldy_imm(0x5); // load value for short firebars by default
     lda_zpx(Enemy_ID);
@@ -7458,9 +7435,9 @@ SetupGFB:
     ldy_imm(0xb); // otherwise load value for long firebars
   
 SetMFbar:
-    sty_zp(0xed); // store maximum value for length of firebars
+    write_byte(0xed, y);
     lda_imm(0x0);
-    sta_zp(0x0); // initialize counter here
+    write_byte(0x0, a);
   
 DrawFbar:
     lda_zp(0xef); // load high byte of spinstate
@@ -7471,7 +7448,7 @@ DrawFbar:
     if (!zero_flag) { goto NextFbar; }
     ldy_abs(DuplicateObj_Offset); // if we arrive at fifth firebar part,
     lda_absy(Enemy_SprDataOffset); // get offset from long firebar and load OAM data offset
-    sta_zp(0x6); // using long firebar offset, then store as new one here
+    write_byte(0x6, a);
   
 NextFbar:
     inc_zp(0x0); // move onto the next firebar part
@@ -7484,7 +7461,7 @@ SkipFBar:
   
 DrawFirebar_Collision:
     lda_zp(0x3); // store mirror data elsewhere
-    sta_zp(0x5);
+    write_byte(0x5, a);
     ldy_zp(0x6); // load OAM data offset for firebar
     lda_zp(0x1); // load horizontal adder we got from position loader
     lsr_zp(0x5); // shift LSB of mirror data
@@ -7493,19 +7470,19 @@ DrawFirebar_Collision:
     adc_imm(0x1); // otherwise get two's compliment of horizontal adder
   
 AddHA:
-    clc(); // add horizontal coordinate relative to screen to
+    carry_flag = false;
     adc_abs(Enemy_Rel_XPos); // horizontal adder, modified or otherwise
-    sta_absy(Sprite_X_Position); // store as X coordinate here
-    sta_zp(0x6); // store here for now, note offset is saved in Y still
+    write_byte(Sprite_X_Position + y, a);
+    write_byte(0x6, a);
     cmp_abs(Enemy_Rel_XPos); // compare X coordinate of sprite to original X of firebar
     if (carry_flag) { goto SubtR1; } // if sprite coordinate => original coordinate, branch
     lda_abs(Enemy_Rel_XPos);
-    sec(); // otherwise subtract sprite X from the
+    carry_flag = true;
     sbc_zp(0x6); // original one and skip this part
     goto ChkFOfs;
   
 SubtR1:
-    sec(); // subtract original X from the
+    carry_flag = true;
     sbc_abs(Enemy_Rel_XPos); // current sprite X
   
 ChkFOfs:
@@ -7525,12 +7502,12 @@ VAHandl:
     adc_imm(0x1); // otherwise get two's compliment of second part
   
 AddVA:
-    clc(); // add vertical coordinate relative to screen to 
+    carry_flag = false;
     adc_abs(Enemy_Rel_YPos); // the second data, modified or otherwise
   
 SetVFbr:
-    sta_absy(Sprite_Y_Position); // store as Y coordinate here
-    sta_zp(0x7); // also store here for now
+    write_byte(Sprite_Y_Position + y, a);
+    write_byte(0x7, a);
   
 FirebarCollision:
     DrawFirebar(); // run sub here to draw current tile of firebar
@@ -7539,7 +7516,7 @@ FirebarCollision:
     lda_abs(StarInvincibleTimer); // if star mario invincibility timer
     ora_abs(TimerControl); // or master timer controls set
     if (!zero_flag) { goto NoColFB; } // then skip all of this
-    sta_zp(0x5); // otherwise initialize counter
+    write_byte(0x5, a);
     ldy_zp(Player_Y_HighPos);
     dey(); // if player's vertical high byte offscreen,
     if (!zero_flag) { goto NoColFB; } // skip all of this
@@ -7553,7 +7530,7 @@ AdjSm:
     inc_zp(0x5); // if small or big but crouching, execute this part
     inc_zp(0x5); // first increment our counter twice (setting $02 as flag)
     tya();
-    clc(); // then add 24 pixels to the player's
+    carry_flag = false;
     adc_imm(0x18); // vertical coordinate
     tay();
   
@@ -7561,11 +7538,11 @@ BigJp:
     tya(); // get vertical coordinate, altered or otherwise, from Y
   
 FBCLoop:
-    sec(); // subtract vertical position of firebar
+    carry_flag = true;
     sbc_zp(0x7); // from the vertical coordinate of the player
     if (!neg_flag) { goto ChkVFBD; } // if player lower on the screen than firebar, 
     eor_imm(0xff); // skip two's compliment part
-    clc(); // otherwise get two's compliment
+    carry_flag = false;
     adc_imm(0x1);
   
 ChkVFBD:
@@ -7575,14 +7552,14 @@ ChkVFBD:
     cmp_imm(0xf0); // because, really, what's the point?
     if (carry_flag) { goto Chk2Ofs; }
     lda_abs(Sprite_X_Position + 4); // get OAM X coordinate for sprite #1
-    clc();
+    carry_flag = false;
     adc_imm(0x4); // add four pixels
-    sta_zp(0x4); // store here
-    sec(); // subtract horizontal coordinate of firebar
+    write_byte(0x4, a);
+    carry_flag = true;
     sbc_zp(0x6); // from the X coordinate of player's sprite 1
     if (!neg_flag) { goto ChkFBCl; } // if modded X coordinate to the right of firebar
     eor_imm(0xff); // skip two's compliment part
-    clc(); // otherwise get two's compliment
+    carry_flag = false;
     adc_imm(0x1);
   
 ChkFBCl:
@@ -7595,7 +7572,7 @@ Chk2Ofs:
     if (zero_flag) { goto NoColFB; }
     ldy_zp(0x5); // otherwise get temp here and use as offset
     lda_zp(Player_Y_Position);
-    clc();
+    carry_flag = false;
     adc_absy(FirebarYPos); // add value loaded with offset to player's vertical coordinate
     inc_zp(0x5); // then increment temp and jump back
     goto FBCLoop;
@@ -7608,19 +7585,19 @@ ChgSDir:
     inx(); // otherwise increment it
   
 SetSDir:
-    stx_zp(Enemy_MovingDir); // store movement direction here
+    write_byte(Enemy_MovingDir, x);
     ldx_imm(0x0);
     lda_zp(0x0); // save value written to $00 to stack
     pha();
     jsr(InjurePlayer, 262); // perform sub to hurt or kill player
     pla();
-    sta_zp(0x0); // get value of $00 from stack
+    write_byte(0x0, a);
   
 NoColFB:
     pla(); // get OAM data offset
-    clc(); // add four to it and save
+    carry_flag = false;
     adc_imm(0x4);
-    sta_zp(0x6);
+    write_byte(0x6, a);
     ldx_zp(ObjectOffset); // get enemy object buffer offset and leave
     goto rts;
     // --------------------------------
@@ -7630,7 +7607,7 @@ MoveFlyingCheepCheep:
     and_imm(0b00100000); // for d5 set
     if (zero_flag) { goto FlyCC; } // branch to continue code if not set
     lda_imm(0x0);
-    sta_absx(Enemy_SprAttrib); // otherwise clear sprite attributes
+    write_byte(Enemy_SprAttrib + x, a);
     goto MoveJ_EnemyVertically; // and jump to move defeated cheep-cheep downwards
   
 FlyCC:
@@ -7645,20 +7622,20 @@ FlyCC:
     lsr_acc();
     tay(); // save as offset (note this tends to go into reach of code)
     lda_zpx(Enemy_Y_Position); // get vertical position
-    sec(); // subtract pseudorandom value based on offset from position
+    carry_flag = true;
     sbc_absy(PRandomSubtracter);
     if (!neg_flag) { goto AddCCF; } // if result within top half of screen, skip this part
     eor_imm(0xff);
-    clc(); // otherwise get two's compliment
+    carry_flag = false;
     adc_imm(0x1);
   
 AddCCF:
     cmp_imm(0x8); // if result or two's compliment greater than eight,
     if (carry_flag) { goto BPGet; } // skip to the end without changing movement force
     lda_absx(Enemy_Y_MoveForce);
-    clc();
+    carry_flag = false;
     adc_imm(0x10); // otherwise add to it
-    sta_absx(Enemy_Y_MoveForce);
+    write_byte(Enemy_Y_MoveForce + x, a);
     lsr_acc(); // move high nybble to low again
     lsr_acc();
     lsr_acc();
@@ -7667,7 +7644,7 @@ AddCCF:
   
 BPGet:
     lda_absy(FlyCCBPriority); // load bg priority data and store (this is very likely
-    sta_absx(Enemy_SprAttrib); // broken or residual code, value is overwritten before
+    write_byte(Enemy_SprAttrib + x, a);
     goto rts; // drawing it next frame), then leave
     // --------------------------------
     // $00 - used to hold horizontal difference
@@ -7683,38 +7660,38 @@ ChkLS:
     lda_zpx(Enemy_State); // if lakitu's enemy state not set at all,
     if (zero_flag) { goto Fr12S; } // go ahead and continue with code
     lda_imm(0x0);
-    sta_zpx(LakituMoveDirection); // otherwise initialize moving direction to move to left
-    sta_abs(EnemyFrenzyBuffer); // initialize frenzy buffer
+    write_byte(LakituMoveDirection + x, a);
+    write_byte(EnemyFrenzyBuffer, a);
     lda_imm(0x10);
     if (!zero_flag) { goto SetLSpd; } // load horizontal speed and do unconditional branch
   
 Fr12S:
     lda_imm(Spiny);
-    sta_abs(EnemyFrenzyBuffer); // set spiny identifier in frenzy buffer
+    write_byte(EnemyFrenzyBuffer, a);
     ldy_imm(0x2);
   
 LdLDa:
     lda_absy(LakituDiffAdj); // load values
-    sta_absy(0x1); // store in zero page
+    write_byte(0x1 + y, a);
     dey();
     if (!neg_flag) { goto LdLDa; } // do this until all values are stired
     jsr(PlayerLakituDiff, 265); // execute sub to set speed and create spinys
   
 SetLSpd:
-    sta_zpx(LakituMoveSpeed); // set movement speed returned from sub
+    write_byte(LakituMoveSpeed + x, a);
     ldy_imm(0x1); // set moving direction to right by default
     lda_zpx(LakituMoveDirection);
     and_imm(0x1); // get LSB of moving direction
     if (!zero_flag) { goto SetLMov; } // if set, branch to the end to use moving direction
     lda_zpx(LakituMoveSpeed);
     eor_imm(0xff); // get two's compliment of moving speed
-    clc();
+    carry_flag = false;
     adc_imm(0x1);
-    sta_zpx(LakituMoveSpeed); // store as new moving speed
+    write_byte(LakituMoveSpeed + x, a);
     iny(); // increment moving direction to left
   
 SetLMov:
-    sty_zpx(Enemy_MovingDir); // store moving direction
+    write_byte(Enemy_MovingDir + x, y);
     goto MoveEnemyHorizontally; // move lakitu horizontally
   
 PlayerLakituDiff:
@@ -7724,16 +7701,16 @@ PlayerLakituDiff:
     iny(); // increment Y for left of player
     lda_zp(0x0);
     eor_imm(0xff); // get two's compliment of low byte of horizontal difference
-    clc();
+    carry_flag = false;
     adc_imm(0x1); // store two's compliment as horizontal difference
-    sta_zp(0x0);
+    write_byte(0x0, a);
   
 ChkLakDif:
     lda_zp(0x0); // get low byte of horizontal difference
     cmp_imm(0x3c); // if within a certain distance of player, branch
     if (!carry_flag) { goto ChkPSpeed; }
     lda_imm(0x3c); // otherwise set maximum distance
-    sta_zp(0x0);
+    write_byte(0x0, a);
     lda_zpx(Enemy_ID); // check if lakitu is in our current enemy slot
     cmp_imm(Lakitu);
     if (!zero_flag) { goto ChkPSpeed; } // if not, branch elsewhere
@@ -7748,14 +7725,14 @@ ChkLakDif:
   
 SetLMovD:
     tya(); // set horizontal direction depending on horizontal
-    sta_zpx(LakituMoveDirection); // difference between enemy and player if necessary
+    write_byte(LakituMoveDirection + x, a);
   
 ChkPSpeed:
     lda_zp(0x0);
     and_imm(0b00111100); // mask out all but four bits in the middle
     lsr_acc(); // divide masked difference by four
     lsr_acc();
-    sta_zp(0x0); // store as new value
+    write_byte(0x0, a);
     ldy_imm(0x0); // init offset
     lda_zp(Player_X_Speed);
     if (zero_flag) { goto SubDifAdj; } // if player not moving horizontally, branch
@@ -7787,7 +7764,7 @@ SubDifAdj:
     ldy_zp(0x0); // get saved horizontal difference
   
 SPixelLak:
-    sec(); // subtract one for each pixel of horizontal difference
+    carry_flag = true;
     sbc_imm(0x1); // from one of three saved values
     dey();
     if (!neg_flag) { goto SPixelLak; } // branch until all pixels are subtracted, to adjust difference
@@ -7802,7 +7779,7 @@ BridgeCollapse:
     lda_zpx(Enemy_ID); // check enemy object identifier for bowser
     cmp_imm(Bowser); // if not found, branch ahead,
     if (!zero_flag) { goto SetM2; } // metatile removal not necessary
-    stx_zp(ObjectOffset); // store as enemy offset here
+    write_byte(ObjectOffset, x);
     lda_zpx(Enemy_State); // if bowser in normal state, skip all of this
     if (zero_flag) { goto RemoveBridge; }
     and_imm(0b01000000); // if bowser's state has d6 clear, skip to silence music
@@ -7813,7 +7790,7 @@ BridgeCollapse:
   
 SetM2:
     lda_imm(Silence); // silence music
-    sta_zp(EventMusicQueue);
+    write_byte(EventMusicQueue, a);
     inc_abs(OperMode_Task); // move onto next secondary mode in autoctrl mode
     goto KillAllEnemies; // jump to empty all enemy slots and then leave  
   
@@ -7825,15 +7802,15 @@ RemoveBridge:
     dec_abs(BowserFeetCounter); // decrement timer to control bowser's feet
     if (!zero_flag) { goto NoBFall; } // if not expired, skip all of this
     lda_imm(0x4);
-    sta_abs(BowserFeetCounter); // otherwise, set timer now
+    write_byte(BowserFeetCounter, a);
     lda_abs(BowserBodyControls);
     eor_imm(0x1); // invert bit to control bowser's feet
-    sta_abs(BowserBodyControls);
+    write_byte(BowserBodyControls, a);
     lda_imm(0x22); // put high byte of name table address here for now
-    sta_zp(0x5);
+    write_byte(0x5, a);
     ldy_abs(BridgeCollapseOffset); // get bridge collapse offset here
     lda_absy(BridgeCollapseData); // load low byte of name table address and store here
-    sta_zp(0x4);
+    write_byte(0x4, a);
     ldy_abs(VRAM_Buffer1_Offset); // increment vram buffer offset
     iny();
     ldx_imm(0xc); // set offset for tile data for sub to draw blank metatile
@@ -7841,18 +7818,18 @@ RemoveBridge:
     ldx_zp(ObjectOffset); // get enemy offset
     jsr(MoveVOffset, 267); // set new vram buffer offset
     lda_imm(Sfx_Blast); // load the fireworks/gunfire sound into the square 2 sfx
-    sta_zp(Square2SoundQueue); // queue while at the same time loading the brick
+    write_byte(Square2SoundQueue, a);
     lda_imm(Sfx_BrickShatter); // shatter sound into the noise sfx queue thus
-    sta_zp(NoiseSoundQueue); // producing the unique sound of the bridge collapsing 
+    write_byte(NoiseSoundQueue, a);
     inc_abs(BridgeCollapseOffset); // increment bridge collapse offset
     lda_abs(BridgeCollapseOffset);
     cmp_imm(0xf); // if bridge collapse offset has not yet reached
     if (!zero_flag) { goto NoBFall; } // the end, go ahead and skip this part
     InitVStf(); // initialize whatever vertical speed bowser has
     lda_imm(0b01000000);
-    sta_zpx(Enemy_State); // set bowser's state to one of defeated states (d6 set)
+    write_byte(Enemy_State + x, a);
     lda_imm(Sfx_BowserFall);
-    sta_zp(Square2SoundQueue); // play bowser defeat sound
+    write_byte(Square2SoundQueue, a);
   
 NoBFall:
     goto BowserGfxHandler; // jump to code that draws bowser
@@ -7873,13 +7850,13 @@ KillLoop:
     EraseEnemyObject(); // branch to kill enemy objects
     dex(); // move onto next enemy slot
     if (!neg_flag) { goto KillLoop; } // do this until all slots are emptied
-    sta_abs(EnemyFrenzyBuffer); // empty frenzy buffer
+    write_byte(EnemyFrenzyBuffer, a);
     ldx_zp(ObjectOffset); // get enemy object offset and leave
     goto rts;
   
 BowserControl:
     lda_imm(0x0);
-    sta_abs(EnemyFrenzyBuffer); // empty frenzy buffer
+    write_byte(EnemyFrenzyBuffer, a);
     lda_abs(TimerControl); // if master timer control not set,
     if (zero_flag) { goto ChkMouth; } // skip jump and execute code here
     goto SkipToFB; // otherwise, jump over a bunch of code
@@ -7893,17 +7870,17 @@ FeetTmr:
     dec_abs(BowserFeetCounter); // decrement timer to control bowser's feet
     if (!zero_flag) { goto ResetMDr; } // if not expired, skip this part
     lda_imm(0x20); // otherwise, reset timer
-    sta_abs(BowserFeetCounter);
+    write_byte(BowserFeetCounter, a);
     lda_abs(BowserBodyControls); // and invert bit used
     eor_imm(0b00000001); // to control bowser's feet
-    sta_abs(BowserBodyControls);
+    write_byte(BowserBodyControls, a);
   
 ResetMDr:
     lda_zp(FrameCounter); // check frame counter
     and_imm(0b00001111); // if not on every sixteenth frame, skip
     if (!zero_flag) { goto B_FaceP; } // ahead to continue code
     lda_imm(0x2); // otherwise reset moving/facing direction every
-    sta_zpx(Enemy_MovingDir); // sixteen frames
+    write_byte(Enemy_MovingDir + x, a);
   
 B_FaceP:
     lda_absx(EnemyFrameTimer); // if timer set here expired,
@@ -7911,12 +7888,12 @@ B_FaceP:
     PlayerEnemyDiff(); // get horizontal difference between player and bowser,
     if (!neg_flag) { goto GetPRCmp; } // and branch if bowser to the right of the player
     lda_imm(0x1);
-    sta_zpx(Enemy_MovingDir); // set bowser to move and face to the right
+    write_byte(Enemy_MovingDir + x, a);
     lda_imm(0x2);
-    sta_abs(BowserMovementSpeed); // set movement speed
+    write_byte(BowserMovementSpeed, a);
     lda_imm(0x20);
-    sta_absx(EnemyFrameTimer); // set timer here
-    sta_abs(BowserFireBreathTimer); // set timer used for bowser's flame
+    write_byte(EnemyFrameTimer + x, a);
+    write_byte(BowserFireBreathTimer, a);
     lda_zpx(Enemy_X_Position);
     cmp_imm(0xc8); // if bowser to the right past a certain point,
     if (carry_flag) { goto HammerChk; } // skip ahead to some other section
@@ -7932,29 +7909,29 @@ GetPRCmp:
     and_imm(0b00000011); // get pseudorandom offset
     tay();
     lda_absy(PRandomRange); // load value using pseudorandom offset
-    sta_abs(MaxRangeFromOrigin); // and store here
+    write_byte(MaxRangeFromOrigin, a);
   
 GetDToO:
     lda_zpx(Enemy_X_Position);
-    clc(); // add movement speed to bowser's horizontal
+    carry_flag = false;
     adc_abs(BowserMovementSpeed); // coordinate and save as new horizontal position
-    sta_zpx(Enemy_X_Position);
+    write_byte(Enemy_X_Position + x, a);
     ldy_zpx(Enemy_MovingDir);
     cpy_imm(0x1); // if bowser moving and facing to the right, skip ahead
     if (zero_flag) { goto HammerChk; }
     ldy_imm(0xff); // set default movement speed here (move left)
-    sec(); // get difference of current vs. original
+    carry_flag = true;
     sbc_abs(BowserOrigXPos); // horizontal position
     if (!neg_flag) { goto CompDToO; } // if current position to the right of original, skip ahead
     eor_imm(0xff);
-    clc(); // get two's compliment
+    carry_flag = false;
     adc_imm(0x1);
     ldy_imm(0x1); // set alternate movement speed here (move right)
   
 CompDToO:
     cmp_abs(MaxRangeFromOrigin); // compare difference with pseudorandom value
     if (!carry_flag) { goto HammerChk; } // if difference < pseudorandom value, leave speed alone
-    sty_abs(BowserMovementSpeed); // otherwise change bowser's movement speed
+    write_byte(BowserMovementSpeed, y);
   
 HammerChk:
     lda_absx(EnemyFrameTimer); // if timer set here not expired yet, skip ahead to
@@ -7976,7 +7953,7 @@ SetHmrTmr:
     and_imm(0b00000011); // get pseudorandom offset
     tay();
     lda_absy(PRandomRange); // get value using pseudorandom offset
-    sta_absx(EnemyFrameTimer); // set for timer here
+    write_byte(EnemyFrameTimer + x, a);
   
 SkipToFB:
     goto ChkFireB; // jump to execute flames code
@@ -7987,7 +7964,7 @@ MakeBJump:
     dec_zpx(Enemy_Y_Position); // otherwise decrement vertical coordinate
     InitVStf(); // initialize movement amount
     lda_imm(0xfe);
-    sta_zpx(Enemy_Y_Speed); // set vertical speed to move bowser upwards
+    write_byte(Enemy_Y_Speed + x, a);
   
 ChkFireB:
     lda_abs(WorldNumber); // check world number here
@@ -8000,21 +7977,21 @@ SpawnFBr:
     lda_abs(BowserFireBreathTimer); // check timer here
     if (!zero_flag) { goto BowserGfxHandler; } // if not expired yet, skip all of this
     lda_imm(0x20);
-    sta_abs(BowserFireBreathTimer); // set timer here
+    write_byte(BowserFireBreathTimer, a);
     lda_abs(BowserBodyControls);
     eor_imm(0b10000000); // invert bowser's mouth bit to open
-    sta_abs(BowserBodyControls); // and close bowser's mouth
+    write_byte(BowserBodyControls, a);
     if (neg_flag) { goto ChkFireB; } // if bowser's mouth open, loop back
     jsr(SetFlameTimer, 270); // get timing for bowser's flame
     ldy_abs(SecondaryHardMode);
     if (zero_flag) { goto SetFBTmr; } // if secondary hard mode flag not set, skip this
-    sec();
+    carry_flag = true;
     sbc_imm(0x10); // otherwise subtract from value in A
   
 SetFBTmr:
-    sta_abs(BowserFireBreathTimer); // set value as timer here
+    write_byte(BowserFireBreathTimer, a);
     lda_imm(BowserFlame); // put bowser's flame identifier
-    sta_abs(EnemyFrenzyBuffer); // in enemy frenzy buffer
+    write_byte(EnemyFrenzyBuffer, a);
     // --------------------------------
   
 BowserGfxHandler:
@@ -8027,30 +8004,30 @@ BowserGfxHandler:
   
 CopyFToR:
     tya(); // move bowser's rear object position value to A
-    clc();
+    carry_flag = false;
     adc_zpx(Enemy_X_Position); // add to bowser's front object horizontal coordinate
     ldy_abs(DuplicateObj_Offset); // get bowser's rear object offset
-    sta_zpy(Enemy_X_Position); // store A as bowser's rear horizontal coordinate
+    write_byte(Enemy_X_Position + y, a);
     lda_zpx(Enemy_Y_Position);
-    clc(); // add eight pixels to bowser's front object
+    carry_flag = false;
     adc_imm(0x8); // vertical coordinate and store as vertical coordinate
-    sta_zpy(Enemy_Y_Position); // for bowser's rear
+    write_byte(Enemy_Y_Position + y, a);
     lda_zpx(Enemy_State);
-    sta_zpy(Enemy_State); // copy enemy state directly from front to rear
+    write_byte(Enemy_State + y, a);
     lda_zpx(Enemy_MovingDir);
-    sta_zpy(Enemy_MovingDir); // copy moving direction also
+    write_byte(Enemy_MovingDir + y, a);
     lda_zp(ObjectOffset); // save enemy object offset of front to stack
     pha();
     ldx_abs(DuplicateObj_Offset); // put enemy object offset of rear as current
-    stx_zp(ObjectOffset);
+    write_byte(ObjectOffset, x);
     lda_imm(Bowser); // set bowser's enemy identifier
-    sta_zpx(Enemy_ID); // store in bowser's rear object
+    write_byte(Enemy_ID + x, a);
     jsr(ProcessBowserHalf, 272); // do a sub here to process bowser's rear
     pla();
-    sta_zp(ObjectOffset); // get original enemy object offset
+    write_byte(ObjectOffset, a);
     tax();
     lda_imm(0x0); // nullify bowser's front/rear graphics flag
-    sta_abs(BowserGfxFlag);
+    write_byte(BowserGfxFlag, a);
   
 ExBGfxH:
     goto rts; // leave!
@@ -8061,7 +8038,7 @@ ProcessBowserHalf:
     lda_zpx(Enemy_State);
     if (!zero_flag) { goto ExBGfxH; } // if either enemy object not in normal state, branch to leave
     lda_imm(0xa);
-    sta_absx(Enemy_BoundBoxCtrl); // set bounding box size control
+    write_byte(Enemy_BoundBoxCtrl + x, a);
     jsr(GetEnemyBoundBox, 274); // get bounding box coordinates
     goto PlayerEnemyCollision; // do player-to-enemy collision detection
     // -------------------------------------------------------------------------------------
@@ -8073,7 +8050,7 @@ SetFlameTimer:
     inc_abs(BowserFlameTimerCtrl); // increment
     lda_abs(BowserFlameTimerCtrl); // mask out all but 3 LSB
     and_imm(0b00000111); // to keep in range of 0-7
-    sta_abs(BowserFlameTimerCtrl);
+    write_byte(BowserFlameTimerCtrl, a);
     lda_absy(FlameTimerData); // load value to be used then leave
   
 ExFl:
@@ -8088,31 +8065,31 @@ ProcBowserFlame:
     lda_imm(0x60); // otherwise load alternate movement force to go faster
   
 SFlmX:
-    sta_zp(0x0); // store value here
+    write_byte(0x0, a);
     lda_absx(Enemy_X_MoveForce);
-    sec(); // subtract value from movement force
+    carry_flag = true;
     sbc_zp(0x0);
-    sta_absx(Enemy_X_MoveForce); // save new value
+    write_byte(Enemy_X_MoveForce + x, a);
     lda_zpx(Enemy_X_Position);
     sbc_imm(0x1); // subtract one from horizontal position to move
-    sta_zpx(Enemy_X_Position); // to the left
+    write_byte(Enemy_X_Position + x, a);
     lda_zpx(Enemy_PageLoc);
     sbc_imm(0x0); // subtract borrow from page location
-    sta_zpx(Enemy_PageLoc);
+    write_byte(Enemy_PageLoc + x, a);
     ldy_absx(BowserFlamePRandomOfs); // get some value here and use as offset
     lda_zpx(Enemy_Y_Position); // load vertical coordinate
     cmp_absy(FlameYPosData); // compare against coordinate data using $0417,x as offset
     if (zero_flag) { goto SetGfxF; } // if equal, branch and do not modify coordinate
-    clc();
+    carry_flag = false;
     adc_absx(Enemy_Y_MoveForce); // otherwise add value here to coordinate and store
-    sta_zpx(Enemy_Y_Position); // as new vertical coordinate
+    write_byte(Enemy_Y_Position + x, a);
   
 SetGfxF:
     jsr(RelativeEnemyPosition, 275); // get new relative coordinates
     lda_zpx(Enemy_State); // if bowser's flame not in normal state,
     if (!zero_flag) { goto ExFl; } // branch to leave
     lda_imm(0x51); // otherwise, continue
-    sta_zp(0x0); // write first tile number
+    write_byte(0x0, a);
     ldy_imm(0x2); // load attributes without vertical flip by default
     lda_zp(FrameCounter);
     and_imm(0b00000010); // invert vertical flip bit every 2 frames
@@ -8120,23 +8097,23 @@ SetGfxF:
     ldy_imm(0x82); // otherwise write value with vertical flip bit set
   
 FlmeAt:
-    sty_zp(0x1); // set bowser's flame sprite attributes here
+    write_byte(0x1, y);
     ldy_absx(Enemy_SprDataOffset); // get OAM data offset
     ldx_imm(0x0);
   
 DrawFlameLoop:
     lda_abs(Enemy_Rel_YPos); // get Y relative coordinate of current enemy object
-    sta_absy(Sprite_Y_Position); // write into Y coordinate of OAM data
+    write_byte(Sprite_Y_Position + y, a);
     lda_zp(0x0);
-    sta_absy(Sprite_Tilenumber); // write current tile number into OAM data
+    write_byte(Sprite_Tilenumber + y, a);
     inc_zp(0x0); // increment tile number to draw more bowser's flame
     lda_zp(0x1);
-    sta_absy(Sprite_Attributes); // write saved attributes into OAM data
+    write_byte(Sprite_Attributes + y, a);
     lda_abs(Enemy_Rel_XPos);
-    sta_absy(Sprite_X_Position); // write X relative coordinate of current enemy object
-    clc();
+    write_byte(Sprite_X_Position + y, a);
+    carry_flag = false;
     adc_imm(0x8);
-    sta_abs(Enemy_Rel_XPos); // then add eight to it and store
+    write_byte(Enemy_Rel_XPos, a);
     iny();
     iny();
     iny();
@@ -8152,7 +8129,7 @@ DrawFlameLoop:
     pha();
     if (!carry_flag) { goto M3FOfs; } // branch if carry not set
     lda_imm(0xf8); // otherwise move sprite offscreen, this part likely
-    sta_absy(Sprite_Y_Position + 12); // residual since flame is only made of three sprites
+    write_byte(Sprite_Y_Position + 12 + y, a);
   
 M3FOfs:
     pla(); // get bits from stack
@@ -8160,7 +8137,7 @@ M3FOfs:
     pha();
     if (!carry_flag) { goto M2FOfs; } // branch if carry not set again
     lda_imm(0xf8); // otherwise move third sprite offscreen
-    sta_absy(Sprite_Y_Position + 8);
+    write_byte(Sprite_Y_Position + 8 + y, a);
   
 M2FOfs:
     pla(); // get bits from stack again
@@ -8168,14 +8145,14 @@ M2FOfs:
     pha();
     if (!carry_flag) { goto M1FOfs; } // branch if carry not set yet again
     lda_imm(0xf8); // otherwise move second sprite offscreen
-    sta_absy(Sprite_Y_Position + 4);
+    write_byte(Sprite_Y_Position + 4 + y, a);
   
 M1FOfs:
     pla(); // get bits from stack one last time
     lsr_acc(); // move d3 to carry
     if (!carry_flag) { goto ExFlmeD; } // branch if carry not set one last time
     lda_imm(0xf8);
-    sta_absy(Sprite_Y_Position); // otherwise move first sprite offscreen
+    write_byte(Sprite_Y_Position + y, a);
   
 ExFlmeD:
     goto rts; // leave
@@ -8185,7 +8162,7 @@ RunFireworks:
     dec_zpx(ExplosionTimerCounter); // decrement explosion timing counter here
     if (!zero_flag) { goto SetupExpl; } // if not expired, skip this part
     lda_imm(0x8);
-    sta_zpx(ExplosionTimerCounter); // reset counter
+    write_byte(ExplosionTimerCounter + x, a);
     inc_zpx(ExplosionGfxCounter); // increment explosion graphics counter
     lda_zpx(ExplosionGfxCounter);
     cmp_imm(0x3); // check explosion graphics counter
@@ -8194,9 +8171,9 @@ RunFireworks:
 SetupExpl:
     jsr(RelativeEnemyPosition, 277); // get relative coordinates of explosion
     lda_abs(Enemy_Rel_YPos); // copy relative coordinates
-    sta_abs(Fireball_Rel_YPos); // from the enemy object to the fireball object
+    write_byte(Fireball_Rel_YPos, a);
     lda_abs(Enemy_Rel_XPos); // first vertical, then horizontal
-    sta_abs(Fireball_Rel_XPos);
+    write_byte(Fireball_Rel_XPos, a);
     ldy_absx(Enemy_SprDataOffset); // get OAM data offset
     lda_zpx(ExplosionGfxCounter); // get explosion graphics counter
     jsr(DrawExplosion_Fireworks, 278); // do a sub to draw the explosion then leave
@@ -8204,17 +8181,17 @@ SetupExpl:
   
 FireworksSoundScore:
     lda_imm(0x0); // disable enemy buffer flag
-    sta_zpx(Enemy_Flag);
+    write_byte(Enemy_Flag + x, a);
     lda_imm(Sfx_Blast); // play fireworks/gunfire sound
-    sta_zp(Square2SoundQueue);
+    write_byte(Square2SoundQueue, a);
     lda_imm(0x5); // set part of score modifier for 500 points
-    sta_abs(DigitModifier + 4);
+    write_byte(DigitModifier + 4, a);
     goto EndAreaPoints; // jump to award points accordingly then leave
     // --------------------------------
   
 RunStarFlagObj:
     lda_imm(0x0); // initialize enemy frenzy buffer
-    sta_abs(EnemyFrenzyBuffer);
+    write_byte(EnemyFrenzyBuffer, a);
     lda_abs(StarFlagTaskControl); // check star flag object task number here
     cmp_imm(0x5); // if greater than 5, branch to exit
     if (carry_flag) { goto StarFlagExit; }
@@ -8241,8 +8218,8 @@ GameTimerFireworks:
     lda_imm(0xff); // otherwise set value for no fireworks
   
 SetFWC:
-    sta_abs(FireworksCounter); // set fireworks counter here
-    sty_zpx(Enemy_State); // set whatever state we have in star flag object
+    write_byte(FireworksCounter, a);
+    write_byte(Enemy_State + x, y);
   
 IncrementSFTask1:
     inc_abs(StarFlagTaskControl); // increment star flag object task number
@@ -8259,15 +8236,15 @@ AwardGameTimerPoints:
     and_imm(0b00000100); // check frame counter for d2 set (skip ahead
     if (zero_flag) { goto NoTTick; } // for four frames every four frames) branch if not set
     lda_imm(Sfx_TimerTick);
-    sta_zp(Square2SoundQueue); // load timer tick sound
+    write_byte(Square2SoundQueue, a);
   
 NoTTick:
     ldy_imm(0x23); // set offset here to subtract from game timer's last digit
     lda_imm(0xff); // set adder here to $ff, or -1, to subtract one
-    sta_abs(DigitModifier + 5); // from the last digit of the game timer
+    write_byte(DigitModifier + 5, a);
     jsr(DigitsMathRoutine, 279); // subtract digit
     lda_imm(0x5); // set now to add 50 points
-    sta_abs(DigitModifier + 5); // per game timer interval subtracted
+    write_byte(DigitModifier + 5, a);
   
 EndAreaPoints:
     ldy_imm(0xb); // load offset for mario's score by default
@@ -8297,7 +8274,7 @@ SetoffF:
     if (zero_flag) { goto DrawFlagSetTimer; } // if no fireworks left to go off, skip this part
     if (neg_flag) { goto DrawFlagSetTimer; } // if no fireworks set to go off, skip this part
     lda_imm(Fireworks);
-    sta_abs(EnemyFrenzyBuffer); // otherwise set fireworks object in frenzy queue
+    write_byte(EnemyFrenzyBuffer, a);
   
 DrawStarFlag:
     jsr(RelativeEnemyPosition, 281); // get relative coordinates of star flag
@@ -8306,17 +8283,17 @@ DrawStarFlag:
   
 DSFLoop:
     lda_abs(Enemy_Rel_YPos); // get relative vertical coordinate
-    clc();
+    carry_flag = false;
     adc_absx(StarFlagYPosAdder); // add Y coordinate adder data
-    sta_absy(Sprite_Y_Position); // store as Y coordinate
+    write_byte(Sprite_Y_Position + y, a);
     lda_absx(StarFlagTileData); // get tile number
-    sta_absy(Sprite_Tilenumber); // store as tile number
+    write_byte(Sprite_Tilenumber + y, a);
     lda_imm(0x22); // set palette and background priority bits
-    sta_absy(Sprite_Attributes); // store as attributes
+    write_byte(Sprite_Attributes + y, a);
     lda_abs(Enemy_Rel_XPos); // get relative horizontal coordinate
-    clc();
+    carry_flag = false;
     adc_absx(StarFlagXPosAdder); // add X coordinate adder data
-    sta_absy(Sprite_X_Position); // store as X coordinate
+    write_byte(Sprite_X_Position + y, a);
     iny();
     iny(); // increment OAM data offset four bytes
     iny(); // for next sprite
@@ -8329,7 +8306,7 @@ DSFLoop:
 DrawFlagSetTimer:
     jsr(DrawStarFlag, 282); // do sub to draw star flag
     lda_imm(0x6);
-    sta_absx(EnemyIntervalTimer); // set interval timer here
+    write_byte(EnemyIntervalTimer + x, a);
   
 IncrementSFTask2:
     inc_abs(StarFlagTaskControl); // move onto next task
@@ -8360,9 +8337,9 @@ MovePiranhaPlant:
     if (!neg_flag) { goto ChkPlayerNearPipe; } // piranha plant, and branch if enemy to right of player
     lda_zp(0x0); // otherwise get saved horizontal difference
     eor_imm(0xff);
-    clc(); // and change to two's compliment
+    carry_flag = false;
     adc_imm(0x1);
-    sta_zp(0x0); // save as new horizontal difference
+    write_byte(0x0, a);
   
 ChkPlayerNearPipe:
     lda_zp(0x0); // get saved horizontal difference
@@ -8372,9 +8349,9 @@ ChkPlayerNearPipe:
 ReversePlantSpeed:
     lda_zpx(PiranhaPlant_Y_Speed); // get vertical speed
     eor_imm(0xff);
-    clc(); // change to two's compliment
+    carry_flag = false;
     adc_imm(0x1);
-    sta_zpx(PiranhaPlant_Y_Speed); // save as new vertical speed
+    write_byte(PiranhaPlant_Y_Speed + x, a);
     inc_zpx(PiranhaPlant_MoveFlag); // increment to set movement flag
   
 SetupToMovePPlant:
@@ -8384,39 +8361,39 @@ SetupToMovePPlant:
     lda_absx(PiranhaPlantUpYPos); // otherwise get other vertical coordinate (highest point)
   
 RiseFallPiranhaPlant:
-    sta_zp(0x0); // save vertical coordinate here
+    write_byte(0x0, a);
     lda_zp(FrameCounter); // get frame counter
     lsr_acc();
     if (!carry_flag) { goto PutinPipe; } // branch to leave if d0 set (execute code every other frame)
     lda_abs(TimerControl); // get master timer control
     if (!zero_flag) { goto PutinPipe; } // branch to leave if set (likely not necessary)
     lda_zpx(Enemy_Y_Position); // get current vertical coordinate
-    clc();
+    carry_flag = false;
     adc_zpx(PiranhaPlant_Y_Speed); // add vertical speed to move up or down
-    sta_zpx(Enemy_Y_Position); // save as new vertical coordinate
+    write_byte(Enemy_Y_Position + x, a);
     cmp_zp(0x0); // compare against low or high coordinate
     if (!zero_flag) { goto PutinPipe; } // branch to leave if not yet reached
     lda_imm(0x0);
-    sta_zpx(PiranhaPlant_MoveFlag); // otherwise clear movement flag
+    write_byte(PiranhaPlant_MoveFlag + x, a);
     lda_imm(0x40);
-    sta_absx(EnemyFrameTimer); // set timer to delay piranha plant movement
+    write_byte(EnemyFrameTimer + x, a);
   
 PutinPipe:
     lda_imm(0b00100000); // set background priority bit in sprite
-    sta_absx(Enemy_SprAttrib); // attributes to give illusion of being inside pipe
+    write_byte(Enemy_SprAttrib + x, a);
     goto rts; // then leave
     // -------------------------------------------------------------------------------------
     // $07 - spinning speed
   
 FirebarSpin:
-    sta_zp(0x7); // save spinning speed here
+    write_byte(0x7, a);
     lda_zpx(FirebarSpinDirection); // check spinning direction
     if (!zero_flag) { goto SpinCounterClockwise; } // if moving counter-clockwise, branch to other part
     ldy_imm(0x18); // possibly residual ldy
     lda_zpx(FirebarSpinState_Low);
-    clc(); // add spinning speed to what would normally be
+    carry_flag = false;
     adc_zp(0x7); // the horizontal speed
-    sta_zpx(FirebarSpinState_Low);
+    write_byte(FirebarSpinState_Low + x, a);
     lda_zpx(FirebarSpinState_High); // add carry to what would normally be the vertical speed
     adc_imm(0x0);
     goto rts;
@@ -8424,9 +8401,9 @@ FirebarSpin:
 SpinCounterClockwise:
     ldy_imm(0x8); // possibly residual ldy
     lda_zpx(FirebarSpinState_Low);
-    sec(); // subtract spinning speed to what would normally be
+    carry_flag = true;
     sbc_zp(0x7); // the horizontal speed
-    sta_zpx(FirebarSpinState_Low);
+    write_byte(FirebarSpinState_Low + x, a);
     lda_zpx(FirebarSpinState_High); // add carry to what would normally be the vertical speed
     sbc_imm(0x0);
     goto rts;
@@ -8440,7 +8417,7 @@ BalancePlatform:
     cmp_imm(0x3);
     if (!zero_flag) { goto DoBPl; }
     EraseEnemyObject(); goto rts; // if far below screen, kill the object
-    EraseEnemyObject(); goto rts; // <gen: fallthrough>
+    EraseEnemyObject(); goto rts; // <fallthrough>
   
 DoBPl:
     lda_zpx(Enemy_State); // get object's state (set to $ff or other platform offset)
@@ -8450,7 +8427,7 @@ DoBPl:
 CheckBalPlatform:
     tay(); // save offset from state as Y
     lda_absx(PlatformCollisionFlag); // get collision flag of platform
-    sta_zp(0x0); // store here
+    write_byte(0x0, a);
     lda_zpx(Enemy_MovingDir); // get moving direction
     if (zero_flag) { goto ChkForFall; }
     goto PlatformFall; // if set, jump here
@@ -8461,9 +8438,9 @@ ChkForFall:
     if (!carry_flag) { goto ChkOtherForFall; } // if not, branch elsewhere
     cpy_zp(0x0); // if collision flag is set to same value as
     if (zero_flag) { goto MakePlatformFall; } // enemy state, branch to make platforms fall
-    clc();
+    carry_flag = false;
     adc_imm(0x2); // otherwise add 2 pixels to vertical position
-    sta_zpx(Enemy_Y_Position); // of current platform and branch elsewhere
+    write_byte(Enemy_Y_Position + x, a);
     goto StopPlatforms; // to make platforms stop
   
 MakePlatformFall:
@@ -8474,9 +8451,9 @@ ChkOtherForFall:
     if (!carry_flag) { goto ChkToMoveBalPlat; } // if not, branch elsewhere
     cpx_zp(0x0); // if collision flag is set to same value as
     if (zero_flag) { goto MakePlatformFall; } // enemy state, branch to make platforms fall
-    clc();
+    carry_flag = false;
     adc_imm(0x2); // otherwise add 2 pixels to vertical position
-    sta_zpy(Enemy_Y_Position); // of other platform and branch elsewhere
+    write_byte(Enemy_Y_Position + y, a);
     goto StopPlatforms; // jump to stop movement and do not return
   
 ChkToMoveBalPlat:
@@ -8485,9 +8462,9 @@ ChkToMoveBalPlat:
     lda_absx(PlatformCollisionFlag); // get collision flag
     if (!neg_flag) { goto ColFlg; } // branch if collision
     lda_absx(Enemy_Y_MoveForce);
-    clc(); // add $05 to contents of moveforce, whatever they be
+    carry_flag = false;
     adc_imm(0x5);
-    sta_zp(0x0); // store here
+    write_byte(0x0, a);
     lda_zpx(Enemy_Y_Speed);
     adc_imm(0x0); // add carry to vertical speed
     if (neg_flag) { goto PlatDn; } // branch if moving downwards
@@ -8515,11 +8492,11 @@ PlatDn:
 DoOtherPlatform:
     ldy_zpx(Enemy_State); // get offset of other platform
     pla(); // get old vertical coordinate from stack
-    sec();
+    carry_flag = true;
     sbc_zpx(Enemy_Y_Position); // get difference of old vs. new coordinate
-    clc();
+    carry_flag = false;
     adc_zpy(Enemy_Y_Position); // add difference to vertical coordinate of other
-    sta_zpy(Enemy_Y_Position); // platform to move it in the opposite direction
+    write_byte(Enemy_Y_Position + y, a);
     lda_absx(PlatformCollisionFlag); // if no collision, skip this part here
     if (neg_flag) { goto DrawEraseRope; }
     tax(); // put offset which collision occurred here
@@ -8538,23 +8515,23 @@ DrawEraseRope:
     pha();
     SetupPlatformRope(); // do a sub to figure out where to put new bg tiles
     lda_zp(0x1); // write name table address to vram buffer
-    sta_absx(VRAM_Buffer1); // first the high byte, then the low
+    write_byte(VRAM_Buffer1 + x, a);
     lda_zp(0x0);
-    sta_absx(VRAM_Buffer1 + 1);
+    write_byte(VRAM_Buffer1 + 1 + x, a);
     lda_imm(0x2); // set length for 2 bytes
-    sta_absx(VRAM_Buffer1 + 2);
+    write_byte(VRAM_Buffer1 + 2 + x, a);
     lda_zpy(Enemy_Y_Speed); // if platform moving upwards, branch 
     if (neg_flag) { goto EraseR1; } // to do something else
     lda_imm(0xa2);
-    sta_absx(VRAM_Buffer1 + 3); // otherwise put tile numbers for left
+    write_byte(VRAM_Buffer1 + 3 + x, a);
     lda_imm(0xa3); // and right sides of rope in vram buffer
-    sta_absx(VRAM_Buffer1 + 4);
+    write_byte(VRAM_Buffer1 + 4 + x, a);
     goto OtherRope; // jump to skip this part
   
 EraseR1:
     lda_imm(0x24); // put blank tiles in vram buffer
-    sta_absx(VRAM_Buffer1 + 3); // to erase rope
-    sta_absx(VRAM_Buffer1 + 4);
+    write_byte(VRAM_Buffer1 + 3 + x, a);
+    write_byte(VRAM_Buffer1 + 4 + x, a);
   
 OtherRope:
     lda_zpy(Enemy_State); // get offset of other platform from state
@@ -8563,31 +8540,31 @@ OtherRope:
     eor_imm(0xff); // invert bits to reverse speed
     SetupPlatformRope(); // do sub again to figure out where to put bg tiles  
     lda_zp(0x1); // write name table address to vram buffer
-    sta_absx(VRAM_Buffer1 + 5); // this time we're doing putting tiles for
+    write_byte(VRAM_Buffer1 + 5 + x, a);
     lda_zp(0x0); // the other platform
-    sta_absx(VRAM_Buffer1 + 6);
+    write_byte(VRAM_Buffer1 + 6 + x, a);
     lda_imm(0x2);
-    sta_absx(VRAM_Buffer1 + 7); // set length again for 2 bytes
+    write_byte(VRAM_Buffer1 + 7 + x, a);
     pla(); // pull first copy of vertical speed from stack
     if (!neg_flag) { goto EraseR2; } // if moving upwards (note inversion earlier), skip this
     lda_imm(0xa2);
-    sta_absx(VRAM_Buffer1 + 8); // otherwise put tile numbers for left
+    write_byte(VRAM_Buffer1 + 8 + x, a);
     lda_imm(0xa3); // and right sides of rope in vram
-    sta_absx(VRAM_Buffer1 + 9); // transfer buffer
+    write_byte(VRAM_Buffer1 + 9 + x, a);
     goto EndRp; // jump to skip this part
   
 EraseR2:
     lda_imm(0x24); // put blank tiles in vram buffer
-    sta_absx(VRAM_Buffer1 + 8); // to erase rope
-    sta_absx(VRAM_Buffer1 + 9);
+    write_byte(VRAM_Buffer1 + 8 + x, a);
+    write_byte(VRAM_Buffer1 + 9 + x, a);
   
 EndRp:
     lda_imm(0x0); // put null terminator at the end
-    sta_absx(VRAM_Buffer1 + 10);
+    write_byte(VRAM_Buffer1 + 10 + x, a);
     lda_abs(VRAM_Buffer1_Offset); // add ten bytes to the vram buffer offset
-    clc(); // and store
+    carry_flag = false;
     adc_imm(10);
-    sta_abs(VRAM_Buffer1_Offset);
+    write_byte(VRAM_Buffer1_Offset, a);
   
 ExitRp:
     ldx_zp(ObjectOffset); // get enemy object buffer offset and leave
@@ -8600,16 +8577,16 @@ InitPlatformFall:
     lda_imm(0x6);
     jsr(SetupFloateyNumber, 289); // award 1000 points to player
     lda_abs(Player_Rel_XPos);
-    sta_absx(FloateyNum_X_Pos); // put floatey number coordinates where player is
+    write_byte(FloateyNum_X_Pos + x, a);
     lda_zp(Player_Y_Position);
-    sta_absx(FloateyNum_Y_Pos);
+    write_byte(FloateyNum_Y_Pos + x, a);
     lda_imm(0x1); // set moving direction as flag for
-    sta_zpx(Enemy_MovingDir); // falling platforms
+    write_byte(Enemy_MovingDir + x, a);
   
 StopPlatforms:
     InitVStf(); // initialize vertical speed and low byte
-    sta_zpy(Enemy_Y_Speed); // for both platforms and leave
-    sta_absy(Enemy_Y_MoveForce);
+    write_byte(Enemy_Y_Speed + y, a);
+    write_byte(Enemy_Y_MoveForce + y, a);
     goto rts;
   
 PlatformFall:
@@ -8634,7 +8611,7 @@ YMovingPlatform:
     lda_zpx(Enemy_Y_Speed); // if platform moving up or down, skip ahead to
     ora_absx(Enemy_Y_MoveForce); // check on other position
     if (!zero_flag) { goto ChkYCenterPos; }
-    sta_absx(Enemy_YMF_Dummy); // initialize dummy variable
+    write_byte(Enemy_YMF_Dummy + x, a);
     lda_zpx(Enemy_Y_Position);
     cmp_absx(YPlatformTopYPos); // if current vertical position => top position, branch
     if (carry_flag) { goto ChkYCenterPos; } // ahead of all this
@@ -8675,9 +8652,9 @@ XMovingPlatform:
   
 PositionPlayerOnHPlat:
     lda_zp(Player_X_Position);
-    clc(); // add saved value from second subroutine to
+    carry_flag = false;
     adc_zp(0x0); // current player's position to position
-    sta_zp(Player_X_Position); // player accordingly in horizontal position
+    write_byte(Player_X_Position, a);
     lda_zp(Player_PageLoc); // get player's page location
     ldy_zp(0x0); // check to see if saved value here is positive or negative
     if (neg_flag) { goto PPHSubt; } // if negative, branch to subtract
@@ -8688,8 +8665,8 @@ PPHSubt:
     sbc_imm(0x0); // subtract borrow from page location
   
 SetPVar:
-    sta_zp(Player_PageLoc); // save result to player's page location
-    sty_abs(Platform_X_Scroll); // put saved value from second sub here to be used later
+    write_byte(Player_PageLoc, a);
+    write_byte(Platform_X_Scroll, y);
     jsr(PositionPlayerOnVPlat, 298); // position player vertically and appropriately
   
 ExXMP:
@@ -8709,11 +8686,11 @@ ExDPl:
   
 RightPlatform:
     jsr(MoveEnemyHorizontally, 301); // move platform with current horizontal speed, if any
-    sta_zp(0x0); // store saved value here (residual code)
+    write_byte(0x0, a);
     lda_absx(PlatformCollisionFlag); // check collision flag, if no collision between player
     if (neg_flag) { goto ExRPl; } // and platform, branch ahead, leave speed unaltered
     lda_imm(0x10);
-    sta_zpx(Enemy_X_Speed); // otherwise set new speed (gets moving if motionless)
+    write_byte(Enemy_X_Speed + x, a);
     jsr(PositionPlayerOnHPlat, 302); // use saved value from earlier sub to position player
   
 ExRPl:
@@ -8732,12 +8709,12 @@ MoveLiftPlatforms:
     lda_abs(TimerControl); // if master timer control set, skip all of this
     if (!zero_flag) { goto ExLiftP; } // and branch to leave
     lda_absx(Enemy_YMF_Dummy);
-    clc(); // add contents of movement amount to whatever's here
+    carry_flag = false;
     adc_absx(Enemy_Y_MoveForce);
-    sta_absx(Enemy_YMF_Dummy);
+    write_byte(Enemy_YMF_Dummy + x, a);
     lda_zpx(Enemy_Y_Position); // add whatever vertical speed is set to current
     adc_zpx(Enemy_Y_Speed); // vertical position plus carry to move up or down
-    sta_zpx(Enemy_Y_Position); // and then leave
+    write_byte(Enemy_Y_Position + x, a);
     goto rts;
   
 ChkSmallPlatCollision:
@@ -8769,16 +8746,16 @@ LimitB:
   
 ExtendLB:
     sbc_imm(0x48); // subtract 72 pixels regardless of enemy object
-    sta_zp(0x1); // store result here
+    write_byte(0x1, a);
     lda_abs(ScreenLeft_PageLoc);
     sbc_imm(0x0); // subtract borrow from page location of left side
-    sta_zp(0x0); // store result here
+    write_byte(0x0, a);
     lda_abs(ScreenRight_X_Pos); // add 72 pixels to the right side horizontal coordinate
     adc_imm(0x48);
-    sta_zp(0x3); // store result here
+    write_byte(0x3, a);
     lda_abs(ScreenRight_PageLoc);
     adc_imm(0x0); // then add the carry to the page location
-    sta_zp(0x2); // and store result here
+    write_byte(0x2, a);
     lda_zpx(Enemy_X_Position); // compare horizontal coordinate of the enemy object
     cmp_zp(0x1); // to modified horizontal left edge coordinate to get carry
     lda_zpx(Enemy_PageLoc);
@@ -8823,13 +8800,13 @@ FireballEnemyCollision:
     txa();
     asl_acc(); // multiply fireball offset by four
     asl_acc();
-    clc();
+    carry_flag = false;
     adc_imm(0x1c); // then add $1c or 28 bytes to it
     tay(); // to use fireball's bounding box coordinates 
     ldx_imm(0x4);
   
 FireballEnemyCDLoop:
-    stx_zp(0x1); // store enemy object offset here
+    write_byte(0x1, x);
     tya();
     pha(); // push fireball offset to the stack
     lda_zpx(Enemy_State);
@@ -8856,14 +8833,14 @@ NotGoomba:
     txa();
     asl_acc(); // otherwise multiply enemy offset by four
     asl_acc();
-    clc();
+    carry_flag = false;
     adc_imm(0x4); // add 4 bytes to it
     tax(); // to use enemy's bounding box coordinates
     jsr(SprObjectCollisionCore, 306); // do fireball-to-enemy collision detection
     ldx_zp(ObjectOffset); // return fireball's original offset
     if (!carry_flag) { goto NoFToECol; } // if carry clear, no collision, thus do next enemy slot
     lda_imm(0b10000000);
-    sta_zpx(Fireball_State); // set d7 in enemy state
+    write_byte(Fireball_State + x, a);
     ldx_zp(0x1); // get enemy offset
     jsr(HandleEnemyFBallCol, 307); // jump to handle fireball to enemy collision
   
@@ -8901,22 +8878,22 @@ HurtBowser:
     dec_abs(BowserHitPoints); // decrement bowser's hit points
     if (!zero_flag) { goto ExHCF; } // if bowser still has hit points, branch to leave
     InitVStf(); // otherwise do sub to init vertical speed and movement force
-    sta_zpx(Enemy_X_Speed); // initialize horizontal speed
-    sta_abs(EnemyFrenzyBuffer); // init enemy frenzy buffer
+    write_byte(Enemy_X_Speed + x, a);
+    write_byte(EnemyFrenzyBuffer, a);
     lda_imm(0xfe);
-    sta_zpx(Enemy_Y_Speed); // set vertical speed to make defeated bowser jump a little
+    write_byte(Enemy_Y_Speed + x, a);
     ldy_abs(WorldNumber); // use world number as offset
     lda_absy(BowserIdentities); // get enemy identifier to replace bowser with
-    sta_zpx(Enemy_ID); // set as new enemy identifier
+    write_byte(Enemy_ID + x, a);
     lda_imm(0x20); // set A to use starting value for state
     cpy_imm(0x3); // check to see if using offset of 3 or more
     if (carry_flag) { goto SetDBSte; } // branch if so
     ora_imm(0x3); // otherwise add 3 to enemy state
   
 SetDBSte:
-    sta_zpx(Enemy_State); // set defeated enemy state
+    write_byte(Enemy_State + x, a);
     lda_imm(Sfx_BowserFall);
-    sta_zp(Square2SoundQueue); // load bowser defeat sound
+    write_byte(Square2SoundQueue, a);
     ldx_zp(0x1); // get enemy offset
     lda_imm(0x9); // award 5000 points to player for defeating bowser
     if (!zero_flag) { goto EnemySmackScore; } // unconditional branch to award points
@@ -8935,14 +8912,14 @@ ShellOrBlockDefeat:
     if (!zero_flag) { goto StnE; } // branch if not found
     lda_zpx(Enemy_Y_Position);
     adc_imm(0x18); // add 24 pixels to enemy object's vertical position
-    sta_zpx(Enemy_Y_Position);
+    write_byte(Enemy_Y_Position + x, a);
   
 StnE:
     jsr(ChkToStunEnemies, 309); // do yet another sub
     lda_zpx(Enemy_State);
     and_imm(0b00011111); // mask out 2 MSB of enemy object's state
     ora_imm(0b00100000); // set d5 to defeat enemy and save as new state
-    sta_zpx(Enemy_State);
+    write_byte(Enemy_State + x, a);
     lda_imm(0x2); // award 200 points by default
     ldy_zpx(Enemy_ID); // check for hammer bro
     cpy_imm(HammerBro);
@@ -8957,7 +8934,7 @@ GoombaPoints:
 EnemySmackScore:
     jsr(SetupFloateyNumber, 310); // update necessary score variables
     lda_imm(Sfx_EnemySmack); // play smack enemy sound
-    sta_zp(Square1SoundQueue);
+    write_byte(Square1SoundQueue, a);
   
 ExHCF:
     goto rts; // and now let's leave
@@ -8973,7 +8950,7 @@ PlayerHammerCollision:
     txa();
     asl_acc(); // multiply misc object offset by four
     asl_acc();
-    clc();
+    carry_flag = false;
     adc_imm(0x24); // add 36 or $24 bytes to get proper offset
     tay(); // for misc object bounding box coordinates
     jsr(PlayerCollisionCore, 311); // do player-to-hammer collision detection
@@ -8982,19 +8959,19 @@ PlayerHammerCollision:
     lda_absx(Misc_Collision_Flag); // otherwise read collision flag
     if (!zero_flag) { goto ExPHC; } // if collision flag already set, branch to leave
     lda_imm(0x1);
-    sta_absx(Misc_Collision_Flag); // otherwise set collision flag now
+    write_byte(Misc_Collision_Flag + x, a);
     lda_zpx(Misc_X_Speed);
     eor_imm(0xff); // get two's compliment of
-    clc(); // hammer's horizontal speed
+    carry_flag = false;
     adc_imm(0x1);
-    sta_zpx(Misc_X_Speed); // set to send hammer flying the opposite direction
+    write_byte(Misc_X_Speed + x, a);
     lda_abs(StarInvincibleTimer); // if star mario invincibility timer set,
     if (!zero_flag) { goto ExPHC; } // branch to leave
     goto InjurePlayer; // otherwise jump to hurt player, do not return
   
 ClHCol:
     lda_imm(0x0); // clear collision flag
-    sta_absx(Misc_Collision_Flag);
+    write_byte(Misc_Collision_Flag + x, a);
   
 ExPHC:
     goto rts;
@@ -9005,16 +8982,16 @@ HandlePowerUpCollision:
     lda_imm(0x6);
     jsr(SetupFloateyNumber, 312); // award 1000 points to player by default
     lda_imm(Sfx_PowerUpGrab);
-    sta_zp(Square2SoundQueue); // play the power-up sound
+    write_byte(Square2SoundQueue, a);
     lda_zp(PowerUpType); // check power-up type
     cmp_imm(0x2);
     if (!carry_flag) { goto Shroom_Flower_PUp; } // if mushroom or fire flower, branch
     cmp_imm(0x3);
     if (zero_flag) { goto SetFor1Up; } // if 1-up mushroom, branch
     lda_imm(0x23); // otherwise set star mario invincibility
-    sta_abs(StarInvincibleTimer); // timer, and load the star mario music
+    write_byte(StarInvincibleTimer, a);
     lda_imm(StarPowerMusic); // into the area music queue, then leave
-    sta_zp(AreaMusicQueue);
+    write_byte(AreaMusicQueue, a);
     goto rts;
   
 Shroom_Flower_PUp:
@@ -9024,7 +9001,7 @@ Shroom_Flower_PUp:
     if (!zero_flag) { goto NoPUp; }
     ldx_zp(ObjectOffset); // get enemy offset, not necessary
     lda_imm(0x2); // set player status to fiery
-    sta_abs(PlayerStatus);
+    write_byte(PlayerStatus, a);
     jsr(GetPlayerColors, 313); // run sub to change colors of player
     ldx_zp(ObjectOffset); // get enemy offset again, and again not necessary
     lda_imm(0xc); // set value to be used by subroutine tree (fiery)
@@ -9032,12 +9009,12 @@ Shroom_Flower_PUp:
   
 SetFor1Up:
     lda_imm(0xb); // change 1000 points into 1-up instead
-    sta_absx(FloateyNum_Control); // and then leave
+    write_byte(FloateyNum_Control + x, a);
     goto rts;
   
 UpToSuper:
     lda_imm(0x1); // set player status to super
-    sta_abs(PlayerStatus);
+    write_byte(PlayerStatus, a);
     lda_imm(0x9); // set value to be used by subroutine tree (super)
   
 UpToFiery:
@@ -9068,7 +9045,7 @@ PlayerEnemyCollision:
     if (carry_flag) { goto CheckForPUpCollision; } // if collision, branch past this part here
     lda_absx(Enemy_CollisionBits);
     and_imm(0b11111110); // otherwise, clear d0 of current enemy object's
-    sta_absx(Enemy_CollisionBits); // collision bit
+    write_byte(Enemy_CollisionBits + x, a);
   
 NoPECol:
     goto rts;
@@ -9091,7 +9068,7 @@ HandlePECollisions:
     if (!zero_flag) { goto ExPEC; } // branch to leave if either is true
     lda_imm(0x1);
     ora_absx(Enemy_CollisionBits); // otherwise set d0 now
-    sta_absx(Enemy_CollisionBits);
+    write_byte(Enemy_CollisionBits + x, a);
     cpy_imm(Spiny); // branch if spiny
     if (zero_flag) { goto ChkForPlayerInjury; }
     cpy_imm(PiranhaPlant); // branch if piranha plant
@@ -9115,15 +9092,15 @@ HandlePECollisions:
     cmp_imm(Goomba);
     if (zero_flag) { goto ExPEC; }
     lda_imm(Sfx_EnemySmack); // play smack enemy sound
-    sta_zp(Square1SoundQueue);
+    write_byte(Square1SoundQueue, a);
     lda_zpx(Enemy_State); // set d7 in enemy state, thus become moving shell
     ora_imm(0b10000000);
-    sta_zpx(Enemy_State);
+    write_byte(Enemy_State + x, a);
     jsr(EnemyFacePlayer, 317); // set moving direction and get offset
     lda_absy(KickedShellXSpdData); // load and set horizontal speed data with offset
-    sta_zpx(Enemy_X_Speed);
+    write_byte(Enemy_X_Speed + x, a);
     lda_imm(0x3); // add three to whatever the stomp counter contains
-    clc(); // to give points for kicking the shell
+    carry_flag = false;
     adc_abs(StompChainCounter);
     ldy_absx(EnemyIntervalTimer); // check shell enemy's timer
     cpy_imm(0x3); // if above a certain point, branch using the points
@@ -9146,7 +9123,7 @@ ChkInj:
     cmp_imm(Bloober);
     if (!carry_flag) { goto ChkETmrs; }
     lda_zp(Player_Y_Position); // add 12 pixels to player's vertical position
-    clc();
+    carry_flag = false;
     adc_imm(0xc);
     cmp_zpx(Enemy_Y_Position); // compare modified player's position to enemy's position
     if (!carry_flag) { goto EnemyStomped; } // branch if this player's position above (less than) enemy's
@@ -9174,11 +9151,11 @@ InjurePlayer:
 ForceInjury:
     ldx_abs(PlayerStatus); // check player's status
     if (zero_flag) { goto KillPlayer; } // branch if small
-    sta_abs(PlayerStatus); // otherwise set player's status to small
+    write_byte(PlayerStatus, a);
     lda_imm(0x8);
-    sta_abs(InjuryTimer); // set injured invincibility timer
+    write_byte(InjuryTimer, a);
     asl_acc();
-    sta_zp(Square1SoundQueue); // play pipedown/injury sound
+    write_byte(Square1SoundQueue, a);
     jsr(GetPlayerColors, 319); // change player's palette if necessary
     lda_imm(0xa); // set subroutine to run on next frame
   
@@ -9186,23 +9163,23 @@ SetKRout:
     ldy_imm(0x1); // set new player state
   
 SetPRout:
-    sta_zp(GameEngineSubroutine); // load new value to run subroutine on next frame
-    sty_zp(Player_State); // store new player state
+    write_byte(GameEngineSubroutine, a);
+    write_byte(Player_State, y);
     ldy_imm(0xff);
-    sty_abs(TimerControl); // set master timer control flag to halt timers
+    write_byte(TimerControl, y);
     iny();
-    sty_abs(ScrollAmount); // initialize scroll speed
+    write_byte(ScrollAmount, y);
   
 ExInjColRoutines:
     ldx_zp(ObjectOffset); // get enemy offset and leave
     goto rts;
   
 KillPlayer:
-    stx_zp(Player_X_Speed); // halt player's horizontal movement by initializing speed
+    write_byte(Player_X_Speed, x);
     inx();
-    stx_zp(EventMusicQueue); // set event music queue to death music
+    write_byte(EventMusicQueue, x);
     lda_imm(0xfc);
-    sta_zp(Player_Y_Speed); // set new vertical speed
+    write_byte(Player_Y_Speed, a);
     lda_imm(0xb); // set subroutine to run on next frame
     if (!zero_flag) { goto SetKRout; } // branch to set player's state and other things
   
@@ -9211,7 +9188,7 @@ EnemyStomped:
     cmp_imm(Spiny); // if found
     if (zero_flag) { goto InjurePlayer; }
     lda_imm(Sfx_EnemyStomp); // otherwise play stomp/swim sound
-    sta_zp(Square1SoundQueue);
+    write_byte(Square1SoundQueue, a);
     lda_zpx(Enemy_ID);
     ldy_imm(0x0); // initialize points data offset for stomped enemies
     cmp_imm(FlyingCheepCheep); // branch for cheep-cheep
@@ -9239,46 +9216,46 @@ EnemyStompedPts:
     pha(); // save enemy movement direction to stack
     jsr(SetStun, 321); // run sub to kill enemy
     pla();
-    sta_zpx(Enemy_MovingDir); // return enemy movement direction from stack
+    write_byte(Enemy_MovingDir + x, a);
     lda_imm(0b00100000);
-    sta_zpx(Enemy_State); // set d5 in enemy state
+    write_byte(Enemy_State + x, a);
     InitVStf(); // nullify vertical speed, physics-related thing,
-    sta_zpx(Enemy_X_Speed); // and horizontal speed
+    write_byte(Enemy_X_Speed + x, a);
     lda_imm(0xfd); // set player's vertical speed, to give bounce
-    sta_zp(Player_Y_Speed);
+    write_byte(Player_Y_Speed, a);
     goto rts;
   
 ChkForDemoteKoopa:
     cmp_imm(0x9); // branch elsewhere if enemy object < $09
     if (!carry_flag) { goto HandleStompedShellE; }
     and_imm(0b00000001); // demote koopa paratroopas to ordinary troopas
-    sta_zpx(Enemy_ID);
+    write_byte(Enemy_ID + x, a);
     ldy_imm(0x0); // return enemy to normal state
-    sty_zpx(Enemy_State);
+    write_byte(Enemy_State + x, y);
     lda_imm(0x3); // award 400 points to the player
     jsr(SetupFloateyNumber, 322);
     InitVStf(); // nullify physics-related thing and vertical speed
     jsr(EnemyFacePlayer, 323); // turn enemy around if necessary
     lda_absy(DemotedKoopaXSpdData);
-    sta_zpx(Enemy_X_Speed); // set appropriate moving speed based on direction
+    write_byte(Enemy_X_Speed + x, a);
     goto SBnce; // then move onto something else
   
 HandleStompedShellE:
     lda_imm(0x4); // set defeated state for enemy
-    sta_zpx(Enemy_State);
+    write_byte(Enemy_State + x, a);
     inc_abs(StompChainCounter); // increment the stomp counter
     lda_abs(StompChainCounter); // add whatever is in the stomp counter
-    clc(); // to whatever is in the stomp timer
+    carry_flag = false;
     adc_abs(StompTimer);
     jsr(SetupFloateyNumber, 324); // award points accordingly
     inc_abs(StompTimer); // increment stomp timer of some sort
     ldy_abs(PrimaryHardMode); // check primary hard mode flag
     lda_absy(RevivalRateData); // load timer setting according to flag
-    sta_absx(EnemyIntervalTimer); // set as enemy timer to revive stomped enemy
+    write_byte(EnemyIntervalTimer + x, a);
   
 SBnce:
     lda_imm(0xfc); // set player's vertical speed for bounce
-    sta_zp(Player_Y_Speed); // and then leave!!!
+    write_byte(Player_Y_Speed, a);
     goto rts;
   
 ChkEnemyFaceRight:
@@ -9298,18 +9275,18 @@ EnemyFacePlayer:
     iny(); // otherwise, increment to set to move to the left
   
 SFcRt:
-    sty_zpx(Enemy_MovingDir); // set moving direction here
+    write_byte(Enemy_MovingDir + x, y);
     dey(); // then decrement to use as a proper offset
     goto rts;
   
 SetupFloateyNumber:
-    sta_absx(FloateyNum_Control); // set number of points control for floatey numbers
+    write_byte(FloateyNum_Control + x, a);
     lda_imm(0x30);
-    sta_absx(FloateyNum_Timer); // set timer for floatey numbers
+    write_byte(FloateyNum_Timer + x, a);
     lda_zpx(Enemy_Y_Position);
-    sta_absx(FloateyNum_Y_Pos); // set vertical coordinate
+    write_byte(FloateyNum_Y_Pos + x, a);
     lda_abs(Enemy_Rel_XPos);
-    sta_absx(FloateyNum_X_Pos); // set horizontal coordinate and leave
+    write_byte(FloateyNum_X_Pos + x, a);
   
 ExSFN:
     goto rts;
@@ -9336,7 +9313,7 @@ EnemiesCollision:
     if (neg_flag) { goto ExitECRoutine; } // branch to leave if there are no other enemies
   
 ECLoop:
-    stx_zp(0x1); // save enemy object buffer offset for second enemy here
+    write_byte(0x1, x);
     tya(); // save first enemy's bounding box offset to stack
     pha();
     lda_zpx(Enemy_Flag); // check enemy object enable flag
@@ -9353,7 +9330,7 @@ ECLoop:
     txa(); // get second enemy object's bounding box offset
     asl_acc(); // multiply by four, then add four
     asl_acc();
-    clc();
+    carry_flag = false;
     adc_imm(0x4);
     tax(); // use as new contents of X
     jsr(SprObjectCollisionCore, 327); // do collision detection using the two enemies here
@@ -9369,7 +9346,7 @@ ECLoop:
     if (!zero_flag) { goto ReadyNextEnemy; } // already set, and move onto next enemy slot if set
     lda_absy(Enemy_CollisionBits);
     ora_absx(SetBitsMask); // if the bit is not set, set it now
-    sta_absy(Enemy_CollisionBits);
+    write_byte(Enemy_CollisionBits + y, a);
   
 YesEC:
     jsr(ProcEnemyCollisions, 328); // react according to the nature of collision
@@ -9378,7 +9355,7 @@ YesEC:
 NoEnemyCollision:
     lda_absy(Enemy_CollisionBits); // load first enemy's collision-related bits
     and_absx(ClearBitsMask); // clear bit connected to second enemy
-    sta_absy(Enemy_CollisionBits); // then move onto next enemy slot
+    write_byte(Enemy_CollisionBits + y, a);
   
 ReadyNextEnemy:
     pla(); // get first enemy's bounding box offset from the stack
@@ -9416,7 +9393,7 @@ ShellCollisions:
     jsr(ShellOrBlockDefeat, 331); // kill second enemy
     ldx_zp(ObjectOffset);
     lda_absx(ShellChainCounter); // get chain counter for shell
-    clc();
+    carry_flag = false;
     adc_imm(0x4); // add four to get appropriate point offset
     ldx_zp(0x1);
     jsr(SetupFloateyNumber, 332); // award appropriate number of points for second enemy
@@ -9436,7 +9413,7 @@ ProcSecondEnemyColl:
     jsr(ShellOrBlockDefeat, 333); // otherwise, kill first enemy
     ldy_zp(0x1);
     lda_absy(ShellChainCounter); // get chain counter for shell
-    clc();
+    carry_flag = false;
     adc_imm(0x4); // add four to get appropriate point offset
     ldx_zp(ObjectOffset);
     jsr(SetupFloateyNumber, 334); // award appropriate number of points for first enemy
@@ -9470,10 +9447,10 @@ RXSpd:
     eor_imm(0xff); // get two's compliment for horizontal speed
     tay();
     iny();
-    sty_zpx(Enemy_X_Speed); // store as new horizontal speed
+    write_byte(Enemy_X_Speed + x, y);
     lda_zpx(Enemy_MovingDir);
     eor_imm(0b00000011); // invert moving direction and store, then leave
-    sta_zpx(Enemy_MovingDir); // thus effectively turning the enemy around
+    write_byte(Enemy_MovingDir + x, a);
   
 ExTA:
     goto rts; // leave!!!
@@ -9482,7 +9459,7 @@ ExTA:
   
 LargePlatformCollision:
     lda_imm(0xff); // save value here
-    sta_absx(PlatformCollisionFlag);
+    write_byte(PlatformCollisionFlag + x, a);
     lda_abs(TimerControl); // check master timer control
     if (!zero_flag) { goto ExLPC; } // if set, branch to leave
     lda_zpx(Enemy_State); // if d7 set in object state,
@@ -9500,7 +9477,7 @@ ChkForPlayerC_LargeP:
     txa();
     GetEnemyBoundBoxOfsArg(); // get bounding box offset in Y
     lda_zpx(Enemy_Y_Position); // store vertical coordinate in
-    sta_zp(0x0); // temp variable for now
+    write_byte(0x0, a);
     txa(); // send offset we're on to the stack
     pha();
     jsr(PlayerCollisionCore, 337); // do player-to-platform collision detection
@@ -9518,11 +9495,11 @@ ExLPC:
 SmallPlatformCollision:
     lda_abs(TimerControl); // if master timer control set,
     if (!zero_flag) { goto ExSPC; } // branch to leave
-    sta_absx(PlatformCollisionFlag); // otherwise initialize collision flag
+    write_byte(PlatformCollisionFlag + x, a);
     CheckPlayerVertical(); // do a sub to see if player is below a certain point
     if (carry_flag) { goto ExSPC; } // or entirely offscreen, and branch to leave if true
     lda_imm(0x2);
-    sta_zp(0x0); // load counter here for 2 bounding boxes
+    write_byte(0x0, a);
   
 ChkSmallPlatLoop:
     ldx_zp(ObjectOffset); // get enemy object offset
@@ -9537,13 +9514,13 @@ ChkSmallPlatLoop:
   
 MoveBoundBox:
     lda_absy(BoundingBox_UL_YPos); // move bounding box vertical coordinates
-    clc(); // 128 pixels downwards
+    carry_flag = false;
     adc_imm(0x80);
-    sta_absy(BoundingBox_UL_YPos);
+    write_byte(BoundingBox_UL_YPos + y, a);
     lda_absy(BoundingBox_DR_YPos);
-    clc();
+    carry_flag = false;
     adc_imm(0x80);
-    sta_absy(BoundingBox_DR_YPos);
+    write_byte(BoundingBox_DR_YPos + y, a);
     dec_zp(0x0); // decrement counter we set earlier
     if (!zero_flag) { goto ChkSmallPlatLoop; } // loop back until both bounding boxes are checked
   
@@ -9557,18 +9534,18 @@ ProcSPlatCollisions:
   
 ProcLPlatCollisions:
     lda_absy(BoundingBox_DR_YPos); // get difference by subtracting the top
-    sec(); // of the player's bounding box from the bottom
+    carry_flag = true;
     sbc_abs(BoundingBox_UL_YPos); // of the platform's bounding box
     cmp_imm(0x4); // if difference too large or negative,
     if (carry_flag) { goto ChkForTopCollision; } // branch, do not alter vertical speed of player
     lda_zp(Player_Y_Speed); // check to see if player's vertical speed is moving down
     if (!neg_flag) { goto ChkForTopCollision; } // if so, don't mess with it
     lda_imm(0x1); // otherwise, set vertical
-    sta_zp(Player_Y_Speed); // speed of player to kill jump
+    write_byte(Player_Y_Speed, a);
   
 ChkForTopCollision:
     lda_abs(BoundingBox_DR_YPos); // get difference by subtracting the top
-    sec(); // of the platform's bounding box from the bottom
+    carry_flag = true;
     sbc_absy(BoundingBox_UL_YPos); // of the player's bounding box
     cmp_imm(0x6);
     if (carry_flag) { goto PlatformSideCollisions; } // if difference not close enough, skip all of this
@@ -9584,22 +9561,22 @@ ChkForTopCollision:
   
 SetCollisionFlag:
     ldx_zp(ObjectOffset); // get enemy object buffer offset
-    sta_absx(PlatformCollisionFlag); // save either bounding box counter or enemy offset here
+    write_byte(PlatformCollisionFlag + x, a);
     lda_imm(0x0);
-    sta_zp(Player_State); // set player state to normal then leave
+    write_byte(Player_State, a);
     goto rts;
   
 PlatformSideCollisions:
     lda_imm(0x1); // set value here to indicate possible horizontal
-    sta_zp(0x0); // collision on left side of platform
+    write_byte(0x0, a);
     lda_abs(BoundingBox_DR_XPos); // get difference by subtracting platform's left edge
-    sec(); // from player's right edge
+    carry_flag = true;
     sbc_absy(BoundingBox_UL_XPos);
     cmp_imm(0x8); // if difference close enough, skip all of this
     if (!carry_flag) { goto SideC; }
     inc_zp(0x0); // otherwise increment value set here for right side collision
     lda_absy(BoundingBox_DR_XPos); // get difference by subtracting player's left edge
-    clc(); // from platform's right edge
+    carry_flag = false;
     sbc_abs(BoundingBox_UL_XPos);
     cmp_imm(0x9); // if difference not close enough, skip subroutine
     if (carry_flag) { goto NoSideC; } // and instead branch to leave (no collision)
@@ -9615,7 +9592,7 @@ NoSideC:
 PositionPlayerOnS_Plat:
     tay(); // use bounding box counter saved in collision flag
     lda_zpx(Enemy_Y_Position); // for offset
-    clc(); // add positioning data using offset to the vertical
+    carry_flag = false;
     adc_absy(PlayerPosSPlatData - 1); // coordinate
     goto PositionPlayerOnVPlatSkip; //  .db $2c ;BIT instruction opcode
   
@@ -9629,15 +9606,15 @@ PositionPlayerOnVPlatSkip:
     ldy_zpx(Enemy_Y_HighPos);
     cpy_imm(0x1); // if vertical high byte offscreen, skip this
     if (!zero_flag) { goto ExPlPos; }
-    sec(); // subtract 32 pixels from vertical coordinate
+    carry_flag = true;
     sbc_imm(0x20); // for the player object's height
-    sta_zp(Player_Y_Position); // save as player's new vertical coordinate
+    write_byte(Player_Y_Position, a);
     tya();
     sbc_imm(0x0); // subtract borrow and store as player's
-    sta_zp(Player_Y_HighPos); // new vertical high byte
+    write_byte(Player_Y_HighPos, a);
     lda_imm(0x0);
-    sta_zp(Player_Y_Speed); // initialize vertical speed and low byte of force
-    sta_abs(Player_Y_MoveForce); // and then leave
+    write_byte(Player_Y_Speed, a);
+    write_byte(Player_Y_MoveForce, a);
   
 ExPlPos:
     goto rts;
@@ -9646,7 +9623,7 @@ ExPlPos:
   
 GetEnemyBoundBoxOfs:
     lda_zp(ObjectOffset); // get enemy object buffer offset
-    GetEnemyBoundBoxOfsArg(); goto rts; // <gen: fallthrough>
+    GetEnemyBoundBoxOfsArg(); goto rts; // <fallthrough>
   
 PlayerBGCollision:
     lda_abs(DisableCollisionDet); // if collision detection disabled flag set,
@@ -9668,14 +9645,14 @@ SetFallS:
     lda_imm(0x2); // load default player state for falling
   
 SetPSte:
-    sta_zp(Player_State); // set whatever player state is appropriate
+    write_byte(Player_State, a);
   
 ChkOnScr:
     lda_zp(Player_Y_HighPos);
     cmp_imm(0x1); // check player's vertical high byte for still on the screen
     if (!zero_flag) { goto ExPBGCol; } // branch to leave if not
     lda_imm(0xff);
-    sta_abs(Player_CollisionBits); // initialize player's collision flag
+    write_byte(Player_CollisionBits, a);
     lda_zp(Player_Y_Position);
     cmp_imm(0xcf); // check player's vertical coordinate
     if (!carry_flag) { goto ChkCollSize; } // if not too close to the bottom of screen, continue
@@ -9696,7 +9673,7 @@ ChkCollSize:
   
 GBBAdr:
     lda_absy(BlockBufferAdderData); // get value using offset
-    sta_zp(0xeb); // store value here
+    write_byte(0xeb, a);
     tay(); // put value into Y, as offset for block buffer routine
     ldx_abs(PlayerSize); // get player's size as offset
     lda_abs(CrouchingFlag);
@@ -9729,11 +9706,11 @@ SolidOrClimb:
     cmp_imm(0x26); // if climbing metatile,
     if (zero_flag) { goto NYSpd; } // branch ahead and do not play sound
     lda_imm(Sfx_Bump);
-    sta_zp(Square1SoundQueue); // otherwise load bump sound
+    write_byte(Square1SoundQueue, a);
   
 NYSpd:
     lda_imm(0x1); // set player's vertical speed to nullify
-    sta_zp(Player_Y_Speed); // jump or swim
+    write_byte(Player_Y_Speed, a);
   
 DoFootCheck:
     ldy_zp(0xeb); // get block buffer adder offset
@@ -9745,9 +9722,9 @@ DoFootCheck:
     if (carry_flag) { goto AwardTouchedCoin; } // if so, branch to some other part of code
     pha(); // save bottom left metatile to stack
     jsr(BlockBufferColli_Feet, 347); // do player-to-bg collision detection on bottom right of player
-    sta_zp(0x0); // save bottom right metatile here
+    write_byte(0x0, a);
     pla();
-    sta_zp(0x1); // pull bottom left metatile and save here
+    write_byte(0x1, a);
     if (!zero_flag) { goto ChkFootMTile; } // if anything here, skip this part
     lda_zp(0x0); // otherwise check for anything in bottom right metatile
     if (zero_flag) { goto DoPlayerSideCheck; } // and skip ahead if not
@@ -9775,35 +9752,35 @@ ContChk:
     cpy_imm(0x5); // from collision detection routine
     if (!carry_flag) { goto LandPlyr; } // if lower nybble < 5, branch
     lda_zp(Player_MovingDir);
-    sta_zp(0x0); // use player's moving direction as temp variable
+    write_byte(0x0, a);
     ImpedePlayerMove(); goto rts; // jump to impede player's movement in that direction
-    ImpedePlayerMove(); goto rts; // <gen: fallthrough>
+    ImpedePlayerMove(); goto rts; // <fallthrough>
   
 LandPlyr:
     jsr(ChkForLandJumpSpring, 350); // do sub to check for jumpspring metatiles and deal with it
     lda_imm(0xf0);
     and_zp(Player_Y_Position); // mask out lower nybble of player's vertical position
-    sta_zp(Player_Y_Position); // and store as new vertical position to land player properly
+    write_byte(Player_Y_Position, a);
     HandlePipeEntry(); // do sub to process potential pipe entry
     lda_imm(0x0);
-    sta_zp(Player_Y_Speed); // initialize vertical speed and fractional
-    sta_abs(Player_Y_MoveForce); // movement force to stop player's vertical movement
-    sta_abs(StompChainCounter); // initialize enemy stomp counter
+    write_byte(Player_Y_Speed, a);
+    write_byte(Player_Y_MoveForce, a);
+    write_byte(StompChainCounter, a);
   
 InitSteP:
     lda_imm(0x0);
-    sta_zp(Player_State); // set player's state to normal
+    write_byte(Player_State, a);
   
 DoPlayerSideCheck:
     ldy_zp(0xeb); // get block buffer adder offset
     iny();
     iny(); // increment offset 2 bytes to use adders for side collisions
     lda_imm(0x2); // set value here to be used as counter
-    sta_zp(0x0);
+    write_byte(0x0, a);
   
 SideCheckLoop:
     iny(); // move onto the next one
-    sty_zp(0xeb); // store it
+    write_byte(0xeb, y);
     lda_zp(Player_Y_Position);
     cmp_imm(0x20); // check player's vertical position
     if (!carry_flag) { goto BHalf; } // if player is in status bar area, branch ahead to skip this part
@@ -9866,11 +9843,11 @@ PipeDwnS:
     lda_abs(Player_SprAttrib); // check player's attributes
     if (!zero_flag) { goto PlyrPipe; } // if already set, branch, do not play sound again
     ldy_imm(Sfx_PipeDown_Injury);
-    sty_zp(Square1SoundQueue); // otherwise load pipedown/injury sound
+    write_byte(Square1SoundQueue, y);
   
 PlyrPipe:
     ora_imm(0b00100000);
-    sta_abs(Player_SprAttrib); // set background priority bit in player attributes
+    write_byte(Player_SprAttrib, a);
     lda_zp(Player_X_Position);
     and_imm(0b00001111); // get lower nybble of player's horizontal coordinate
     if (zero_flag) { goto ChkGERtn; } // if at zero, branch ahead to skip this part
@@ -9881,7 +9858,7 @@ PlyrPipe:
   
 SetCATmr:
     lda_absy(AreaChangeTimerData); // set timer for change of area as appropriate
-    sta_abs(ChangeAreaTimer);
+    write_byte(ChangeAreaTimer, a);
   
 ChkGERtn:
     lda_zp(GameEngineSubroutine); // get number of game engine routine running
@@ -9890,7 +9867,7 @@ ChkGERtn:
     cmp_imm(0x8); // player control routine, go ahead and branch to leave
     if (!zero_flag) { goto ExCSM; }
     lda_imm(0x2);
-    sta_zp(GameEngineSubroutine); // otherwise set sideways pipe entry routine to run
+    write_byte(GameEngineSubroutine, a);
     goto rts; // and leave
     // --------------------------------
     // $02 - high nybble of vertical coordinate from block buffer
@@ -9910,16 +9887,16 @@ HandleCoinMetatile:
   
 HandleAxeMetatile:
     lda_imm(0x0);
-    sta_abs(OperMode_Task); // reset secondary mode
+    write_byte(OperMode_Task, a);
     lda_imm(0x2);
-    sta_abs(OperMode); // set primary mode to autoctrl mode
+    write_byte(OperMode, a);
     lda_imm(0x18);
-    sta_zp(Player_X_Speed); // set horizontal speed and continue to erase axe metatile
+    write_byte(Player_X_Speed, a);
   
 ErACM:
     ldy_zp(0x2); // load vertical high nybble offset for block buffer
     lda_imm(0x0); // load blank metatile
-    sta_indy(0x6); // store to remove old contents from block buffer
+    write_byte(read_word(0x6) + y, a);
     goto RemoveCoin_Axe; // update the screen accordingly
     // --------------------------------
     // $02 - high nybble of vertical coordinate from block buffer
@@ -9947,7 +9924,7 @@ FlagpoleCollision:
     cmp_imm(0x5); // check for end-of-level routine running
     if (zero_flag) { goto PutPlayerOnVine; } // if running, branch to end of climbing code
     lda_imm(0x1);
-    sta_zp(PlayerFacingDir); // set player's facing direction to right
+    write_byte(PlayerFacingDir, a);
     inc_abs(ScrollLock); // set scroll lock flag
     lda_zp(GameEngineSubroutine);
     cmp_imm(0x4); // check for flagpole slide routine running
@@ -9955,12 +9932,12 @@ FlagpoleCollision:
     lda_imm(BulletBill_CannonVar); // load identifier for bullet bills (cannon variant)
     KillEnemies(); // get rid of them
     lda_imm(Silence);
-    sta_zp(EventMusicQueue); // silence music
+    write_byte(EventMusicQueue, a);
     lsr_acc();
-    sta_abs(FlagpoleSoundQueue); // load flagpole sound into flagpole sound queue
+    write_byte(FlagpoleSoundQueue, a);
     ldx_imm(0x4); // start at end of vertical coordinate data
     lda_zp(Player_Y_Position);
-    sta_abs(FlagpoleCollisionYPos); // store player's vertical coordinate here to be used later
+    write_byte(FlagpoleCollisionYPos, a);
   
 ChkFlagpoleYPosLoop:
     cmp_absx(FlagpoleYPosData); // compare with current vertical coordinate data
@@ -9969,11 +9946,11 @@ ChkFlagpoleYPosLoop:
     if (!zero_flag) { goto ChkFlagpoleYPosLoop; } // do this until all data is checked (use last one if all checked)
   
 MtchF:
-    stx_abs(FlagpoleScore); // store offset here to be used later
+    write_byte(FlagpoleScore, x);
   
 RunFR:
     lda_imm(0x4);
-    sta_zp(GameEngineSubroutine); // set value to run flagpole slide routine
+    write_byte(GameEngineSubroutine, a);
     goto PutPlayerOnVine; // jump to end of climbing code
   
 VineCollision:
@@ -9983,21 +9960,21 @@ VineCollision:
     cmp_imm(0x20); // for being in status bar area
     if (carry_flag) { goto PutPlayerOnVine; } // branch if not that far up
     lda_imm(0x1);
-    sta_zp(GameEngineSubroutine); // otherwise set to run autoclimb routine next frame
+    write_byte(GameEngineSubroutine, a);
   
 PutPlayerOnVine:
     lda_imm(0x3); // set player state to climbing
-    sta_zp(Player_State);
+    write_byte(Player_State, a);
     lda_imm(0x0); // nullify player's horizontal speed
-    sta_zp(Player_X_Speed); // and fractional horizontal movement force
-    sta_abs(Player_X_MoveForce);
+    write_byte(Player_X_Speed, a);
+    write_byte(Player_X_MoveForce, a);
     lda_zp(Player_X_Position); // get player's horizontal coordinate
-    sec();
+    carry_flag = true;
     sbc_abs(ScreenLeft_X_Pos); // subtract from left side horizontal coordinate
     cmp_imm(0x10);
     if (carry_flag) { goto SetVXPl; } // if 16 or more pixels difference, do not alter facing direction
     lda_imm(0x2);
-    sta_zp(PlayerFacingDir); // otherwise force player to face left
+    write_byte(PlayerFacingDir, a);
   
 SetVXPl:
     ldy_zp(PlayerFacingDir); // get current facing direction, use as offset
@@ -10006,15 +9983,15 @@ SetVXPl:
     asl_acc(); // move low nybble to high
     asl_acc();
     asl_acc();
-    clc();
+    carry_flag = false;
     adc_absy(ClimbXPosAdder - 1); // add pixels depending on facing direction
-    sta_zp(Player_X_Position); // store as player's horizontal coordinate
+    write_byte(Player_X_Position, a);
     lda_zp(0x6); // get low byte of block buffer address again
     if (!zero_flag) { goto ExPVne; } // if not zero, branch
     lda_abs(ScreenRight_PageLoc); // load page location of right side of screen
-    clc();
+    carry_flag = false;
     adc_absy(ClimbPLocAdder - 1); // add depending on facing location
-    sta_zp(Player_PageLoc); // store as player's page location
+    write_byte(Player_PageLoc, a);
   
 ExPVne:
     goto rts; // finally, we're done!
@@ -10027,13 +10004,13 @@ ChkForLandJumpSpring:
     ChkJumpspringMetatiles(); // do sub to check if player landed on jumpspring
     if (!carry_flag) { goto ExCJSp; } // if carry not set, jumpspring not found, therefore leave
     lda_imm(0x70);
-    sta_abs(VerticalForce); // otherwise set vertical movement force for player
+    write_byte(VerticalForce, a);
     lda_imm(0xf9);
-    sta_abs(JumpspringForce); // set default jumpspring force
+    write_byte(JumpspringForce, a);
     lda_imm(0x3);
-    sta_abs(JumpspringTimer); // set jumpspring timer to be used later
+    write_byte(JumpspringTimer, a);
     lsr_acc();
-    sta_abs(JumpspringAnimCtrl); // set jumpspring animation control to start animating
+    write_byte(JumpspringAnimCtrl, a);
   
 ExCJSp:
     goto rts; // and leave
@@ -10054,12 +10031,12 @@ CheckForCoinMTiles:
     if (zero_flag) { goto CoinSd; } // branch if found
     cmp_imm(0xc3); // check for underwater coin
     if (zero_flag) { goto CoinSd; } // branch if found
-    clc(); // otherwise clear carry and leave
+    carry_flag = false;
     goto rts;
   
 CoinSd:
     lda_imm(Sfx_CoinGrab);
-    sta_zp(Square2SoundQueue); // load coin grab sound and leave
+    write_byte(Square2SoundQueue, a);
     goto rts;
   
 GetMTileAttrib:
@@ -10123,7 +10100,7 @@ HandleEToBGCollision:
     if (!zero_flag) { goto LandEnemyProperly; } // check for blank metatile $23 and branch if not found
     ldy_zp(0x2); // get vertical coordinate used to find block
     lda_imm(0x0); // store default blank metatile in that spot so we won't
-    sta_indy(0x6); // trigger this routine accidentally again
+    write_byte(read_word(0x6) + y, a);
     lda_zpx(Enemy_ID);
     cmp_imm(0x15); // if enemy object => $15, branch ahead
     if (carry_flag) { goto ChkToStunEnemies; }
@@ -10147,13 +10124,13 @@ ChkToStunEnemies:
   
 Demote:
     and_imm(0b00000001); // erase all but LSB, essentially turning enemy object
-    sta_zpx(Enemy_ID); // into green or red koopa troopa to demote them
+    write_byte(Enemy_ID + x, a);
   
 SetStun:
     lda_zpx(Enemy_State); // load enemy state
     and_imm(0b11110000); // save high nybble
     ora_imm(0b00000010);
-    sta_zpx(Enemy_State); // set d1 of enemy state
+    write_byte(Enemy_State + x, a);
     dec_zpx(Enemy_Y_Position);
     dec_zpx(Enemy_Y_Position); // subtract two pixels from enemy's vertical position
     lda_zpx(Enemy_ID);
@@ -10167,7 +10144,7 @@ SetWYSpd:
     lda_imm(0xff); // change the vertical speed
   
 SetNotW:
-    sta_zpx(Enemy_Y_Speed); // set vertical speed now
+    write_byte(Enemy_Y_Speed + x, a);
     ldy_imm(0x1);
     PlayerEnemyDiff(); // get horizontal difference between player and enemy object
     if (!neg_flag) { goto ChkBBill; } // branch if enemy is to the right of player
@@ -10179,12 +10156,12 @@ ChkBBill:
     if (zero_flag) { goto NoCDirF; }
     cmp_imm(BulletBill_FrenzyVar); // check for bullet bill (frenzy variant)
     if (zero_flag) { goto NoCDirF; } // branch if either found, direction does not change
-    sty_zpx(Enemy_MovingDir); // store as moving direction
+    write_byte(Enemy_MovingDir + x, y);
   
 NoCDirF:
     dey(); // decrement and use as offset
     lda_absy(EnemyBGCXSpdData); // get proper horizontal speed
-    sta_zpx(Enemy_X_Speed); // and store, then leave
+    write_byte(Enemy_X_Speed + x, a);
   
 ExEBGChk:
     goto rts;
@@ -10193,7 +10170,7 @@ ExEBGChk:
   
 LandEnemyProperly:
     lda_zp(0x4); // check lower nybble of vertical coordinate saved earlier
-    sec();
+    carry_flag = true;
     sbc_imm(0x8); // subtract eight pixels
     cmp_imm(0x5); // used to determine whether enemy landed from falling
     if (carry_flag) { goto ChkForRedKoopa; } // branch if lower nybble in range of $0d-$0f before subtract
@@ -10224,9 +10201,9 @@ ChkLandedEnemyState:
     lda_imm(0x0); // set timer for $00 if spiny
   
 SetForStn:
-    sta_absx(EnemyIntervalTimer); // set timer here
+    write_byte(EnemyIntervalTimer + x, a);
     lda_imm(0x3); // set state here, apparently used to render
-    sta_zpx(Enemy_State); // upside-down koopas and buzzy beetles
+    write_byte(Enemy_State + x, a);
     jsr(EnemyLanding, 364); // then land it properly
   
 ExSteChk:
@@ -10239,9 +10216,9 @@ ProcEnemyDirection:
     cmp_imm(Spiny); // check for spiny
     if (!zero_flag) { goto InvtD; } // branch if not found
     lda_imm(0x1);
-    sta_zpx(Enemy_MovingDir); // send enemy moving to the right by default
+    write_byte(Enemy_MovingDir + x, a);
     lda_imm(0x8);
-    sta_zpx(Enemy_X_Speed); // set horizontal speed accordingly
+    write_byte(Enemy_X_Speed + x, a);
     lda_zp(FrameCounter);
     and_imm(0b00000111); // if timed appropriately, spiny will skip over
     if (zero_flag) { goto LandEnemyInitState; } // trying to face the player
@@ -10264,13 +10241,13 @@ LandEnemyInitState:
     and_imm(0b10000000); // if d7 of enemy state is set, branch
     if (!zero_flag) { goto NMovShellFallBit; }
     lda_imm(0x0); // otherwise initialize enemy state and leave
-    sta_zpx(Enemy_State); // note this will also turn spiny's egg into spiny
+    write_byte(Enemy_State + x, a);
     goto rts;
   
 NMovShellFallBit:
     lda_zpx(Enemy_State); // nullify d6 of enemy state, save other bits
     and_imm(0b10111111); // and store, then leave
-    sta_zpx(Enemy_State);
+    write_byte(Enemy_State + x, a);
     goto rts;
     // --------------------------------
   
@@ -10294,7 +10271,7 @@ GetSteFromD:
     lda_absy(EnemyBGCStateData); // load new enemy state with old as offset
   
 SetD6Ste:
-    sta_zpx(Enemy_State); // set as new state
+    write_byte(Enemy_State + x, a);
     // --------------------------------
     // $00 - used to store bitmask (not used but initialized here)
     // $eb - used in DoEnemySideCheck as counter and to compare moving directions
@@ -10305,7 +10282,7 @@ DoEnemySideCheck:
     if (!carry_flag) { goto ExESdeC; }
     ldy_imm(0x16); // start by finding block to the left of enemy ($00,$14)
     lda_imm(0x2); // set value here in what is also used as
-    sta_zp(0xeb); // OAM data offset
+    write_byte(0xeb, a);
   
 SdeCLoop:
     lda_zp(0xeb); // check value
@@ -10333,14 +10310,14 @@ ChkForBump_HammerBroJ:
     asl_acc(); // ahead and do not play sound
     if (!carry_flag) { goto NoBump; }
     lda_imm(Sfx_Bump); // otherwise, play bump sound
-    sta_zp(Square1SoundQueue); // sound will never be played if branching from ChkForRedKoopa
+    write_byte(Square1SoundQueue, a);
   
 NoBump:
     lda_zpx(Enemy_ID); // check for hammer bro
     cmp_imm(0x5);
     if (!zero_flag) { goto InvEnemyDir; } // branch if not found
     lda_imm(0x0);
-    sta_zp(0x0); // initialize value here for bitmask  
+    write_byte(0x0, a);
     ldy_imm(0xfa); // load default vertical speed for jumping
     goto SetHJ; // jump to code that makes hammer bro jump
   
@@ -10354,12 +10331,12 @@ EnemyLanding:
     lda_zpx(Enemy_Y_Position);
     and_imm(0b11110000); // save high nybble of vertical coordinate, and
     ora_imm(0b00001000); // set d3, then store, probably used to set enemy object
-    sta_zpx(Enemy_Y_Position); // neatly on whatever it's landing on
+    write_byte(Enemy_Y_Position + x, a);
     goto rts;
   
 SubtEnemyYPos:
     lda_zpx(Enemy_Y_Position); // add 62 pixels to enemy object's
-    clc(); // vertical coordinate
+    carry_flag = false;
     adc_imm(0x3e);
     cmp_imm(0x44); // compare against a certain range
     goto rts; // and leave with flags set for conditional branch
@@ -10368,7 +10345,7 @@ EnemyJump:
     jsr(SubtEnemyYPos, 369); // do a sub here
     if (!carry_flag) { goto DoSide; } // if enemy vertical coord + 62 < 68, branch to leave
     lda_zpx(Enemy_Y_Speed);
-    clc(); // add two to vertical speed
+    carry_flag = false;
     adc_imm(0x2);
     cmp_imm(0x3); // if green paratroopa not falling, branch ahead
     if (!carry_flag) { goto DoSide; }
@@ -10378,7 +10355,7 @@ EnemyJump:
     if (zero_flag) { goto DoSide; } // branch if found
     jsr(EnemyLanding, 372); // change vertical coordinate and speed
     lda_imm(0xfd);
-    sta_zpx(Enemy_Y_Speed); // make the paratroopa jump again
+    write_byte(Enemy_Y_Speed + x, a);
   
 DoSide:
     goto DoEnemySideCheck; // check for horizontal blockage, then leave
@@ -10393,7 +10370,7 @@ HammerBroBGColl:
 KillEnemyAboveBlock:
     jsr(ShellOrBlockDefeat, 374); // do this sub to kill enemy
     lda_imm(0xfc); // alter vertical speed of enemy and leave
-    sta_zpx(Enemy_Y_Speed);
+    write_byte(Enemy_Y_Speed + x, a);
     goto rts;
   
 UnderHammerBro:
@@ -10401,14 +10378,14 @@ UnderHammerBro:
     if (!zero_flag) { goto NoUnderHammerBro; } // branch if not expired
     lda_zpx(Enemy_State);
     and_imm(0b10001000); // save d7 and d3 from enemy state, nullify other bits
-    sta_zpx(Enemy_State); // and store
+    write_byte(Enemy_State + x, a);
     jsr(EnemyLanding, 375); // modify vertical coordinate, speed and something else
     goto DoEnemySideCheck; // then check for horizontal blockage and leave
   
 NoUnderHammerBro:
     lda_zpx(Enemy_State); // if hammer bro is not standing on anything, set d0
     ora_imm(0x1); // in the enemy state to indicate jumping or falling, then leave
-    sta_zpx(Enemy_State);
+    write_byte(Enemy_State + x, a);
     goto rts;
   
 ChkUnderEnemy:
@@ -10444,24 +10421,24 @@ FireballBGCollision:
     lda_zpx(FireballBouncingFlag); // if bouncing flag already set,
     if (!zero_flag) { goto InitFireballExplode; } // branch to set exploding bit in fireball's state
     lda_imm(0xfd);
-    sta_zpx(Fireball_Y_Speed); // otherwise set vertical speed to move upwards (give it bounce)
+    write_byte(Fireball_Y_Speed + x, a);
     lda_imm(0x1);
-    sta_zpx(FireballBouncingFlag); // set bouncing flag
+    write_byte(FireballBouncingFlag + x, a);
     lda_zpx(Fireball_Y_Position);
     and_imm(0xf8); // modify vertical coordinate to land it properly
-    sta_zpx(Fireball_Y_Position); // store as new vertical coordinate
+    write_byte(Fireball_Y_Position + x, a);
     goto rts; // leave
   
 ClearBounceFlag:
     lda_imm(0x0);
-    sta_zpx(FireballBouncingFlag); // clear bouncing flag by default
+    write_byte(FireballBouncingFlag + x, a);
     goto rts; // leave
   
 InitFireballExplode:
     lda_imm(0x80);
-    sta_zpx(Fireball_State); // set exploding flag in fireball's state
+    write_byte(Fireball_State + x, a);
     lda_imm(Sfx_Bump);
-    sta_zp(Square1SoundQueue); // load bump sound
+    write_byte(Square1SoundQueue, a);
     goto rts; // leave
     // -------------------------------------------------------------------------------------
     // $00 - used to hold one of bitmasks, or offset
@@ -10472,7 +10449,7 @@ InitFireballExplode:
   
 GetFireballBoundBox:
     txa(); // add seven bytes to offset
-    clc(); // to use in routines as offset for fireball
+    carry_flag = false;
     adc_imm(0x7);
     tax();
     ldy_imm(0x2); // set offset for relative coordinates
@@ -10480,7 +10457,7 @@ GetFireballBoundBox:
   
 GetMiscBoundBox:
     txa(); // add nine bytes to offset
-    clc(); // to use in routines as offset for misc object
+    carry_flag = false;
     adc_imm(0x9);
     tax();
     ldy_imm(0x6); // set offset for relative coordinates
@@ -10491,20 +10468,20 @@ FBallB:
   
 GetEnemyBoundBox:
     ldy_imm(0x48); // store bitmask here for now
-    sty_zp(0x0);
+    write_byte(0x0, y);
     ldy_imm(0x44); // store another bitmask here for now and jump
     goto GetMaskedOffScrBits;
   
 SmallPlatformBoundBox:
     ldy_imm(0x8); // store bitmask here for now
-    sty_zp(0x0);
+    write_byte(0x0, y);
     ldy_imm(0x4); // store another bitmask here for now
   
 GetMaskedOffScrBits:
     lda_zpx(Enemy_X_Position); // get enemy object position relative
-    sec(); // to the left side of the screen
+    carry_flag = true;
     sbc_abs(ScreenLeft_X_Pos);
-    sta_zp(0x1); // store here
+    write_byte(0x1, a);
     lda_zpx(Enemy_PageLoc); // subtract borrow from current page location
     sbc_abs(ScreenLeft_PageLoc); // of left side
     if (neg_flag) { goto CMBits; } // if enemy object is beyond left edge, branch
@@ -10515,7 +10492,7 @@ GetMaskedOffScrBits:
 CMBits:
     tya(); // otherwise use contents of Y
     and_abs(Enemy_OffscreenBits); // preserve bitwise whatever's in here
-    sta_absx(EnemyOffscrBitsMasked); // save masked offscreen bits here
+    write_byte(EnemyOffscrBitsMasked + x, a);
     if (!zero_flag) { goto MoveBoundBoxOffscreen; } // if anything set here, branch
     goto SetupEOffsetFBBox; // otherwise, do something else
   
@@ -10528,7 +10505,7 @@ LargePlatformBoundBox:
   
 SetupEOffsetFBBox:
     txa(); // add 1 to offset to properly address
-    clc(); // the enemy object memory locations
+    carry_flag = false;
     adc_imm(0x1);
     tax();
     ldy_imm(0x1); // load 1 as offset here, same reason
@@ -10541,18 +10518,18 @@ MoveBoundBoxOffscreen:
     asl_acc();
     tay(); // use as offset here
     lda_imm(0xff);
-    sta_absy(EnemyBoundingBoxCoord); // load value into four locations here and leave
-    sta_absy(EnemyBoundingBoxCoord + 1);
-    sta_absy(EnemyBoundingBoxCoord + 2);
-    sta_absy(EnemyBoundingBoxCoord + 3);
+    write_byte(EnemyBoundingBoxCoord + y, a);
+    write_byte(EnemyBoundingBoxCoord + 1 + y, a);
+    write_byte(EnemyBoundingBoxCoord + 2 + y, a);
+    write_byte(EnemyBoundingBoxCoord + 3 + y, a);
     goto rts;
   
 BoundingBoxCore:
-    stx_zp(0x0); // save offset here
+    write_byte(0x0, x);
     lda_absy(SprObject_Rel_YPos); // store object coordinates relative to screen
-    sta_zp(0x2); // vertically and horizontally, respectively
+    write_byte(0x2, a);
     lda_absy(SprObject_Rel_XPos);
-    sta_zp(0x1);
+    write_byte(0x1, a);
     txa(); // multiply offset by four and save to stack
     asl_acc();
     asl_acc();
@@ -10563,23 +10540,23 @@ BoundingBoxCore:
     asl_acc();
     tax();
     lda_zp(0x1); // add the first number in the bounding box data to the
-    clc(); // relative horizontal coordinate using enemy object offset
+    carry_flag = false;
     adc_absx(BoundBoxCtrlData); // and store somewhere using same offset * 4
-    sta_absy(BoundingBox_UL_Corner); // store here
+    write_byte(BoundingBox_UL_Corner + y, a);
     lda_zp(0x1);
-    clc();
+    carry_flag = false;
     adc_absx(BoundBoxCtrlData + 2); // add the third number in the bounding box data to the
-    sta_absy(BoundingBox_LR_Corner); // relative horizontal coordinate and store
+    write_byte(BoundingBox_LR_Corner + y, a);
     inx(); // increment both offsets
     iny();
     lda_zp(0x2); // add the second number to the relative vertical coordinate
-    clc(); // using incremented offset and store using the other
+    carry_flag = false;
     adc_absx(BoundBoxCtrlData); // incremented offset
-    sta_absy(BoundingBox_UL_Corner);
+    write_byte(BoundingBox_UL_Corner + y, a);
     lda_zp(0x2);
-    clc();
+    carry_flag = false;
     adc_absx(BoundBoxCtrlData + 2); // add the fourth number to the relative vertical coordinate
-    sta_absy(BoundingBox_LR_Corner); // and store
+    write_byte(BoundingBox_LR_Corner + y, a);
     pla(); // get original offset loaded into $00 * y from stack
     tay(); // use as Y
     ldx_zp(0x0); // get original offset and use as X again
@@ -10587,12 +10564,12 @@ BoundingBoxCore:
   
 CheckRightScreenBBox:
     lda_abs(ScreenLeft_X_Pos); // add 128 pixels to left side of screen
-    clc(); // and store as horizontal coordinate of middle
+    carry_flag = false;
     adc_imm(0x80);
-    sta_zp(0x2);
+    write_byte(0x2, a);
     lda_abs(ScreenLeft_PageLoc); // add carry to page location of left side of screen
     adc_imm(0x0); // and store as page location of middle
-    sta_zp(0x1);
+    write_byte(0x1, a);
     lda_zpx(SprObject_X_Position); // get horizontal coordinate
     cmp_zp(0x2); // compare against middle horizontal coordinate
     lda_zpx(SprObject_PageLoc); // get page location
@@ -10603,10 +10580,10 @@ CheckRightScreenBBox:
     lda_imm(0xff); // load offscreen value here to use on one or both horizontal sides
     ldx_absy(BoundingBox_UL_XPos); // check left-side edge of bounding box for offscreen
     if (neg_flag) { goto SORte; } // coordinates, and branch if still on the screen
-    sta_absy(BoundingBox_UL_XPos); // store offscreen value for left side
+    write_byte(BoundingBox_UL_XPos + y, a);
   
 SORte:
-    sta_absy(BoundingBox_DR_XPos); // store offscreen value for right side
+    write_byte(BoundingBox_DR_XPos + y, a);
   
 NoOfs:
     ldx_zp(ObjectOffset); // get object offset and leave
@@ -10620,10 +10597,10 @@ CheckLeftScreenBBox:
     lda_imm(0x0);
     ldx_absy(BoundingBox_DR_XPos); // check right-side edge of bounding box for offscreen
     if (!neg_flag) { goto SOLft; } // coordinates, branch if still onscreen
-    sta_absy(BoundingBox_DR_XPos); // store offscreen value for right side
+    write_byte(BoundingBox_DR_XPos + y, a);
   
 SOLft:
-    sta_absy(BoundingBox_UL_XPos); // store offscreen value for left side
+    write_byte(BoundingBox_UL_XPos + y, a);
   
 NoOfs2:
     ldx_zp(ObjectOffset); // get object offset and leave
@@ -10636,9 +10613,9 @@ PlayerCollisionCore:
     ldx_imm(0x0); // initialize X to use player's bounding box for comparison
   
 SprObjectCollisionCore:
-    sty_zp(0x6); // save contents of Y here
+    write_byte(0x6, y);
     lda_imm(0x1);
-    sta_zp(0x7); // save value 1 here as counter, compare horizontal coordinates first
+    write_byte(0x7, a);
   
 CollisionCoreLoop:
     lda_absy(BoundingBox_UL_Corner); // compare left/top coordinates
@@ -10679,7 +10656,7 @@ FirstBoxGreater:
     if (carry_flag) { goto CollisionFound; } // collision, and branch, otherwise, proceed onwards here
   
 NoCollisionFound:
-    clc(); // clear carry, then load value set earlier, then leave
+    carry_flag = false;
     ldy_zp(0x6); // like previous ones, if horizontal coordinates do not collide, we do
     goto rts; // not bother checking vertical ones, because what's the point?
   
@@ -10688,7 +10665,7 @@ CollisionFound:
     iny(); // the vertical coordinates
     dec_zp(0x7); // decrement counter to reflect this
     if (!neg_flag) { goto CollisionCoreLoop; } // if counter not expired, branch to loop
-    sec(); // otherwise we already did both sets, therefore collision, so set carry
+    carry_flag = true;
     ldy_zp(0x6); // load original value set here earlier, then leave
     goto rts;
     // -------------------------------------------------------------------------------------
@@ -10701,7 +10678,7 @@ CollisionFound:
 BlockBufferChk_Enemy:
     pha(); // save contents of A to stack
     txa();
-    clc(); // add 1 to X to run sub with enemy offset in mind
+    carry_flag = false;
     adc_imm(0x1);
     tax();
     pla(); // pull A from stack and jump elsewhere
@@ -10717,7 +10694,7 @@ BlockBufferChk_Enemy:
 BlockBufferChk_FBall:
     ldy_imm(0x1a); // set offset for block buffer adder data
     txa();
-    clc();
+    carry_flag = false;
     adc_imm(0x7); // add seven bytes to use
     tax();
     lda_imm(0x0); //  ResJmpM: lda #$00 ;set A to return vertical coordinate
@@ -10743,11 +10720,11 @@ BlockBufferColli_SideSkip:
   
 BlockBufferCollision:
     pha(); // save contents of A to stack
-    sty_zp(0x4); // save contents of Y here
+    write_byte(0x4, y);
     lda_absy(BlockBuffer_X_Adder); // add horizontal coordinate
-    clc(); // of object to value obtained using Y as offset
+    carry_flag = false;
     adc_zpx(SprObject_X_Position);
-    sta_zp(0x5); // store here
+    write_byte(0x5, a);
     lda_zpx(SprObject_PageLoc);
     adc_imm(0x0); // add carry to page location
     and_imm(0x1); // get LSB, mask out all other bits
@@ -10760,15 +10737,15 @@ BlockBufferCollision:
     GetBlockBufferAddr(); // get address of block buffer into $06, $07
     ldy_zp(0x4); // get old contents of Y
     lda_zpx(SprObject_Y_Position); // get vertical coordinate of object
-    clc();
+    carry_flag = false;
     adc_absy(BlockBuffer_Y_Adder); // add it to value obtained using Y as offset
     and_imm(0b11110000); // mask out low nybble
-    sec();
+    carry_flag = true;
     sbc_imm(0x20); // subtract 32 pixels for the status bar
-    sta_zp(0x2); // store result here
+    write_byte(0x2, a);
     tay(); // use as offset for block buffer
     lda_indy(0x6); // check current content of block buffer
-    sta_zp(0x3); // and store here
+    write_byte(0x3, a);
     ldy_zp(0x4); // get old contents of Y again
     pla(); // pull A from stack
     if (!zero_flag) { goto RetXC; } // if A = 1, branch
@@ -10780,7 +10757,7 @@ RetXC:
   
 RetYC:
     and_imm(0b00001111); // and mask out high nybble
-    sta_zp(0x4); // store masked out result here
+    write_byte(0x4, a);
     lda_zp(0x3); // get saved content of block buffer
     goto rts; // and leave
     // -------------------------------------------------------------------------------------
@@ -10791,36 +10768,36 @@ RetYC:
     // $02 - offset to sprite data
   
 DrawVine:
-    sty_zp(0x0); // save offset here
+    write_byte(0x0, y);
     lda_abs(Enemy_Rel_YPos); // get relative vertical coordinate
-    clc();
+    carry_flag = false;
     adc_absy(VineYPosAdder); // add value using offset in Y to get value
     ldx_absy(VineObjOffset); // get offset to vine
     ldy_absx(Enemy_SprDataOffset); // get sprite data offset
-    sty_zp(0x2); // store sprite data offset here
+    write_byte(0x2, y);
     SixSpriteStacker(); // stack six sprites on top of each other vertically
     lda_abs(Enemy_Rel_XPos); // get relative horizontal coordinate
-    sta_absy(Sprite_X_Position); // store in first, third and fifth sprites
-    sta_absy(Sprite_X_Position + 8);
-    sta_absy(Sprite_X_Position + 16);
-    clc();
+    write_byte(Sprite_X_Position + y, a);
+    write_byte(Sprite_X_Position + 8 + y, a);
+    write_byte(Sprite_X_Position + 16 + y, a);
+    carry_flag = false;
     adc_imm(0x6); // add six pixels to second, fourth and sixth sprites
-    sta_absy(Sprite_X_Position + 4); // to give characteristic staggered vine shape to
-    sta_absy(Sprite_X_Position + 12); // our vertical stack of sprites
-    sta_absy(Sprite_X_Position + 20);
+    write_byte(Sprite_X_Position + 4 + y, a);
+    write_byte(Sprite_X_Position + 12 + y, a);
+    write_byte(Sprite_X_Position + 20 + y, a);
     lda_imm(0b00100001); // set bg priority and palette attribute bits
-    sta_absy(Sprite_Attributes); // set in first, third and fifth sprites
-    sta_absy(Sprite_Attributes + 8);
-    sta_absy(Sprite_Attributes + 16);
+    write_byte(Sprite_Attributes + y, a);
+    write_byte(Sprite_Attributes + 8 + y, a);
+    write_byte(Sprite_Attributes + 16 + y, a);
     ora_imm(0b01000000); // additionally, set horizontal flip bit
-    sta_absy(Sprite_Attributes + 4); // for second, fourth and sixth sprites
-    sta_absy(Sprite_Attributes + 12);
-    sta_absy(Sprite_Attributes + 20);
+    write_byte(Sprite_Attributes + 4 + y, a);
+    write_byte(Sprite_Attributes + 12 + y, a);
+    write_byte(Sprite_Attributes + 20 + y, a);
     ldx_imm(0x5); // set tiles for six sprites
   
 VineTL:
     lda_imm(0xe1); // set tile number for sprite
-    sta_absy(Sprite_Tilenumber);
+    write_byte(Sprite_Tilenumber + y, a);
     iny(); // move offset to next sprite data
     iny();
     iny();
@@ -10831,19 +10808,19 @@ VineTL:
     lda_zp(0x0); // get offset to vine adding data
     if (!zero_flag) { goto SkpVTop; } // if offset not zero, skip this part
     lda_imm(0xe0);
-    sta_absy(Sprite_Tilenumber); // set other tile number for top of vine
+    write_byte(Sprite_Tilenumber + y, a);
   
 SkpVTop:
     ldx_imm(0x0); // start with the first sprite again
   
 ChkFTop:
     lda_abs(VineStart_Y_Position); // get original starting vertical coordinate
-    sec();
+    carry_flag = true;
     sbc_absy(Sprite_Y_Position); // subtract top-most sprite's Y coordinate
     cmp_imm(0x64); // if two coordinates are less than 100/$64 pixels
     if (!carry_flag) { goto NextVSp; } // apart, skip this to leave sprite alone
     lda_imm(0xf8);
-    sta_absy(Sprite_Y_Position); // otherwise move sprite offscreen
+    write_byte(Sprite_Y_Position + y, a);
   
 NextVSp:
     iny(); // move offset to next OAM data
@@ -10879,32 +10856,32 @@ GetHPose:
   
 RenderH:
     lda_abs(Misc_Rel_YPos); // get relative vertical coordinate
-    clc();
+    carry_flag = false;
     adc_absx(FirstSprYPos); // add first sprite vertical adder based on offset
-    sta_absy(Sprite_Y_Position); // store as sprite Y coordinate for first sprite
-    clc();
+    write_byte(Sprite_Y_Position + y, a);
+    carry_flag = false;
     adc_absx(SecondSprYPos); // add second sprite vertical adder based on offset
-    sta_absy(Sprite_Y_Position + 4); // store as sprite Y coordinate for second sprite
+    write_byte(Sprite_Y_Position + 4 + y, a);
     lda_abs(Misc_Rel_XPos); // get relative horizontal coordinate
-    clc();
+    carry_flag = false;
     adc_absx(FirstSprXPos); // add first sprite horizontal adder based on offset
-    sta_absy(Sprite_X_Position); // store as sprite X coordinate for first sprite
-    clc();
+    write_byte(Sprite_X_Position + y, a);
+    carry_flag = false;
     adc_absx(SecondSprXPos); // add second sprite horizontal adder based on offset
-    sta_absy(Sprite_X_Position + 4); // store as sprite X coordinate for second sprite
+    write_byte(Sprite_X_Position + 4 + y, a);
     lda_absx(FirstSprTilenum);
-    sta_absy(Sprite_Tilenumber); // get and store tile number of first sprite
+    write_byte(Sprite_Tilenumber + y, a);
     lda_absx(SecondSprTilenum);
-    sta_absy(Sprite_Tilenumber + 4); // get and store tile number of second sprite
+    write_byte(Sprite_Tilenumber + 4 + y, a);
     lda_absx(HammerSprAttrib);
-    sta_absy(Sprite_Attributes); // get and store attribute bytes for both
-    sta_absy(Sprite_Attributes + 4); // note in this case they use the same data
+    write_byte(Sprite_Attributes + y, a);
+    write_byte(Sprite_Attributes + 4 + y, a);
     ldx_zp(ObjectOffset); // get misc object offset
     lda_abs(Misc_OffscreenBits);
     and_imm(0b11111100); // check offscreen bits
     if (zero_flag) { goto NoHOffscr; } // if all bits clear, leave object alone
     lda_imm(0x0);
-    sta_zpx(Misc_State); // otherwise nullify misc object state
+    write_byte(Misc_State + x, a);
     lda_imm(0xf8);
     jsr(DumpTwoSpr, 382); // do sub to move hammer sprites offscreen
   
@@ -10920,42 +10897,42 @@ NoHOffscr:
 FlagpoleGfxHandler:
     ldy_absx(Enemy_SprDataOffset); // get sprite data offset for flagpole flag
     lda_abs(Enemy_Rel_XPos); // get relative horizontal coordinate
-    sta_absy(Sprite_X_Position); // store as X coordinate for first sprite
-    clc();
+    write_byte(Sprite_X_Position + y, a);
+    carry_flag = false;
     adc_imm(0x8); // add eight pixels and store
-    sta_absy(Sprite_X_Position + 4); // as X coordinate for second and third sprites
-    sta_absy(Sprite_X_Position + 8);
-    clc();
+    write_byte(Sprite_X_Position + 4 + y, a);
+    write_byte(Sprite_X_Position + 8 + y, a);
+    carry_flag = false;
     adc_imm(0xc); // add twelve more pixels and
-    sta_zp(0x5); // store here to be used later by floatey number
+    write_byte(0x5, a);
     lda_zpx(Enemy_Y_Position); // get vertical coordinate
     jsr(DumpTwoSpr, 383); // and do sub to dump into first and second sprites
     adc_imm(0x8); // add eight pixels
-    sta_absy(Sprite_Y_Position + 8); // and store into third sprite
+    write_byte(Sprite_Y_Position + 8 + y, a);
     lda_abs(FlagpoleFNum_Y_Pos); // get vertical coordinate for floatey number
-    sta_zp(0x2); // store it here
+    write_byte(0x2, a);
     lda_imm(0x1);
-    sta_zp(0x3); // set value for flip which will not be used, and
-    sta_zp(0x4); // attribute byte for floatey number
-    sta_absy(Sprite_Attributes); // set attribute bytes for all three sprites
-    sta_absy(Sprite_Attributes + 4);
-    sta_absy(Sprite_Attributes + 8);
+    write_byte(0x3, a);
+    write_byte(0x4, a);
+    write_byte(Sprite_Attributes + y, a);
+    write_byte(Sprite_Attributes + 4 + y, a);
+    write_byte(Sprite_Attributes + 8 + y, a);
     lda_imm(0x7e);
-    sta_absy(Sprite_Tilenumber); // put triangle shaped tile
-    sta_absy(Sprite_Tilenumber + 8); // into first and third sprites
+    write_byte(Sprite_Tilenumber + y, a);
+    write_byte(Sprite_Tilenumber + 8 + y, a);
     lda_imm(0x7f);
-    sta_absy(Sprite_Tilenumber + 4); // put skull tile into second sprite
+    write_byte(Sprite_Tilenumber + 4 + y, a);
     lda_abs(FlagpoleCollisionYPos); // get vertical coordinate at time of collision
     if (zero_flag) { goto ChkFlagOffscreen; } // if zero, branch ahead
     tya();
-    clc(); // add 12 bytes to sprite data offset
+    carry_flag = false;
     adc_imm(0xc);
     tay(); // put back in Y
     lda_abs(FlagpoleScore); // get offset used to award points for touching flagpole
     asl_acc(); // multiply by 2 to get proper offset here
     tax();
     lda_absx(FlagpoleScoreNumTiles); // get appropriate tile data
-    sta_zp(0x0);
+    write_byte(0x0, a);
     lda_absx(FlagpoleScoreNumTiles + 1);
     jsr(DrawOneSpriteRow, 384); // use it to render floatey number
   
@@ -10971,18 +10948,18 @@ MoveSixSpritesOffscreen:
     lda_imm(0xf8); // set offscreen coordinate if jumping here
   
 DumpSixSpr:
-    sta_absy(Sprite_Data + 20); // dump A contents
-    sta_absy(Sprite_Data + 16); // into third row sprites
+    write_byte(Sprite_Data + 20 + y, a);
+    write_byte(Sprite_Data + 16 + y, a);
   
 DumpFourSpr:
-    sta_absy(Sprite_Data + 12); // into second row sprites
+    write_byte(Sprite_Data + 12 + y, a);
   
 DumpThreeSpr:
-    sta_absy(Sprite_Data + 8);
+    write_byte(Sprite_Data + 8 + y, a);
   
 DumpTwoSpr:
-    sta_absy(Sprite_Data + 4); // and into first row sprites
-    sta_absy(Sprite_Data);
+    write_byte(Sprite_Data + 4 + y, a);
+    write_byte(Sprite_Data + y, a);
   
 ExitDumpSpr:
     goto rts;
@@ -10990,7 +10967,7 @@ ExitDumpSpr:
   
 DrawLargePlatform:
     ldy_absx(Enemy_SprDataOffset); // get OAM data offset
-    sty_zp(0x2); // store here
+    write_byte(0x2, y);
     iny(); // add 3 to it for offset
     iny(); // to X coordinate
     iny();
@@ -11010,8 +10987,8 @@ ShrinkPlatform:
   
 SetLast2Platform:
     ldy_absx(Enemy_SprDataOffset); // get OAM data offset
-    sta_absy(Sprite_Y_Position + 16); // store vertical coordinate or offscreen
-    sta_absy(Sprite_Y_Position + 20); // coordinate into last two sprites as Y coordinate
+    write_byte(Sprite_Y_Position + 16 + y, a);
+    write_byte(Sprite_Y_Position + 20 + y, a);
     lda_imm(0x5b); // load default tile for platform (girder)
     ldx_abs(CloudTypeOverride);
     if (zero_flag) { goto SetPlatformTilenum; } // if cloud level override flag not set, use
@@ -11032,7 +11009,7 @@ SetPlatformTilenum:
     pha(); // bits to the stack
     if (!carry_flag) { goto SChk2; }
     lda_imm(0xf8); // if d7 was set, move first sprite offscreen
-    sta_absy(Sprite_Y_Position);
+    write_byte(Sprite_Y_Position + y, a);
   
 SChk2:
     pla(); // get bits from stack
@@ -11040,7 +11017,7 @@ SChk2:
     pha(); // save to stack
     if (!carry_flag) { goto SChk3; }
     lda_imm(0xf8); // if d6 was set, move second sprite offscreen
-    sta_absy(Sprite_Y_Position + 4);
+    write_byte(Sprite_Y_Position + 4 + y, a);
   
 SChk3:
     pla(); // get bits from stack
@@ -11048,7 +11025,7 @@ SChk3:
     pha(); // save to stack
     if (!carry_flag) { goto SChk4; }
     lda_imm(0xf8); // if d5 was set, move third sprite offscreen
-    sta_absy(Sprite_Y_Position + 8);
+    write_byte(Sprite_Y_Position + 8 + y, a);
   
 SChk4:
     pla(); // get bits from stack
@@ -11056,7 +11033,7 @@ SChk4:
     pha(); // save to stack
     if (!carry_flag) { goto SChk5; }
     lda_imm(0xf8); // if d4 was set, move fourth sprite offscreen
-    sta_absy(Sprite_Y_Position + 12);
+    write_byte(Sprite_Y_Position + 12 + y, a);
   
 SChk5:
     pla(); // get bits from stack
@@ -11064,14 +11041,14 @@ SChk5:
     pha(); // save to stack
     if (!carry_flag) { goto SChk6; }
     lda_imm(0xf8); // if d3 was set, move fifth sprite offscreen
-    sta_absy(Sprite_Y_Position + 16);
+    write_byte(Sprite_Y_Position + 16 + y, a);
   
 SChk6:
     pla(); // get bits from stack
     asl_acc(); // rotate d2 into carry
     if (!carry_flag) { goto SLChk; } // save to stack
     lda_imm(0xf8);
-    sta_absy(Sprite_Y_Position + 20); // if d2 was set, move sixth sprite offscreen
+    write_byte(Sprite_Y_Position + 20 + y, a);
   
 SLChk:
     lda_abs(Enemy_OffscreenBits); // check d7 of offscreen bits
@@ -11093,17 +11070,17 @@ NotRsNum:
     lda_zpx(Misc_Y_Position); // get vertical coordinate
     jsr(DumpTwoSpr, 390); // dump into both sprites
     lda_abs(Misc_Rel_XPos); // get relative horizontal coordinate
-    sta_absy(Sprite_X_Position); // store as X coordinate for first sprite
-    clc();
+    write_byte(Sprite_X_Position + y, a);
+    carry_flag = false;
     adc_imm(0x8); // add eight pixels
-    sta_absy(Sprite_X_Position + 4); // store as X coordinate for second sprite
+    write_byte(Sprite_X_Position + 4 + y, a);
     lda_imm(0x2);
-    sta_absy(Sprite_Attributes); // store attribute byte in both sprites
-    sta_absy(Sprite_Attributes + 4);
+    write_byte(Sprite_Attributes + y, a);
+    write_byte(Sprite_Attributes + 4 + y, a);
     lda_imm(0xf7);
-    sta_absy(Sprite_Tilenumber); // put tile numbers into both sprites
+    write_byte(Sprite_Tilenumber + y, a);
     lda_imm(0xfb); // that resemble "200"
-    sta_absy(Sprite_Tilenumber + 4);
+    write_byte(Sprite_Tilenumber + 4 + y, a);
     goto ExJCGfx; // then jump to leave (why not an rts here instead?)
   
 JCoinGfxHandler:
@@ -11112,13 +11089,13 @@ JCoinGfxHandler:
     cmp_imm(0x2); // if 2 or greater, 
     if (carry_flag) { goto DrawFloateyNumber_Coin; } // branch to draw floatey number
     lda_zpx(Misc_Y_Position); // store vertical coordinate as
-    sta_absy(Sprite_Y_Position); // Y coordinate for first sprite
-    clc();
+    write_byte(Sprite_Y_Position + y, a);
+    carry_flag = false;
     adc_imm(0x8); // add eight pixels
-    sta_absy(Sprite_Y_Position + 4); // store as Y coordinate for second sprite
+    write_byte(Sprite_Y_Position + 4 + y, a);
     lda_abs(Misc_Rel_XPos); // get relative horizontal coordinate
-    sta_absy(Sprite_X_Position);
-    sta_absy(Sprite_X_Position + 4); // store as X coordinate for first and second sprites
+    write_byte(Sprite_X_Position + y, a);
+    write_byte(Sprite_X_Position + 4 + y, a);
     lda_zp(FrameCounter); // get frame counter
     lsr_acc(); // divide by 2 to alter every other frame
     and_imm(0b00000011); // mask out d2-d1
@@ -11128,9 +11105,9 @@ JCoinGfxHandler:
     jsr(DumpTwoSpr, 391); // do sub to dump tile number into both sprites
     dey(); // decrement to get old offset
     lda_imm(0x2);
-    sta_absy(Sprite_Attributes); // set attribute byte in first sprite
+    write_byte(Sprite_Attributes + y, a);
     lda_imm(0x82);
-    sta_absy(Sprite_Attributes + 4); // set attribute byte with vertical flip in second sprite
+    write_byte(Sprite_Attributes + 4 + y, a);
     ldx_zp(ObjectOffset); // get misc object offset
   
 ExJCGfx:
@@ -11147,27 +11124,27 @@ ExJCGfx:
 DrawPowerUp:
     ldy_abs(Enemy_SprDataOffset + 5); // get power-up's sprite data offset
     lda_abs(Enemy_Rel_YPos); // get relative vertical coordinate
-    clc();
+    carry_flag = false;
     adc_imm(0x8); // add eight pixels
-    sta_zp(0x2); // store result here
+    write_byte(0x2, a);
     lda_abs(Enemy_Rel_XPos); // get relative horizontal coordinate
-    sta_zp(0x5); // store here
+    write_byte(0x5, a);
     ldx_zp(PowerUpType); // get power-up type
     lda_absx(PowerUpAttributes); // get attribute data for power-up type
     ora_abs(Enemy_SprAttrib + 5); // add background priority bit if set
-    sta_zp(0x4); // store attributes here
+    write_byte(0x4, a);
     txa();
     pha(); // save power-up type to the stack
     asl_acc();
     asl_acc(); // multiply by four to get proper offset
     tax(); // use as X
     lda_imm(0x1);
-    sta_zp(0x7); // set counter here to draw two rows of sprite object
-    sta_zp(0x3); // init d1 of flip control
+    write_byte(0x7, a);
+    write_byte(0x3, a);
   
 PUpDrawLoop:
     lda_absx(PowerUpGfxTable); // load left tile of power-up object
-    sta_zp(0x0);
+    write_byte(0x0, a);
     lda_absx(PowerUpGfxTable + 1); // load right tile
     jsr(DrawOneSpriteRow, 392); // branch to draw one row of our power-up object
     dec_zp(0x7); // decrement counter
@@ -11177,26 +11154,26 @@ PUpDrawLoop:
     if (zero_flag) { goto PUpOfs; } // if regular mushroom, branch, do not change colors or flip
     cmp_imm(0x3);
     if (zero_flag) { goto PUpOfs; } // if 1-up mushroom, branch, do not change colors or flip
-    sta_zp(0x0); // store power-up type here now
+    write_byte(0x0, a);
     lda_zp(FrameCounter); // get frame counter
     lsr_acc(); // divide by 2 to change colors every two frames
     and_imm(0b00000011); // mask out all but d1 and d0 (previously d2 and d1)
     ora_abs(Enemy_SprAttrib + 5); // add background priority bit if any set
-    sta_absy(Sprite_Attributes); // set as new palette bits for top left and
-    sta_absy(Sprite_Attributes + 4); // top right sprites for fire flower and star
+    write_byte(Sprite_Attributes + y, a);
+    write_byte(Sprite_Attributes + 4 + y, a);
     ldx_zp(0x0);
     dex(); // check power-up type for fire flower
     if (zero_flag) { goto FlipPUpRightSide; } // if found, skip this part
-    sta_absy(Sprite_Attributes + 8); // otherwise set new palette bits  for bottom left
-    sta_absy(Sprite_Attributes + 12); // and bottom right sprites as well for star only
+    write_byte(Sprite_Attributes + 8 + y, a);
+    write_byte(Sprite_Attributes + 12 + y, a);
   
 FlipPUpRightSide:
     lda_absy(Sprite_Attributes + 4);
     ora_imm(0b01000000); // set horizontal flip bit for top right sprite
-    sta_absy(Sprite_Attributes + 4);
+    write_byte(Sprite_Attributes + 4 + y, a);
     lda_absy(Sprite_Attributes + 12);
     ora_imm(0b01000000); // set horizontal flip bit for bottom right sprite
-    sta_absy(Sprite_Attributes + 12); // note these are only done for fire flower and star power-ups
+    write_byte(Sprite_Attributes + 12 + y, a);
   
 PUpOfs:
     goto SprObjectOffscrChk; // jump to check to see if power-up is offscreen at all, then leave
@@ -11214,17 +11191,17 @@ PUpOfs:
   
 EnemyGfxHandler:
     lda_zpx(Enemy_Y_Position); // get enemy object vertical position
-    sta_zp(0x2);
+    write_byte(0x2, a);
     lda_abs(Enemy_Rel_XPos); // get enemy object horizontal position
-    sta_zp(0x5); // relative to screen
+    write_byte(0x5, a);
     ldy_absx(Enemy_SprDataOffset);
-    sty_zp(0xeb); // get sprite data offset
+    write_byte(0xeb, y);
     lda_imm(0x0);
-    sta_abs(VerticalFlipFlag); // initialize vertical flip flag by default
+    write_byte(VerticalFlipFlag, a);
     lda_zpx(Enemy_MovingDir);
-    sta_zp(0x3); // get enemy object moving direction
+    write_byte(0x3, a);
     lda_absx(Enemy_SprAttrib);
-    sta_zp(0x4); // get enemy object sprite attributes
+    write_byte(0x4, a);
     lda_zpx(Enemy_ID);
     cmp_imm(PiranhaPlant); // is enemy object piranha plant?
     if (!zero_flag) { goto CheckForRetainerObj; } // if not, branch
@@ -11236,7 +11213,7 @@ EnemyGfxHandler:
   
 CheckForRetainerObj:
     lda_zpx(Enemy_State); // store enemy state
-    sta_zp(0xed);
+    write_byte(0xed, a);
     and_imm(0b00011111); // nullify all but 5 LSB and use as Y
     tay();
     lda_zpx(Enemy_ID); // check for mushroom retainer/princess object
@@ -11244,7 +11221,7 @@ CheckForRetainerObj:
     if (!zero_flag) { goto CheckForBulletBillCV; } // if not found, branch
     ldy_imm(0x0); // if found, nullify saved state in Y
     lda_imm(0x1); // set value that will not be used
-    sta_zp(0x3);
+    write_byte(0x3, a);
     lda_imm(0x15); // set value $15 as code for mushroom retainer/princess object
   
 CheckForBulletBillCV:
@@ -11257,9 +11234,9 @@ CheckForBulletBillCV:
     ora_imm(0b00100000); // otherwise do so
   
 SBBAt:
-    sta_zp(0x4); // set new sprite attributes
+    write_byte(0x4, a);
     ldy_imm(0x0); // nullify saved enemy state both in Y and in
-    sty_zp(0xed); // memory location here
+    write_byte(0xed, y);
     lda_imm(0x8); // set specific value to unconditionally branch once
   
 CheckForJumpspring:
@@ -11270,8 +11247,8 @@ CheckForJumpspring:
     lda_absx(JumpspringFrameOffsets); // load data using frame number as offset
   
 CheckForPodoboo:
-    sta_zp(0xef); // store saved enemy object value here
-    sty_zp(0xec); // and Y here (enemy state -2 MSB if not changed)
+    write_byte(0xef, a);
+    write_byte(0xec, y);
     ldx_zp(ObjectOffset); // get enemy object offset
     cmp_imm(0xc); // check for podoboo object
     if (!zero_flag) { goto CheckBowserGfxFlag; } // branch if not found
@@ -11288,7 +11265,7 @@ CheckBowserGfxFlag:
     iny(); // otherwise draw bowser's rear
   
 SBwsrGfxOfs:
-    sty_zp(0xef);
+    write_byte(0xef, y);
   
 CheckForGoomba:
     ldy_zp(0xef); // check value for goomba object
@@ -11298,7 +11275,7 @@ CheckForGoomba:
     cmp_imm(0x2); // check for defeated state
     if (!carry_flag) { goto GmbaAnim; } // if not defeated, go ahead and animate
     ldx_imm(0x4); // if defeated, write new value here
-    stx_zp(0xec);
+    write_byte(0xec, x);
   
 GmbaAnim:
     and_imm(0b00100000); // check for d5 set in enemy object state 
@@ -11309,12 +11286,12 @@ GmbaAnim:
     if (!zero_flag) { goto CheckBowserFront; }
     lda_zp(0x3);
     eor_imm(0b00000011); // invert bits to flip horizontally every eight frames
-    sta_zp(0x3); // leave alone otherwise
+    write_byte(0x3, a);
   
 CheckBowserFront:
     lda_absy(EnemyAttributeData); // load sprite attribute using enemy object
     ora_zp(0x4); // as offset, and add to bits already loaded
-    sta_zp(0x4);
+    write_byte(0x4, a);
     lda_absy(EnemyGfxTableOffsets); // load value based on enemy object as offset
     tax(); // save as X
     ldy_zp(0xec); // get previously saved value
@@ -11332,7 +11309,7 @@ ChkFrontSte:
     if (zero_flag) { goto DrawBowser; }
   
 FlipBowserOver:
-    stx_abs(VerticalFlipFlag); // set vertical flip flag to nonzero
+    write_byte(VerticalFlipFlag, x);
   
 DrawBowser:
     goto DrawEnemyObject; // draw bowser's graphics now
@@ -11348,9 +11325,9 @@ ChkRearSte:
     and_imm(0b00100000); // if bowser not defeated, do not set flag
     if (zero_flag) { goto DrawBowser; }
     lda_zp(0x2); // subtract 16 pixels from
-    sec(); // saved vertical coordinate
+    carry_flag = true;
     sbc_imm(0x10);
-    sta_zp(0x2);
+    write_byte(0x2, a);
     goto FlipBowserOver; // jump to set vertical flip flag
   
 CheckForSpiny:
@@ -11360,9 +11337,9 @@ CheckForSpiny:
     if (!zero_flag) { goto NotEgg; } // otherwise branch
     ldx_imm(0x30); // set to spiny egg offset
     lda_imm(0x2);
-    sta_zp(0x3); // set enemy direction to reverse sprites horizontally
+    write_byte(0x3, a);
     lda_imm(0x5);
-    sta_zp(0xec); // set enemy state
+    write_byte(0xec, a);
   
 NotEgg:
     goto CheckForHammerBro; // skip a big chunk of this if we found spiny but not in egg
@@ -11462,7 +11439,7 @@ CheckToAnimateEnemy:
     if (carry_flag) { goto CheckDefeatedState; } // if so, leave the offset alone (use princess)
     ldx_imm(0xa2); // otherwise, set for mushroom retainer object instead
     lda_imm(0x3); // set alternate state here
-    sta_zp(0xec);
+    write_byte(0xec, a);
     if (!zero_flag) { goto CheckDefeatedState; } // unconditional branch
   
 CheckForSecondFrame:
@@ -11476,7 +11453,7 @@ CheckAnimationStop:
     ora_abs(TimerControl);
     if (!zero_flag) { goto CheckDefeatedState; } // if either condition true, branch
     txa();
-    clc();
+    carry_flag = false;
     adc_imm(0x6); // add $06 to current enemy offset
     tax(); // to animate various enemy objects
   
@@ -11488,9 +11465,9 @@ CheckDefeatedState:
     cmp_imm(0x4); // check for saved enemy object => $04
     if (!carry_flag) { goto DrawEnemyObject; } // branch if less
     ldy_imm(0x1);
-    sty_abs(VerticalFlipFlag); // set vertical flip flag
+    write_byte(VerticalFlipFlag, y);
     dey();
-    sty_zp(0xec); // init saved value here
+    write_byte(0xec, y);
   
 DrawEnemyObject:
     ldy_zp(0xeb); // load sprite data offset
@@ -11526,7 +11503,7 @@ CheckForVerticalFlip:
     cmp_imm(0x15);
     if (carry_flag) { goto FlipEnemyVertically; } // also branch if enemy object => $15
     txa();
-    clc();
+    carry_flag = false;
     adc_imm(0x8); // if not selected objects or => $15, set
     tax(); // offset in X for next row
   
@@ -11536,13 +11513,13 @@ FlipEnemyVertically:
     lda_absx(Sprite_Tilenumber + 4);
     pha();
     lda_absy(Sprite_Tilenumber + 16); // exchange third row tiles
-    sta_absx(Sprite_Tilenumber); // with first or second row tiles
+    write_byte(Sprite_Tilenumber + x, a);
     lda_absy(Sprite_Tilenumber + 20);
-    sta_absx(Sprite_Tilenumber + 4);
+    write_byte(Sprite_Tilenumber + 4 + x, a);
     pla(); // pull first or second row tiles from stack
-    sta_absy(Sprite_Tilenumber + 20); // and save in third row
+    write_byte(Sprite_Tilenumber + 20 + y, a);
     pla();
-    sta_absy(Sprite_Tilenumber + 16);
+    write_byte(Sprite_Tilenumber + 16 + y, a);
   
 CheckForESymmetry:
     lda_abs(BowserGfxFlag); // are we drawing bowser at all?
@@ -11569,7 +11546,7 @@ ESRtnr:
     cmp_imm(0x15); // check for princess/mushroom retainer object
     if (!zero_flag) { goto SpnySC; }
     lda_imm(0x42); // set horizontal flip on bottom right sprite
-    sta_absy(Sprite_Attributes + 20); // note that palette bits were already set earlier
+    write_byte(Sprite_Attributes + 20 + y, a);
   
 SpnySC:
     cpx_imm(0x2); // if alternate enemy state set to 1 or 0, branch
@@ -11580,27 +11557,27 @@ MirrorEnemyGfx:
     if (!zero_flag) { goto CheckToMirrorLakitu; }
     lda_absy(Sprite_Attributes); // load attribute bits of first sprite
     and_imm(0b10100011);
-    sta_absy(Sprite_Attributes); // save vertical flip, priority, and palette bits
-    sta_absy(Sprite_Attributes + 8); // in left sprite column of enemy object OAM data
-    sta_absy(Sprite_Attributes + 16);
+    write_byte(Sprite_Attributes + y, a);
+    write_byte(Sprite_Attributes + 8 + y, a);
+    write_byte(Sprite_Attributes + 16 + y, a);
     ora_imm(0b01000000); // set horizontal flip
     cpx_imm(0x5); // check for state used by spiny's egg
     if (!zero_flag) { goto EggExc; } // if alternate state not set to $05, branch
     ora_imm(0b10000000); // otherwise set vertical flip
   
 EggExc:
-    sta_absy(Sprite_Attributes + 4); // set bits of right sprite column
-    sta_absy(Sprite_Attributes + 12); // of enemy object sprite data
-    sta_absy(Sprite_Attributes + 20);
+    write_byte(Sprite_Attributes + 4 + y, a);
+    write_byte(Sprite_Attributes + 12 + y, a);
+    write_byte(Sprite_Attributes + 20 + y, a);
     cpx_imm(0x4); // check alternate enemy state
     if (!zero_flag) { goto CheckToMirrorLakitu; } // branch if not $04
     lda_absy(Sprite_Attributes + 8); // get second row left sprite attributes
     ora_imm(0b10000000);
-    sta_absy(Sprite_Attributes + 8); // store bits with vertical flip in
-    sta_absy(Sprite_Attributes + 16); // second and third row left sprites
+    write_byte(Sprite_Attributes + 8 + y, a);
+    write_byte(Sprite_Attributes + 16 + y, a);
     ora_imm(0b01000000);
-    sta_absy(Sprite_Attributes + 12); // store with horizontal and vertical flip in
-    sta_absy(Sprite_Attributes + 20); // second and third row right sprites
+    write_byte(Sprite_Attributes + 12 + y, a);
+    write_byte(Sprite_Attributes + 20 + y, a);
   
 CheckToMirrorLakitu:
     lda_zp(0xef); // check for lakitu enemy object
@@ -11610,36 +11587,36 @@ CheckToMirrorLakitu:
     if (!zero_flag) { goto NVFLak; } // branch if vertical flip flag not set
     lda_absy(Sprite_Attributes + 16); // save vertical flip and palette bits
     and_imm(0b10000001); // in third row left sprite
-    sta_absy(Sprite_Attributes + 16);
+    write_byte(Sprite_Attributes + 16 + y, a);
     lda_absy(Sprite_Attributes + 20); // set horizontal flip and palette bits
     ora_imm(0b01000001); // in third row right sprite
-    sta_absy(Sprite_Attributes + 20);
+    write_byte(Sprite_Attributes + 20 + y, a);
     ldx_abs(FrenzyEnemyTimer); // check timer
     cpx_imm(0x10);
     if (carry_flag) { goto SprObjectOffscrChk; } // branch if timer has not reached a certain range
-    sta_absy(Sprite_Attributes + 12); // otherwise set same for second row right sprite
+    write_byte(Sprite_Attributes + 12 + y, a);
     and_imm(0b10000001);
-    sta_absy(Sprite_Attributes + 8); // preserve vertical flip and palette bits for left sprite
+    write_byte(Sprite_Attributes + 8 + y, a);
     if (!carry_flag) { goto SprObjectOffscrChk; } // unconditional branch
   
 NVFLak:
     lda_absy(Sprite_Attributes); // get first row left sprite attributes
     and_imm(0b10000001);
-    sta_absy(Sprite_Attributes); // save vertical flip and palette bits
+    write_byte(Sprite_Attributes + y, a);
     lda_absy(Sprite_Attributes + 4); // get first row right sprite attributes
     ora_imm(0b01000001); // set horizontal flip and palette bits
-    sta_absy(Sprite_Attributes + 4); // note that vertical flip is left as-is
+    write_byte(Sprite_Attributes + 4 + y, a);
   
 CheckToMirrorJSpring:
     lda_zp(0xef); // check for jumpspring object (any frame)
     cmp_imm(0x18);
     if (!carry_flag) { goto SprObjectOffscrChk; } // branch if not jumpspring object at all
     lda_imm(0x82);
-    sta_absy(Sprite_Attributes + 8); // set vertical flip and palette bits of 
-    sta_absy(Sprite_Attributes + 16); // second and third row left sprites
+    write_byte(Sprite_Attributes + 8 + y, a);
+    write_byte(Sprite_Attributes + 16 + y, a);
     ora_imm(0b01000000);
-    sta_absy(Sprite_Attributes + 12); // set, in addition to those, horizontal flip
-    sta_absy(Sprite_Attributes + 20); // for second and third row right sprites
+    write_byte(Sprite_Attributes + 12 + y, a);
+    write_byte(Sprite_Attributes + 20 + y, a);
   
 SprObjectOffscrChk:
     ldx_zp(ObjectOffset); // get enemy buffer offset
@@ -11695,26 +11672,26 @@ ExEGHandler:
   
 DrawEnemyObjRow:
     lda_absx(EnemyGraphicsTable); // load two tiles of enemy graphics
-    sta_zp(0x0);
+    write_byte(0x0, a);
     lda_absx(EnemyGraphicsTable + 1);
   
 DrawOneSpriteRow:
-    sta_zp(0x1);
+    write_byte(0x1, a);
     goto DrawSpriteObject; // draw them
   
 MoveESprRowOffscreen:
-    clc(); // add A to enemy object OAM data offset
+    carry_flag = false;
     adc_absx(Enemy_SprDataOffset);
     tay(); // use as offset
     lda_imm(0xf8);
     goto DumpTwoSpr; // move first row of sprites offscreen
   
 MoveESprColOffscreen:
-    clc(); // add A to enemy object OAM data offset
+    carry_flag = false;
     adc_absx(Enemy_SprDataOffset);
     tay(); // use as offset
     jsr(MoveColOffscreen, 402); // move first and second row sprites in column offscreen
-    sta_absy(Sprite_Data + 16); // move third row sprite in column offscreen
+    write_byte(Sprite_Data + 16 + y, a);
     goto rts;
     // -------------------------------------------------------------------------------------
     // $00-$01 - tile numbers
@@ -11725,19 +11702,19 @@ MoveESprColOffscreen:
   
 DrawBlock:
     lda_abs(Block_Rel_YPos); // get relative vertical coordinate of block object
-    sta_zp(0x2); // store here
+    write_byte(0x2, a);
     lda_abs(Block_Rel_XPos); // get relative horizontal coordinate of block object
-    sta_zp(0x5); // store here
+    write_byte(0x5, a);
     lda_imm(0x3);
-    sta_zp(0x4); // set attribute byte here
+    write_byte(0x4, a);
     lsr_acc();
-    sta_zp(0x3); // set horizontal flip bit here (will not be used)
+    write_byte(0x3, a);
     ldy_absx(Block_SprDataOffset); // get sprite data offset
     ldx_imm(0x0); // reset X for use as offset to tile data
   
 DBlkLoop:
     lda_absx(DefaultBlockObjTiles); // get left tile number
-    sta_zp(0x0); // set here
+    write_byte(0x0, a);
     lda_absx(DefaultBlockObjTiles + 1); // get right tile number
     jsr(DrawOneSpriteRow, 403); // do sub to write tile numbers to first row of sprites
     cpx_imm(0x4); // check incremented offset
@@ -11748,8 +11725,8 @@ DBlkLoop:
     cmp_imm(0x1); // check for ground level type area
     if (zero_flag) { goto ChkRep; } // if found, branch to next part
     lda_imm(0x86);
-    sta_absy(Sprite_Tilenumber); // otherwise remove brick tiles with lines
-    sta_absy(Sprite_Tilenumber + 4); // and replace then with lineless brick tiles
+    write_byte(Sprite_Tilenumber + y, a);
+    write_byte(Sprite_Tilenumber + 4 + y, a);
   
 ChkRep:
     lda_absx(Block_Metatile); // check replacement metatile
@@ -11767,13 +11744,13 @@ ChkRep:
   
 SetBFlip:
     ldx_zp(ObjectOffset); // put block object offset back in X
-    sta_absy(Sprite_Attributes); // store attribute byte as-is in first sprite
+    write_byte(Sprite_Attributes + y, a);
     ora_imm(0b01000000);
-    sta_absy(Sprite_Attributes + 4); // set horizontal flip bit for second sprite
+    write_byte(Sprite_Attributes + 4 + y, a);
     ora_imm(0b10000000);
-    sta_absy(Sprite_Attributes + 12); // set both flip bits for fourth sprite
+    write_byte(Sprite_Attributes + 12 + y, a);
     and_imm(0b10000011);
-    sta_absy(Sprite_Attributes + 8); // set vertical flip bit for third sprite
+    write_byte(Sprite_Attributes + 8 + y, a);
   
 BlkOffscr:
     lda_abs(Block_OffscreenBits); // get offscreen bits for block object
@@ -11781,8 +11758,8 @@ BlkOffscr:
     and_imm(0b00000100); // check to see if d2 in offscreen bits are set
     if (zero_flag) { goto PullOfsB; } // if not set, branch, otherwise move sprites offscreen
     lda_imm(0xf8); // move offscreen two OAMs
-    sta_absy(Sprite_Y_Position + 4); // on the right side
-    sta_absy(Sprite_Y_Position + 12);
+    write_byte(Sprite_Y_Position + 4 + y, a);
+    write_byte(Sprite_Y_Position + 12 + y, a);
   
 PullOfsB:
     pla(); // pull offscreen bits from stack
@@ -11793,8 +11770,8 @@ ChkLeftCo:
   
 MoveColOffscreen:
     lda_imm(0xf8); // move offscreen two OAMs
-    sta_absy(Sprite_Y_Position); // on the left side (or two rows of enemy on either side
-    sta_absy(Sprite_Y_Position + 8); // if branched here from enemy graphics handler)
+    write_byte(Sprite_Y_Position + y, a);
+    write_byte(Sprite_Y_Position + 8 + y, a);
   
 ExDBlk:
     goto rts;
@@ -11803,13 +11780,13 @@ ExDBlk:
   
 DrawBrickChunks:
     lda_imm(0x2); // set palette bits here
-    sta_zp(0x0);
+    write_byte(0x0, a);
     lda_imm(0x75); // set tile number for ball (something residual, likely)
     ldy_zp(GameEngineSubroutine);
     cpy_imm(0x5); // if end-of-level routine running,
     if (zero_flag) { goto DChunks; } // use palette and tile number assigned
     lda_imm(0x3); // otherwise set different palette bits
-    sta_zp(0x0);
+    write_byte(0x0, a);
     lda_imm(0x84); // and set tile number for brick chunks
   
 DChunks:
@@ -11830,27 +11807,27 @@ DChunks:
     lda_abs(Block_Rel_YPos); // get first block object's relative vertical coordinate
     jsr(DumpTwoSpr, 407); // do sub to dump current Y coordinate into two sprites
     lda_abs(Block_Rel_XPos); // get first block object's relative horizontal coordinate
-    sta_absy(Sprite_X_Position); // save into X coordinate of first sprite
+    write_byte(Sprite_X_Position + y, a);
     lda_absx(Block_Orig_XPos); // get original horizontal coordinate
-    sec();
+    carry_flag = true;
     sbc_abs(ScreenLeft_X_Pos); // subtract coordinate of left side from original coordinate
-    sta_zp(0x0); // store result as relative horizontal coordinate of original
-    sec();
+    write_byte(0x0, a);
+    carry_flag = true;
     sbc_abs(Block_Rel_XPos); // get difference of relative positions of original - current
     adc_zp(0x0); // add original relative position to result
     adc_imm(0x6); // plus 6 pixels to position second brick chunk correctly
-    sta_absy(Sprite_X_Position + 4); // save into X coordinate of second sprite
+    write_byte(Sprite_X_Position + 4 + y, a);
     lda_abs(Block_Rel_YPos + 1); // get second block object's relative vertical coordinate
-    sta_absy(Sprite_Y_Position + 8);
-    sta_absy(Sprite_Y_Position + 12); // dump into Y coordinates of third and fourth sprites
+    write_byte(Sprite_Y_Position + 8 + y, a);
+    write_byte(Sprite_Y_Position + 12 + y, a);
     lda_abs(Block_Rel_XPos + 1); // get second block object's relative horizontal coordinate
-    sta_absy(Sprite_X_Position + 8); // save into X coordinate of third sprite
+    write_byte(Sprite_X_Position + 8 + y, a);
     lda_zp(0x0); // use original relative horizontal position
-    sec();
+    carry_flag = true;
     sbc_abs(Block_Rel_XPos + 1); // get difference of relative positions of original - current
     adc_zp(0x0); // add original relative position to result
     adc_imm(0x6); // plus 6 pixels to position fourth brick chunk correctly
-    sta_absy(Sprite_X_Position + 12); // save into X coordinate of fourth sprite
+    write_byte(Sprite_X_Position + 12 + y, a);
     lda_abs(Block_OffscreenBits); // get offscreen bits for block object
     jsr(ChkLeftCo, 408); // do sub to move left half of sprites offscreen if necessary
     lda_abs(Block_OffscreenBits); // get offscreen bits again
@@ -11866,8 +11843,8 @@ ChnkOfs:
     cmp_absy(Sprite_X_Position + 4); // to right-side X coordinate
     if (!carry_flag) { goto ExBCDr; } // branch to leave if less
     lda_imm(0xf8); // otherwise move right half of sprites offscreen
-    sta_absy(Sprite_Y_Position + 4);
-    sta_absy(Sprite_Y_Position + 12);
+    write_byte(Sprite_Y_Position + 4 + y, a);
+    write_byte(Sprite_Y_Position + 12 + y, a);
   
 ExBCDr:
     goto rts; // leave
@@ -11876,10 +11853,10 @@ ExBCDr:
 DrawFireball:
     ldy_absx(FBall_SprDataOffset); // get fireball's sprite data offset
     lda_abs(Fireball_Rel_YPos); // get relative vertical coordinate
-    sta_absy(Sprite_Y_Position); // store as sprite Y coordinate
+    write_byte(Sprite_Y_Position + y, a);
     lda_abs(Fireball_Rel_XPos); // get relative horizontal coordinate
-    sta_absy(Sprite_X_Position); // store as sprite X coordinate, then do shared code
-    DrawFirebar(); goto rts; // <gen: fallthrough>
+    write_byte(Sprite_X_Position + y, a);
+    DrawFirebar(); goto rts; // <fallthrough>
     // -------------------------------------------------------------------------------------
   
 DrawExplosion_Fireball:
@@ -11899,36 +11876,36 @@ DrawExplosion_Fireworks:
     dey(); // decrement Y so we have the proper offset again
     ldx_zp(ObjectOffset); // return enemy object buffer offset to X
     lda_abs(Fireball_Rel_YPos); // get relative vertical coordinate
-    sec(); // subtract four pixels vertically
+    carry_flag = true;
     sbc_imm(0x4); // for first and third sprites
-    sta_absy(Sprite_Y_Position);
-    sta_absy(Sprite_Y_Position + 8);
-    clc(); // add eight pixels vertically
+    write_byte(Sprite_Y_Position + y, a);
+    write_byte(Sprite_Y_Position + 8 + y, a);
+    carry_flag = false;
     adc_imm(0x8); // for second and fourth sprites
-    sta_absy(Sprite_Y_Position + 4);
-    sta_absy(Sprite_Y_Position + 12);
+    write_byte(Sprite_Y_Position + 4 + y, a);
+    write_byte(Sprite_Y_Position + 12 + y, a);
     lda_abs(Fireball_Rel_XPos); // get relative horizontal coordinate
-    sec(); // subtract four pixels horizontally
+    carry_flag = true;
     sbc_imm(0x4); // for first and second sprites
-    sta_absy(Sprite_X_Position);
-    sta_absy(Sprite_X_Position + 4);
-    clc(); // add eight pixels horizontally
+    write_byte(Sprite_X_Position + y, a);
+    write_byte(Sprite_X_Position + 4 + y, a);
+    carry_flag = false;
     adc_imm(0x8); // for third and fourth sprites
-    sta_absy(Sprite_X_Position + 8);
-    sta_absy(Sprite_X_Position + 12);
+    write_byte(Sprite_X_Position + 8 + y, a);
+    write_byte(Sprite_X_Position + 12 + y, a);
     lda_imm(0x2); // set palette attributes for all sprites, but
-    sta_absy(Sprite_Attributes); // set no flip at all for first sprite
+    write_byte(Sprite_Attributes + y, a);
     lda_imm(0x82);
-    sta_absy(Sprite_Attributes + 4); // set vertical flip for second sprite
+    write_byte(Sprite_Attributes + 4 + y, a);
     lda_imm(0x42);
-    sta_absy(Sprite_Attributes + 8); // set horizontal flip for third sprite
+    write_byte(Sprite_Attributes + 8 + y, a);
     lda_imm(0xc2);
-    sta_absy(Sprite_Attributes + 12); // set both flips for fourth sprite
+    write_byte(Sprite_Attributes + 12 + y, a);
     goto rts; // we are done
   
 KillFireBall:
     lda_imm(0x0); // clear fireball state to kill it
-    sta_zpx(Fireball_State);
+    write_byte(Fireball_State + x, a);
     goto rts;
     // -------------------------------------------------------------------------------------
   
@@ -11943,16 +11920,16 @@ DrawSmallPlatform:
     dey(); // decrement for original offset
     dey();
     lda_abs(Enemy_Rel_XPos); // get relative horizontal coordinate
-    sta_absy(Sprite_X_Position);
-    sta_absy(Sprite_X_Position + 12); // dump as X coordinate into first and fourth sprites
-    clc();
+    write_byte(Sprite_X_Position + y, a);
+    write_byte(Sprite_X_Position + 12 + y, a);
+    carry_flag = false;
     adc_imm(0x8); // add eight pixels
-    sta_absy(Sprite_X_Position + 4); // dump into second and fifth sprites
-    sta_absy(Sprite_X_Position + 16);
-    clc();
+    write_byte(Sprite_X_Position + 4 + y, a);
+    write_byte(Sprite_X_Position + 16 + y, a);
+    carry_flag = false;
     adc_imm(0x8); // add eight more pixels
-    sta_absy(Sprite_X_Position + 8); // dump into third and sixth sprites
-    sta_absy(Sprite_X_Position + 20);
+    write_byte(Sprite_X_Position + 8 + y, a);
+    write_byte(Sprite_X_Position + 20 + y, a);
     lda_zpx(Enemy_Y_Position); // get vertical coordinate
     tax();
     pha(); // save to stack
@@ -11963,7 +11940,7 @@ DrawSmallPlatform:
 TopSP:
     jsr(DumpThreeSpr, 413); // dump vertical coordinate into Y coordinates
     pla(); // pull from stack
-    clc();
+    carry_flag = false;
     adc_imm(0x80); // add 128 pixels
     tax();
     cpx_imm(0x20); // if below status bar (taking wrap into account)
@@ -11971,16 +11948,16 @@ TopSP:
     lda_imm(0xf8); // otherwise move last three sprites offscreen
   
 BotSP:
-    sta_absy(Sprite_Y_Position + 12); // dump vertical coordinate + 128 pixels
-    sta_absy(Sprite_Y_Position + 16); // into Y coordinates
-    sta_absy(Sprite_Y_Position + 20);
+    write_byte(Sprite_Y_Position + 12 + y, a);
+    write_byte(Sprite_Y_Position + 16 + y, a);
+    write_byte(Sprite_Y_Position + 20 + y, a);
     lda_abs(Enemy_OffscreenBits); // get offscreen bits
     pha(); // save to stack
     and_imm(0b00001000); // check d3
     if (zero_flag) { goto SOfs; }
     lda_imm(0xf8); // if d3 was set, move first and
-    sta_absy(Sprite_Y_Position); // fourth sprites offscreen
-    sta_absy(Sprite_Y_Position + 12);
+    write_byte(Sprite_Y_Position + y, a);
+    write_byte(Sprite_Y_Position + 12 + y, a);
   
 SOfs:
     pla(); // move out and back into stack
@@ -11988,16 +11965,16 @@ SOfs:
     and_imm(0b00000100); // check d2
     if (zero_flag) { goto SOfs2; }
     lda_imm(0xf8); // if d2 was set, move second and
-    sta_absy(Sprite_Y_Position + 4); // fifth sprites offscreen
-    sta_absy(Sprite_Y_Position + 16);
+    write_byte(Sprite_Y_Position + 4 + y, a);
+    write_byte(Sprite_Y_Position + 16 + y, a);
   
 SOfs2:
     pla(); // get from stack
     and_imm(0b00000010); // check d1
     if (zero_flag) { goto ExSPl; }
     lda_imm(0xf8); // if d1 was set, move third and
-    sta_absy(Sprite_Y_Position + 8); // sixth sprites offscreen
-    sta_absy(Sprite_Y_Position + 20);
+    write_byte(Sprite_Y_Position + 8 + y, a);
+    write_byte(Sprite_Y_Position + 20 + y, a);
   
 ExSPl:
     ldx_zp(ObjectOffset); // get enemy object offset and leave
@@ -12048,7 +12025,7 @@ SwimKT:
   
 BigKTS:
     lda_absx(SwimKickTileNum); // overwrite tile number in sprite 7/8
-    sta_absy(Sprite_Tilenumber + 24); // to animate player's feet when swimming
+    write_byte(Sprite_Tilenumber + 24 + y, a);
   
 ExPGH:
     goto rts; // then leave
@@ -12066,7 +12043,7 @@ PlayerKilled:
     lda_absy(PlayerGfxTblOffsets); // get offset to graphics table
   
 PlayerGfxProcessing:
-    sta_abs(PlayerGfxOffset); // store offset to graphics table here
+    write_byte(PlayerGfxOffset, a);
     lda_imm(0x4);
     jsr(RenderPlayerSub, 417); // draw player based on offset loaded
     ChkForPlayerAttrib(); // set horizontal flip bits as necessary
@@ -12075,12 +12052,12 @@ PlayerGfxProcessing:
     ldy_imm(0x0); // set value to initialize by default
     lda_abs(PlayerAnimTimer); // get animation frame timer
     cmp_abs(FireballThrowingTimer); // compare to fireball throw timer
-    sty_abs(FireballThrowingTimer); // initialize fireball throw timer
+    write_byte(FireballThrowingTimer, y);
     if (carry_flag) { goto PlayerOffscreenChk; } // if animation frame timer => fireball throw timer skip to end
-    sta_abs(FireballThrowingTimer); // otherwise store animation timer into fireball throw timer
+    write_byte(FireballThrowingTimer, a);
     ldy_imm(0x7); // load offset for throwing
     lda_absy(PlayerGfxTblOffsets); // get offset to graphics table
-    sta_abs(PlayerGfxOffset); // store it for use later
+    write_byte(PlayerGfxOffset, a);
     ldy_imm(0x4); // set to update four sprite rows by default
     lda_zp(Player_X_Speed);
     ora_zp(Left_Right_Buttons); // check for horizontal speed or left/right button press
@@ -12097,10 +12074,10 @@ PlayerOffscreenChk:
     lsr_acc(); // move vertical bits to low nybble
     lsr_acc();
     lsr_acc();
-    sta_zp(0x0); // store here
+    write_byte(0x0, a);
     ldx_imm(0x3); // check all four rows of player sprites
     lda_abs(Player_SprDataOffset); // get player's sprite data offset
-    clc();
+    carry_flag = false;
     adc_imm(0x18); // add 24 bytes to start at bottom row
     tay(); // set as offset here
   
@@ -12112,7 +12089,7 @@ PROfsLoop:
   
 NPROffscr:
     tya();
-    sec(); // subtract eight bytes to do
+    carry_flag = true;
     sbc_imm(0x8); // next row up
     tay();
     dex(); // decrement row counter
@@ -12125,7 +12102,7 @@ DrawPlayer_Intermediate:
   
 PIntLoop:
     lda_absx(IntermediatePlayerData); // load data to display player as he always
-    sta_zpx(0x2); // appears on world/lives display
+    write_byte(0x2 + x, a);
     dex();
     if (!neg_flag) { goto PIntLoop; } // do this until all data is loaded
     ldx_imm(0xb8); // load offset for small standing
@@ -12133,7 +12110,7 @@ PIntLoop:
     jsr(DrawPlayerLoop, 420); // draw player accordingly
     lda_abs(Sprite_Attributes + 36); // get empty sprite attributes
     ora_imm(0b01000000); // set horizontal flip bit for bottom-right sprite
-    sta_abs(Sprite_Attributes + 32); // store and leave
+    write_byte(Sprite_Attributes + 32, a);
     goto rts;
     // -------------------------------------------------------------------------------------
     // $00-$01 - used to hold tile numbers, $00 also used to hold upper extent of animation frames
@@ -12145,22 +12122,22 @@ PIntLoop:
     // these also used in IntermediatePlayerData
   
 RenderPlayerSub:
-    sta_zp(0x7); // store number of rows of sprites to draw
+    write_byte(0x7, a);
     lda_abs(Player_Rel_XPos);
-    sta_abs(Player_Pos_ForScroll); // store player's relative horizontal position
-    sta_zp(0x5); // store it here also
+    write_byte(Player_Pos_ForScroll, a);
+    write_byte(0x5, a);
     lda_abs(Player_Rel_YPos);
-    sta_zp(0x2); // store player's vertical position
+    write_byte(0x2, a);
     lda_zp(PlayerFacingDir);
-    sta_zp(0x3); // store player's facing direction
+    write_byte(0x3, a);
     lda_abs(Player_SprAttrib);
-    sta_zp(0x4); // store player's sprite attributes
+    write_byte(0x4, a);
     ldx_abs(PlayerGfxOffset); // load graphics table offset
     ldy_abs(Player_SprDataOffset); // get player's sprite data offset
   
 DrawPlayerLoop:
     lda_absx(PlayerGraphicsTable); // load player's left side
-    sta_zp(0x0);
+    write_byte(0x0, a);
     lda_absx(PlayerGraphicsTable + 1); // now load right side
     jsr(DrawOneSpriteRow, 421);
     dec_zp(0x7); // decrement rows of sprites to draw
@@ -12202,7 +12179,7 @@ ProcOnGroundActs:
 NonAnimatedActs:
     GetGfxOffsetAdder(); // do a sub here to get offset adder for graphics table
     lda_imm(0x0);
-    sta_abs(PlayerAnimCtrl); // initialize animation frame control
+    write_byte(PlayerAnimCtrl, a);
     lda_absy(PlayerGfxTblOffsets); // load offset to graphics table using size as offset
     goto rts;
   
@@ -12245,22 +12222,22 @@ ThreeFrameExtent:
     lda_imm(0x2); // load upper extent for frame control for climbing
   
 AnimationControl:
-    sta_zp(0x0); // store upper extent here
+    write_byte(0x0, a);
     jsr(GetCurrentAnimOffset, 422); // get proper offset to graphics table
     pha(); // save offset to stack
     lda_abs(PlayerAnimTimer); // load animation frame timer
     if (!zero_flag) { goto ExAnimC; } // branch if not expired
     lda_abs(PlayerAnimTimerSet); // get animation frame timer amount
-    sta_abs(PlayerAnimTimer); // and set timer accordingly
+    write_byte(PlayerAnimTimer, a);
     lda_abs(PlayerAnimCtrl);
-    clc(); // add one to animation frame control
+    carry_flag = false;
     adc_imm(0x1);
     cmp_zp(0x0); // compare to upper extent
     if (!carry_flag) { goto SetAnimC; } // if frame control + 1 < upper extent, use as next
     lda_imm(0x0); // otherwise initialize frame control
   
 SetAnimC:
-    sta_abs(PlayerAnimCtrl); // store as new animation frame control
+    write_byte(PlayerAnimCtrl, a);
   
 ExAnimC:
     pla(); // get offset to graphics table from stack and leave
@@ -12275,10 +12252,10 @@ HandleChangeSize:
     cpy_imm(0xa); // check for preset upper extent
     if (!carry_flag) { goto CSzNext; } // if not there yet, skip ahead to use
     ldy_imm(0x0); // otherwise initialize both grow/shrink flag
-    sty_abs(PlayerChangeSizeFlag); // and animation frame control
+    write_byte(PlayerChangeSizeFlag, y);
   
 CSzNext:
-    sty_abs(PlayerAnimCtrl); // store proper frame control
+    write_byte(PlayerAnimCtrl, y);
   
 GorSLog:
     lda_abs(PlayerSize); // get player's size
@@ -12295,7 +12272,7 @@ GetOffsetFromAnimCtrl:
   
 ShrinkPlayer:
     tya(); // add ten bytes to frame control as offset
-    clc();
+    carry_flag = false;
     adc_imm(0xa); // this thing apparently uses two of the swimming frames
     tax(); // to draw the player shrinking
     ldy_imm(0x9); // load offset for small player swimming
@@ -12351,8 +12328,8 @@ RelativeBlockPosition:
     iny(); // adjust other and get coordinates for other one
   
 VariableObjOfsRelPos:
-    stx_zp(0x0); // store value to add to A here
-    clc();
+    write_byte(0x0, x);
+    carry_flag = false;
     adc_zp(0x0); // add A to value stored
     tax(); // use as enemy offset
     GetObjRelativePosition();
@@ -12384,7 +12361,7 @@ GetMiscOffscreenBits:
   
 GetProperObjOffset:
     txa(); // move offset to A
-    clc();
+    carry_flag = false;
     adc_absy(ObjOffsetData); // add amount of bytes to offset depending on setting in Y
     tax(); // put back in X and leave
     goto rts;
@@ -12399,8 +12376,8 @@ GetBlockOffscreenBits:
     ldy_imm(0x4); // set Y to put offscreen bits in Block_OffscreenBits
   
 SetOffscrBitsOffset:
-    stx_zp(0x0);
-    clc(); // add contents of X to A to get
+    write_byte(0x0, x);
+    carry_flag = false;
     adc_zp(0x0); // appropriate offset, then give back to X
     tax();
   
@@ -12413,11 +12390,11 @@ GetOffScreenBitsSet:
     asl_acc();
     asl_acc();
     ora_zp(0x0); // mask together with previously saved low nybble
-    sta_zp(0x0); // store both here
+    write_byte(0x0, a);
     pla(); // get offscreen bits offset from stack
     tay();
     lda_zp(0x0); // get value here and store elsewhere
-    sta_absy(SprObject_OffscrBits);
+    write_byte(SprObject_OffscrBits + y, a);
     ldx_zp(ObjectOffset);
     goto rts;
   
@@ -12427,7 +12404,7 @@ RunOffscrBitsSubs:
     lsr_acc();
     lsr_acc();
     lsr_acc();
-    sta_zp(0x0); // store here
+    write_byte(0x0, a);
     goto GetYOffscreenBits;
     // --------------------------------
     // (these apply to these three subsections)
@@ -12437,14 +12414,14 @@ RunOffscrBitsSubs:
     // $07 - used to store difference between coordinates of object and screen edges
   
 GetXOffscreenBits:
-    stx_zp(0x4); // save position in buffer to here
+    write_byte(0x4, x);
     ldy_imm(0x1); // start with right side of screen
   
 XOfsLoop:
     lda_absy(ScreenEdge_X_Pos); // get pixel coordinate of edge
-    sec(); // get difference between pixel coordinate of edge
+    carry_flag = true;
     sbc_zpx(SprObject_X_Position); // and pixel coordinate of object position
-    sta_zp(0x7); // store here
+    write_byte(0x7, a);
     lda_absy(ScreenEdge_PageLoc); // get page location of edge
     sbc_zpx(SprObject_PageLoc); // subtract from page location of object position
     ldx_absy(DefaultXOnscreenOfs); // load offset value here
@@ -12454,7 +12431,7 @@ XOfsLoop:
     cmp_imm(0x1);
     if (!neg_flag) { goto XLdBData; } // if one page or more to the left of either edge, branch
     lda_imm(0x38); // if no branching, load value here and store
-    sta_zp(0x6);
+    write_byte(0x6, a);
     lda_imm(0x8); // load some other value and execute subroutine
     DividePDiff();
   
@@ -12471,14 +12448,14 @@ ExXOfsBS:
     // --------------------------------
   
 GetYOffscreenBits:
-    stx_zp(0x4); // save position in buffer to here
+    write_byte(0x4, x);
     ldy_imm(0x1); // start with top of screen
   
 YOfsLoop:
     lda_absy(HighPosUnitData); // load coordinate for edge of vertical unit
-    sec();
+    carry_flag = true;
     sbc_zpx(SprObject_Y_Position); // subtract from vertical coordinate of object
-    sta_zp(0x7); // store here
+    write_byte(0x7, a);
     lda_imm(0x1); // subtract one from vertical high byte of object
     sbc_zpx(SprObject_Y_HighPos);
     ldx_absy(DefaultYOnscreenOfs); // load offset value here
@@ -12488,7 +12465,7 @@ YOfsLoop:
     cmp_imm(0x1);
     if (!neg_flag) { goto YLdBData; } // if one vertical unit or more above the screen, branch
     lda_imm(0x20); // if no branching, load value here and store
-    sta_zp(0x6);
+    write_byte(0x6, a);
     lda_imm(0x4); // load some other value and execute subroutine
     DividePDiff();
   
@@ -12516,36 +12493,36 @@ DrawSpriteObject:
     lsr_acc(); // move d1 into carry
     lda_zp(0x0);
     if (!carry_flag) { goto NoHFlip; } // if d1 not set, branch
-    sta_absy(Sprite_Tilenumber + 4); // store first tile into second sprite
+    write_byte(Sprite_Tilenumber + 4 + y, a);
     lda_zp(0x1); // and second into first sprite
-    sta_absy(Sprite_Tilenumber);
+    write_byte(Sprite_Tilenumber + y, a);
     lda_imm(0x40); // activate horizontal flip OAM attribute
     if (!zero_flag) { goto SetHFAt; } // and unconditionally branch
   
 NoHFlip:
-    sta_absy(Sprite_Tilenumber); // store first tile into first sprite
+    write_byte(Sprite_Tilenumber + y, a);
     lda_zp(0x1); // and second into second sprite
-    sta_absy(Sprite_Tilenumber + 4);
+    write_byte(Sprite_Tilenumber + 4 + y, a);
     lda_imm(0x0); // clear bit for horizontal flip
   
 SetHFAt:
     ora_zp(0x4); // add other OAM attributes if necessary
-    sta_absy(Sprite_Attributes); // store sprite attributes
-    sta_absy(Sprite_Attributes + 4);
+    write_byte(Sprite_Attributes + y, a);
+    write_byte(Sprite_Attributes + 4 + y, a);
     lda_zp(0x2); // now the y coordinates
-    sta_absy(Sprite_Y_Position); // note because they are
-    sta_absy(Sprite_Y_Position + 4); // side by side, they are the same
+    write_byte(Sprite_Y_Position + y, a);
+    write_byte(Sprite_Y_Position + 4 + y, a);
     lda_zp(0x5);
-    sta_absy(Sprite_X_Position); // store x coordinate, then
-    clc(); // add 8 pixels and store another to
+    write_byte(Sprite_X_Position + y, a);
+    carry_flag = false;
     adc_imm(0x8); // put them side by side
-    sta_absy(Sprite_X_Position + 4);
+    write_byte(Sprite_X_Position + 4 + y, a);
     lda_zp(0x2); // add eight pixels to the next y
-    clc(); // coordinate
+    carry_flag = false;
     adc_imm(0x8);
-    sta_zp(0x2);
+    write_byte(0x2, a);
     tya(); // add eight to the offset in Y to
-    clc(); // move to the next two sprites
+    carry_flag = false;
     adc_imm(0x8);
     tay();
     inx(); // increment offset to return it to the
@@ -12559,14 +12536,14 @@ SetHFAt:
 SoundEngine:
     lda_abs(OperMode); // are we in title screen mode?
     if (!zero_flag) { goto SndOn; }
-    sta_abs(SND_MASTERCTRL_REG); // if so, disable sound and leave
+    write_byte(SND_MASTERCTRL_REG, a);
     goto rts;
   
 SndOn:
     lda_imm(0xff);
-    sta_abs(JOYPAD_PORT2); // disable irqs and set frame counter mode???
+    write_byte(JOYPAD_PORT2, a);
     lda_imm(0xf);
-    sta_abs(SND_MASTERCTRL_REG); // enable first four channels
+    write_byte(SND_MASTERCTRL_REG, a);
     lda_abs(PauseModeFlag); // is sound already in pause mode?
     if (!zero_flag) { goto InPause; }
     lda_zp(PauseSoundQueue); // if not, check pause sfx queue    
@@ -12578,17 +12555,17 @@ InPause:
     if (!zero_flag) { goto ContPau; }
     lda_zp(PauseSoundQueue); // check pause queue
     if (zero_flag) { goto SkipSoundSubroutines; }
-    sta_abs(PauseSoundBuffer); // if queue full, store in buffer and activate
-    sta_abs(PauseModeFlag); // pause mode to interrupt game sounds
+    write_byte(PauseSoundBuffer, a);
+    write_byte(PauseModeFlag, a);
     lda_imm(0x0); // disable sound and clear sfx buffers
-    sta_abs(SND_MASTERCTRL_REG);
-    sta_zp(Square1SoundBuffer);
-    sta_zp(Square2SoundBuffer);
-    sta_zp(NoiseSoundBuffer);
+    write_byte(SND_MASTERCTRL_REG, a);
+    write_byte(Square1SoundBuffer, a);
+    write_byte(Square2SoundBuffer, a);
+    write_byte(NoiseSoundBuffer, a);
     lda_imm(0xf);
-    sta_abs(SND_MASTERCTRL_REG); // enable sound again
+    write_byte(SND_MASTERCTRL_REG, a);
     lda_imm(0x2a); // store length of sound in pause counter
-    sta_abs(Squ1_SfxLenCounter);
+    write_byte(Squ1_SfxLenCounter, a);
   
 PTone1F:
     lda_imm(0x44); // play first tone
@@ -12615,16 +12592,16 @@ DecPauC:
     dec_abs(Squ1_SfxLenCounter); // decrement pause sfx counter
     if (!zero_flag) { goto SkipSoundSubroutines; }
     lda_imm(0x0); // disable sound if in pause mode and
-    sta_abs(SND_MASTERCTRL_REG); // not currently playing the pause sfx
+    write_byte(SND_MASTERCTRL_REG, a);
     lda_abs(PauseSoundBuffer); // if no longer playing pause sfx, check to see
     cmp_imm(0x2); // if we need to be playing sound again
     if (!zero_flag) { goto SkipPIn; }
     lda_imm(0x0); // clear pause mode to allow game sounds again
-    sta_abs(PauseModeFlag);
+    write_byte(PauseModeFlag, a);
   
 SkipPIn:
     lda_imm(0x0); // clear pause sfx buffer
-    sta_abs(PauseSoundBuffer);
+    write_byte(PauseSoundBuffer, a);
     if (zero_flag) { goto SkipSoundSubroutines; }
   
 RunSoundSubroutines:
@@ -12633,15 +12610,15 @@ RunSoundSubroutines:
     jsr(NoiseSfxHandler, 435); //  ''  ''  '' noise channel
     jsr(MusicHandler, 436); // play music on all channels
     lda_imm(0x0); // clear the music queues
-    sta_zp(AreaMusicQueue);
-    sta_zp(EventMusicQueue);
+    write_byte(AreaMusicQueue, a);
+    write_byte(EventMusicQueue, a);
   
 SkipSoundSubroutines:
     lda_imm(0x0); // clear the sound effects queues
-    sta_zp(Square1SoundQueue);
-    sta_zp(Square2SoundQueue);
-    sta_zp(NoiseSoundQueue);
-    sta_zp(PauseSoundQueue);
+    write_byte(Square1SoundQueue, a);
+    write_byte(Square2SoundQueue, a);
+    write_byte(NoiseSoundQueue, a);
+    write_byte(PauseSoundQueue, a);
     ldy_abs(DAC_Counter); // load some sort of counter 
     lda_zp(AreaMusicBuffer);
     and_imm(0b00000011); // check for specific music
@@ -12656,13 +12633,13 @@ NoIncDAC:
     dec_abs(DAC_Counter); // decrement counter
   
 StrWave:
-    sty_abs(SND_DELTA_REG + 1); // store into DMC load register (??)
+    write_byte(SND_DELTA_REG + 1, y);
     goto rts; // we are done here
     // --------------------------------
   
 Dump_Squ1_Regs:
-    sty_abs(SND_SQUARE1_REG + 1); // dump the contents of X and Y into square 1's control regs
-    stx_abs(SND_SQUARE1_REG);
+    write_byte(SND_SQUARE1_REG + 1, y);
+    write_byte(SND_SQUARE1_REG, x);
     goto rts;
   
 PlaySqu1Sfx:
@@ -12675,17 +12652,17 @@ Dump_Freq_Regs:
     tay();
     lda_absy(FreqRegLookupTbl + 1); // use previous contents of A for sound reg offset
     if (zero_flag) { goto NoTone; } // if zero, then do not load
-    sta_absx(SND_REGISTER + 2); // first byte goes into LSB of frequency divider
+    write_byte(SND_REGISTER + 2 + x, a);
     lda_absy(FreqRegLookupTbl); // second byte goes into 3 MSB plus extra bit for 
     ora_imm(0b00001000); // length counter
-    sta_absx(SND_REGISTER + 3);
+    write_byte(SND_REGISTER + 3 + x, a);
   
 NoTone:
     goto rts;
   
 Dump_Sq2_Regs:
-    stx_abs(SND_SQUARE2_REG); // dump the contents of X and Y into square 2's control regs
-    sty_abs(SND_SQUARE2_REG + 1);
+    write_byte(SND_SQUARE2_REG, x);
+    write_byte(SND_SQUARE2_REG + 1, y);
     goto rts;
   
 PlaySqu2Sfx:
@@ -12702,7 +12679,7 @@ SetFreq_Tri:
   
 PlayFlagpoleSlide:
     lda_imm(0x40); // store length of flagpole sound
-    sta_abs(Squ1_SfxLenCounter);
+    write_byte(Squ1_SfxLenCounter, a);
     lda_imm(0x62); // load part of reg contents for flagpole sound
     jsr(SetFreq_Squ1, 439);
     ldx_imm(0x99); // now load the rest
@@ -12720,7 +12697,7 @@ JumpRegContents:
     ldy_imm(0xa7); // anyway, this loads the first part of mario's jumping sound
     jsr(PlaySqu1Sfx, 440);
     lda_imm(0x28); // store length of sfx for both jumping sounds
-    sta_abs(Squ1_SfxLenCounter); // then continue on here
+    write_byte(Squ1_SfxLenCounter, a);
   
 ContinueSndJump:
     lda_abs(Squ1_SfxLenCounter); // jumping sounds seem to be composed of three parts
@@ -12753,7 +12730,7 @@ PlayBump:
   
 Fthrow:
     ldx_imm(0x9e); // the fireball sound shares reg contents with the bump sound
-    sta_abs(Squ1_SfxLenCounter);
+    write_byte(Squ1_SfxLenCounter, a);
     lda_imm(0xc); // load offset for bump sound
     jsr(PlaySqu1Sfx, 442);
   
@@ -12762,7 +12739,7 @@ ContinueBumpThrow:
     cmp_imm(0x6);
     if (!zero_flag) { goto DecJpFPS; }
     lda_imm(0xbb); // load second part directly
-    sta_abs(SND_SQUARE1_REG + 1);
+    write_byte(SND_SQUARE1_REG + 1, a);
   
 DecJpFPS:
     if (!zero_flag) { goto BranchToDecLength1; } // unconditional branch
@@ -12770,7 +12747,7 @@ DecJpFPS:
 Square1SfxHandler:
     ldy_zp(Square1SoundQueue); // check for sfx in queue
     if (zero_flag) { goto CheckSfx1Buffer; }
-    sty_zp(Square1SoundBuffer); // if found, put in buffer
+    write_byte(Square1SoundBuffer, y);
     if (neg_flag) { goto PlaySmallJump; } // small jump
     lsr_zp(Square1SoundQueue);
     if (carry_flag) { goto PlayBigJump; } // big jump
@@ -12811,7 +12788,7 @@ ExS1H:
   
 PlaySwimStomp:
     lda_imm(0xe); // store length of swim/stomp sound
-    sta_abs(Squ1_SfxLenCounter);
+    write_byte(Squ1_SfxLenCounter, a);
     ldy_imm(0x9c); // store reg contents for swim/stomp sound
     ldx_imm(0x9e);
     lda_imm(0x26);
@@ -12820,11 +12797,11 @@ PlaySwimStomp:
 ContinueSwimStomp:
     ldy_abs(Squ1_SfxLenCounter); // look up reg contents in data section based on
     lda_absy(SwimStompEnvelopeData - 1); // length of sound left, used to control sound's
-    sta_abs(SND_SQUARE1_REG); // envelope
+    write_byte(SND_SQUARE1_REG, a);
     cpy_imm(0x6);
     if (!zero_flag) { goto BranchToDecLength1; }
     lda_imm(0x9e); // when the length counts down to a certain point, put this
-    sta_abs(SND_SQUARE1_REG + 2); // directly into the LSB of square 1's frequency divider
+    write_byte(SND_SQUARE1_REG + 2, a);
   
 BranchToDecLength1:
     if (!zero_flag) { goto DecrementSfx1Length; } // unconditional branch (regardless of how we got here)
@@ -12833,7 +12810,7 @@ PlaySmackEnemy:
     lda_imm(0xe); // store length of smack enemy sound
     ldy_imm(0xcb);
     ldx_imm(0x9f);
-    sta_abs(Squ1_SfxLenCounter);
+    write_byte(Squ1_SfxLenCounter, a);
     lda_imm(0x28); // store reg contents for smack enemy sound
     jsr(PlaySqu1Sfx, 444);
     if (!zero_flag) { goto DecrementSfx1Length; } // unconditional branch
@@ -12843,7 +12820,7 @@ ContinueSmackEnemy:
     cpy_imm(0x8);
     if (!zero_flag) { goto SmSpc; }
     lda_imm(0xa0); // if we're at the about-halfway point, make the second tone
-    sta_abs(SND_SQUARE1_REG + 2); // in the smack enemy sound
+    write_byte(SND_SQUARE1_REG + 2, a);
     lda_imm(0x9f);
     if (!zero_flag) { goto SmTick; }
   
@@ -12851,7 +12828,7 @@ SmSpc:
     lda_imm(0x90); // this creates spaces in the sound, giving it its distinct noise
   
 SmTick:
-    sta_abs(SND_SQUARE1_REG);
+    write_byte(SND_SQUARE1_REG, a);
   
 DecrementSfx1Length:
     dec_abs(Squ1_SfxLenCounter); // decrement length of sfx
@@ -12859,18 +12836,18 @@ DecrementSfx1Length:
   
 StopSquare1Sfx:
     ldx_imm(0x0); // if end of sfx reached, clear buffer
-    stx_zp(0xf1); // and stop making the sfx
+    write_byte(0xf1, x);
     ldx_imm(0xe);
-    stx_abs(SND_MASTERCTRL_REG);
+    write_byte(SND_MASTERCTRL_REG, x);
     ldx_imm(0xf);
-    stx_abs(SND_MASTERCTRL_REG);
+    write_byte(SND_MASTERCTRL_REG, x);
   
 ExSfx1:
     goto rts;
   
 PlayPipeDownInj:
     lda_imm(0x2f); // load length of pipedown sound
-    sta_abs(Squ1_SfxLenCounter);
+    write_byte(Squ1_SfxLenCounter, a);
   
 ContinuePipeDownInj:
     lda_abs(Squ1_SfxLenCounter); // some bitwise logic, forces the regs
@@ -12899,7 +12876,7 @@ PlayTimerTick:
     ldx_imm(0x98); // and part of reg contents
   
 CGrab_TTickRegL:
-    sta_abs(Squ2_SfxLenCounter);
+    write_byte(Squ2_SfxLenCounter, a);
     ldy_imm(0x7f); // load the rest of reg contents 
     lda_imm(0x42); // of coin grab and timer tick sound
     jsr(PlaySqu2Sfx, 446);
@@ -12909,14 +12886,14 @@ ContinueCGrabTTick:
     cmp_imm(0x30); // timer tick sound also executes this, not sure why
     if (!zero_flag) { goto N2Tone; }
     lda_imm(0x54); // if so, load the tone directly into the reg
-    sta_abs(SND_SQUARE2_REG + 2);
+    write_byte(SND_SQUARE2_REG + 2, a);
   
 N2Tone:
     if (!zero_flag) { goto DecrementSfx2Length; }
   
 PlayBlast:
     lda_imm(0x20); // load length of fireworks/gunfire sound
-    sta_abs(Squ2_SfxLenCounter);
+    write_byte(Squ2_SfxLenCounter, a);
     ldy_imm(0x94); // load reg contents of fireworks/gunfire sound
     lda_imm(0x5e);
     if (!zero_flag) { goto SBlasJ; }
@@ -12933,7 +12910,7 @@ SBlasJ:
   
 PlayPowerUpGrab:
     lda_imm(0x36); // load length of power-up grab sound
-    sta_abs(Squ2_SfxLenCounter);
+    write_byte(Squ2_SfxLenCounter, a);
   
 ContinuePowerUpGrab:
     lda_abs(Squ2_SfxLenCounter); // load frequency reg based on length left over
@@ -12953,13 +12930,13 @@ DecrementSfx2Length:
   
 EmptySfx2Buffer:
     ldx_imm(0x0); // initialize square 2's sound effects buffer
-    stx_zp(Square2SoundBuffer);
+    write_byte(Square2SoundBuffer, x);
   
 StopSquare2Sfx:
     ldx_imm(0xd); // stop playing the sfx
-    stx_abs(SND_MASTERCTRL_REG);
+    write_byte(SND_MASTERCTRL_REG, x);
     ldx_imm(0xf);
-    stx_abs(SND_MASTERCTRL_REG);
+    write_byte(SND_MASTERCTRL_REG, x);
   
 ExSfx2:
     goto rts;
@@ -12970,7 +12947,7 @@ Square2SfxHandler:
     if (!zero_flag) { goto ContinueExtraLife; }
     ldy_zp(Square2SoundQueue); // check for sfx in queue
     if (zero_flag) { goto CheckSfx2Buffer; }
-    sty_zp(Square2SoundBuffer); // if found, put in buffer and check for the following
+    write_byte(Square2SoundBuffer, y);
     if (neg_flag) { goto PlayBowserFall; } // bowser fall
     lsr_zp(Square2SoundQueue);
     if (carry_flag) { goto PlayCoinGrab; } // coin grab
@@ -13017,7 +12994,7 @@ JumpToDecLength2:
   
 PlayBowserFall:
     lda_imm(0x38); // load length of bowser defeat sound
-    sta_abs(Squ2_SfxLenCounter);
+    write_byte(Squ2_SfxLenCounter, a);
     ldy_imm(0xc4); // load contents of reg for bowser defeat sound
     lda_imm(0x18);
   
@@ -13039,7 +13016,7 @@ EL_LRegs:
   
 PlayExtraLife:
     lda_imm(0x30); // load length of 1-up sound
-    sta_abs(Squ2_SfxLenCounter);
+    write_byte(Squ2_SfxLenCounter, a);
   
 ContinueExtraLife:
     lda_abs(Squ2_SfxLenCounter);
@@ -13064,11 +13041,11 @@ PlayGrowVine:
     lda_imm(0x20); // load length of vine grow sound
   
 GrowItemRegs:
-    sta_abs(Squ2_SfxLenCounter);
+    write_byte(Squ2_SfxLenCounter, a);
     lda_imm(0x7f); // load contents of reg for both sounds directly
-    sta_abs(SND_SQUARE2_REG + 1);
+    write_byte(SND_SQUARE2_REG + 1, a);
     lda_imm(0x0); // start secondary counter for both sounds
-    sta_abs(Sfx_SecondaryCounter);
+    write_byte(Sfx_SecondaryCounter, a);
   
 ContinueGrowItems:
     inc_abs(Sfx_SecondaryCounter); // increment secondary counter for both sounds
@@ -13078,7 +13055,7 @@ ContinueGrowItems:
     cpy_abs(Squ2_SfxLenCounter); // have we reached the end yet?
     if (zero_flag) { goto StopGrowItems; } // if so, branch to jump, and stop playing sounds
     lda_imm(0x9d); // load contents of other reg directly
-    sta_abs(SND_SQUARE2_REG);
+    write_byte(SND_SQUARE2_REG, a);
     lda_absy(PUp_VGrow_FreqData); // use secondary counter / 2 as offset for frequency regs
     jsr(SetFreq_Squ2, 448);
     goto rts;
@@ -13089,7 +13066,7 @@ StopGrowItems:
   
 PlayBrickShatter:
     lda_imm(0x20); // load length of brick shatter sound
-    sta_abs(Noise_SfxLenCounter);
+    write_byte(Noise_SfxLenCounter, a);
   
 ContinueBrickShatter:
     lda_abs(Noise_SfxLenCounter);
@@ -13100,18 +13077,18 @@ ContinueBrickShatter:
     lda_absy(BrickShatterEnvData);
   
 PlayNoiseSfx:
-    sta_abs(SND_NOISE_REG); // play the sfx
-    stx_abs(SND_NOISE_REG + 2);
+    write_byte(SND_NOISE_REG, a);
+    write_byte(SND_NOISE_REG + 2, x);
     lda_imm(0x18);
-    sta_abs(SND_NOISE_REG + 3);
+    write_byte(SND_NOISE_REG + 3, a);
   
 DecrementSfx3Length:
     dec_abs(Noise_SfxLenCounter); // decrement length of sfx
     if (!zero_flag) { goto ExSfx3; }
     lda_imm(0xf0); // if done, stop playing the sfx
-    sta_abs(SND_NOISE_REG);
+    write_byte(SND_NOISE_REG, a);
     lda_imm(0x0);
-    sta_zp(NoiseSoundBuffer);
+    write_byte(NoiseSoundBuffer, a);
   
 ExSfx3:
     goto rts;
@@ -13119,7 +13096,7 @@ ExSfx3:
 NoiseSfxHandler:
     ldy_zp(NoiseSoundQueue); // check for sfx in queue
     if (zero_flag) { goto CheckNoiseBuffer; }
-    sty_zp(NoiseSoundBuffer); // if found, put in buffer
+    write_byte(NoiseSoundBuffer, y);
     lsr_zp(NoiseSoundQueue);
     if (carry_flag) { goto PlayBrickShatter; } // brick shatter
     lsr_zp(NoiseSoundQueue);
@@ -13138,7 +13115,7 @@ ExNH:
   
 PlayBowserFlame:
     lda_imm(0x40); // load length of bowser flame sound
-    sta_abs(Noise_SfxLenCounter);
+    write_byte(Noise_SfxLenCounter, a);
   
 ContinueBowserFlame:
     lda_abs(Noise_SfxLenCounter);
@@ -13163,7 +13140,7 @@ MusicHandler:
     goto rts; // no music, then leave
   
 LoadEventMusic:
-    sta_abs(EventMusicBuffer); // copy event music queue contents to buffer
+    write_byte(EventMusicBuffer, a);
     cmp_imm(DeathMusic); // is it death music?
     if (!zero_flag) { goto NoStopSfx; } // if not, jump elsewhere
     jsr(StopSquare1Sfx, 449); // stop sfx in square 1 and 2
@@ -13171,14 +13148,14 @@ LoadEventMusic:
   
 NoStopSfx:
     ldx_zp(AreaMusicBuffer);
-    stx_abs(AreaMusicBuffer_Alt); // save current area music buffer to be re-obtained later
+    write_byte(AreaMusicBuffer_Alt, x);
     ldy_imm(0x0);
-    sty_abs(NoteLengthTblAdder); // default value for additional length byte offset
-    sty_zp(AreaMusicBuffer); // clear area music buffer
+    write_byte(NoteLengthTblAdder, y);
+    write_byte(AreaMusicBuffer, y);
     cmp_imm(TimeRunningOutMusic); // is it time running out music?
     if (!zero_flag) { goto FindEventMusicHeader; }
     ldx_imm(0x8); // load offset to be added to length byte of header
-    stx_abs(NoteLengthTblAdder);
+    write_byte(NoteLengthTblAdder, x);
     if (!zero_flag) { goto FindEventMusicHeader; } // unconditional branch
   
 LoadAreaMusic:
@@ -13190,12 +13167,12 @@ NoStop1:
     ldy_imm(0x10); // start counter used only by ground level music
   
 GMLoopB:
-    sty_abs(GroundMusicHeaderOfs);
+    write_byte(GroundMusicHeaderOfs, y);
   
 HandleAreaMusicLoopB:
     ldy_imm(0x0); // clear event music buffer
-    sty_abs(EventMusicBuffer);
-    sta_zp(AreaMusicBuffer); // copy area music queue contents to buffer
+    write_byte(EventMusicBuffer, y);
+    write_byte(AreaMusicBuffer, a);
     cmp_imm(0x1); // is it ground level music?
     if (!zero_flag) { goto FindAreaMusicHeader; }
     inc_abs(GroundMusicHeaderOfs); // increment but only if playing ground level music
@@ -13207,7 +13184,7 @@ HandleAreaMusicLoopB:
   
 FindAreaMusicHeader:
     ldy_imm(0x8); // load Y for offset of area music
-    sty_zp(MusicOffset_Square2); // residual instruction here
+    write_byte(MusicOffset_Square2, y);
   
 FindEventMusicHeader:
     iny(); // increment Y pointer based on previously loaded queue contents
@@ -13218,30 +13195,30 @@ LoadHeader:
     lda_absy(MusicHeaderOffsetData); // load offset for header
     tay();
     lda_absy(MusicHeaderData); // now load the header
-    sta_zp(NoteLenLookupTblOfs);
+    write_byte(NoteLenLookupTblOfs, a);
     lda_absy(MusicHeaderData + 1);
-    sta_zp(MusicDataLow);
+    write_byte(MusicDataLow, a);
     lda_absy(MusicHeaderData + 2);
-    sta_zp(MusicDataHigh);
+    write_byte(MusicDataHigh, a);
     lda_absy(MusicHeaderData + 3);
-    sta_zp(MusicOffset_Triangle);
+    write_byte(MusicOffset_Triangle, a);
     lda_absy(MusicHeaderData + 4);
-    sta_zp(MusicOffset_Square1);
+    write_byte(MusicOffset_Square1, a);
     lda_absy(MusicHeaderData + 5);
-    sta_abs(MusicOffset_Noise);
-    sta_abs(NoiseDataLoopbackOfs);
+    write_byte(MusicOffset_Noise, a);
+    write_byte(NoiseDataLoopbackOfs, a);
     lda_imm(0x1); // initialize music note counters
-    sta_abs(Squ2_NoteLenCounter);
-    sta_abs(Squ1_NoteLenCounter);
-    sta_abs(Tri_NoteLenCounter);
-    sta_abs(Noise_BeatLenCounter);
+    write_byte(Squ2_NoteLenCounter, a);
+    write_byte(Squ1_NoteLenCounter, a);
+    write_byte(Tri_NoteLenCounter, a);
+    write_byte(Noise_BeatLenCounter, a);
     lda_imm(0x0); // initialize music data offset for square 2
-    sta_zp(MusicOffset_Square2);
-    sta_abs(AltRegContentFlag); // initialize alternate control reg data used by square 1
+    write_byte(MusicOffset_Square2, a);
+    write_byte(AltRegContentFlag, a);
     lda_imm(0xb); // disable triangle channel and reenable it
-    sta_abs(SND_MASTERCTRL_REG);
+    write_byte(SND_MASTERCTRL_REG, a);
     lda_imm(0xf);
-    sta_abs(SND_MASTERCTRL_REG);
+    write_byte(SND_MASTERCTRL_REG, a);
   
 HandleSquare2Music:
     dec_abs(Squ2_NoteLenCounter); // decrement square 2 note length
@@ -13267,12 +13244,12 @@ NotTRO:
     and_imm(0b01011111);
     if (!zero_flag) { goto MusicLoopBack; } // if any area music except pipe intro, music loops
     lda_imm(0x0); // clear primary and secondary buffers and initialize
-    sta_zp(AreaMusicBuffer); // control regs of square and triangle channels
-    sta_abs(EventMusicBuffer);
-    sta_abs(SND_TRIANGLE_REG);
+    write_byte(AreaMusicBuffer, a);
+    write_byte(EventMusicBuffer, a);
+    write_byte(SND_TRIANGLE_REG, a);
     lda_imm(0x90);
-    sta_abs(SND_SQUARE1_REG);
-    sta_abs(SND_SQUARE2_REG);
+    write_byte(SND_SQUARE1_REG, a);
+    write_byte(SND_SQUARE2_REG, a);
     goto rts;
   
 MusicLoopBack:
@@ -13283,7 +13260,7 @@ VictoryMLoopBack:
   
 Squ2LengthHandler:
     jsr(ProcessLengthData, 452); // store length of note
-    sta_abs(Squ2_NoteLenBuffer);
+    write_byte(Squ2_NoteLenBuffer, a);
     ldy_zp(MusicOffset_Square2); // fetch another byte (MUST NOT BE LENGTH BYTE!)
     inc_zp(MusicOffset_Square2);
     lda_indy(MusicData);
@@ -13296,12 +13273,12 @@ Squ2NoteHandler:
     jsr(LoadControlRegs, 454); // if not, load control regs for square 2
   
 Rest:
-    sta_abs(Squ2_EnvelopeDataCtrl); // save contents of A
+    write_byte(Squ2_EnvelopeDataCtrl, a);
     jsr(Dump_Sq2_Regs, 455); // dump X and Y into square 2 control regs
   
 SkipFqL1:
     lda_abs(Squ2_NoteLenBuffer); // save length in square 2 note counter
-    sta_abs(Squ2_NoteLenCounter);
+    write_byte(Squ2_NoteLenCounter, a);
   
 MiscSqu2MusicTasks:
     lda_zp(Square2SoundBuffer); // is there a sound playing on square 2?
@@ -13315,9 +13292,9 @@ MiscSqu2MusicTasks:
   
 NoDecEnv1:
     jsr(LoadEnvelopeData, 456); // do a load of envelope data to replace default
-    sta_abs(SND_SQUARE2_REG); // based on offset set by first load unless playing
+    write_byte(SND_SQUARE2_REG, a);
     ldx_imm(0x7f); // death music or d4 set on secondary buffer
-    stx_abs(SND_SQUARE2_REG + 1);
+    write_byte(SND_SQUARE2_REG + 1, x);
   
 HandleSquare1Music:
     ldy_zp(MusicOffset_Square1); // is there a nonzero offset here?
@@ -13331,15 +13308,15 @@ FetchSqu1MusicData:
     lda_indy(MusicData);
     if (!zero_flag) { goto Squ1NoteHandler; } // if nonzero, then skip this part
     lda_imm(0x83);
-    sta_abs(SND_SQUARE1_REG); // store some data into control regs for square 1
+    write_byte(SND_SQUARE1_REG, a);
     lda_imm(0x94); // and fetch another byte of data, used to give
-    sta_abs(SND_SQUARE1_REG + 1); // death music its unique sound
-    sta_abs(AltRegContentFlag);
+    write_byte(SND_SQUARE1_REG + 1, a);
+    write_byte(AltRegContentFlag, a);
     if (!zero_flag) { goto FetchSqu1MusicData; } // unconditional branch
   
 Squ1NoteHandler:
     jsr(AlternateLengthHandler, 457);
-    sta_abs(Squ1_NoteLenCounter); // save contents of A in square 1 note counter
+    write_byte(Squ1_NoteLenCounter, a);
     ldy_zp(Square1SoundBuffer); // is there a sound playing on square 1?
     if (!zero_flag) { goto HandleTriangleMusic; }
     txa();
@@ -13349,7 +13326,7 @@ Squ1NoteHandler:
     jsr(LoadControlRegs, 459);
   
 SkipCtrlL:
-    sta_abs(Squ1_EnvelopeDataCtrl); // save envelope offset
+    write_byte(Squ1_EnvelopeDataCtrl, a);
     jsr(Dump_Squ1_Regs, 460);
   
 MiscSqu1MusicTasks:
@@ -13364,7 +13341,7 @@ MiscSqu1MusicTasks:
   
 NoDecEnv2:
     jsr(LoadEnvelopeData, 461); // do a load of envelope data
-    sta_abs(SND_SQUARE1_REG); // based on offset set by first load
+    write_byte(SND_SQUARE1_REG, a);
   
 DeathMAltReg:
     lda_abs(AltRegContentFlag); // check for alternate control reg data
@@ -13372,7 +13349,7 @@ DeathMAltReg:
     lda_imm(0x7f); // load this value if zero, the alternate value
   
 DoAltLoad:
-    sta_abs(SND_SQUARE1_REG + 1); // if nonzero, and let's move on
+    write_byte(SND_SQUARE1_REG + 1, a);
   
 HandleTriangleMusic:
     lda_zp(MusicOffset_Triangle);
@@ -13384,9 +13361,9 @@ HandleTriangleMusic:
     if (zero_flag) { goto LoadTriCtrlReg; } // if zero, skip all this and move on to noise 
     if (!neg_flag) { goto TriNoteHandler; } // if non-negative, data is note
     jsr(ProcessLengthData, 462); // otherwise, it is length data
-    sta_abs(Tri_NoteLenBuffer); // save contents of A
+    write_byte(Tri_NoteLenBuffer, a);
     lda_imm(0x1f);
-    sta_abs(SND_TRIANGLE_REG); // load some default data for triangle control reg
+    write_byte(SND_TRIANGLE_REG, a);
     ldy_zp(MusicOffset_Triangle); // fetch another byte
     inc_zp(MusicOffset_Triangle);
     lda_indy(MusicData);
@@ -13395,7 +13372,7 @@ HandleTriangleMusic:
 TriNoteHandler:
     jsr(SetFreq_Tri, 463);
     ldx_abs(Tri_NoteLenBuffer); // save length in triangle note counter
-    stx_abs(Tri_NoteLenCounter);
+    write_byte(Tri_NoteLenCounter, x);
     lda_abs(EventMusicBuffer);
     and_imm(0b01101110); // check for death music or d4 set on secondary buffer
     if (!zero_flag) { goto NotDOrD4; } // if playing any other secondary, skip primary buffer check
@@ -13421,7 +13398,7 @@ LongN:
     lda_imm(0xff); // or any secondary (including win castle) except death and d4
   
 LoadTriCtrlReg:
-    sta_abs(SND_TRIANGLE_REG); // save final contents of A into control reg for triangle
+    write_byte(SND_TRIANGLE_REG, a);
   
 HandleNoiseMusic:
     lda_zp(AreaMusicBuffer); // check if playing underground or castle music
@@ -13436,12 +13413,12 @@ FetchNoiseBeatData:
     lda_indy(MusicData); // get noise beat data, if nonzero, branch to handle
     if (!zero_flag) { goto NoiseBeatHandler; }
     lda_abs(NoiseDataLoopbackOfs); // if data is zero, reload original noise beat offset
-    sta_abs(MusicOffset_Noise); // and loopback next time around
+    write_byte(MusicOffset_Noise, a);
     if (!zero_flag) { goto FetchNoiseBeatData; } // unconditional branch
   
 NoiseBeatHandler:
     jsr(AlternateLengthHandler, 464);
-    sta_abs(Noise_BeatLenCounter); // store length in noise beat counter
+    write_byte(Noise_BeatLenCounter, a);
     txa();
     and_imm(0b00111110); // reload data and erase length bits
     if (zero_flag) { goto SilentBeat; } // if no beat data, silence
@@ -13472,9 +13449,9 @@ SilentBeat:
     lda_imm(0x10); // silence
   
 PlayBeat:
-    sta_abs(SND_NOISE_REG); // load beat data into noise regs
-    stx_abs(SND_NOISE_REG + 2);
-    sty_abs(SND_NOISE_REG + 3);
+    write_byte(SND_NOISE_REG, a);
+    write_byte(SND_NOISE_REG + 2, x);
+    write_byte(SND_NOISE_REG + 3, y);
   
 ExitMusicHandler:
     goto rts;
@@ -13489,7 +13466,7 @@ AlternateLengthHandler:
   
 ProcessLengthData:
     and_imm(0b00000111); // clear all but the three LSBs
-    clc();
+    carry_flag = false;
     adc_zp(0xf0); // add offset loaded from first header byte
     adc_abs(NoteLengthTblAdder); // add extra if time running out music
     tay();
@@ -14011,7 +13988,7 @@ rts:
 void SpriteShuffler(void) {
   ldy_abs(AreaType); // load level type, likely residual code
   lda_imm(0x28); // load preset value which will put it at
-  sta_zp(0x0); // sprite #10
+  write_byte(0x0, a);
   ldx_imm(0xe); // start at the end of OAM data offsets
   
 ShuffleLoop:
@@ -14019,14 +13996,14 @@ ShuffleLoop:
     cmp_zp(0x0); // the preset value
     if (!carry_flag) { goto NextSprOffset; } // if less, skip this part
     ldy_abs(SprShuffleAmtOffset); // get current offset to preset value we want to add
-    clc();
+    carry_flag = false;
     adc_absy(SprShuffleAmt); // get shuffle amount, add to current sprite offset
     if (!carry_flag) { goto StrSprOffset; } // if not exceeded $ff, skip second add
-    clc();
+    carry_flag = false;
     adc_zp(0x0); // otherwise add preset value $28 to offset
   
 StrSprOffset:
-    sta_absx(SprDataOffset); // store new offset here or old one if branched to here
+    write_byte(SprDataOffset + x, a);
   
 NextSprOffset:
     dex(); // move backwards to next one
@@ -14038,34 +14015,34 @@ NextSprOffset:
     ldx_imm(0x0); // otherwise, init to 0
   
 SetAmtOffset:
-    stx_abs(SprShuffleAmtOffset);
+    write_byte(SprShuffleAmtOffset, x);
     ldx_imm(0x8); // load offsets for values and storage
     ldy_imm(0x2);
   
 SetMiscOffset:
     lda_absy(SprDataOffset + 5); // load one of three OAM data offsets
-    sta_absx(Misc_SprDataOffset - 2); // store first one unmodified, but
-    clc(); // add eight to the second and eight
+    write_byte(Misc_SprDataOffset - 2 + x, a);
+    carry_flag = false;
     adc_imm(0x8); // more to the third one
-    sta_absx(Misc_SprDataOffset - 1); // note that due to the way X is set up,
-    clc(); // this code loads into the misc sprite offsets
+    write_byte(Misc_SprDataOffset - 1 + x, a);
+    carry_flag = false;
     adc_imm(0x8);
-    sta_absx(Misc_SprDataOffset);
+    write_byte(Misc_SprDataOffset + x, a);
     dex();
     dex();
     dex();
     dey();
     if (!neg_flag) { goto SetMiscOffset; } // do this until all misc spr offsets are loaded
-    return; // rts
+    return; // <rts>
 }
 
 void GoContinue(void) {
-  sta_abs(WorldNumber); // start both players at the first area
-  sta_abs(OffScr_WorldNumber); // of the previously saved world number
+  write_byte(WorldNumber, a);
+  write_byte(OffScr_WorldNumber, a);
   ldx_imm(0x0); // note that on power-up using this function
-  stx_abs(AreaNumber); // will make no difference
-  stx_abs(OffScr_AreaNumber);
-  return; // rts
+  write_byte(AreaNumber, x);
+  write_byte(OffScr_AreaNumber, x);
+  return; // <rts>
   // -------------------------------------------------------------------------------------
 }
 
@@ -14074,18 +14051,18 @@ void DrawMushroomIcon(void) {
   
 IconDataRead:
     lda_absy(MushroomIconData); // note that the default position is set for a
-    sta_absy(VRAM_Buffer1 - 1); // 1-player game
+    write_byte(VRAM_Buffer1 - 1 + y, a);
     dey();
     if (!neg_flag) { goto IconDataRead; }
     lda_abs(NumberOfPlayers); // check number of players
     if (zero_flag) { goto ExitIcon; } // if set to 1-player game, we're done
     lda_imm(0x24); // otherwise, load blank tile in 1-player position
-    sta_abs(VRAM_Buffer1 + 3);
+    write_byte(VRAM_Buffer1 + 3, a);
     lda_imm(0xce); // then load shroom icon tile in 2-player position
-    sta_abs(VRAM_Buffer1 + 5);
+    write_byte(VRAM_Buffer1 + 5, a);
   
 ExitIcon:
-    return; // rts
+    return; // <rts>
 }
 
 void DemoEngine(void) {
@@ -14094,19 +14071,19 @@ void DemoEngine(void) {
   if (!zero_flag) { goto DoAction; } // if timer still counting down, skip
   inx();
   inc_abs(DemoAction); // if expired, increment action, X, and
-  sec(); // set carry by default for demo over
+  carry_flag = true;
   lda_absx(DemoTimingData - 1); // get next timer
-  sta_abs(DemoActionTimer); // store as current timer
+  write_byte(DemoActionTimer, a);
   if (zero_flag) { goto DemoOver; } // if timer already at zero, skip
   
 DoAction:
     lda_absx(DemoActionData - 1); // get and perform action (current or next)
-    sta_abs(SavedJoypad1Bits);
+    write_byte(SavedJoypad1Bits, a);
     dec_abs(DemoActionTimer); // decrement action timer
-    clc(); // clear carry if demo still going
+    carry_flag = false;
   
 DemoOver:
-    return; // rts
+    return; // <rts>
 }
 
 void ColorRotation(void) {
@@ -14120,14 +14097,14 @@ void ColorRotation(void) {
   
 GetBlankPal:
     lda_absy(BlankPalette); // get blank palette for palette 3
-    sta_absx(VRAM_Buffer1); // store it in the vram buffer
+    write_byte(VRAM_Buffer1 + x, a);
     inx(); // increment offsets
     iny();
     cpy_imm(0x8);
     if (!carry_flag) { goto GetBlankPal; } // do this until all bytes are copied
     ldx_abs(VRAM_Buffer1_Offset); // get current vram buffer offset
     lda_imm(0x3);
-    sta_zp(0x0); // set counter here
+    write_byte(0x0, a);
     lda_abs(AreaType); // get area type
     asl_acc(); // multiply by 4 to get proper offset
     asl_acc();
@@ -14135,7 +14112,7 @@ GetBlankPal:
   
 GetAreaPal:
     lda_absy(Palette3Data); // fetch palette to be written based on area type
-    sta_absx(VRAM_Buffer1 + 3); // store it to overwrite blank palette in vram buffer
+    write_byte(VRAM_Buffer1 + 3 + x, a);
     iny();
     inx();
     dec_zp(0x0); // decrement counter
@@ -14143,61 +14120,61 @@ GetAreaPal:
     ldx_abs(VRAM_Buffer1_Offset); // get current vram buffer offset
     ldy_abs(ColorRotateOffset); // get color cycling offset
     lda_absy(ColorRotatePalette);
-    sta_absx(VRAM_Buffer1 + 4); // get and store current color in second slot of palette
+    write_byte(VRAM_Buffer1 + 4 + x, a);
     lda_abs(VRAM_Buffer1_Offset);
-    clc(); // add seven bytes to vram buffer offset
+    carry_flag = false;
     adc_imm(0x7);
-    sta_abs(VRAM_Buffer1_Offset);
+    write_byte(VRAM_Buffer1_Offset, a);
     inc_abs(ColorRotateOffset); // increment color cycling offset
     lda_abs(ColorRotateOffset);
     cmp_imm(0x6); // check to see if it's still in range
     if (!carry_flag) { goto ExitColorRot; } // if so, branch to leave
     lda_imm(0x0);
-    sta_abs(ColorRotateOffset); // otherwise, init to keep it in range
+    write_byte(ColorRotateOffset, a);
   
 ExitColorRot:
-    return; // rts // leave
+    return; // <rts> // leave
 }
 
 void RemBridge(void) {
   lda_absx(BlockGfxData); // write top left and top right
-  sta_absy(VRAM_Buffer1 + 2); // tile numbers into first spot
+  write_byte(VRAM_Buffer1 + 2 + y, a);
   lda_absx(BlockGfxData + 1);
-  sta_absy(VRAM_Buffer1 + 3);
+  write_byte(VRAM_Buffer1 + 3 + y, a);
   lda_absx(BlockGfxData + 2); // write bottom left and bottom
-  sta_absy(VRAM_Buffer1 + 7); // right tiles numbers into
+  write_byte(VRAM_Buffer1 + 7 + y, a);
   lda_absx(BlockGfxData + 3); // second spot
-  sta_absy(VRAM_Buffer1 + 8);
+  write_byte(VRAM_Buffer1 + 8 + y, a);
   lda_zp(0x4);
-  sta_absy(VRAM_Buffer1); // write low byte of name table
-  clc(); // into first slot as read
+  write_byte(VRAM_Buffer1 + y, a);
+  carry_flag = false;
   adc_imm(0x20); // add 32 bytes to value
-  sta_absy(VRAM_Buffer1 + 5); // write low byte of name table
+  write_byte(VRAM_Buffer1 + 5 + y, a);
   lda_zp(0x5); // plus 32 bytes into second slot
-  sta_absy(VRAM_Buffer1 - 1); // write high byte of name
-  sta_absy(VRAM_Buffer1 + 4); // table address to both slots
+  write_byte(VRAM_Buffer1 - 1 + y, a);
+  write_byte(VRAM_Buffer1 + 4 + y, a);
   lda_imm(0x2);
-  sta_absy(VRAM_Buffer1 + 1); // put length of 2 in
-  sta_absy(VRAM_Buffer1 + 6); // both slots
+  write_byte(VRAM_Buffer1 + 1 + y, a);
+  write_byte(VRAM_Buffer1 + 6 + y, a);
   lda_imm(0x0);
-  sta_absy(VRAM_Buffer1 + 9); // put null terminator at end
+  write_byte(VRAM_Buffer1 + 9 + y, a);
   ldx_zp(0x0); // get offset control bit here
-  return; // rts // and leave
+  return; // <rts> // and leave
   // -------------------------------------------------------------------------------------
   // METATILE GRAPHICS TABLE
 }
 
 void InitScroll(void) {
-  sta_abs(PPU_SCROLL_REG); // store contents of A into scroll registers
-  sta_abs(PPU_SCROLL_REG); // and end whatever subroutine led us here
-  return; // rts
+  write_byte(PPU_SCROLL_REG, a);
+  write_byte(PPU_SCROLL_REG, a);
+  return; // <rts>
   // -------------------------------------------------------------------------------------
 }
 
 void WritePPUReg1(void) {
-  sta_abs(PPU_CTRL_REG1); // write contents of A to PPU register 1
-  sta_abs(Mirror_PPU_CTRL_REG1); // and its mirror
-  return; // rts
+  write_byte(PPU_CTRL_REG1, a);
+  write_byte(Mirror_PPU_CTRL_REG1, a);
+  return; // <rts>
   // -------------------------------------------------------------------------------------
   // $00 - used to store status bar nybbles
   // $02 - used as temp vram offset
@@ -14206,7 +14183,7 @@ void WritePPUReg1(void) {
 }
 
 void OutputNumbers(void) {
-  clc(); // add 1 to low nybble
+  carry_flag = false;
   adc_imm(0x1);
   and_imm(0b00001111); // mask out high nybble
   cmp_imm(0x6);
@@ -14221,42 +14198,42 @@ void OutputNumbers(void) {
   lda_imm(0x22); // if so, put further down on the screen
   
 SetupNums:
-    sta_absx(VRAM_Buffer1);
+    write_byte(VRAM_Buffer1 + x, a);
     lda_absy(StatusBarData); // write low vram address and length of thing
-    sta_absx(VRAM_Buffer1 + 1); // we're printing to the buffer
+    write_byte(VRAM_Buffer1 + 1 + x, a);
     lda_absy(StatusBarData + 1);
-    sta_absx(VRAM_Buffer1 + 2);
-    sta_zp(0x3); // save length byte in counter
-    stx_zp(0x2); // and buffer pointer elsewhere for now
+    write_byte(VRAM_Buffer1 + 2 + x, a);
+    write_byte(0x3, a);
+    write_byte(0x2, x);
     pla(); // pull original incremented value from stack
     tax();
     lda_absx(StatusBarOffset); // load offset to value we want to write
-    sec();
+    carry_flag = true;
     sbc_absy(StatusBarData + 1); // subtract from length byte we read before
     tay(); // use value as offset to display digits
     ldx_zp(0x2);
   
 DigitPLoop:
     lda_absy(DisplayDigits); // write digits to the buffer
-    sta_absx(VRAM_Buffer1 + 3);
+    write_byte(VRAM_Buffer1 + 3 + x, a);
     inx();
     iny();
     dec_zp(0x3); // do this until all the digits are written
     if (!zero_flag) { goto DigitPLoop; }
     lda_imm(0x0); // put null terminator at end
-    sta_absx(VRAM_Buffer1 + 3);
+    write_byte(VRAM_Buffer1 + 3 + x, a);
     inx(); // increment buffer pointer by 3
     inx();
     inx();
-    stx_abs(VRAM_Buffer1_Offset); // store it in case we want to use it again
+    write_byte(VRAM_Buffer1_Offset, x);
   
 ExitOutputN:
-    return; // rts
+    return; // <rts>
 }
 
 void TopScoreCheck(void) {
   ldy_imm(0x5); // start with the lowest digit
-  sec();
+  carry_flag = true;
   
 GetScoreDiff:
     lda_absx(PlayerScoreDisplay); // subtract each player digit from each high score digit
@@ -14270,23 +14247,23 @@ GetScoreDiff:
   
 CopyScore:
     lda_absx(PlayerScoreDisplay); // store player's score digits into high score memory area
-    sta_absy(TopScoreDisplay);
+    write_byte(TopScoreDisplay + y, a);
     inx();
     iny();
     cpy_imm(0x6); // do this until we have stored them all
     if (!carry_flag) { goto CopyScore; }
   
 NoTopSc:
-    return; // rts
+    return; // <rts>
 }
 
 void InitializeMemory(void) {
   ldx_imm(0x7); // set initial high byte to $0700-$07ff
   lda_imm(0x0); // set initial low byte to start of page (at $00 of page)
-  sta_zp(0x6);
+  write_byte(0x6, a);
   
 InitPageLoop:
-    stx_zp(0x7);
+    write_byte(0x7, x);
   
 InitByteLoop:
     cpx_imm(0x1); // check to see if we're on the stack ($0100-$01ff)
@@ -14295,7 +14272,7 @@ InitByteLoop:
     if (carry_flag) { goto SkipByte; } // if so, skip write
   
 InitByte:
-    sta_indy(0x6); // otherwise, initialize byte with current low byte in Y
+    write_byte(read_word(0x6) + y, a);
   
 SkipByte:
     dey();
@@ -14303,7 +14280,7 @@ SkipByte:
     if (!zero_flag) { goto InitByteLoop; }
     dex(); // go onto the next page
     if (!neg_flag) { goto InitPageLoop; } // do this until all pages of memory have been erased
-    return; // rts
+    return; // <rts>
 }
 
 void GetAreaMusic(void) {
@@ -14327,66 +14304,66 @@ ChkAreaType:
   
 StoreMusic:
     lda_absy(MusicSelectData); // otherwise select appropriate music for level type
-    sta_zp(AreaMusicQueue); // store in queue and leave
+    write_byte(AreaMusicQueue, a);
   
 ExitGetM:
-    return; // rts
+    return; // <rts>
 }
 
 void SetupGameOver(void) {
   lda_imm(0x0); // reset screen routine task control for title screen, game,
-  sta_abs(ScreenRoutineTask); // and game over modes
-  sta_abs(Sprite0HitDetectFlag); // disable sprite 0 check
+  write_byte(ScreenRoutineTask, a);
+  write_byte(Sprite0HitDetectFlag, a);
   lda_imm(GameOverMusic);
-  sta_zp(EventMusicQueue); // put game over music in secondary queue
+  write_byte(EventMusicQueue, a);
   inc_abs(DisableScreenFlag); // disable screen output
   inc_abs(OperMode_Task); // set secondary mode to 1
-  return; // rts
+  return; // <rts>
   // -------------------------------------------------------------------------------------
 }
 
 void TransposePlayers(void) {
-  sec(); // set carry flag by default to end game
+  carry_flag = true;
   lda_abs(NumberOfPlayers); // if only a 1 player game, leave
   if (zero_flag) { goto ExTrans; }
   lda_abs(OffScr_NumberofLives); // does offscreen player have any lives left?
   if (neg_flag) { goto ExTrans; } // branch if not
   lda_abs(CurrentPlayer); // invert bit to update
   eor_imm(0b00000001); // which player is on the screen
-  sta_abs(CurrentPlayer);
+  write_byte(CurrentPlayer, a);
   ldx_imm(0x6);
   
 TransLoop:
     lda_absx(OnscreenPlayerInfo); // transpose the information
     pha(); // of the onscreen player
     lda_absx(OffscreenPlayerInfo); // with that of the offscreen player
-    sta_absx(OnscreenPlayerInfo);
+    write_byte(OnscreenPlayerInfo + x, a);
     pla();
-    sta_absx(OffscreenPlayerInfo);
+    write_byte(OffscreenPlayerInfo + x, a);
     dex();
     if (!neg_flag) { goto TransLoop; }
-    clc(); // clear carry flag to get game going
+    carry_flag = false;
   
 ExTrans:
-    return; // rts
+    return; // <rts>
 }
 
 void DoNothing2(void) {
-  return; // rts
+  return; // <rts>
   // -------------------------------------------------------------------------------------
 }
 
 void ScrollLockObject(void) {
   lda_abs(ScrollLock); // invert scroll lock to turn it on
   eor_imm(0b00000001);
-  sta_abs(ScrollLock);
-  return; // rts
+  write_byte(ScrollLock, a);
+  return; // <rts>
   // --------------------------------
   // $00 - used to store enemy identifier in KillEnemies
 }
 
 void KillEnemies(void) {
-  sta_zp(0x0); // store identifier here
+  write_byte(0x0, a);
   lda_imm(0x0);
   ldx_imm(0x4); // check for identifier in enemy object buffer
   
@@ -14394,12 +14371,12 @@ KillELoop:
     ldy_zpx(Enemy_ID);
     cpy_zp(0x0); // if not found, branch
     if (!zero_flag) { goto NoKillE; }
-    sta_zpx(Enemy_Flag); // if found, deactivate enemy object flag
+    write_byte(Enemy_Flag + x, a);
   
 NoKillE:
     dex(); // do this until all slots are checked
     if (!neg_flag) { goto KillELoop; }
-    return; // rts
+    return; // <rts>
 }
 
 void AreaFrenzy(void) {
@@ -14415,15 +14392,15 @@ FreCompLoop:
     lda_imm(0x0); // if enemy object already present, nullify queue and leave
   
 ExitAFrenzy:
-    sta_abs(EnemyFrenzyQueue); // store enemy into frenzy queue
-    return; // rts
+    write_byte(EnemyFrenzyQueue, a);
+    return; // <rts>
 }
 
 void FindEmptyEnemySlot(void) {
   ldx_imm(0x0); // start at first enemy slot
   
 EmptyChkLoop:
-    clc(); // clear carry flag by default
+    carry_flag = false;
     lda_zpx(Enemy_Flag); // check enemy buffer for nonzero
     if (zero_flag) { goto ExitEmptyChk; } // if zero, leave
     inx();
@@ -14431,19 +14408,19 @@ EmptyChkLoop:
     if (!zero_flag) { goto EmptyChkLoop; }
   
 ExitEmptyChk:
-    return; // rts // if all values nonzero, carry flag is set
+    return; // <rts> // if all values nonzero, carry flag is set
 }
 
 void GetLrgObjAttrib(void) {
   ldy_absx(AreaObjOffsetBuffer); // get offset saved from area obj decoding routine
   lda_indy(AreaData); // get first byte of level object
   and_imm(0b00001111);
-  sta_zp(0x7); // save row location
+  write_byte(0x7, a);
   iny();
   lda_indy(AreaData); // get next byte, save lower nybble (length or height)
   and_imm(0b00001111); // as Y, then leave
   tay();
-  return; // rts
+  return; // <rts>
   // --------------------------------
 }
 
@@ -14453,7 +14430,7 @@ void GetAreaObjXPosition(void) {
   asl_acc();
   asl_acc();
   asl_acc();
-  return; // rts
+  return; // <rts>
   // --------------------------------
 }
 
@@ -14463,9 +14440,9 @@ void GetAreaObjYPosition(void) {
   asl_acc(); // this will give us the proper vertical pixel coordinate
   asl_acc();
   asl_acc();
-  clc();
+  carry_flag = false;
   adc_imm(32); // add 32 pixels for the status bar
-  return; // rts
+  return; // <rts>
   // -------------------------------------------------------------------------------------
   // $06-$07 - used to store block buffer address used as indirect
 }
@@ -14478,13 +14455,13 @@ void GetBlockBufferAddr(void) {
   lsr_acc();
   tay(); // use nybble as pointer to high byte
   lda_absy(BlockBufferAddr + 2); // of indirect here
-  sta_zp(0x7);
+  write_byte(0x7, a);
   pla();
   and_imm(0b00001111); // pull from stack, mask out high nybble
-  clc();
+  carry_flag = false;
   adc_absy(BlockBufferAddr); // add to low byte
-  sta_zp(0x6); // store here and leave
-  return; // rts
+  write_byte(0x6, a);
+  return; // <rts>
   // -------------------------------------------------------------------------------------
   // unused space
   //       .db $ff, $ff
@@ -14493,21 +14470,21 @@ void GetBlockBufferAddr(void) {
 
 void GetScreenPosition(void) {
   lda_abs(ScreenLeft_X_Pos); // get coordinate of screen's left boundary
-  clc();
+  carry_flag = false;
   adc_imm(0xff); // add 255 pixels
-  sta_abs(ScreenRight_X_Pos); // store as coordinate of screen's right boundary
+  write_byte(ScreenRight_X_Pos, a);
   lda_abs(ScreenLeft_PageLoc); // get page number where left boundary is
   adc_imm(0x0); // add carry from before
-  sta_abs(ScreenRight_PageLoc); // store as page number where right boundary is
-  return; // rts
+  write_byte(ScreenRight_PageLoc, a);
+  return; // <rts>
   // -------------------------------------------------------------------------------------
 }
 
 void MovePlayerYAxis(void) {
-  clc();
+  carry_flag = false;
   adc_zp(Player_Y_Position); // add contents of A to player position
-  sta_zp(Player_Y_Position);
-  return; // rts
+  write_byte(Player_Y_Position, a);
+  return; // <rts>
   // -------------------------------------------------------------------------------------
 }
 
@@ -14531,7 +14508,7 @@ ChkSkid:
     lda_imm(0x0); // otherwise set zero value here
   
 SetRunSpd:
-    sta_abs(RunningSpeed); // store zero or running speed here
+    write_byte(RunningSpeed, a);
     goto SetAnimSpd;
   
 ProcSkid:
@@ -14539,15 +14516,15 @@ ProcSkid:
     cmp_imm(0xb); // against one last amount
     if (carry_flag) { goto SetAnimSpd; } // if greater than this amount, branch
     lda_zp(PlayerFacingDir);
-    sta_zp(Player_MovingDir); // otherwise use facing direction to set moving direction
+    write_byte(Player_MovingDir, a);
     lda_imm(0x0);
-    sta_zp(Player_X_Speed); // nullify player's horizontal speed
-    sta_abs(Player_X_MoveForce); // and dummy variable for player
+    write_byte(Player_X_Speed, a);
+    write_byte(Player_X_MoveForce, a);
   
 SetAnimSpd:
     lda_absy(PlayerAnimTmrData); // get animation timer setting using Y as offset
-    sta_abs(PlayerAnimTimerSet);
-    return; // rts
+    write_byte(PlayerAnimTimerSet, a);
+    return; // <rts>
 }
 
 void ImposeFriction(void) {
@@ -14565,65 +14542,65 @@ JoypFrict:
   
 LeftFrict:
     lda_abs(Player_X_MoveForce); // load value set here
-    clc();
+    carry_flag = false;
     adc_abs(FrictionAdderLow); // add to it another value set here
-    sta_abs(Player_X_MoveForce); // store here
+    write_byte(Player_X_MoveForce, a);
     lda_zp(Player_X_Speed);
     adc_abs(FrictionAdderHigh); // add value plus carry to horizontal speed
-    sta_zp(Player_X_Speed); // set as new horizontal speed
+    write_byte(Player_X_Speed, a);
     cmp_abs(MaximumRightSpeed); // compare against maximum value for right movement
     if (neg_flag) { goto XSpdSign; } // if horizontal speed greater negatively, branch
     lda_abs(MaximumRightSpeed); // otherwise set preset value as horizontal speed
-    sta_zp(Player_X_Speed); // thus slowing the player's left movement down
+    write_byte(Player_X_Speed, a);
     goto SetAbsSpd; // skip to the end
   
 RghtFrict:
     lda_abs(Player_X_MoveForce); // load value set here
-    sec();
+    carry_flag = true;
     sbc_abs(FrictionAdderLow); // subtract from it another value set here
-    sta_abs(Player_X_MoveForce); // store here
+    write_byte(Player_X_MoveForce, a);
     lda_zp(Player_X_Speed);
     sbc_abs(FrictionAdderHigh); // subtract value plus borrow from horizontal speed
-    sta_zp(Player_X_Speed); // set as new horizontal speed
+    write_byte(Player_X_Speed, a);
     cmp_abs(MaximumLeftSpeed); // compare against maximum value for left movement
     if (!neg_flag) { goto XSpdSign; } // if horizontal speed greater positively, branch
     lda_abs(MaximumLeftSpeed); // otherwise set preset value as horizontal speed
-    sta_zp(Player_X_Speed); // thus slowing the player's right movement down
+    write_byte(Player_X_Speed, a);
   
 XSpdSign:
     cmp_imm(0x0); // if player not moving or moving to the right,
     if (!neg_flag) { goto SetAbsSpd; } // branch and leave horizontal speed value unmodified
     eor_imm(0xff);
-    clc(); // otherwise get two's compliment to get absolute
+    carry_flag = false;
     adc_imm(0x1); // unsigned walking/running speed
   
 SetAbsSpd:
-    sta_abs(Player_XSpeedAbsolute); // store walking/running speed here and leave
-    return; // rts
+    write_byte(Player_XSpeedAbsolute, a);
+    return; // <rts>
 }
 
 void Setup_Vine(void) {
   lda_imm(VineObject); // load identifier for vine object
-  sta_zpx(Enemy_ID); // store in buffer
+  write_byte(Enemy_ID + x, a);
   lda_imm(0x1);
-  sta_zpx(Enemy_Flag); // set flag for enemy object buffer
+  write_byte(Enemy_Flag + x, a);
   lda_zpy(Block_PageLoc);
-  sta_zpx(Enemy_PageLoc); // copy page location from previous object
+  write_byte(Enemy_PageLoc + x, a);
   lda_zpy(Block_X_Position);
-  sta_zpx(Enemy_X_Position); // copy horizontal coordinate from previous object
+  write_byte(Enemy_X_Position + x, a);
   lda_zpy(Block_Y_Position);
-  sta_zpx(Enemy_Y_Position); // copy vertical coordinate from previous object
+  write_byte(Enemy_Y_Position + x, a);
   ldy_abs(VineFlagOffset); // load vine flag/offset to next available vine slot
   if (!zero_flag) { goto NextVO; } // if set at all, don't bother to store vertical
-  sta_abs(VineStart_Y_Position); // otherwise store vertical coordinate here
+  write_byte(VineStart_Y_Position, a);
   
 NextVO:
     txa(); // store object offset to next available vine slot
-    sta_absy(VineObjOffset); // using vine flag as offset
+    write_byte(VineObjOffset + y, a);
     inc_abs(VineFlagOffset); // increment vine flag offset
     lda_imm(Sfx_GrowVine);
-    sta_zp(Square2SoundQueue); // load vine grow sound
-    return; // rts
+    write_byte(Square2SoundQueue, a);
+    return; // <rts>
 }
 
 void FindEmptyMiscSlot(void) {
@@ -14638,16 +14615,16 @@ FMiscLoop:
     ldy_imm(0x8); // if no empty slots found, use last slot
   
 UseMiscS:
-    sty_abs(JumpCoinMiscOffset); // store offset of misc object buffer here (residual)
-    return; // rts
+    write_byte(JumpCoinMiscOffset, y);
+    return; // <rts>
 }
 
 void PwrUpJmp(void) {
   lda_imm(0x1); // this is a residual jump point in enemy object jump table
-  sta_zp(Enemy_State + 5); // set power-up object's state
-  sta_zp(Enemy_Flag + 5); // set buffer flag
+  write_byte(Enemy_State + 5, a);
+  write_byte(Enemy_Flag + 5, a);
   lda_imm(0x3);
-  sta_abs(Enemy_BoundBoxCtrl + 5); // set bounding box size control for power-up object
+  write_byte(Enemy_BoundBoxCtrl + 5, a);
   lda_zp(PowerUpType);
   cmp_imm(0x2); // check currently loaded power-up type
   if (carry_flag) { goto PutBehind; } // if star or 1-up, branch ahead
@@ -14657,29 +14634,29 @@ void PwrUpJmp(void) {
   lsr_acc(); // otherwise shift right to force fire flower type
   
 StrType:
-    sta_zp(PowerUpType); // store type here
+    write_byte(PowerUpType, a);
   
 PutBehind:
     lda_imm(0b00100000);
-    sta_abs(Enemy_SprAttrib + 5); // set background priority bit
+    write_byte(Enemy_SprAttrib + 5, a);
     lda_imm(Sfx_GrowPowerUp);
-    sta_zp(Square2SoundQueue); // load power-up reveal sound and leave
-    return; // rts
+    write_byte(Square2SoundQueue, a);
+    return; // <rts>
 }
 
 void InitBlock_XY_Pos(void) {
   lda_zp(Player_X_Position); // get player's horizontal coordinate
-  clc();
+  carry_flag = false;
   adc_imm(0x8); // add eight pixels
   and_imm(0xf0); // mask out low nybble to give 16-pixel correspondence
-  sta_zpx(Block_X_Position); // save as horizontal coordinate for block object
+  write_byte(Block_X_Position + x, a);
   lda_zp(Player_PageLoc);
   adc_imm(0x0); // add carry to page location of player
-  sta_zpx(Block_PageLoc); // save as page location of block object
-  sta_absx(Block_PageLoc2); // save elsewhere to be used later
+  write_byte(Block_PageLoc + x, a);
+  write_byte(Block_PageLoc2 + x, a);
   lda_zp(Player_Y_HighPos);
-  sta_zpx(Block_Y_HighPos); // save vertical high byte of player into
-  return; // rts // vertical high byte of block object and leave
+  write_byte(Block_Y_HighPos + x, a);
+  return; // <rts> // vertical high byte of block object and leave
   // --------------------------------
 }
 
@@ -14691,73 +14668,73 @@ BumpChkLoop:
     if (zero_flag) { goto MatchBump; } // metatile found in block buffer, branch if so
     dey(); // otherwise move onto next metatile
     if (!neg_flag) { goto BumpChkLoop; } // do this until all metatiles are checked
-    clc(); // if none match, return with carry clear
+    carry_flag = false;
   
 MatchBump:
-    return; // rts // note carry is set if found match
+    return; // <rts> // note carry is set if found match
 }
 
 void SpawnBrickChunks(void) {
   lda_zpx(Block_X_Position); // set horizontal coordinate of block object
-  sta_absx(Block_Orig_XPos); // as original horizontal coordinate here
+  write_byte(Block_Orig_XPos + x, a);
   lda_imm(0xf0);
-  sta_zpx(Block_X_Speed); // set horizontal speed for brick chunk objects
-  sta_zpx(Block_X_Speed + 2);
+  write_byte(Block_X_Speed + x, a);
+  write_byte(Block_X_Speed + 2 + x, a);
   lda_imm(0xfa);
-  sta_zpx(Block_Y_Speed); // set vertical speed for one
+  write_byte(Block_Y_Speed + x, a);
   lda_imm(0xfc);
-  sta_zpx(Block_Y_Speed + 2); // set lower vertical speed for the other
+  write_byte(Block_Y_Speed + 2 + x, a);
   lda_imm(0x0);
-  sta_absx(Block_Y_MoveForce); // init fractional movement force for both
-  sta_absx(Block_Y_MoveForce + 2);
+  write_byte(Block_Y_MoveForce + x, a);
+  write_byte(Block_Y_MoveForce + 2 + x, a);
   lda_zpx(Block_PageLoc);
-  sta_zpx(Block_PageLoc + 2); // copy page location
+  write_byte(Block_PageLoc + 2 + x, a);
   lda_zpx(Block_X_Position);
-  sta_zpx(Block_X_Position + 2); // copy horizontal coordinate
+  write_byte(Block_X_Position + 2 + x, a);
   lda_zpx(Block_Y_Position);
-  clc(); // add 8 pixels to vertical coordinate
+  carry_flag = false;
   adc_imm(0x8); // and save as vertical coordinate for one of them
-  sta_zpx(Block_Y_Position + 2);
+  write_byte(Block_Y_Position + 2 + x, a);
   lda_imm(0xfa);
-  sta_zpx(Block_Y_Speed); // set vertical speed...again??? (redundant)
-  return; // rts
+  write_byte(Block_Y_Speed + x, a);
+  return; // <rts>
   // -------------------------------------------------------------------------------------
 }
 
 void ImposeGravity(void) {
   pha(); // push value to stack
   lda_absx(SprObject_YMF_Dummy);
-  clc(); // add value in movement force to contents of dummy variable
+  carry_flag = false;
   adc_absx(SprObject_Y_MoveForce);
-  sta_absx(SprObject_YMF_Dummy);
+  write_byte(SprObject_YMF_Dummy + x, a);
   ldy_imm(0x0); // set Y to zero by default
   lda_zpx(SprObject_Y_Speed); // get current vertical speed
   if (!neg_flag) { goto AlterYP; } // if currently moving downwards, do not decrement Y
   dey(); // otherwise decrement Y
   
 AlterYP:
-    sty_zp(0x7); // store Y here
+    write_byte(0x7, y);
     adc_zpx(SprObject_Y_Position); // add vertical position to vertical speed plus carry
-    sta_zpx(SprObject_Y_Position); // store as new vertical position
+    write_byte(SprObject_Y_Position + x, a);
     lda_zpx(SprObject_Y_HighPos);
     adc_zp(0x7); // add carry plus contents of $07 to vertical high byte
-    sta_zpx(SprObject_Y_HighPos); // store as new vertical high byte
+    write_byte(SprObject_Y_HighPos + x, a);
     lda_absx(SprObject_Y_MoveForce);
-    clc();
+    carry_flag = false;
     adc_zp(0x0); // add downward movement amount to contents of $0433
-    sta_absx(SprObject_Y_MoveForce);
+    write_byte(SprObject_Y_MoveForce + x, a);
     lda_zpx(SprObject_Y_Speed); // add carry to vertical speed and store
     adc_imm(0x0);
-    sta_zpx(SprObject_Y_Speed);
+    write_byte(SprObject_Y_Speed + x, a);
     cmp_zp(0x2); // compare to maximum speed
     if (neg_flag) { goto ChkUpM; } // if less than preset value, skip this part
     lda_absx(SprObject_Y_MoveForce);
     cmp_imm(0x80); // if less positively than preset maximum, skip this part
     if (!carry_flag) { goto ChkUpM; }
     lda_zp(0x2);
-    sta_zpx(SprObject_Y_Speed); // keep vertical speed within maximum value
+    write_byte(SprObject_Y_Speed + x, a);
     lda_imm(0x0);
-    sta_absx(SprObject_Y_MoveForce); // clear fractional
+    write_byte(SprObject_Y_MoveForce + x, a);
   
 ChkUpM:
     pla(); // get value from stack
@@ -14766,54 +14743,54 @@ ChkUpM:
     eor_imm(0b11111111); // otherwise get two's compliment of maximum speed
     tay();
     iny();
-    sty_zp(0x7); // store two's compliment here
+    write_byte(0x7, y);
     lda_absx(SprObject_Y_MoveForce);
-    sec(); // subtract upward movement amount from contents
+    carry_flag = true;
     sbc_zp(0x1); // of movement force, note that $01 is twice as large as $00,
-    sta_absx(SprObject_Y_MoveForce); // thus it effectively undoes add we did earlier
+    write_byte(SprObject_Y_MoveForce + x, a);
     lda_zpx(SprObject_Y_Speed);
     sbc_imm(0x0); // subtract borrow from vertical speed and store
-    sta_zpx(SprObject_Y_Speed);
+    write_byte(SprObject_Y_Speed + x, a);
     cmp_zp(0x7); // compare vertical speed to two's compliment
     if (!neg_flag) { goto ExVMove; } // if less negatively than preset maximum, skip this part
     lda_absx(SprObject_Y_MoveForce);
     cmp_imm(0x80); // check if fractional part is above certain amount,
     if (carry_flag) { goto ExVMove; } // and if so, branch to leave
     lda_zp(0x7);
-    sta_zpx(SprObject_Y_Speed); // keep vertical speed within maximum value
+    write_byte(SprObject_Y_Speed + x, a);
     lda_imm(0xff);
-    sta_absx(SprObject_Y_MoveForce); // clear fractional
+    write_byte(SprObject_Y_MoveForce + x, a);
   
 ExVMove:
-    return; // rts // leave!
+    return; // <rts> // leave!
 }
 
 void NoInitCode(void) {
-  return; // rts // this executed when enemy object has no init code
+  return; // <rts> // this executed when enemy object has no init code
   // --------------------------------
 }
 
 void InitRetainerObj(void) {
   lda_imm(0xb8); // set fixed vertical position for
-  sta_zpx(Enemy_Y_Position); // princess/mushroom retainer object
-  return; // rts
+  write_byte(Enemy_Y_Position + x, a);
+  return; // <rts>
   // --------------------------------
 }
 
 void InitVStf(void) {
   lda_imm(0x0); // initialize vertical speed
-  sta_zpx(Enemy_Y_Speed); // and movement force
-  sta_absx(Enemy_Y_MoveForce);
-  return; // rts
+  write_byte(Enemy_Y_Speed + x, a);
+  write_byte(Enemy_Y_MoveForce + x, a);
+  return; // <rts>
   // --------------------------------
 }
 
 void InitBulletBill(void) {
   lda_imm(0x2); // set moving direction for left
-  sta_zpx(Enemy_MovingDir);
+  write_byte(Enemy_MovingDir + x, a);
   lda_imm(0x9); // set bounding box control for $09
-  sta_absx(Enemy_BoundBoxCtrl);
-  return; // rts
+  write_byte(Enemy_BoundBoxCtrl + x, a);
+  return; // <rts>
   // --------------------------------
 }
 
@@ -14821,7 +14798,7 @@ void InitFireworks(void) {
   lda_abs(FrenzyEnemyTimer); // if timer not expired yet, branch to leave
   if (!zero_flag) { goto ExitFWk; }
   lda_imm(0x20); // otherwise reset timer
-  sta_abs(FrenzyEnemyTimer);
+  write_byte(FrenzyEnemyTimer, a);
   dec_abs(FireworksCounter); // decrement for each explosion
   ldy_imm(0x6); // start at last slot
   
@@ -14831,39 +14808,39 @@ StarFChk:
     cmp_imm(StarFlagObject); // if there isn't a star flag object,
     if (!zero_flag) { goto StarFChk; } // routine goes into infinite loop = crash
     lda_zpy(Enemy_X_Position);
-    sec(); // get horizontal coordinate of star flag object, then
+    carry_flag = true;
     sbc_imm(0x30); // subtract 48 pixels from it and save to
     pha(); // the stack
     lda_zpy(Enemy_PageLoc);
     sbc_imm(0x0); // subtract the carry from the page location
-    sta_zp(0x0); // of the star flag object
+    write_byte(0x0, a);
     lda_abs(FireworksCounter); // get fireworks counter
-    clc();
+    carry_flag = false;
     adc_zpy(Enemy_State); // add state of star flag object (possibly not necessary)
     tay(); // use as offset
     pla(); // get saved horizontal coordinate of star flag - 48 pixels
-    clc();
+    carry_flag = false;
     adc_absy(FireworksXPosData); // add number based on offset of fireworks counter
-    sta_zpx(Enemy_X_Position); // store as the fireworks object horizontal coordinate
+    write_byte(Enemy_X_Position + x, a);
     lda_zp(0x0);
     adc_imm(0x0); // add carry and store as page location for
-    sta_zpx(Enemy_PageLoc); // the fireworks object
+    write_byte(Enemy_PageLoc + x, a);
     lda_absy(FireworksYPosData); // get vertical position using same offset
-    sta_zpx(Enemy_Y_Position); // and store as vertical coordinate for fireworks object
+    write_byte(Enemy_Y_Position + x, a);
     lda_imm(0x1);
-    sta_zpx(Enemy_Y_HighPos); // store in vertical high byte
-    sta_zpx(Enemy_Flag); // and activate enemy buffer flag
+    write_byte(Enemy_Y_HighPos + x, a);
+    write_byte(Enemy_Flag + x, a);
     lsr_acc();
-    sta_zpx(ExplosionGfxCounter); // initialize explosion counter
+    write_byte(ExplosionGfxCounter + x, a);
     lda_imm(0x8);
-    sta_zpx(ExplosionTimerCounter); // set explosion timing counter
+    write_byte(ExplosionTimerCounter + x, a);
   
 ExitFWk:
-    return; // rts
+    return; // <rts>
 }
 
 void NoFrenzyCode(void) {
-  return; // rts
+  return; // <rts>
   // --------------------------------
 }
 
@@ -14875,15 +14852,15 @@ LakituChk:
     cmp_imm(Lakitu); // for lakitu
     if (!zero_flag) { goto NextFSlot; }
     lda_imm(0x1); // if found, set state
-    sta_zpy(Enemy_State);
+    write_byte(Enemy_State + y, a);
   
 NextFSlot:
     dey(); // move onto the next slot
     if (!neg_flag) { goto LakituChk; } // do this until all slots are checked
     lda_imm(0x0);
-    sta_abs(EnemyFrenzyBuffer); // empty enemy frenzy buffer
-    sta_zpx(Enemy_Flag); // disable enemy buffer flag for this object
-    return; // rts
+    write_byte(EnemyFrenzyBuffer, a);
+    write_byte(Enemy_Flag + x, a);
+    return; // <rts>
 }
 
 void InitVertPlatform(void) {
@@ -14891,57 +14868,57 @@ void InitVertPlatform(void) {
   lda_zpx(Enemy_Y_Position); // check vertical position
   if (!neg_flag) { goto SetYO; } // if above a certain point, skip this part
   eor_imm(0xff);
-  clc(); // otherwise get two's compliment
+  carry_flag = false;
   adc_imm(0x1);
   ldy_imm(0xc0); // get alternate value to add to vertical position
   
 SetYO:
-    sta_absx(YPlatformTopYPos); // save as top vertical position
+    write_byte(YPlatformTopYPos + x, a);
     tya();
-    clc(); // load value from earlier, add number of pixels 
+    carry_flag = false;
     adc_zpx(Enemy_Y_Position); // to vertical position
-    sta_zpx(YPlatformCenterYPos); // save result as central vertical position
+    write_byte(YPlatformCenterYPos + x, a);
     // --------------------------------
 }
 
 void PosPlatform(void) {
   lda_zpx(Enemy_X_Position); // get horizontal coordinate
-  clc();
+  carry_flag = false;
   adc_absy(PlatPosDataLow); // add or subtract pixels depending on offset
-  sta_zpx(Enemy_X_Position); // store as new horizontal coordinate
+  write_byte(Enemy_X_Position + x, a);
   lda_zpx(Enemy_PageLoc);
   adc_absy(PlatPosDataHigh); // add or subtract page location depending on offset
-  sta_zpx(Enemy_PageLoc); // store as new page location
-  return; // rts // and go back
+  write_byte(Enemy_PageLoc + x, a);
+  return; // <rts> // and go back
   // --------------------------------
 }
 
 void EndOfEnemyInitCode(void) {
-  return; // rts
+  return; // <rts>
   // -------------------------------------------------------------------------------------
 }
 
 void NoRunCode(void) {
-  return; // rts
+  return; // <rts>
   // --------------------------------
 }
 
 void NoMoveCode(void) {
-  return; // rts
+  return; // <rts>
   // --------------------------------
 }
 
 void EraseEnemyObject(void) {
   lda_imm(0x0); // clear all enemy object variables
-  sta_zpx(Enemy_Flag);
-  sta_zpx(Enemy_ID);
-  sta_zpx(Enemy_State);
-  sta_absx(FloateyNum_Control);
-  sta_absx(EnemyIntervalTimer);
-  sta_absx(ShellChainCounter);
-  sta_absx(Enemy_SprAttrib);
-  sta_absx(EnemyFrameTimer);
-  return; // rts
+  write_byte(Enemy_Flag + x, a);
+  write_byte(Enemy_ID + x, a);
+  write_byte(Enemy_State + x, a);
+  write_byte(FloateyNum_Control + x, a);
+  write_byte(EnemyIntervalTimer + x, a);
+  write_byte(ShellChainCounter + x, a);
+  write_byte(Enemy_SprAttrib + x, a);
+  write_byte(EnemyFrameTimer + x, a);
+  return; // <rts>
   // -------------------------------------------------------------------------------------
 }
 
@@ -14951,74 +14928,74 @@ void GetFirebarPosition(void) {
   cmp_imm(0x9);
   if (!carry_flag) { goto GetHAdder; } // if lower than $09, branch ahead
   eor_imm(0b00001111); // otherwise get two's compliment to oscillate
-  clc();
+  carry_flag = false;
   adc_imm(0x1);
   
 GetHAdder:
-    sta_zp(0x1); // store result, modified or not, here
+    write_byte(0x1, a);
     ldy_zp(0x0); // load number of firebar ball where we're at
     lda_absy(FirebarTblOffsets); // load offset to firebar position data
-    clc();
+    carry_flag = false;
     adc_zp(0x1); // add oscillated high byte of spinstate
     tay(); // to offset here and use as new offset
     lda_absy(FirebarPosLookupTbl); // get data here and store as horizontal adder
-    sta_zp(0x1);
+    write_byte(0x1, a);
     pla(); // pull whatever was in A from the stack
     pha(); // save it again because we still need it
-    clc();
+    carry_flag = false;
     adc_imm(0x8); // add eight this time, to get vertical adder
     and_imm(0b00001111); // mask out high nybble
     cmp_imm(0x9); // if lower than $09, branch ahead
     if (!carry_flag) { goto GetVAdder; }
     eor_imm(0b00001111); // otherwise get two's compliment
-    clc();
+    carry_flag = false;
     adc_imm(0x1);
   
 GetVAdder:
-    sta_zp(0x2); // store result here
+    write_byte(0x2, a);
     ldy_zp(0x0);
     lda_absy(FirebarTblOffsets); // load offset to firebar position data again
-    clc();
+    carry_flag = false;
     adc_zp(0x2); // this time add value in $02 to offset here and use as offset
     tay();
     lda_absy(FirebarPosLookupTbl); // get data here and store as vertica adder
-    sta_zp(0x2);
+    write_byte(0x2, a);
     pla(); // pull out whatever was in A one last time
     lsr_acc(); // divide by eight or shift three to the right
     lsr_acc();
     lsr_acc();
     tay(); // use as offset
     lda_absy(FirebarMirrorData); // load mirroring data here
-    sta_zp(0x3); // store
-    return; // rts
+    write_byte(0x3, a);
+    return; // <rts>
 }
 
 void SetupPlatformRope(void) {
   pha(); // save second/third copy to stack
   lda_zpy(Enemy_X_Position); // get horizontal coordinate
-  clc();
+  carry_flag = false;
   adc_imm(0x8); // add eight pixels
   ldx_abs(SecondaryHardMode); // if secondary hard mode flag set,
   if (!zero_flag) { goto GetLRp; } // use coordinate as-is
-  clc();
+  carry_flag = false;
   adc_imm(0x10); // otherwise add sixteen more pixels
   
 GetLRp:
     pha(); // save modified horizontal coordinate to stack
     lda_zpy(Enemy_PageLoc);
     adc_imm(0x0); // add carry to page location
-    sta_zp(0x2); // and save here
+    write_byte(0x2, a);
     pla(); // pull modified horizontal coordinate
     and_imm(0b11110000); // from the stack, mask out low nybble
     lsr_acc(); // and shift three bits to the right
     lsr_acc();
     lsr_acc();
-    sta_zp(0x0); // store result here as part of name table low byte
+    write_byte(0x0, a);
     ldx_zpy(Enemy_Y_Position); // get vertical coordinate
     pla(); // get second/third copy of vertical speed from stack
     if (!neg_flag) { goto GetHRp; } // skip this part if moving downwards or not at all
     txa();
-    clc();
+    carry_flag = false;
     adc_imm(0x8); // add eight to vertical coordinate and
     tax(); // save as X
   
@@ -15031,27 +15008,27 @@ GetHRp:
     rol_acc(); // rotate carry to d0, thus d7 and d6 are at 2 LSB
     and_imm(0b00000011); // mask out all bits but d7 and d6, then set
     ora_imm(0b00100000); // d5 to get appropriate high byte of name table
-    sta_zp(0x1); // address, then store
+    write_byte(0x1, a);
     lda_zp(0x2); // get saved page location from earlier
     and_imm(0x1); // mask out all but LSB
     asl_acc();
     asl_acc(); // shift twice to the left and save with the
     ora_zp(0x1); // rest of the bits of the high byte, to get
-    sta_zp(0x1); // the proper name table and the right place on it
+    write_byte(0x1, a);
     pla(); // get modified vertical coordinate from stack
     and_imm(0b11100000); // mask out low nybble and LSB of high nybble
-    clc();
+    carry_flag = false;
     adc_zp(0x0); // add to horizontal part saved here
-    sta_zp(0x0); // save as name table low byte
+    write_byte(0x0, a);
     lda_zpy(Enemy_Y_Position);
     cmp_imm(0xe8); // if vertical position not below the
     if (!carry_flag) { goto ExPRp; } // bottom of the screen, we're done, branch to leave
     lda_zp(0x0);
     and_imm(0b10111111); // mask out d6 of low byte of name table address
-    sta_zp(0x0);
+    write_byte(0x0, a);
   
 ExPRp:
-    return; // rts // leave!
+    return; // <rts> // leave!
 }
 
 void CheckPlayerVertical(void) {
@@ -15065,19 +15042,19 @@ void CheckPlayerVertical(void) {
   cmp_imm(0xd0); // the player is vertically
   
 ExCPV:
-    return; // rts
+    return; // <rts>
 }
 
 void GetEnemyBoundBoxOfsArg(void) {
   asl_acc(); // multiply A by four, then add four
   asl_acc(); // to skip player's bounding box
-  clc();
+  carry_flag = false;
   adc_imm(0x4);
   tay(); // send to Y
   lda_abs(Enemy_OffscreenBits); // get offscreen bits for enemy object
   and_imm(0b00001111); // save low nybble
   cmp_imm(0b00001111); // check for all bits set
-  return; // rts
+  return; // <rts>
   // -------------------------------------------------------------------------------------
   // $00-$01 - used to hold many values, essentially temp variables
   // $04 - holds lower nybble of vertical coordinate from block buffer routine
@@ -15090,21 +15067,21 @@ void ChkInvisibleMTiles(void) {
   cmp_imm(0x60); // check for hidden 1-up block
   
 ExCInvT:
-    return; // rts // leave with zero flag set if either found
+    return; // <rts> // leave with zero flag set if either found
 }
 
 void ChkJumpspringMetatiles(void) {
   cmp_imm(0x67); // check for top jumpspring metatile
   if (zero_flag) { goto JSFnd; } // branch to set carry if found
   cmp_imm(0x68); // check for bottom jumpspring metatile
-  clc(); // clear carry flag
+  carry_flag = false;
   if (!zero_flag) { goto NoJSFnd; } // branch to use cleared carry if not found
   
 JSFnd:
-    sec(); // set carry if found
+    carry_flag = true;
   
 NoJSFnd:
-    return; // rts // leave
+    return; // <rts> // leave
 }
 
 void HandlePipeEntry(void) {
@@ -15118,13 +15095,13 @@ void HandlePipeEntry(void) {
   cmp_imm(0x10); // check left foot metatile for warp pipe left metatile
   if (!zero_flag) { goto ExPipeE; } // branch to leave if not found
   lda_imm(0x30);
-  sta_abs(ChangeAreaTimer); // set timer for change of area
+  write_byte(ChangeAreaTimer, a);
   lda_imm(0x3);
-  sta_zp(GameEngineSubroutine); // set to run vertical pipe entry routine on next frame
+  write_byte(GameEngineSubroutine, a);
   lda_imm(Sfx_PipeDown_Injury);
-  sta_zp(Square1SoundQueue); // load pipedown/injury sound
+  write_byte(Square1SoundQueue, a);
   lda_imm(0b00100000);
-  sta_abs(Player_SprAttrib); // set background priority bit in player's attributes
+  write_byte(Player_SprAttrib, a);
   lda_abs(WarpZoneControl); // check warp zone control
   if (zero_flag) { goto ExPipeE; } // branch to leave if none found
   and_imm(0b00000011); // mask out all but 2 LSB
@@ -15142,22 +15119,22 @@ void HandlePipeEntry(void) {
 GetWNum:
     ldy_absx(WarpZoneNumbers); // get warp zone numbers
     dey(); // decrement for use as world number
-    sty_abs(WorldNumber); // store as world number and offset
+    write_byte(WorldNumber, y);
     ldx_absy(WorldAddrOffsets); // get offset to where this world's area offsets are
     lda_absx(AreaAddrOffsets); // get area offset based on world offset
-    sta_abs(AreaPointer); // store area offset here to be used to change areas
+    write_byte(AreaPointer, a);
     lda_imm(Silence);
-    sta_zp(EventMusicQueue); // silence music
+    write_byte(EventMusicQueue, a);
     lda_imm(0x0);
-    sta_abs(EntrancePage); // initialize starting page number
-    sta_abs(AreaNumber); // initialize area number used for area address offset
-    sta_abs(LevelNumber); // initialize level number used for world display
-    sta_abs(AltEntranceControl); // initialize mode of entry
+    write_byte(EntrancePage, a);
+    write_byte(AreaNumber, a);
+    write_byte(LevelNumber, a);
+    write_byte(AltEntranceControl, a);
     inc_abs(Hidden1UpFlag); // set flag for hidden 1-up blocks
     inc_abs(FetchNewGameTimerFlag); // set flag to load new game timer
   
 ExPipeE:
-    return; // rts // leave!!!
+    return; // <rts> // leave!!!
 }
 
 void ImpedePlayerMove(void) {
@@ -15180,38 +15157,38 @@ RImpd:
   
 NXSpd:
     ldy_imm(0x10);
-    sty_abs(SideCollisionTimer); // set timer of some sort
+    write_byte(SideCollisionTimer, y);
     ldy_imm(0x0);
-    sty_zp(Player_X_Speed); // nullify player's horizontal speed
+    write_byte(Player_X_Speed, y);
     cmp_imm(0x0); // if value set in A not set to $ff,
     if (!neg_flag) { goto PlatF; } // branch ahead, do not decrement Y
     dey(); // otherwise decrement Y now
   
 PlatF:
-    sty_zp(0x0); // store Y as high bits of horizontal adder
-    clc();
+    write_byte(0x0, y);
+    carry_flag = false;
     adc_zp(Player_X_Position); // add contents of A to player's horizontal
-    sta_zp(Player_X_Position); // position to move player left or right
+    write_byte(Player_X_Position, a);
     lda_zp(Player_PageLoc);
     adc_zp(0x0); // add high bits and carry to
-    sta_zp(Player_PageLoc); // page location if necessary
+    write_byte(Player_PageLoc, a);
   
 ExIPM:
     txa(); // invert contents of X
     eor_imm(0xff);
     and_abs(Player_CollisionBits); // mask out bit that was set here
-    sta_abs(Player_CollisionBits); // store to clear bit
-    return; // rts
+    write_byte(Player_CollisionBits, a);
+    return; // <rts>
 }
 
 void PlayerEnemyDiff(void) {
   lda_zpx(Enemy_X_Position); // get distance between enemy object's
-  sec(); // horizontal coordinate and the player's
+  carry_flag = true;
   sbc_zp(Player_X_Position); // horizontal coordinate
-  sta_zp(0x0); // and store here
+  write_byte(0x0, a);
   lda_zpx(Enemy_PageLoc);
   sbc_zp(Player_PageLoc); // subtract borrow, then leave
-  return; // rts
+  return; // <rts>
   // --------------------------------
 }
 
@@ -15219,8 +15196,8 @@ void SixSpriteStacker(void) {
   ldx_imm(0x6); // do six sprites
   
 StkLp:
-    sta_absy(Sprite_Data); // store X or Y coordinate into OAM data
-    clc();
+    write_byte(Sprite_Data + y, a);
+    carry_flag = false;
     adc_imm(0x8); // add eight pixels
     iny();
     iny(); // move offset four bytes forward
@@ -15229,7 +15206,7 @@ StkLp:
     dex(); // do another sprite
     if (!zero_flag) { goto StkLp; } // do this until all sprites are done
     ldy_zp(0x2); // get saved OAM data offset and leave
-    return; // rts
+    return; // <rts>
 }
 
 void DrawFirebar(void) {
@@ -15239,7 +15216,7 @@ void DrawFirebar(void) {
   pha(); // save result to stack
   and_imm(0x1); // mask out all but last bit
   eor_imm(0x64); // set either tile $64 or $65 as fireball tile
-  sta_absy(Sprite_Tilenumber); // thus tile changes every four frames
+  write_byte(Sprite_Tilenumber + y, a);
   pla(); // get from stack
   lsr_acc(); // divide by four again
   lsr_acc();
@@ -15248,8 +15225,8 @@ void DrawFirebar(void) {
   ora_imm(0b11000000); // otherwise flip both ways every eight frames
   
 FireA:
-    sta_absy(Sprite_Attributes); // store attribute byte and leave
-    return; // rts
+    write_byte(Sprite_Attributes + y, a);
+    return; // <rts>
 }
 
 void DrawBubble(void) {
@@ -15261,28 +15238,28 @@ void DrawBubble(void) {
   if (!zero_flag) { goto ExDBub; } // if bit set, branch to leave
   ldy_absx(Bubble_SprDataOffset); // get air bubble's OAM data offset
   lda_abs(Bubble_Rel_XPos); // get relative horizontal coordinate
-  sta_absy(Sprite_X_Position); // store as X coordinate here
+  write_byte(Sprite_X_Position + y, a);
   lda_abs(Bubble_Rel_YPos); // get relative vertical coordinate
-  sta_absy(Sprite_Y_Position); // store as Y coordinate here
+  write_byte(Sprite_Y_Position + y, a);
   lda_imm(0x74);
-  sta_absy(Sprite_Tilenumber); // put air bubble tile into OAM data
+  write_byte(Sprite_Tilenumber + y, a);
   lda_imm(0x2);
-  sta_absy(Sprite_Attributes); // set attribute byte
+  write_byte(Sprite_Attributes + y, a);
   
 ExDBub:
-    return; // rts // leave
+    return; // <rts> // leave
 }
 
 void GetGfxOffsetAdder(void) {
   lda_abs(PlayerSize); // get player's size
   if (zero_flag) { goto SzOfs; } // if player big, use current offset as-is
   tya(); // for big player
-  clc(); // otherwise add eight bytes to offset
+  carry_flag = false;
   adc_imm(0x8); // for small player
   tay();
   
 SzOfs:
-    return; // rts // go back
+    return; // <rts> // go back
 }
 
 void ChkForPlayerAttrib(void) {
@@ -15303,39 +15280,39 @@ void ChkForPlayerAttrib(void) {
 KilledAtt:
     lda_absy(Sprite_Attributes + 16);
     and_imm(0b00111111); // mask out horizontal and vertical flip bits
-    sta_absy(Sprite_Attributes + 16); // for third row sprites and save
+    write_byte(Sprite_Attributes + 16 + y, a);
     lda_absy(Sprite_Attributes + 20);
     and_imm(0b00111111);
     ora_imm(0b01000000); // set horizontal flip bit for second
-    sta_absy(Sprite_Attributes + 20); // sprite in the third row
+    write_byte(Sprite_Attributes + 20 + y, a);
   
 C_S_IGAtt:
     lda_absy(Sprite_Attributes + 24);
     and_imm(0b00111111); // mask out horizontal and vertical flip bits
-    sta_absy(Sprite_Attributes + 24); // for fourth row sprites and save
+    write_byte(Sprite_Attributes + 24 + y, a);
     lda_absy(Sprite_Attributes + 28);
     and_imm(0b00111111);
     ora_imm(0b01000000); // set horizontal flip bit for second
-    sta_absy(Sprite_Attributes + 28); // sprite in the fourth row
+    write_byte(Sprite_Attributes + 28 + y, a);
   
 ExPlyrAt:
-    return; // rts // leave
+    return; // <rts> // leave
 }
 
 void GetObjRelativePosition(void) {
   lda_zpx(SprObject_Y_Position); // load vertical coordinate low
-  sta_absy(SprObject_Rel_YPos); // store here
+  write_byte(SprObject_Rel_YPos + y, a);
   lda_zpx(SprObject_X_Position); // load horizontal coordinate
-  sec(); // subtract left edge coordinate
+  carry_flag = true;
   sbc_abs(ScreenLeft_X_Pos);
-  sta_absy(SprObject_Rel_XPos); // store result here
-  return; // rts
+  write_byte(SprObject_Rel_XPos + y, a);
+  return; // <rts>
   // -------------------------------------------------------------------------------------
   // $00 - used as temp variable to hold offscreen bits
 }
 
 void DividePDiff(void) {
-  sta_zp(0x5); // store current value in A here
+  write_byte(0x5, a);
   lda_zp(0x7); // get pixel difference
   cmp_zp(0x6); // compare to preset value
   if (carry_flag) { goto ExDivPD; } // if pixel difference >= preset value, branch
@@ -15351,7 +15328,7 @@ SetOscrO:
     tax(); // use as offset
   
 ExDivPD:
-    return; // rts // leave
+    return; // <rts> // leave
 }
 
 

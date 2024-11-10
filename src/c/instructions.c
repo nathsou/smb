@@ -81,65 +81,6 @@ void ldy_absx(uint16_t addr) {
     ldy_imm(absolute_x(addr));
 }
 
-// STA - Store Accumulator
-
-void sta_zp(uint8_t addr) {
-    write_byte(addr, a);
-}
-
-void sta_zpx(uint8_t addr) {
-    write_byte(addr + x, a);
-}
-
-void sta_zpy(uint8_t addr) {
-    write_byte(addr + y, a);
-}
-
-void sta_abs(uint16_t addr) {
-    write_byte(addr, a);
-}
-
-void sta_absx(uint16_t addr) {
-    write_byte(addr + x, a);
-}
-
-void sta_absy(uint16_t addr) {
-    write_byte(addr + y, a);
-}
-
-void sta_indy(uint8_t addr) {
-    uint16_t ind_addr = indirect_y_addr(addr);
-    write_byte(ind_addr, a);
-}
-
-// STX - Store X Register
-
-void stx_zp(uint8_t addr) {
-    write_byte(addr, x);
-}
-
-void stx_zpy(uint8_t addr) {
-    write_byte(addr + y, x);
-}
-
-void stx_abs(uint16_t addr) {
-    write_byte(addr, x);
-}
-
-// STY - Store Y Register
-
-void sty_zp(uint8_t addr) {
-    write_byte(addr, y);
-}
-
-void sty_zpx(uint8_t addr) {
-    write_byte(addr + x, y);
-}
-
-void sty_abs(uint16_t addr) {
-    write_byte(addr, y);
-}
-
 // ADC - Add with Carry
 
 void adc_imm(uint8_t value) {

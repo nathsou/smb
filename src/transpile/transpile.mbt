@@ -209,88 +209,108 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, bb: @lower.BasicBlock, low: @l
         }
       }
       Inst(~op, ~mode, ~comment) => {
-        let args = match mode {
-          Accumulator => ""
-          Implied => ""
-          Immediate(expr) => "\{show_expr(expr)}"
-          Relative(expr) => "\{show_expr(expr)}"
-          ZeroPage(expr) => "\{show_expr(expr)}"
-          ZeroPageX(expr) => "\{show_expr(expr)}"
-          ZeroPageY(expr) => "\{show_expr(expr)}"
-          Absolute(expr) => "\{show_expr(expr)}"
-          AbsoluteX(expr) => "\{show_expr(expr)}"
-          AbsoluteY(expr) => "\{show_expr(expr)}"
-          Indirect(expr) => "\{show_expr(expr)}"
-          IndexedIndirect(expr) => "\{show_expr(expr)}"
-          IndirectIndexed(expr) => "\{show_expr(expr)}"
-        }
-
-        let is_relative = match mode {
-          Relative(_) => true
-          _ => false
-        }
-
-        let stmt = match (op, is_relative) {
-          (BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS , true) => {
-            let cond = match op {
-              BCC => "!carry_flag"
-              BCS => "carry_flag"
-              BEQ => "zero_flag"
-              BNE => "!zero_flag"
-              BMI => "neg_flag"
-              BPL => "!neg_flag"
-              BVC => "!overflow_flag"
-              BVS => "overflow_flag"
-              _ => abort("unreachable")
-            }
-
-            let target = match mode {
+        match (op, mode) {
+          (TXS, _) => self.emit("sp = x;")
+          (RTI, _) => self.emit("return; // <rti>")
+          (CLC, _) => self.emit("carry_flag = false;")
+          (SEC, _) => self.emit("carry_flag = true;")
+          (STA, ZeroPage(addr)) => self.emit("write_byte(\{show_expr(addr)}, a);")
+          (STA, ZeroPageX(addr)) => self.emit("write_byte(\{show_expr(addr)} + x, a);")
+          (STA, ZeroPageY(addr)) => self.emit("write_byte(\{show_expr(addr)} + y, a);")
+          (STA, Absolute(addr)) => self.emit("write_byte(\{show_expr(addr)}, a);")
+          (STA, AbsoluteX(addr)) => self.emit("write_byte(\{show_expr(addr)} + x, a);")
+          (STA, AbsoluteY(addr)) => self.emit("write_byte(\{show_expr(addr)} + y, a);")
+          (STA, IndirectIndexed(addr)) => self.emit("write_byte(read_word(\{show_expr(addr)}) + y, a);")
+          (STX, ZeroPage(addr)) => self.emit("write_byte(\{show_expr(addr)}, x);")
+          (STX, ZeroPageY(addr)) => self.emit("write_byte(\{show_expr(addr)} + y, x);")
+          (STX, Absolute(addr)) => self.emit("write_byte(\{show_expr(addr)}, x);")
+          (STY, ZeroPage(addr)) => self.emit("write_byte(\{show_expr(addr)}, y);")
+          (STY, ZeroPageX(addr)) => self.emit("write_byte(\{show_expr(addr)} + x, y);")
+          (STY, Absolute(addr)) => self.emit("write_byte(\{show_expr(addr)}, y);")
+          _ => {
+            let args = match mode {
+              Accumulator => ""
+              Implied => ""
+              Immediate(expr) => "\{show_expr(expr)}"
               Relative(expr) => "\{show_expr(expr)}"
-              _ => abort("unreachable")
+              ZeroPage(expr) => "\{show_expr(expr)}"
+              ZeroPageX(expr) => "\{show_expr(expr)}"
+              ZeroPageY(expr) => "\{show_expr(expr)}"
+              Absolute(expr) => "\{show_expr(expr)}"
+              AbsoluteX(expr) => "\{show_expr(expr)}"
+              AbsoluteY(expr) => "\{show_expr(expr)}"
+              Indirect(expr) => "\{show_expr(expr)}"
+              IndexedIndirect(expr) => "\{show_expr(expr)}"
+              IndirectIndexed(expr) => "\{show_expr(expr)}"
             }
 
-            "if (\{cond}) { \{gen_jump(target, low)} }"
-          }
-          (JMP, _) => {
-            gen_jump(args, low)
-          }
-          (JSR, _) => {
-            let target = match mode {
-              Absolute(Ident(~name, ty=_)) => name
-              _ => ""
+            let is_relative = match mode {
+              Relative(_) => true
+              _ => false
             }
 
-            if low.self_contained_subroutine_labels.contains(target) {
-              "\{target}();"
-            } else {
-              self.jsr_return_index += 1
-              "jsr(\{target}, \{self.jsr_return_index - 1});"
-            }
-          }
-          (RTS, _) => {
-            match bb.subroutine {
-              Some(sub) => {
-                if low.self_contained_subroutine_labels.contains(sub.name) {
-                  "return; // rts"
+            let stmt = match (op, is_relative) {
+              (BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS , true) => {
+                let cond = match op {
+                  BCC => "!carry_flag"
+                  BCS => "carry_flag"
+                  BEQ => "zero_flag"
+                  BNE => "!zero_flag"
+                  BMI => "neg_flag"
+                  BPL => "!neg_flag"
+                  BVC => "!overflow_flag"
+                  BVS => "overflow_flag"
+                  _ => abort("unreachable")
+                }
+
+                let target = match mode {
+                  Relative(expr) => "\{show_expr(expr)}"
+                  _ => abort("unreachable")
+                }
+
+                "if (\{cond}) { \{gen_jump(target, low)} }"
+              }
+              (JMP, _) => {
+                gen_jump(args, low)
+              }
+              (JSR, _) => {
+                let target = match mode {
+                  Absolute(Ident(~name, ty=_)) => name
+                  _ => ""
+                }
+
+                if low.self_contained_subroutine_labels.contains(target) {
+                  "\{target}();"
                 } else {
-                  "goto rts;"
+                  self.jsr_return_index += 1
+                  "jsr(\{target}, \{self.jsr_return_index - 1});"
                 }
               }
-              None => "goto rts;"
+              (RTS, _) => {
+                match bb.subroutine {
+                  Some(sub) => {
+                    if low.self_contained_subroutine_labels.contains(sub.name) {
+                      "return; // <rts>"
+                    } else {
+                      "goto rts;"
+                    }
+                  }
+                  None => "goto rts;"
+                }
+              }
+              _ => "\{op.to_string().to_lower()}\{mode.suffix()}(\{args});"
             }
-          }
-          (RTI, _) => "return; // rti"
-          _ => "\{op.to_string().to_lower()}\{mode.suffix()}(\{args});"
-        }
-        
-        let stmt = match comment {
-          Some(comment) => {
-            "\{stmt} // \{comment}"
-          }
-          None => stmt
-        }
+            
+            let stmt = match comment {
+              Some(comment) => {
+                "\{stmt} // \{comment}"
+              }
+              None => stmt
+            }
 
-        self.emit(stmt)
+            self.emit(stmt)
+          }
+        }
       }
       Comment(comment) => {
         self.emit("// \{comment}")

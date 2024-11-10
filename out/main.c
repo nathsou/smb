@@ -19,7 +19,7 @@
 #define CONTROLLER1_START_KEY KEY_ENTER
 #define CONTROLLER1_SELECT_KEY KEY_SPACE
 
-#define AUDIO_SAMPLE_RATE 44100
+#define AUDIO_SAMPLE_RATE 48000
 
 void handle_inputs(void) {
     uint8_t state = 0;
@@ -54,8 +54,9 @@ int main(void) {
     SetTargetFPS(60);
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "SMB");
 
-    InitAudioDevice();
+    SetAudioStreamBufferSizeDefault(128);
 
+    InitAudioDevice();
     AudioStream stream = LoadAudioStream(AUDIO_SAMPLE_RATE, 8, 1);
     SetAudioStreamCallback(stream, audio_input_callback);
     PlayAudioStream(stream);
@@ -91,6 +92,7 @@ int main(void) {
         EndDrawing();
     }
 
+    StopAudioStream(stream);
     UnloadAudioStream(stream);
     UnloadTexture(texture);
     CloseAudioDevice();
