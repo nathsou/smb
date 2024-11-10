@@ -2,6 +2,13 @@
 
 Static recompilation of SMB using [doppelganger's disassembly](https://www.romhacking.net/documents/344/)
 
+## Checkpoints
+
+- [x] Static translation of the disassembly to low-level C
+- [x] PPU & APU emulation layes
+- [x] Convert self-contained subroutines to C functions
+- [ ] Remove unused flag updates
+
 ## References & Resources
 
 - [doppelganger's disassembly](https://www.romhacking.net/documents/344/)
