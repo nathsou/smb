@@ -5,7 +5,7 @@ Static recompilation of SMB using [doppelganger's disassembly](https://www.romha
 ## Checkpoints
 
 - [x] Static translation of the disassembly to low-level C
-- [x] PPU & APU emulation layes
+- [x] PPU & APU emulation layers
 - [x] Convert self-contained subroutines to C functions
 - [ ] Remove unused flag updates
 
