@@ -209,24 +209,24 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, bb: @lower.BasicBlock, low: @l
         }
       }
       Inst(~op, ~mode, ~comment) => {
-        match (op, mode) {
-          (TXS, _) => self.emit("sp = x;")
-          (RTI, _) => self.emit("return; // <rti>")
-          (CLC, _) => self.emit("carry_flag = false;")
-          (SEC, _) => self.emit("carry_flag = true;")
-          (STA, ZeroPage(addr)) => self.emit("write_byte(\{show_expr(addr)}, a);")
-          (STA, ZeroPageX(addr)) => self.emit("write_byte(\{show_expr(addr)} + x, a);")
-          (STA, ZeroPageY(addr)) => self.emit("write_byte(\{show_expr(addr)} + y, a);")
-          (STA, Absolute(addr)) => self.emit("write_byte(\{show_expr(addr)}, a);")
-          (STA, AbsoluteX(addr)) => self.emit("write_byte(\{show_expr(addr)} + x, a);")
-          (STA, AbsoluteY(addr)) => self.emit("write_byte(\{show_expr(addr)} + y, a);")
-          (STA, IndirectIndexed(addr)) => self.emit("write_byte(read_word(\{show_expr(addr)}) + y, a);")
-          (STX, ZeroPage(addr)) => self.emit("write_byte(\{show_expr(addr)}, x);")
-          (STX, ZeroPageY(addr)) => self.emit("write_byte(\{show_expr(addr)} + y, x);")
-          (STX, Absolute(addr)) => self.emit("write_byte(\{show_expr(addr)}, x);")
-          (STY, ZeroPage(addr)) => self.emit("write_byte(\{show_expr(addr)}, y);")
-          (STY, ZeroPageX(addr)) => self.emit("write_byte(\{show_expr(addr)} + x, y);")
-          (STY, Absolute(addr)) => self.emit("write_byte(\{show_expr(addr)}, y);")
+        let stmt = match (op, mode) {
+          (TXS, _) => "sp = x;"
+          (RTI, _) => "return; // <rti>"
+          (CLC, _) => "carry_flag = false;"
+          (SEC, _) => "carry_flag = true;"
+          (STA, ZeroPage(addr)) => "write_byte(\{show_expr(addr)}, a);"
+          (STA, ZeroPageX(addr)) => "write_byte(\{show_expr(addr)} + x, a);"
+          (STA, ZeroPageY(addr)) => "write_byte(\{show_expr(addr)} + y, a);"
+          (STA, Absolute(addr)) => "write_byte(\{show_expr(addr)}, a);"
+          (STA, AbsoluteX(addr)) => "write_byte(\{show_expr(addr)} + x, a);"
+          (STA, AbsoluteY(addr)) => "write_byte(\{show_expr(addr)} + y, a);"
+          (STA, IndirectIndexed(addr)) => "write_byte(read_word(\{show_expr(addr)}) + y, a);"
+          (STX, ZeroPage(addr)) => "write_byte(\{show_expr(addr)}, x);"
+          (STX, ZeroPageY(addr)) => "write_byte(\{show_expr(addr)} + y, x);"
+          (STX, Absolute(addr)) => "write_byte(\{show_expr(addr)}, x);"
+          (STY, ZeroPage(addr)) => "write_byte(\{show_expr(addr)}, y);"
+          (STY, ZeroPageX(addr)) => "write_byte(\{show_expr(addr)} + x, y);"
+          (STY, Absolute(addr)) => "write_byte(\{show_expr(addr)}, y);"
           _ => {
             let args = match mode {
               Accumulator => ""
@@ -249,7 +249,7 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, bb: @lower.BasicBlock, low: @l
               _ => false
             }
 
-            let stmt = match (op, is_relative) {
+            match (op, is_relative) {
               (BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS , true) => {
                 let cond = match op {
                   BCC => "!carry_flag"
@@ -300,17 +300,17 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, bb: @lower.BasicBlock, low: @l
               }
               _ => "\{op.to_string().to_lower()}\{mode.suffix()}(\{args});"
             }
-            
-            let stmt = match comment {
-              Some(comment) => {
-                "\{stmt} // \{comment}"
-              }
-              None => stmt
-            }
-
-            self.emit(stmt)
           }
         }
+
+        let stmt = match comment {
+          Some(comment) => {
+            "\{stmt} // \{comment}"
+          }
+          None => stmt
+        }
+
+        self.emit(stmt)
       }
       Comment(comment) => {
         self.emit("// \{comment}")
@@ -360,7 +360,7 @@ self.emit("#include \"code.h\"")
   self.emit("case RUN_STATE_RESET: goto Start;")
   self.emit("case RUN_STATE_NMI_HANDLER: goto NonMaskableInterrupt;")
   self.indentation -= 1
-  self.emit("}\n")
+  self.emit("}")
   
   for bb in low.basic_blocks {
     if bb.subroutine.is_empty() || not(low.self_contained_subroutine_labels.contains(bb.subroutine.unwrap().name)) {
@@ -391,8 +391,6 @@ self.emit("#include \"code.h\"")
       self.emit_subroutine(sub, low)
     }
   }
-
-  self.emit("")
 }
 
 pub struct File {
