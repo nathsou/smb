@@ -55,12 +55,17 @@ pub enum AsmItem {
   Comment(String)
 } derive (Show)
 
+pub struct BasicBlockLink {
+  bb: BasicBlock
+  is_fallthrough: Bool
+} derive (Show)
+
 pub struct BasicBlock {
   id: Int
   mut name: String?
   items: Array[AsmItem]
-  predecessors: Array[BasicBlock]
-  successors: Array[BasicBlock]
+  predecessors: Array[BasicBlockLink]
+  successors: Array[BasicBlockLink]
   mut is_subroutine_entry: Bool
   mut subroutine: AsmSubroutine?
 } derive (Show)

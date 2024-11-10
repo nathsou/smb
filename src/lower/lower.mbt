@@ -389,13 +389,13 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
     self.basic_blocks.push(bb)
   }
 
-  fn connect(a: BasicBlock, b: BasicBlock) -> Unit {
-    if not(a.successors.iter().any(fn(bb) { bb.id == b.id })) {
-      a.successors.push(b)
+  fn connect(a: BasicBlock, b: BasicBlock, is_fallthrough: Bool) -> Unit {
+    if not(a.successors.iter().any(fn(link) { link.bb.id == b.id })) {
+      a.successors.push({ bb: b, is_fallthrough })
     }
 
-    if not(b.predecessors.iter().any(fn(bb) { bb.id == a.id })) {
-      b.predecessors.push(a)
+    if not(b.predecessors.iter().any(fn(link) { link.bb.id == a.id })) {
+      b.predecessors.push({ bb: a, is_fallthrough })
     }
   }
 
@@ -411,7 +411,7 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
       ) => {
         match self.bb_by_label[label] {
           Some(target_bb) => {
-            connect(bb, target_bb)
+            connect(bb, target_bb, false)
           }
           None => raise LoweringError("Unknown jump target: \{label}")
         }
@@ -420,7 +420,7 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
         for label in jump_table {
           match self.bb_by_label[label] {
             Some(target_bb) => {
-              connect(bb, target_bb)
+              connect(bb, target_bb, false)
             }
             None => raise LoweringError("Unknown jump target: \{label}")
           }
@@ -436,7 +436,7 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
           RTI | RTS | BRK | JMP => ()
           _ => {
             if bb.id + 1 < self.basic_blocks.length() {
-              connect(bb, self.basic_blocks[bb.id + 1])
+              connect(bb, self.basic_blocks[bb.id + 1], true)
             }
           }
         }
@@ -566,16 +566,42 @@ fn collect_self_contained_subroutines(self: AsmLowering) -> Unit {
     }
   }
 
-  for sub in self.subroutines {
-    if sub.is_self_contained(self.targets) {
-      self.self_contained_subroutine_labels.insert(sub.name)
-      sub.is_self_contained = true
+  fn update_self_contained_list() -> Unit {
+    for sub in self.subroutines {
+      if not(sub.is_self_contained) && sub.is_self_contained(self.targets) {
+        self.self_contained_subroutine_labels.insert(sub.name)
+        sub.is_self_contained = true
 
-      // insert a jump instruction in place of automatic fallthroughs to subroutines
-      for pred in sub.entry.predecessors {
-        pred.items.push(Inst(op=JMP, mode=Absolute(Ident(name=sub.name, ty=LabelTy)), comment=Some("<fallthrough>")))
+        // insert a jump instruction in place of automatic fallthroughs to subroutines
+        for pred in sub.entry.predecessors {
+          if pred.is_fallthrough {
+            pred.bb.items.push(Inst(op=JMP, mode=Absolute(Ident(name=sub.name, ty=LabelTy)), comment=Some("<fallthrough>")))
+          }
+        }
       }
     }
+  }
+
+  // remove external jump targets that are self-contained subroutines
+  fn remove_external_jumps_to_self_contained_subs() -> Bool {
+    let mut changed = false
+
+    for sub in self.subroutines {
+      for label in self.self_contained_subroutine_labels {
+        if sub.external_jumps.contains(label) {
+          sub.external_jumps.remove(label)
+          changed = true
+        }
+      }
+    }
+
+    changed
+  }
+
+  update_self_contained_list()
+
+  while remove_external_jumps_to_self_contained_subs() {
+    update_self_contained_list()
   }
 }
 
@@ -593,9 +619,9 @@ fn _build_cfg_dotfile(self: AsmLowering) -> String {
     builder.write_string("\t\{name} [label=\"\{name}\"]\n")
 
     for succ in bb.successors {
-      let succ_name = match succ.name {
+      let succ_name = match succ.bb.name {
         Some(name) => name
-        None => succ.id.to_string()
+        None => succ.bb.id.to_string()
       }
 
       builder.write_string("\t\{name} -> \{succ_name}\n")

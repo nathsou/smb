@@ -2396,6 +2396,9 @@ InitializeNameTables:
               lda #$24                  ;set vram address to start of name table 1
               jsr WriteNTAddr
               lda #$20                  ;and then set it to name table 0
+              jsr WriteNTAddr
+              rts
+            
 WriteNTAddr:  sta PPU_ADDRESS
               lda #$00
               sta PPU_ADDRESS
@@ -2416,7 +2419,8 @@ InitATLoop:   sta PPU_DATA
               bne InitATLoop
               sta HorizontalScroll      ;reset scroll variables
               sta VerticalScroll
-              jmp InitScroll            ;initialize scroll registers to zero
+              jsr InitScroll            ;initialize scroll registers to zero
+              rts
 
 ;-------------------------------------------------------------------------------------
 ;$00 - temp joypad bit
