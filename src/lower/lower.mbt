@@ -319,35 +319,53 @@ fn contains(self: JumpTargets, label: String) -> Bool {
   self.jump_targets.contains(label) || self.subroutines.contains(label)
 }
 
-fn collect_basic_block_leaders(self: AsmLowering) -> Set[Int] {
+fn next_non_comment_item_index(self: AsmLowering, start: Int) -> Int? {
+  for i in start..<self.lowered.length() {
+    match self.lowered[i] {
+      Comment(_) => ()
+      _ => return Some(i)
+    }
+  }
+
+  None
+}
+
+fn collect_basic_block_leaders(self: AsmLowering) -> Array[Int] {
   self.collect_jump_targets()
-  let leader_indices = Set::new()
+  let leader_indices = []
+
+  fn insert_leader_index(idx: Int?) {
+    match idx {
+      Some(idx) => {
+        // avoid duplicates
+        if leader_indices.is_empty() || leader_indices[leader_indices.length() - 1] != idx {
+          leader_indices.push(idx)
+        }
+      }
+      None => {
+        leader_indices.push(self.lowered.length() - 1)
+      }
+    }
+  }
 
   // the first non-comment instruction is always a leader
-  let first_inst_idx = self.lowered.search_by(fn(item) {
-    match item {
-      Comment(_) => false
-      _ => true
-    }
-  })
-
-  leader_indices.insert(first_inst_idx.unwrap())
+  insert_leader_index(self.next_non_comment_item_index(0))
   
   for i in 0..<self.lowered.length() {
     match self.lowered[i] {
       // the target of a jump instruction is a leader
       Label(label) => {
         if self.targets.contains(label) {
-          leader_indices.insert(i)
+          insert_leader_index(Some(i))
         }
       }
       Inst(~op, ..) => {
         if op.is_branching() {
-          // the next instruction after a branching instruction is a leader
-          leader_indices.insert(i + 1)
+          // the next non-comment instruction after a branching instruction is a leader
+          insert_leader_index(self.next_non_comment_item_index(i + 1))
         }
       }
-      JumpEngine(_) => leader_indices.insert(i + 1)
+      JumpEngine(_) => insert_leader_index(self.next_non_comment_item_index(i + 1))
       _ => ()
     }
   }
@@ -355,11 +373,30 @@ fn collect_basic_block_leaders(self: AsmLowering) -> Set[Int] {
   leader_indices
 }
 
+fn last_non_comment_item(self: BasicBlock) -> AsmItem? {
+  let mut i = self.items.length() - 1
+
+  while i >= 0 {
+    match self.items[i] {
+      Comment(_) => ()
+      item => return Some(item)
+    }
+
+    i -= 1
+  }
+
+  None
+}
+
 fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
   let leader_indices = self.collect_basic_block_leaders()
 
-  // Starting from a leader, the set of all following instructions until and not including the next leader is the basic block corresponding to the starting leader.
-  for leader in leader_indices {
+  // Starting from a leader, the set of all following instructions until and not including the next leader
+  // is the basic block corresponding to the starting leader.
+  for i in 1..<leader_indices.length() {
+    let prev_leader = leader_indices[i - 1]
+    let curr_leader = leader_indices[i]
+
     let bb = {
       id: self.basic_blocks.length(),
       name: None,
@@ -370,8 +407,8 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
       subroutine: None,
     }
 
-    for i in leader..<self.lowered.length() {
-      match self.lowered[i] {
+    for j in prev_leader..<curr_leader {
+      match self.lowered[j] {
         Label(label) => {
           bb.name = Some(label)
           self.bb_by_label[label] = bb
@@ -379,11 +416,7 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
         _ => ()
       }
 
-      bb.items.push(self.lowered[i])
-
-      if leader_indices.contains(i + 1) {
-        break
-      }
+      bb.items.push(self.lowered[j])
     }
 
     self.basic_blocks.push(bb)
@@ -401,7 +434,7 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
 
   // connect basic blocks
   for bb in self.basic_blocks {
-    let last_item = bb.items.last().unwrap()
+    let last_item = bb.last_non_comment_item().or_error!(LoweringError("Empty basic block"))
 
     match last_item {
       Inst(
@@ -430,18 +463,18 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
     }
 
     // check for fallthrough to the next basic block
-    match bb.items.last() {
-      Some(Inst(~op, ..)) => {
+    let fallthrough = match last_item {
+      Inst(~op, ..) => {
         match op {
-          RTI | RTS | BRK | JMP => ()
-          _ => {
-            if bb.id + 1 < self.basic_blocks.length() {
-              connect(bb, self.basic_blocks[bb.id + 1], true)
-            }
-          }
+          RTI | RTS | BRK | JMP => false
+          _ => true
         }
       }
-      _ => ()
+      _ => false
+    }
+
+    if fallthrough && bb.id + 1 < self.basic_blocks.length() {
+      connect(bb, self.basic_blocks[bb.id + 1], true)
     }
   }
 }
@@ -455,6 +488,7 @@ fn collect_labels(self: BasicBlock, labels: Set[String]) -> Unit {
   }
 }
 
+// collect jump targets that are not defined in the current subroutine
 fn collect_external_labels(self: BasicBlock, internal_labels: Set[String], external_labels: Set[String]) -> Unit {
     for item in self.items {
       match item {
@@ -490,53 +524,115 @@ fn collect_external_labels(self: AsmSubroutine, targets: JumpTargets) -> Unit {
 }
 
 fn collect_subroutines(self: AsmLowering) -> Unit {
-  let mut idx = 0
+  let components = self.collect_connected_components()
 
-  while idx < self.basic_blocks.length() {
-    let bb = self.basic_blocks[idx]
-
-    match bb.name {
-      Some(name) => {
-        if self.targets.subroutines.contains(name) {
-          let sub = {
-            name,
-            blocks: [bb],
-            entry: bb,
-            exit: bb,
-            internal_labels: Set::new(),
-            external_jumps: Set::new(),
-            is_self_contained: false,
-          }
-
-          let mut exit_bb = bb
-          bb.is_subroutine_entry = true
-          bb.subroutine = Some(sub)
-
-          for i in (idx + 1)..<self.basic_blocks.length() {
-            let bb = self.basic_blocks[i]
-            bb.subroutine = Some(sub)
-            sub.blocks.push(bb)
-            bb.collect_labels(sub.internal_labels)
-
-            if bb.successors.length() == 0 {
-              exit_bb = bb
-              break
-            }
-          }
-
-          sub.collect_external_labels(self.targets)
-
-          self.subroutines.push(sub)
-          idx = exit_bb.id
-        } else {
-          idx += 1
-        }
+  for component in components {
+    let entry_idx = match component.search_by(fn(bb) { bb.predecessors.is_empty() }) {
+      Some(idx) => idx
+      None => {
+        println("Warning: no entry point found in component \{component[0].id}")
+        0
       }
-      _ => {
-        idx += 1
+    }
+
+    let entry = component[entry_idx]
+    entry.is_subroutine_entry = true
+    let name = entry.name.or_else(fn() { "Sub\{entry.id}" })
+
+    let exit_idx = match component
+      .search_by(fn(bb) { bb.successors.is_empty() }) {
+      Some(idx) => idx
+      None => {
+        println("Warning: no exit point found in component \{name}")
+        return
+      }
+    }
+
+    let exit = component[exit_idx]
+
+    let sub = {
+      name,
+      blocks: component,
+      entry,
+      exit,
+      internal_labels: Set::new(),
+      external_jumps: Set::new(),
+      is_self_contained: false,
+    }
+
+    for bb in component {
+      bb.subroutine = Some(sub)
+      bb.collect_labels(sub.internal_labels)
+    }
+
+    sub.collect_external_labels(self.targets)
+
+    self.subroutines.push(sub)
+  }
+}
+
+fn dfs(self: BasicBlock, visited: Set[Int]) -> Array[BasicBlock] {
+  let stack = [self]
+  let blocks = []
+
+  while not(stack.is_empty()) {
+    let bb = stack.pop().unwrap()
+
+    if not(visited.contains(bb.id)) {
+      visited.insert(bb.id)
+      blocks.push(bb)
+
+      for link in bb.successors {
+        stack.push(link.bb)
       }
     }
   }
+
+  blocks.sort_by(fn(a, b) { a.id - b.id })
+  blocks
+}
+
+fn collect_connected_components(self: AsmLowering) -> Array[Array[BasicBlock]] {
+  let components = []
+  let visited = Set::new()
+
+  for bb in self.basic_blocks {
+    if not(visited.contains(bb.id)) {
+      let blocks = bb.dfs(visited)
+      components.push(blocks)
+    }
+  }
+
+  components
+}
+
+fn _write_connected_components_dotfile(components: Array[Array[BasicBlock]]) -> Unit {
+  let builder = StringBuilder::new()
+
+  builder.write_string("digraph G {\n")
+
+  for i, component in components {
+    builder.write_string("\tsubgraph cluster_\{i} {\n")
+    builder.write_string("\t\tstyle=filled;\n")
+    builder.write_string("\t\tcolor=lightgrey;\n")
+    let label = component[0].name.or_else(fn() { "Component \{i}" })
+    builder.write_string("\t\tlabel = \"\{label}\"\n")
+
+    for bb in component {
+      let name = match bb.name {
+        Some(name) => name
+        None => bb.id.to_string()
+      }
+
+      builder.write_string("\t\t\{name} [label=\"\{name}\"]\n")
+    }
+
+    builder.write_string("\t}\n")
+  }
+
+  builder.write_string("}\n")
+
+  @fs.write_string_to_file(path="components.dot", content=builder.to_string())
 }
 
 // a subroutine is considered self-contained if it doesn't call any external labels
@@ -547,7 +643,7 @@ fn is_self_contained(self: AsmSubroutine, targets: JumpTargets) -> Bool {
   }
 
   for label in self.internal_labels {
-    if targets.externals.contains(label) {
+    if label != self.name && targets.externals.contains(label) {
       return false
     }
   }
@@ -605,7 +701,7 @@ fn collect_self_contained_subroutines(self: AsmLowering) -> Unit {
   }
 }
 
-fn _build_cfg_dotfile(self: AsmLowering) -> String {
+fn _show_cfg_dotfile(self: AsmLowering) -> Unit {
   let builder = StringBuilder::new()
 
   builder.write_string("digraph G {\n")
@@ -630,15 +726,20 @@ fn _build_cfg_dotfile(self: AsmLowering) -> String {
 
   builder.write_string("}\n")
 
-  builder.to_string()
+  println(builder.to_string())
 }
 
 fn _show_bbs(self: AsmLowering) -> Unit {
   for bb in self.basic_blocks {
-    println("Basic block \{bb.id} (\{bb.name.or_default()})")
+    let preds = String::concat(bb.predecessors.map(fn(link) { link.bb.id.to_string() }), separator=", ")
+    let succs = String::concat(bb.successors.map(fn(link) { link.bb.id.to_string() }), separator=", ")
+
+    println("Basic block \{bb.id} (\{bb.name.or_default()}), preds: [\{preds}], succs: [\{succs}]")
+
     for item in bb.items {
       println("\{item}")
     }
+
     println("")
   }
 }

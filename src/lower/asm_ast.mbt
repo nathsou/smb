@@ -74,7 +74,7 @@ pub struct AsmSubroutine {
   name: String
   blocks: Array[BasicBlock]
   entry: BasicBlock
-  exit: BasicBlock
+  mut exit: BasicBlock
   internal_labels: Set[String]
   external_jumps: Set[String]
   mut is_self_contained: Bool
