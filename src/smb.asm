@@ -941,10 +941,14 @@ OperModeExecutionTree:
 MoveAllSpritesOffscreen:
               ldy #$00                ;this routine moves all sprites off the screen
               ; in multiple places, the bit absolute ($2c) instruction opcode is used to skip the next instruction using only one byte
-              jmp MoveSpritesOffscreenSkip ; .db $2c ;BIT instruction opcode
+              jsr MoveSpritesOffscreenSkip ; .db $2c ;BIT instruction opcode
+              rts
 
 MoveSpritesOffscreen:
               ldy #$04                ;this routine moves all but sprite 0
+              jsr MoveSpritesOffscreenSkip
+              rts
+
 MoveSpritesOffscreenSkip:
               lda #$f8                ;off the screen
 SprInitLoop:  sta Sprite_Y_Position,y ;write 248 into OAM data's Y coordinate
@@ -1775,7 +1779,8 @@ WarpNumLoop: lda WarpZoneNumbers,x  ;print warp zone numbers into the
              cpy #$0c
              bcc WarpNumLoop
              lda #$2c               ;load new buffer pointer at end of message
-             jmp SetVRAMOffset
+             jsr SetVRAMOffset
+             rts
 
 ;-------------------------------------------------------------------------------------
 
@@ -1889,7 +1894,8 @@ SetAttrib:  lda AttributeBuffer,y        ;get previously saved bits from before
             lda CurrentNTAddr_High       ;and then invert d2 of the name table address high
             eor #%00000100               ;to move onto the next appropriate name table
             sta CurrentNTAddr_High
-ExitDrawM:  jmp SetVRAMCtrl              ;jump to set buffer to $0341 and leave
+ExitDrawM:  jsr SetVRAMCtrl              ;jump to set buffer to $0341 and leave
+            rts
 
 ;-------------------------------------------------------------------------------------
 ;$00 - temp attribute table address high (big endian order this time!)
@@ -2035,6 +2041,8 @@ ReplaceBlockMetatile:
 
 DestroyBlockMetatile:
        lda #$00       ;force blank metatile if branched/jumped to this point
+       jsr WriteBlockMetatile
+       rts
 
 WriteBlockMetatile:
              ldy #$03                ;load offset for blank metatile
@@ -2059,7 +2067,8 @@ MoveVOffset: dey                     ;decrement vram buffer offset
              tya                     ;add 10 bytes to it
              clc
              adc #10
-             jmp SetVRAMOffset       ;branch to store as new vram buffer offset
+             jsr SetVRAMOffset       ;branch to store as new vram buffer offset
+             rts
 
 PutBlockMetatile:
             stx $00               ;store control bit from SprDataOffset_Ctrl
@@ -2433,6 +2442,9 @@ ReadJoypads:
               sta JOYPAD_PORT
               jsr ReadPortBits
               inx                    ;increment for joypad 2's port
+              jsr ReadPortBits
+              rts
+
 ReadPortBits: ldy #$08
 PortLoop:     pha                    ;push previous bit onto stack
               lda JOYPAD_PORT,x      ;read current bit on joypad port
@@ -3681,10 +3693,12 @@ EndMushL: lda #$1b                   ;if at the end, render end of mushroom
           lda #$50
 AllUnder: inx
           ldy #$0f                   ;set $0f to render all way down
-          jmp RenderUnderPart       ;now render the stem of mushroom
+          jsr RenderUnderPart       ;now render the stem of mushroom
+          rts
 NoUnder:  ldx $07                    ;load row of ledge
           ldy #$00                   ;set 0 for no bottom on this part
-          jmp RenderUnderPart
+          jsr RenderUnderPart
+          rts
 
 ;--------------------------------
 
@@ -3892,7 +3906,8 @@ DrawPipe: pla                      ;get value saved earlier and use as Y
           lda VerticalPipeData+2,y ;render the rest of the pipe
           ldy $06                  ;subtract one from length and render the part underneath
           dey
-          jmp RenderUnderPart
+          jsr RenderUnderPart
+          rts
       
 GetPipeHeight:
       ldy #$01       ;check for length loaded, if not, load
@@ -3923,7 +3938,8 @@ Hole_Water:
       ldx #$0b
       ldy #$01              ;now render the water underneath
       lda #$87
-      jmp RenderUnderPart
+      jsr RenderUnderPart
+      rts
 
 ;--------------------------------
 
@@ -3964,7 +3980,8 @@ Bridge_LowSkip:
       inx
       ldy #$00             ;now render the bridge itself
       lda #$63
-      jmp RenderUnderPart
+      jsr RenderUnderPart
+      rts
 
 ;--------------------------------
 
@@ -3972,7 +3989,8 @@ FlagBalls_Residual:
       jsr GetLrgObjAttrib  ;get low nybble from object byte
       ldx #$02             ;render flag balls on third row from top
       lda #$6d             ;of screen downwards based on low nybble
-      jmp RenderUnderPart
+      jsr RenderUnderPart
+      rts
 
 ;--------------------------------
 
@@ -4020,7 +4038,8 @@ BalancePlatRope:
           jsr GetLrgObjAttrib ;get vertical length from lower nybble
           ldx #$01
 DrawRope: lda #$40            ;render the actual rope
-          jmp RenderUnderPart
+          jsr RenderUnderPart
+          rts
 
 ;--------------------------------
 
@@ -4060,7 +4079,8 @@ EmptyBlock:
         ldx $07
         lda #$c4
 ColObj: ldy #$00             ;column length of 1
-        jmp RenderUnderPart
+        jsr RenderUnderPart
+        rts
 
 ;--------------------------------
 
@@ -4087,7 +4107,8 @@ GetRow:  pha                        ;store metatile here
 DrawRow: ldx $07
          ldy #$00                   ;set vertical height of 1
          pla
-         jmp RenderUnderPart        ;render object
+         jsr RenderUnderPart        ;render object
+         rts
 
 ColumnOfBricks:
       ldy AreaType          ;load area type obtained from area offset
@@ -4101,7 +4122,8 @@ GetRow2: pha                        ;save metatile to stack for now
          jsr GetLrgObjAttrib        ;get length and row
          pla                        ;restore metatile
          ldx $07                    ;get starting row
-         jmp RenderUnderPart        ;now render the column
+         jsr RenderUnderPart        ;now render the column
+         rts
 
 ;--------------------------------
 
@@ -4153,7 +4175,8 @@ NextStair: dec StaircaseControl      ;move onto next step (or first if starting)
            lda StaircaseHeightData,y
            tay
            lda #$61                  ;now render solid block staircase
-           jmp RenderUnderPart
+           jsr RenderUnderPart
+           rts
 
 ;--------------------------------
 
@@ -4184,14 +4207,17 @@ Jumpspring:
 
 Hidden1UpBlock:
       lda Hidden1UpFlag  ;if flag not set, do not render object
-      beq ExitDecBlock
+      beq ExitHidden1UpBlock
       lda #$00           ;if set, init for the next one
       sta Hidden1UpFlag
-      jmp BrickWithItem  ;jump to code shared with unbreakable bricks
+      jsr BrickWithItem  ;jump to code shared with unbreakable bricks
+ExitHidden1UpBlock:
+      rts
 
 QuestionBlock:
       jsr GetAreaObjectID ;get value from level decoder routine
-      jmp DrawQBlk        ;go to render it
+      jsr DrawQBlk        ;go to render it
+      rts
 
 BrickWithCoins:
       lda #$00                 ;initialize multi-coin timer flag
@@ -4211,14 +4237,15 @@ BWithL:   clc                         ;add object ID to adder
 DrawQBlk: lda BrickQBlockMetatiles,y  ;get appropriate metatile for brick (question block
           pha                         ;if branched to here from question block routine)
           jsr GetLrgObjAttrib         ;get row from location byte
-          jmp DrawRow                 ;now render the object
+          jsr DrawRow                 ;now render the object
+          rts
 
 GetAreaObjectID:
               lda $00    ;get value saved from area parser routine
               sec
               sbc #$00   ;possibly residual code
               tay        ;save to Y
-ExitDecBlock: rts
+              rts
 
 ;--------------------------------
 
@@ -6983,7 +7010,8 @@ CoinBlock:
       lda Block_Y_Position,x  ;get vertical coordinate of block object
       sbc #$10                ;subtract 16 pixels
       sta Misc_Y_Position,y   ;store as vertical coordinate of misc object
-      jmp JCoinC              ;jump to rest of code as applies to this misc object
+      jsr JCoinC              ;jump to rest of code as applies to this misc object
+      rts
 
 SetupJumpCoin:
         jsr FindEmptyMiscSlot  ;set offset for empty or last misc object buffer slot
@@ -7549,8 +7577,11 @@ MoveEnemyHorizontally:
 
 MovePlayerHorizontally:
       lda JumpspringAnimCtrl  ;if jumpspring currently animating,
-      bne ExXMove             ;branch to leave
+      bne MovePlayerHorizontallyExit ;branch to leave
       tax                     ;otherwise set zero for offset to use player's stuff
+      jmp MoveObjectHorizontally
+MovePlayerHorizontallyExit:
+      rts
 
 MoveObjectHorizontally:
           lda SprObject_X_Speed,x     ;get currently saved value (horizontal
@@ -7590,7 +7621,7 @@ UseAdder: sty $02                     ;save Y here
           pla
           clc                         ;pull old carry from stack and add
           adc $00                     ;to high nybble moved to low
-ExXMove:  rts                         ;and leave
+          rts                         ;and leave
 
 ;-------------------------------------------------------------------------------------
 ;$00 - used for downward force
@@ -7602,11 +7633,13 @@ MovePlayerVertically:
          lda TimerControl
          bne NoJSChk             ;if master timer control set, branch ahead
          lda JumpspringAnimCtrl  ;otherwise check to see if jumpspring is animating
-         bne ExXMove             ;branch to leave if so
+         bne MovePlayerVerticallyExit ;branch to leave if so
 NoJSChk: lda VerticalForce       ;dump vertical force 
          sta $00
          lda #$04                ;set maximum vertical speed here
-         jmp ImposeGravitySprObj ;then jump to move player vertically
+         jsr ImposeGravitySprObj ;then jump to move player vertically
+MovePlayerVerticallyExit:
+        rts
 
 ;--------------------------------
 
@@ -7618,13 +7651,15 @@ MoveD_EnemyVertically:
 
 MoveFallingPlatform:
            ldy #$20       ;set movement amount
-ContVMove: jmp SetHiMax   ;jump to skip the rest of this
+ContVMove: jsr SetHiMax   ;jump to skip the rest of this
+           rts
 
 ;--------------------------------
 
 MoveRedPTroopaDown:
       ldy #$00            ;set Y to move downwards
-      jmp MoveRedPTroopa  ;skip to movement routine
+      jsr MoveRedPTroopa  ;skip to movement routine
+      rts
 
 MoveRedPTroopaUp:
       ldy #$01            ;set Y to move upwards
@@ -7638,7 +7673,8 @@ MoveRedPTroopa:
       lda #$02
       sta $02             ;set maximum speed here
       tya                 ;set movement direction in A, and
-      jmp RedPTroopaGrav  ;jump to move this thing
+      jsr RedPTroopaGrav  ;jump to move this thing
+      rts
 
 ;--------------------------------
 
@@ -7649,7 +7685,8 @@ MoveDropPlatform:
 MoveEnemySlowVert:
           ldy #$0f         ;set movement amount for bowser/other objects
 SetMdMax: lda #$02         ;set maximum speed in A
-          bne SetXMoveAmt  ;unconditional branch
+          jsr SetXMoveAmt  ;unconditional branch
+          rts
 
 ;--------------------------------
 
@@ -7680,13 +7717,15 @@ ImposeGravityBlock:
 ImposeGravitySprObj:
       sta $02            ;set maximum speed here
       lda #$00           ;set value to move downwards
-      jmp ImposeGravity  ;jump to the code that actually moves it
+      jsr ImposeGravity  ;jump to the code that actually moves it
+      rts
 
 ;--------------------------------
 
 MovePlatformDown:
       lda #$00    ;save value to stack (if branching here, execute next
-      jmp MovePlatformUpSkip ; .db $2c     ;part as BIT instruction)
+      jsr MovePlatformUpSkip ; .db $2c     ;part as BIT instruction)
+      rts
 
 MovePlatformUp:
            lda #$01        ;save value to stack
@@ -8556,7 +8595,7 @@ FSLoop: iny                     ;increment one slot
         sta Enemy_Y_HighPos,y   ;set high vertical byte for new enemy
         lda Enemy_Y_Position,x
         sta Enemy_Y_Position,y  ;copy vertical coordinate from original to new
-FlmEx:  rts                     ;and then leave
+        rts                     ;and then leave
 
 ;--------------------------------
 
@@ -8568,7 +8607,7 @@ FlameYMFAdderData:
 
 InitBowserFlame:
         lda FrenzyEnemyTimer        ;if timer not expired yet, branch to leave
-        bne FlmEx
+        bne FinishFlameExit
         sta Enemy_Y_MoveForce,x     ;reset something here
         lda NoiseSoundQueue
         ora #Sfx_BowserFlame        ;load bowser's flame sound into queue
@@ -8636,6 +8675,7 @@ FinishFlame:
       lsr
       sta Enemy_X_MoveForce,x  ;initialize horizontal movement force, and
       sta Enemy_State,x        ;enemy state
+FinishFlameExit:
       rts
 
 ;--------------------------------
@@ -9211,7 +9251,8 @@ MovePodoboo:
       sta EnemyIntervalTimer,x   ;store as new enemy timer
       lda #$f9
       sta Enemy_Y_Speed,x        ;set vertical speed to move podoboo upwards
-PdbM: jmp MoveJ_EnemyVertically  ;branch to impose gravity on podoboo
+PdbM: jsr MoveJ_EnemyVertically  ;branch to impose gravity on podoboo
+      rts
 
 ;--------------------------------
 ;$00 - used in HammerBroJumpCode as bitmask
@@ -9385,7 +9426,8 @@ NKGmba: rts                   ;leave!
 
 MoveJumpingEnemy:
       jsr MoveJ_EnemyVertically  ;do a sub to impose gravity on green paratroopa
-      jmp MoveEnemyHorizontally  ;jump to move enemy horizontally
+      jsr MoveEnemyHorizontally  ;jump to move enemy horizontally
+      rts
 
 ;--------------------------------
 
@@ -9407,8 +9449,10 @@ MoveRedPTUpOrDown:
           lda Enemy_Y_Position,x      ;check current vs. central vertical coordinate
           cmp RedPTroopaCenterYPos,x
           bcc MovPTDwn                ;if current < central, jump to move downwards
-          jmp MoveRedPTroopaUp        ;otherwise jump to move upwards
-MovPTDwn: jmp MoveRedPTroopaDown      ;move downwards
+          jsr MoveRedPTroopaUp        ;otherwise jump to move upwards
+          rts
+MovPTDwn: jsr MoveRedPTroopaDown      ;move downwards
+          rts
 
 ;--------------------------------
 ;$00 - used to store adder for movement, also used as adder for platform
@@ -9594,10 +9638,12 @@ MoveBulletBill:
          lda Enemy_State,x          ;check bullet bill's enemy object state for d5 set
          and #%00100000
          beq NotDefB                ;if not set, continue with movement code
-         jmp MoveJ_EnemyVertically  ;otherwise jump to move defeated bullet bill downwards
+         jsr MoveJ_EnemyVertically  ;otherwise jump to move defeated bullet bill downwards
+         rts
 NotDefB: lda #$e8                   ;set bullet bill's horizontal speed
          sta Enemy_X_Speed,x        ;and move it accordingly (note: this bullet bill
-         jmp MoveEnemyHorizontally  ;object occurs in frenzy object $17, not from cannons)
+         jsr MoveEnemyHorizontally  ;object occurs in frenzy object $17, not from cannons)
+         rts
 
 ;--------------------------------
 ;$02 - used to hold preset values
@@ -9940,7 +9986,8 @@ MoveFlyingCheepCheep:
         beq FlyCC                  ;branch to continue code if not set
         lda #$00
         sta Enemy_SprAttrib,x      ;otherwise clear sprite attributes
-        jmp MoveJ_EnemyVertically  ;and jump to move defeated cheep-cheep downwards
+        jsr MoveJ_EnemyVertically  ;and jump to move defeated cheep-cheep downwards
+        rts
 FlyCC:  jsr MoveEnemyHorizontally  ;move cheep-cheep horizontally based on speed and force
         ldy #$0d                   ;set vertical movement amount
         lda #$05                   ;set maximum speed
@@ -11174,7 +11221,7 @@ SetDBSte: sta Enemy_State,x          ;set defeated enemy state
           sta Square2SoundQueue      ;load bowser defeat sound
           ldx $01                    ;get enemy offset
           lda #$09                   ;award 5000 points to player for defeating bowser
-          bne EnemySmackScore        ;unconditional branch to award points
+          jmp EnemySmackScore        ;unconditional branch to award points
 
 ChkOtherEnemies:
       cmp #BulletBill_FrenzyVar
@@ -11332,10 +11379,12 @@ CheckForPUpCollision:
        ldy Enemy_ID,x
        cpy #PowerUpObject            ;check for power-up object
        bne EColl                     ;if not found, branch to next part
-       jmp HandlePowerUpCollision    ;otherwise, unconditional jump backwards
+       jsr HandlePowerUpCollision    ;otherwise, unconditional jump backwards
+       rts
 EColl: lda StarInvincibleTimer       ;if star mario invincibility timer expired,
        beq HandlePECollisions        ;perform task here, otherwise kill enemy like
-       jmp ShellOrBlockDefeat        ;hit with a shell, or from beneath
+       jsr ShellOrBlockDefeat        ;hit with a shell, or from beneath
+       rts
 
 KickedShellPtsData:
       .db $0a, $06, $04
@@ -11856,7 +11905,8 @@ PositionPlayerOnS_Plat:
       lda Enemy_Y_Position,x     ;for offset
       clc                        ;add positioning data using offset to the vertical
       adc PlayerPosSPlatData-1,y ;coordinate
-      jmp PositionPlayerOnVPlatSkip ; .db $2c ;BIT instruction opcode
+      jsr PositionPlayerOnVPlatSkip ; .db $2c ;BIT instruction opcode
+      rts
 
 PositionPlayerOnVPlat:
          lda Enemy_Y_Position,x    ;get vertical coordinate
@@ -12808,13 +12858,15 @@ GetMiscBoundBox:
         tax
         ldy #$06                  ;set offset for relative coordinates
 FBallB: jsr BoundingBoxCore       ;get bounding box coordinates
-        jmp CheckRightScreenBBox  ;jump to handle any offscreen coordinates
+        jsr CheckRightScreenBBox  ;jump to handle any offscreen coordinates
+        rts
 
 GetEnemyBoundBox:
       ldy #$48                 ;store bitmask here for now
       sty $00
       ldy #$44                 ;store another bitmask here for now and jump
-      jmp GetMaskedOffScrBits
+      jsr GetMaskedOffScrBits
+      rts
 
 SmallPlatformBoundBox:
       ldy #$08                 ;store bitmask here for now
@@ -12836,7 +12888,8 @@ CMBits: tya                         ;otherwise use contents of Y
         and Enemy_OffscreenBits     ;preserve bitwise whatever's in here
         sta EnemyOffscrBitsMasked,x ;save masked offscreen bits here
         bne MoveBoundBoxOffscreen   ;if anything set here, branch
-        jmp SetupEOffsetFBBox       ;otherwise, do something else
+        jsr SetupEOffsetFBBox       ;otherwise, do something else
+        rts
 
 LargePlatformBoundBox:
       inx                        ;increment X to get the proper offset
@@ -13018,7 +13071,8 @@ BlockBufferChk_Enemy:
       adc #$01
       tax
       pla        ;pull A from stack and jump elsewhere
-      jmp BBChk_E
+      jsr BBChk_E
+      rts
 
 ; ResidualMiscObjectCode:
 ;       txa
@@ -13060,7 +13114,8 @@ BlockBufferColli_Feet:
 
 BlockBufferColli_Head:
        lda #$00       ;set flag to return vertical coordinate
-       jmp BlockBufferColli_SideSkip ; .db $2c ;BIT instruction opcode
+       jsr BlockBufferColli_SideSkip ; .db $2c ;BIT instruction opcode
+       rts
 
 BlockBufferColli_Side:
        lda #$01       ;set flag to return horizontal coordinate
@@ -13447,7 +13502,7 @@ NotRsNum: lda Misc_Y_Position,x     ;get vertical coordinate
           sta Sprite_Tilenumber,y   ;put tile numbers into both sprites
           lda #$fb                  ;that resemble "200"
           sta Sprite_Tilenumber+4,y
-          jmp ExJCGfx               ;then jump to leave (why not an rts here instead?)
+          rts ; jmp ExJCGfx ;then jump to leave (why not an rts here instead?)
 
 JumpingCoinTiles:
       .db $60, $61, $62, $63
@@ -13478,7 +13533,7 @@ JCoinGfxHandler:
          lda #$82
          sta Sprite_Attributes+4,y   ;set attribute byte with vertical flip in second sprite
          ldx ObjectOffset            ;get misc object offset
-ExJCGfx: rts                         ;leave
+         rts                         ;leave
 
 ;-------------------------------------------------------------------------------------
 ;$00-$01 - used to hold tiles for drawing the power-up, $00 also used to hold power-up type
@@ -13551,7 +13606,8 @@ FlipPUpRightSide:
         lda Sprite_Attributes+12,y
         ora #%01000000             ;set horizontal flip bit for bottom right sprite
         sta Sprite_Attributes+12,y ;note these are only done for fire flower and star power-ups
-PUpOfs: jmp SprObjectOffscrChk     ;jump to check to see if power-up is offscreen at all, then leave
+PUpOfs: jsr SprObjectOffscrChk     ;jump to check to see if power-up is offscreen at all, then leave
+        rts
 
 ;-------------------------------------------------------------------------------------
 ;$00-$01 - used in DrawEnemyObjRow to hold sprite tile numbers
@@ -13906,7 +13962,8 @@ DrawEnemyObject:
       bne CheckForVerticalFlip   ;for bullet bill, branch if not found
 
 SkipToOffScrChk:
-      jmp SprObjectOffscrChk     ;jump if found
+      jsr SprObjectOffscrChk     ;jump if found
+      rts
 
 CheckForVerticalFlip:
       lda VerticalFlipFlag       ;check if vertical flip flag is set here
@@ -13953,7 +14010,8 @@ CheckForESymmetry:
         ldx $ec                     ;get alternate enemy state
         cmp #$05                    ;check for hammer bro object
         bne ContES
-        jmp SprObjectOffscrChk      ;jump if found
+        jsr SprObjectOffscrChk      ;jump if found
+        rts
 ContES: cmp #Bloober                ;check for bloober object
         beq MirrorEnemyGfx
         cmp #PiranhaPlant           ;check for piranha plant object
@@ -14084,14 +14142,16 @@ DrawEnemyObjRow:
 
 DrawOneSpriteRow:
       sta $01
-      jmp DrawSpriteObject        ;draw them
+      jsr DrawSpriteObject        ;draw them
+      rts
 
 MoveESprRowOffscreen:
       clc                         ;add A to enemy object OAM data offset
       adc Enemy_SprDataOffset,x
       tay                         ;use as offset
       lda #$f8
-      jmp DumpTwoSpr              ;move first row of sprites offscreen
+      jsr DumpTwoSpr              ;move first row of sprites offscreen
+      rts
 
 MoveESprColOffscreen:
       clc                         ;add A to enemy object OAM data offset
@@ -14667,11 +14727,13 @@ ActionSwimming:
 
 GetCurrentAnimOffset:
         lda PlayerAnimCtrl         ;get animation frame control
-        jmp GetOffsetFromAnimCtrl  ;jump to get proper offset to graphics table
+        jsr GetOffsetFromAnimCtrl  ;jump to get proper offset to graphics table
+        rts
 
 FourFrameExtent:
         lda #$03              ;load upper extent for frame control
-        jmp AnimationControl  ;jump to get offset and animate player object
+        jsr AnimationControl  ;jump to get offset and animate player object
+        rts
 
 ThreeFrameExtent:
         lda #$02              ;load upper extent for frame control for climbing
@@ -14778,13 +14840,15 @@ ExPlyrAt:  rts                         ;leave
 RelativePlayerPosition:
         ldx #$00      ;set offsets for relative cooordinates
         ldy #$00      ;routine to correspond to player object
-        jmp RelWOfs   ;get the coordinates
+        jsr RelWOfs   ;get the coordinates
+        rts
 
 RelativeBubblePosition:
         ldy #$01                ;set for air bubble offsets
         jsr GetProperObjOffset  ;modify X to get proper air bubble offset
         ldy #$03
-        jmp RelWOfs             ;get the coordinates
+        jsr RelWOfs             ;get the coordinates
+        rts
 
 RelativeFireballPosition:
          ldy #$00                    ;set for fireball offsets
@@ -14798,12 +14862,14 @@ RelativeMiscPosition:
         ldy #$02                ;set for misc object offsets
         jsr GetProperObjOffset  ;modify X to get proper misc object offset
         ldy #$06
-        jmp RelWOfs             ;get the coordinates
+        jsr RelWOfs             ;get the coordinates
+        rts
 
 RelativeEnemyPosition:
         lda #$01                     ;get coordinates of enemy object 
         ldy #$01                     ;relative to the screen
-        jmp VariableObjOfsRelPos
+        jsr VariableObjOfsRelPos
+        rts
 
 RelativeBlockPosition:
         lda #$09                     ;get coordinates of one block object
@@ -14838,25 +14904,29 @@ GetObjRelativePosition:
 GetPlayerOffscreenBits:
         ldx #$00                 ;set offsets for player-specific variables
         ldy #$00                 ;and get offscreen information about player
-        jmp GetOffScreenBitsSet
+        jsr GetOffScreenBitsSet
+        rts
 
 GetFireballOffscreenBits:
         ldy #$00                 ;set for fireball offsets
         jsr GetProperObjOffset   ;modify X to get proper fireball offset
         ldy #$02                 ;set other offset for fireball's offscreen bits
-        jmp GetOffScreenBitsSet  ;and get offscreen information about fireball
+        jsr GetOffScreenBitsSet  ;and get offscreen information about fireball
+        rts
 
 GetBubbleOffscreenBits:
         ldy #$01                 ;set for air bubble offsets
         jsr GetProperObjOffset   ;modify X to get proper air bubble offset
         ldy #$03                 ;set other offset for airbubble's offscreen bits
-        jmp GetOffScreenBitsSet  ;and get offscreen information about air bubble
+        jsr GetOffScreenBitsSet  ;and get offscreen information about air bubble
+        rts
 
 GetMiscOffscreenBits:
         ldy #$02                 ;set for misc object offsets
         jsr GetProperObjOffset   ;modify X to get proper misc object offset
         ldy #$06                 ;set other offset for misc object's offscreen bits
-        jmp GetOffScreenBitsSet  ;and get offscreen information about misc object
+        jsr GetOffScreenBitsSet  ;and get offscreen information about misc object
+        rts
 
 ObjOffsetData:
         .db $07, $16, $0d
@@ -14871,7 +14941,8 @@ GetProperObjOffset:
 GetEnemyOffscreenBits:
         lda #$01                 ;set A to add 1 byte in order to get enemy offset
         ldy #$01                 ;set Y to put offscreen bits in Enemy_OffscreenBits
-        jmp SetOffscrBitsOffset
+        jsr SetOffscrBitsOffset
+        rts
 
 GetBlockOffscreenBits:
         lda #$09       ;set A to add 9 bytes in order to get block obj offset

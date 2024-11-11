@@ -13,3 +13,5 @@ smb.dSYM
 .clangd
 .DS_Store
 *.dSYM
+*.dot
+*.svg
