@@ -7,7 +7,6 @@ on:
   pull_request:
     branches:
       - main  # Also run on PRs targeting main
-  workflow_dispatch:
 
 jobs:
   build-and-deploy:
@@ -36,3 +35,4 @@ jobs:
           folder: dist
           branch: gh-pages
           clean: true  # Automatically remove deleted files from the deploy branch
+          token: ${{ secrets.GITHUB_TOKEN }}
