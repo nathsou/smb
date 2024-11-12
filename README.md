@@ -1,8 +1,18 @@
 # SMB
 
+[Play it online](https://nathsou.github.io/smb/)
+
 Static recompilation of Super Mario Bros. using [doppelganger's disassembly](https://www.romhacking.net/documents/344/)
 
-![SMB C port running in the browser](res/smb-demo.png)
+[![SMB C port running in the browser](res/smb-demo.png)](https://nathsou.github.io/smb)
+
+## Controls
+
+- D-Pad: WASD
+- B: K
+- A: L
+- start: Enter
+- select: Space
 
 ## Checkpoints
 
