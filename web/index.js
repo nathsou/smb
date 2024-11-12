@@ -1,6 +1,6 @@
 const SCREEN_WIDTH = 256;
 const SCREEN_HEIGHT = 240;
-const AUDIO_CHUNK_SIZE = 2048;
+const AUDIO_CHUNK_SIZE = 1024;
 
 function createCanvas() {
     const canvas = document.createElement('canvas');
@@ -347,17 +347,31 @@ async function main() {
 
     smb(0);
 
+    let lastFrameTime = performance.now();
+    let currentFrameTime = lastFrameTime;
+    let lastUpdateTime = lastFrameTime;
+    const targetFrameTime = 1000 / 60;
+
     const update = () => {
-        updateController1(joypad1.getState());
-        smb(1);
-        stepAPUFrame();
+        const currentTime = performance.now();
+        const delta = currentTime - lastUpdateTime;
+        currentFrameTime += delta;
+        lastUpdateTime = currentTime;
         
-        if (audioInitialized) {
-            processAudio();
+        if (currentFrameTime >= targetFrameTime) {
+            updateController1(joypad1.getState());
+            smb(1);
+            stepAPUFrame();
+            
+            if (audioInitialized) {
+                processAudio();
+            }
+            
+            renderPPU();
+            renderFrame();
+            lastFrameTime = currentTime;
+            currentFrameTime = currentFrameTime - targetFrameTime;
         }
-        
-        renderPPU();
-        renderFrame();
         
         requestAnimationFrame(update);
     };
