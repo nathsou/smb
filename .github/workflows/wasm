@@ -3,7 +3,10 @@ name: Build and Deploy WASM
 on:
   push:
     branches:
-      - main  # or master, depending on your default branch
+      - '**'  # Matches all branches
+  pull_request:
+    branches:
+      - main  # Also run on PRs targeting main
   workflow_dispatch:
 
 jobs:
