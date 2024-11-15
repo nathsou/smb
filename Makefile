@@ -3,6 +3,7 @@ CC = clang
 CFLAGS = -g -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function -Wno-unused-value -Wconversion -Wsign-conversion -Wno-missing-braces
 CFLAGS += -I./raylib-quickstart/build/external/raylib-master/src
 CFLAGS += -O3 -std=c99
+CFLAGS += -ferror-limit=0
 
 # Platform-specific flags
 UNAME_S := $(shell uname -s)

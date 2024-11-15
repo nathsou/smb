@@ -285,7 +285,7 @@ fn collect_instructions(self: AsmLowering) -> Unit!LoweringError {
   }
 }
 
-struct JumpTargets {
+pub struct JumpTargets {
   jump_targets: Set[String]
   subroutines: Set[String]
   externals: Set[String]
@@ -308,6 +308,12 @@ fn collect_jump_targets(self: AsmLowering) -> Unit {
       JumpEngine(~jump_table) => {
         for label in jump_table {
           self.targets.subroutines.insert(label)
+        }
+      }
+      Label(name) => {
+        // manually annotated subroutines
+        if name.ends_with("__sub") {
+          self.targets.subroutines.insert(name)
         }
       }
       _ => ()
