@@ -1,4 +1,6 @@
 
+const GEN_FUNCS = false
+
 pub struct Emitter {
   output: StringBuilder
   mut indentation: Int
@@ -177,8 +179,8 @@ fn emit_code_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("void smb(RunState state);")
   self.emit("")
 
-  for sub in low.subroutines {
-    if sub.is_self_contained {
+  if GEN_FUNCS {
+    for sub in low.subroutines {
       self.emit("void \{sub.name}(void);")
     }
   }
@@ -188,25 +190,25 @@ fn emit_code_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#endif")
 }
 
-fn gen_jump(target: String, low: @lower.AsmLowering) -> String {
-  if low.self_contained_subroutine_labels.contains(target) {
-    "\{target}(); goto rts;"
+fn gen_jump(target: String, low: @lower.AsmLowering, bb: @lower.BasicBlock) -> String {
+  if GEN_FUNCS && low.targets.subroutines.contains(target) {
+    "\{target}(); return;"
   } else {
     "goto \{target};"
   }
 }
 
-fn emit_item(self: Emitter, item: @lower.AsmItem, bb: @lower.BasicBlock, low: @lower.AsmLowering) -> Unit {
+fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering, bb: @lower.BasicBlock) -> Unit {
     match item {
       Label(name) => {
         // do not output labels for subroutines
-        let is_standalone_subroutine_label = match bb.subroutine { Some(sub) => sub.is_self_contained && sub.name == name; _ => false }
+        // let is_standalone_subroutine_label = match bb.subroutine { Some(sub) => sub.is_self_contained && sub.name == name; _ => false }
         
-        if not(is_standalone_subroutine_label) {
+        // if not(is_standalone_subroutine_label) {
           self.indentation = 1
           self.emit("\n\{name}:")
           self.indentation = 2
-        }
+        // }
       }
       Inst(~op, ~mode, ~comment) => {
         let stmt = match (op, mode) {
@@ -268,10 +270,10 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, bb: @lower.BasicBlock, low: @l
                   _ => abort("unreachable")
                 }
 
-                "if (\{cond}) { \{gen_jump(target, low)} }"
+                "if (\{cond}) { \{gen_jump(target, low, bb)} }"
               }
               (JMP, _) => {
-                gen_jump(args, low)
+                gen_jump(args, low, bb)
               }
               (JSR, _) => {
                 let target = match mode {
@@ -279,7 +281,7 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, bb: @lower.BasicBlock, low: @l
                   _ => ""
                 }
 
-                if low.self_contained_subroutine_labels.contains(target) {
+                if GEN_FUNCS {
                   "\{target}();"
                 } else {
                   self.jsr_return_index += 1
@@ -287,15 +289,10 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, bb: @lower.BasicBlock, low: @l
                 }
               }
               (RTS, _) => {
-                match bb.subroutine {
-                  Some(sub) => {
-                    if low.self_contained_subroutine_labels.contains(sub.name) {
-                      "return; // <rts>"
-                    } else {
-                      "goto rts;"
-                    }
-                  }
-                  None => "goto rts;"
+                if GEN_FUNCS {
+                  "return;"
+                } else {
+                  "goto rts;"
                 }
               }
               _ => "\{op.to_string().to_lower()}\{mode.suffix()}(\{args});"
@@ -321,7 +318,7 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, bb: @lower.BasicBlock, low: @l
         self.indentation += 1
 
         for idx, label in jump_table {
-          self.emit("case \{idx}: \{gen_jump(label, low)}")
+          self.emit("case \{idx}: \{gen_jump(label, low, bb)}")
         }
 
         self.indentation -= 1
@@ -332,7 +329,7 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, bb: @lower.BasicBlock, low: @l
 
 fn emit_basic_block(self: Emitter, bb: @lower.BasicBlock, low: @lower.AsmLowering) -> Unit {
   for item in bb.items {
-    self.emit_item(item, bb, low)
+    self.emit_item(item, low, bb)
   }
 }
 
@@ -357,13 +354,15 @@ self.emit("#include \"code.h\"")
 
   self.emit("switch (state) {")
   self.indentation += 1
-  self.emit("case RUN_STATE_RESET: goto Start;")
-  self.emit("case RUN_STATE_NMI_HANDLER: goto NonMaskableInterrupt;")
+  let goto_start = if GEN_FUNCS { "Start();" } else { "goto Start;" }
+  let goto_nmi = if GEN_FUNCS { "NonMaskableInterrupt();" } else { "goto NonMaskableInterrupt;" }
+  self.emit("case RUN_STATE_RESET: \{goto_start}")
+  self.emit("case RUN_STATE_NMI_HANDLER: \{goto_nmi}")
   self.indentation -= 1
   self.emit("}")
   
-  for bb in low.basic_blocks {
-    if bb.subroutine.is_empty() || not(low.self_contained_subroutine_labels.contains(bb.subroutine.unwrap().name)) {
+  if not(GEN_FUNCS) {
+    for bb in low.basic_blocks {
       self.emit_basic_block(bb, low)
     }
   }
@@ -386,8 +385,8 @@ self.emit("#include \"code.h\"")
 
   self.emit("")
 
-  for sub in low.subroutines {
-    if sub.is_self_contained {
+  if GEN_FUNCS {
+    for sub in low.subroutines {
       self.emit_subroutine(sub, low)
     }
   }
