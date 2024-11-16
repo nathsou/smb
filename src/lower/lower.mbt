@@ -377,13 +377,18 @@ fn collect_basic_block_leaders(self: AsmLowering) -> Array[Int] {
   leader_indices
 }
 
-fn last_non_comment_item(self: BasicBlock) -> AsmItem? {
+struct ItemInfo {
+  item: AsmItem
+  index: Int
+}
+
+fn last_non_comment_item(self: BasicBlock) -> ItemInfo? {
   let mut i = self.items.length() - 1
 
   while i >= 0 {
     match self.items[i] {
       Comment(_) => ()
-      item => return Some(item)
+      item => return Some({ item, index: i })
     }
 
     i -= 1
@@ -395,7 +400,7 @@ fn last_non_comment_item(self: BasicBlock) -> AsmItem? {
 fn has_fallthrough(self: BasicBlock) -> Bool!LoweringError {
   let last_item = self.last_non_comment_item().or_error!(LoweringError("Empty basic block"))
 
-  match last_item {
+  match last_item.item {
     Inst(~op, ..) => {
       match op {
         RTI | RTS | BRK | JMP => false
@@ -454,7 +459,7 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
   for bb in self.basic_blocks {
     let last_item = bb.last_non_comment_item().or_error!(LoweringError("Empty basic block"))
 
-    match last_item {
+    match last_item.item {
       Inst(
         op=JMP | BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS,
         mode=Relative(Ident(name=label, ..)) | Absolute(Ident(name=label, ..)),
@@ -562,7 +567,7 @@ fn rewrite_bb(self: AsmLowering, bb: BasicBlock, visited: Set[Int]) -> Unit!Lowe
                 let prev_bb = sub.blocks[sub.blocks.length() - 1]
                 if prev_bb.successors.length() > 0 && prev_bb.has_fallthrough!() {
                   prev_bb.items.push(Inst(op=JSR, mode=Absolute(Ident(name=next_name, ty=LabelTy)), comment=Some("<fallthrough>")))
-                  prev_bb.items.push(Inst(op=RTS, mode=Implied, comment=Some("<fallthrough>")))
+                  prev_bb.items.push(Inst(op=RTS, mode=Implied, comment=None))
                 }
                 break
               }
@@ -633,10 +638,25 @@ fn collect_connected_components(self: AsmLowering) -> Array[Array[BasicBlock]] {
   components
 }
 
+fn remove_unused_rts(self: AsmLowering) -> Unit!LoweringError {
+  for sub in self.subroutines {
+    let last_bb = sub.exit
+    let last_item = last_bb.last_non_comment_item().or_error!(LoweringError("Empty basic block"))
+
+    match last_item.item {
+      Inst(op=RTS, ..) => {
+        let _ = sub.exit.items.remove(last_item.index)
+      }
+      _ => ()
+    }
+  }
+}
+
 pub fn lower(self: AsmLowering) -> Unit!LoweringError {
   self.collect_labels_and_tables!()
   self.collect_defines!()
   self.collect_instructions!()
   self.collect_basic_blocks!()
   self.collect_subroutines!()
+  self.remove_unused_rts!()
 }

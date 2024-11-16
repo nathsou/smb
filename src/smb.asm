@@ -854,10 +854,10 @@ PauseRoutine:
                cmp #VictoryModeValue  ;if so, go ahead
                beq ChkPauseTimer
                cmp #GameModeValue     ;are we in game mode?
-               bne ExitPause          ;if not, leave
+               bne __ret__            ;if not, leave
                lda OperMode_Task      ;if we are in game mode, are we running game engine?
                cmp #$03
-               bne ExitPause          ;if not, leave
+               bne __ret__            ;if not, leave
 ChkPauseTimer: lda GamePauseTimer     ;check if pause timer is still counting down
                beq ChkStart
                dec GamePauseTimer     ;if so, decrement and leave
@@ -867,7 +867,7 @@ ChkStart:      lda SavedJoypad1Bits   ;check to see if start is pressed
                beq ClrPauseTimer
                lda GamePauseStatus    ;check to see if timer flag is set
                and #%10000000         ;and if so, do not reset timer (residual,
-               bne ExitPause          ;joypad reading routine makes this unnecessary)
+               bne __ret__            ;joypad reading routine makes this unnecessary)
                lda #$2b               ;set pause timer
                sta GamePauseTimer
                lda GamePauseStatus
@@ -880,7 +880,7 @@ ChkStart:      lda SavedJoypad1Bits   ;check to see if start is pressed
 ClrPauseTimer: lda GamePauseStatus    ;clear timer flag if timer is at zero and start button
                and #%01111111         ;is not pressed
 SetPause:      sta GamePauseStatus
-ExitPause:     rts
+               rts
 
 ;-------------------------------------------------------------------------------------
 ;$00 - used for preset value
@@ -1031,7 +1031,7 @@ NullJoypad:   lda #$00                    ;clear joypad bits for player 1
 RunDemo:      jsr GameCoreRoutine         ;run game engine
               lda GameEngineSubroutine    ;check to see if we're running lose life routine
               cmp #$06
-              bne ExitMenu                ;if not, do not do all the resetting below
+              bne __ret__                 ;if not, do not do all the resetting below
 ResetTitle:   lda #$00                    ;reset game modes, disable
               sta OperMode                ;sprite 0 check and disable
               sta OperMode_Task           ;screen output
@@ -1059,7 +1059,7 @@ StartWorld1:  jsr LoadAreaPointer
 InitScores:   sta ScoreAndCoinDisplay,x   ;clear player scores and coin displays
               dex
               bpl InitScores
-ExitMenu:     rts
+              rts
 GoContinue:   sta WorldNumber             ;start both players at the first area
               sta OffScr_WorldNumber      ;of the previously saved world number
               ldx #$00                    ;note that on power-up using this function
@@ -1079,12 +1079,12 @@ IconDataRead: lda MushroomIconData,y  ;note that the default position is set for
               dey
               bpl IconDataRead
               lda NumberOfPlayers     ;check number of players
-              beq ExitIcon            ;if set to 1-player game, we're done
+              beq __ret__             ;if set to 1-player game, we're done
               lda #$24                ;otherwise, load blank tile in 1-player position
               sta VRAM_Buffer1+3
               lda #$ce                ;then load shroom icon tile in 2-player position
               sta VRAM_Buffer1+5
-ExitIcon:     rts
+              rts
 
 ;-------------------------------------------------------------------------------------
 
@@ -1107,12 +1107,12 @@ DemoEngine:
           sec                    ;set carry by default for demo over
           lda DemoTimingData-1,x ;get next timer
           sta DemoActionTimer    ;store as current timer
-          beq DemoOver           ;if timer already at zero, skip
+          beq __ret__            ;if timer already at zero, skip
 DoAction: lda DemoActionData-1,x ;get and perform action (current or next)
           sta SavedJoypad1Bits
           dec DemoActionTimer    ;decrement action timer
           clc                    ;clear carry if demo still going
-DemoOver: rts
+          rts
 
 ;-------------------------------------------------------------------------------------
 
@@ -1228,11 +1228,11 @@ IncMsgCounter: lda SecondaryMsgCounter
                adc #$00                      ;add carry to primary message counter
                sta PrimaryMsgCounter
                cmp #$07                      ;check primary counter one more time
-SetEndTimer:   bcc ExitMsgs                  ;if not reached value yet, branch to leave
+SetEndTimer:   bcc __ret__                   ;if not reached value yet, branch to leave
                lda #$06
                sta WorldEndTimer             ;otherwise set world end timer
                jsr IncModeTask_A__sub
-ExitMsgs:      rts
+               rts
 
 
 IncModeTask_A__sub: inc OperMode_Task             ;move onto next task in mode
@@ -1259,13 +1259,13 @@ EndExitOne:    rts                        ;and leave
 EndChkBButton: lda SavedJoypad1Bits
                ora SavedJoypad2Bits       ;check to see if B button was pressed on
                and #B_Button              ;either controller
-               beq EndExitTwo             ;branch to leave if not
+               beq __ret__                ;branch to leave if not
                lda #$01                   ;otherwise set world selection flag
                sta WorldSelectEnableFlag
                lda #$ff                   ;remove onscreen player's lives
                sta NumberofLives
                jsr TerminateGame          ;do sub to continue other player or end game
-EndExitTwo:    rts                        ;leave
+               rts                        ;leave
 
 ;-------------------------------------------------------------------------------------
 
@@ -1294,7 +1294,7 @@ ScoreUpdateData:
 
 FloateyNumbersRoutine:
               lda FloateyNum_Control,x     ;load control for floatey number
-              beq FloateyNumbersRoutineExit ;if zero, branch to leave
+              beq __ret__                  ;if zero, branch to leave
               cmp #$0b                     ;if less than $0b, branch
               bcc ChkNumTimer
               lda #$0b                     ;otherwise set to $0b, thus keeping
@@ -1366,7 +1366,6 @@ SetupNumSpr:  lda FloateyNum_Y_Pos,x       ;get vertical coordinate
               lda FloateyNumTileData+1,x
               sta Sprite_Tilenumber+4,y    ;display the second half
               ldx ObjectOffset             ;get enemy object offset and leave
-FloateyNumbersRoutineExit:
               rts
 
 ;-------------------------------------------------------------------------------------
@@ -1824,10 +1823,9 @@ WarpNumLoop: lda WarpZoneNumbers,x  ;print warp zone numbers into the
 
 ResetSpritesAndScreenTimer:
          lda ScreenTimer             ;check if screen timer has expired
-         bne NoReset                 ;if not, branch to leave
+         bne __ret__                 ;if not, branch to leave
          jsr MoveAllSpritesOffscreen ;otherwise reset sprites now
          jsr ResetScreenTimer
-NoReset:
          rts
 
 ResetScreenTimer:
@@ -2008,10 +2006,10 @@ Palette3Data:
 ColorRotation:
               lda FrameCounter         ;get frame counter
               and #$07                 ;mask out all but three LSB
-              bne ExitColorRot         ;branch if not set to zero to do this every eighth frame
+              bne __ret__              ;branch if not set to zero to do this every eighth frame
               ldx VRAM_Buffer1_Offset  ;check vram buffer offset
               cpx #$31
-              bcs ExitColorRot         ;if offset over 48 bytes, branch to leave
+              bcs __ret__         ;if offset over 48 bytes, branch to leave
               tay                      ;otherwise use frame counter's 3 LSB as offset here
 GetBlankPal:  lda BlankPalette,y       ;get blank palette for palette 3
               sta VRAM_Buffer1,x       ;store it in the vram buffer
@@ -2043,10 +2041,10 @@ GetAreaPal:   lda Palette3Data,y       ;fetch palette to be written based on are
               inc ColorRotateOffset    ;increment color cycling offset
               lda ColorRotateOffset
               cmp #$06                 ;check to see if it's still in range
-              bcc ExitColorRot         ;if so, branch to leave
+              bcc __ret__              ;if so, branch to leave
               lda #$00
               sta ColorRotateOffset    ;otherwise, init to keep it in range
-ExitColorRot: rts                      ;leave
+              rts                      ;leave
 
 ;-------------------------------------------------------------------------------------
 ;$00 - temp store for offset control bit
@@ -2607,7 +2605,7 @@ OutputNumbers:
              adc #$01
              and #%00001111           ;mask out high nybble
              cmp #$06
-             bcs ExitOutputN
+             bcs __ret__
              pha                      ;save incremented value to stack for now and
              asl                      ;shift to left and use as offset
              tay
@@ -2642,7 +2640,7 @@ DigitPLoop:  lda DisplayDigits,y      ;write digits to the buffer
              inx
              inx
              stx VRAM_Buffer1_Offset  ;store it in case we want to use it again
-ExitOutputN: rts
+             rts
 
 ;-------------------------------------------------------------------------------------
 
@@ -2692,7 +2690,7 @@ GetScoreDiff: lda PlayerScoreDisplay,x ;subtract each player digit from each hig
               dex                      ;any player digit, borrow will be set until a subsequent
               dey                      ;subtraction clears it (player digit is higher than top)
               bpl GetScoreDiff
-              bcc NoTopSc              ;check to see if borrow is still set, if so, no new high score
+              bcc __ret__              ;check to see if borrow is still set, if so, no new high score
               inx                      ;increment X and Y once to the start of the score
               iny
 CopyScore:    lda PlayerScoreDisplay,x ;store player's score digits into high score memory area
@@ -2701,7 +2699,7 @@ CopyScore:    lda PlayerScoreDisplay,x ;store player's score digits into high sc
               iny
               cpy #$06                 ;do this until we have stored them all
               bcc CopyScore
-NoTopSc:      rts
+              rts
 
 ;-------------------------------------------------------------------------------------
 
@@ -2860,7 +2858,7 @@ MusicSelectData:
 
 GetAreaMusic:
              lda OperMode           ;if in title screen mode, leave
-             beq ExitGetM
+             beq __ret__
              lda AltEntranceControl ;check for specific alternate mode of entry
              cmp #$02               ;if found, branch without checking starting position
              beq ChkAreaType        ;from area object data header
@@ -2876,7 +2874,7 @@ ChkAreaType: ldy AreaType           ;load area type as offset for music bit
              ldy #$04               ;select music for cloud type level if found
 StoreMusic:  lda MusicSelectData,y  ;otherwise select appropriate music for level type
              sta AreaMusicQueue     ;store in queue and leave
-ExitGetM:    rts
+             rts
 
 ;-------------------------------------------------------------------------------------
 
@@ -3041,9 +3039,8 @@ RunGameOver:
       and #Start_Button
       bne TerminateGame
       lda ScreenTimer       ;if not pressed, wait for
-      bne GameIsOn          ;screen timer to expire
+      bne __ret__           ;screen timer to expire
       jsr TerminateGame
-GameIsOn:
       rts
 
 TerminateGame:
@@ -3077,9 +3074,9 @@ ContinueGame:
 TransposePlayers:
            sec                       ;set carry flag by default to end game
            lda NumberOfPlayers       ;if only a 1 player game, leave
-           beq ExTrans
+           beq __ret__
            lda OffScr_NumberofLives  ;does offscreen player have any lives left?
-           bmi ExTrans               ;branch if not
+           bmi __ret__               ;branch if not
            lda CurrentPlayer         ;invert bit to update
            eor #%00000001            ;which player is on the screen
            sta CurrentPlayer
@@ -3093,7 +3090,7 @@ TransLoop: lda OnscreenPlayerInfo,x    ;transpose the information
            dex
            bpl TransLoop
            clc            ;clear carry flag to get game going
-ExTrans:   rts
+           rts
 
 ;-------------------------------------------------------------------------------------
 
@@ -3114,9 +3111,9 @@ DoAPTasks:    dey
               tya
               jsr AreaParserTasks
               dec AreaParserTaskNum     ;if all tasks not complete do not
-              bne SkipATRender          ;render attribute table yet
+              bne __ret__          ;render attribute table yet
               jsr RenderAttributeTables
-SkipATRender: rts
+              rts
 
 AreaParserTasks:
       jsr JumpEngine
@@ -3821,7 +3818,7 @@ ChkCFloor:  cpx #$0b                 ;have we reached the row just before floor?
             pla
             tax                      ;get obj buffer offset from before
             lda CurrentPageLoc
-            beq ExitCastle           ;if we're at page 0, we do not need to do anything else
+            beq __ret__           ;if we're at page 0, we do not need to do anything else
             lda AreaObjectLength,x   ;check length
             cmp #$01                 ;if length almost about to expire, put brick at floor
             beq PlayerStop
@@ -3830,7 +3827,7 @@ ChkCFloor:  cpx #$0b                 ;have we reached the row just before floor?
             cmp #$03                 ;if found, then check to see if we're at the second column
             beq PlayerStop
 NotTall:    cmp #$02                 ;if not tall castle, check to see if we're at the third column
-            bne ExitCastle           ;if we aren't and the castle is tall, don't create flag yet
+            bne __ret__           ;if we aren't and the castle is tall, don't create flag yet
             jsr GetAreaObjXPosition  ;otherwise, obtain and save horizontal pixel coordinate
             pha
             jsr FindEmptyEnemySlot   ;find an empty place on the enemy object buffer
@@ -3848,7 +3845,7 @@ NotTall:    cmp #$02                 ;if not tall castle, check to see if we're 
             rts
 PlayerStop: ldy #$52                 ;put brick at floor to stop player at end of level
             sty MetatileBuffer+10    ;this is only done if we're on the second column
-ExitCastle: rts
+            rts
 
 ;--------------------------------
 
@@ -3872,7 +3869,7 @@ IntroPipe:
                jsr ChkLrgObjFixedLength
                ldy #$0a                 ;set fixed value and render the sideways part
                jsr RenderSidewaysPipe
-               bcs NoBlankP             ;if carry flag set, not time to draw vertical pipe part
+               bcs __ret__             ;if carry flag set, not time to draw vertical pipe part
                ldx #$06                 ;blank everything above the vertical pipe part
 VPipeSectLoop: lda #$00                 ;all the way to the top of the screen
                sta MetatileBuffer,x     ;because otherwise it will look like exit pipe
@@ -3880,7 +3877,7 @@ VPipeSectLoop: lda #$00                 ;all the way to the top of the screen
                bpl VPipeSectLoop
                lda VerticalPipeData,y   ;draw the end of the vertical pipe part
                sta MetatileBuffer+7
-NoBlankP:      rts
+               rts
 
 SidePipeShaftData:
       .db $15, $14  ;used to control whether or not vertical pipe shaft
@@ -3983,11 +3980,11 @@ FindEmptyEnemySlot:
               ldx #$00          ;start at first enemy slot
 EmptyChkLoop: clc               ;clear carry flag by default
               lda Enemy_Flag,x  ;check enemy buffer for nonzero
-              beq ExitEmptyChk  ;if zero, leave
+              beq __ret__       ;if zero, leave
               inx
               cpx #$05          ;if nonzero, check next value
               bne EmptyChkLoop
-ExitEmptyChk: rts               ;if all values nonzero, carry flag is set
+              rts               ;if all values nonzero, carry flag is set
 
 ;--------------------------------
 
@@ -4278,11 +4275,10 @@ Jumpspring:
 
 Hidden1UpBlock:
       lda Hidden1UpFlag  ;if flag not set, do not render object
-      beq ExitHidden1UpBlock
+      beq __ret__
       lda #$00           ;if set, init for the next one
       sta Hidden1UpFlag
       jsr BrickWithItem  ;jump to code shared with unbreakable bricks
-ExitHidden1UpBlock:
       rts
 
 QuestionBlock:
@@ -4375,11 +4371,11 @@ RenderUnderPart:
 DrawThisRow: sta MetatileBuffer,x  ;render contents of A from routine that called this
 WaitOneRow:  inx
              cpx #$0d              ;stop rendering if we're at the bottom of the screen
-             bcs ExitUPartR
+             bcs __ret__
              ldy AreaObjectHeight  ;decrement, and stop rendering if there is no more length
              dey
              bpl RenderUnderPart
-ExitUPartR:  rts
+             rts
 
 ;--------------------------------
 
@@ -4389,11 +4385,11 @@ ChkLrgObjLength:
 ChkLrgObjFixedLength:
         lda AreaObjectLength,x  ;check for set length counter
         clc                     ;clear carry flag for not just starting
-        bpl LenSet              ;if counter not set, load it, otherwise leave alone
+        bpl __ret__              ;if counter not set, load it, otherwise leave alone
         tya                     ;save length into length counter
         sta AreaObjectLength,x
         sec                     ;set carry flag if just starting
-LenSet: rts
+        rts
 
 
 GetLrgObjAttrib:
@@ -5470,19 +5466,19 @@ SaveAB:       lda A_B_Buttons            ;save current A and B button
               sta Left_Right_Buttons     ;nullify left and right buttons temp variable
 UpdScrollVar: lda VRAM_Buffer_AddrCtrl
               cmp #$06                   ;if vram address controller set to 6 (one of two $0341s)
-              beq ExitEng                ;then branch to leave
+              beq __ret__                ;then branch to leave
               lda AreaParserTaskNum      ;otherwise check number of tasks
               bne RunParser
               lda ScrollThirtyTwo        ;get horizontal scroll in 0-31 or $00-$20 range
               cmp #$20                   ;check to see if exceeded $21
-              bmi ExitEng                ;branch to leave if not
+              bmi __ret__                ;branch to leave if not
               lda ScrollThirtyTwo
               sbc #$20                   ;otherwise subtract $20 to set appropriately
               sta ScrollThirtyTwo        ;and store
               lda #$00                   ;reset vram buffer offset used in conjunction with
               sta VRAM_Buffer2_Offset    ;level graphics buffer at $0341-$035f
 RunParser:    jsr AreaParserTaskHandler  ;update the name table with more level graphics
-ExitEng:      rts                        ;and after all that, we're finally done!
+              rts                        ;and after all that, we're finally done!
 
 ;-------------------------------------------------------------------------------------
 
@@ -5623,7 +5619,7 @@ ChkBehPipe: lda Player_SprAttrib      ;check for sprite attributes
             jmp AutoControlPlayer     ;force player to walk to the right
 IntroEntr:  jsr EnterSidePipe         ;execute sub to move player to the right
             dec ChangeAreaTimer       ;decrement timer for change of area
-            bne ExitEntr              ;branch to exit if not yet expired
+            bne __ret__              ;branch to exit if not yet expired
             inc DisableIntermediate   ;set flag to skip world and lives display
             jsr NextArea              ;jump to increment to next area and set modes
             rts
@@ -5637,7 +5633,7 @@ EntrMode2:  lda JoypadOverride        ;if controller override bits set here,
             rts                       ;to the last part, otherwise leave
 VineEntr:   lda VineHeight
             cmp #$60                  ;check vine height
-            bne ExitEntr              ;if vine not yet reached maximum height, branch to leave
+            bne __ret__              ;if vine not yet reached maximum height, branch to leave
             lda Player_Y_Position     ;get player's vertical coordinate
             cmp #$99                  ;check player's vertical coordinate against preset value
             ldy #$00                  ;load default values to be written to
@@ -5652,7 +5648,7 @@ OffVine:    sty DisableCollisionDet   ;set collision detection disable flag
             jsr AutoControlPlayer     ;use contents of A to move player up or right, execute sub
             lda Player_X_Position
             cmp #$48                  ;check player's horizontal position
-            bcc ExitEntr              ;if not far enough to the right, branch to leave
+            bcc __ret__              ;if not far enough to the right, branch to leave
 PlayerRdy:  lda #$08                  ;set routine to be executed by game engine next frame
             sta GameEngineSubroutine
             lda #$01                  ;set to face player to the right
@@ -5661,7 +5657,7 @@ PlayerRdy:  lda #$08                  ;set routine to be executed by game engine
             sta AltEntranceControl    ;init mode of entry
             sta DisableCollisionDet   ;init collision detection disable flag
             sta JoypadOverride        ;nullify controller override bits
-ExitEntr:   rts                       ;leave!
+            rts                       ;leave!
 
 ;-------------------------------------------------------------------------------------
 ;$07 - used to hold upper limit of high byte when player falls down hole
@@ -5851,9 +5847,9 @@ PlayerChangeSize:
              jsr InitChangeSize  ;otherwise run code to get growing/shrinking going
              rts
 EndChgSize:  cmp #$c4            ;check again for another specific moment
-             bne ExitChgSize     ;and branch to leave if before or after that point
+             bne __ret__     ;and branch to leave if before or after that point
              jsr DonePlayerTask  ;otherwise do sub to init timer control and set routine
-ExitChgSize: rts                 ;and then leave
+             rts                 ;and then leave
 
 ;-------------------------------------------------------------------------------------
 
@@ -5995,7 +5991,7 @@ PlayerMovementSubs:
 SetCrouch: sta CrouchingFlag         ;store value in crouch flag
 ProcMove:  jsr PlayerPhysicsSub      ;run sub related to jumping and swimming
            lda PlayerChangeSizeFlag  ;if growing/shrinking flag set,
-           bne NoMoveSub             ;branch to leave
+           bne __ret__               ;branch to leave
            lda Player_State
            cmp #$03                  ;get player state
            beq MoveSubs              ;if climbing, branch ahead, leave timer unset
@@ -6008,7 +6004,7 @@ MoveSubs:  jsr JumpEngine
       .dw FallingSub
       .dw ClimbingSub
 
-NoMoveSub: rts
+      rts
 
 ;-------------------------------------------------------------------------------------
 ;$00 - used by ClimbingSub to store high vertical adder
@@ -6299,10 +6295,10 @@ GetXPhy2:  lda MaxRightXSpdData,y     ;get maximum speed to the right
            sta FrictionAdderHigh      ;init something here
            lda PlayerFacingDir
            cmp Player_MovingDir       ;check facing direction against moving direction
-           beq ExitPhy                ;if the same, branch to leave
+           beq __ret__                ;if the same, branch to leave
            asl FrictionAdderLow       ;otherwise shift d7 of friction adder low into carry
            rol FrictionAdderHigh      ;then rotate carry onto d0 of friction adder high
-ExitPhy:   rts                        ;and then leave
+           rts                        ;and then leave
 
 ;-------------------------------------------------------------------------------------
 
@@ -6427,7 +6423,7 @@ ProcFireballs:
 
 ProcAirBubbles:
           lda AreaType                ;if not water type level, skip the rest of this
-          bne BublExit
+          bne __ret__
           ldx #$02                    ;otherwise load counter and use as offset
 BublLoop: stx ObjectOffset            ;store offset
           jsr BubbleCheck             ;check timers and coordinates, create air bubble
@@ -6436,7 +6432,7 @@ BublLoop: stx ObjectOffset            ;store offset
           jsr DrawBubble              ;draw the air bubble
           dex
           bpl BublLoop                ;do this until all three are handled
-BublExit: rts                         ;then leave
+          rts                         ;then leave
 
 FireballXSpdData:
       .db $40, $c0
@@ -6555,17 +6551,17 @@ BubbleTimerData:
 
 RunGameTimer:
            lda OperMode               ;get primary mode of operation
-           beq ExGTimer               ;branch to leave if in title screen mode
+           beq __ret__               ;branch to leave if in title screen mode
            lda GameEngineSubroutine
            cmp #$08                   ;if routine number less than eight running,
-           bcc ExGTimer               ;branch to leave
+           bcc __ret__               ;branch to leave
            cmp #$0b                   ;if running death routine,
-           beq ExGTimer               ;branch to leave
+           beq __ret__               ;branch to leave
            lda Player_Y_HighPos
            cmp #$02                   ;if player below the screen,
-           bcs ExGTimer               ;branch to leave regardless of level type
+           bcs __ret__               ;branch to leave regardless of level type
            lda GameTimerCtrlTimer     ;if game timer control not yet expired,
-           bne ExGTimer               ;branch to leave
+           bne __ret__               ;branch to leave
            lda GameTimerDisplay
            ora GameTimerDisplay+1     ;otherwise check game timer digits
            ora GameTimerDisplay+2
@@ -6589,20 +6585,19 @@ ResGTCtrl: lda #$18                   ;reset game timer control
 TimeUpOn:  sta PlayerStatus           ;init player status (note A will always be zero here)
            jsr ForceInjury            ;do sub to kill the player (note player is small here)
            inc GameTimerExpiredFlag   ;set game timer expiration flag
-ExGTimer:  rts                        ;leave
+           rts                        ;leave
 
 ;-------------------------------------------------------------------------------------
 
 WarpZoneObject:
       lda ScrollLock         ;check for scroll lock flag
-      beq WarpZoneObjectExit           ;branch if not set to leave
+      beq __ret__           ;branch if not set to leave
       lda Player_Y_Position  ;check to see if player's vertical coordinate has
       and Player_Y_HighPos   ;same bits set as in vertical high byte (why?)
-      bne WarpZoneObjectExit           ;if so, branch to leave
+      bne __ret__           ;if so, branch to leave
       sta ScrollLock         ;otherwise nullify scroll lock flag
       inc WarpZoneControl    ;increment warp zone flag to make warp pipes for warp zone
       jsr EraseEnemyObject   ;kill this object
-WarpZoneObjectExit:
       rts
 
 ;-------------------------------------------------------------------------------------
@@ -6615,10 +6610,10 @@ WarpZoneObjectExit:
 
 ProcessWhirlpools:
         lda AreaType                ;check for water type level
-        bne ExitWh                  ;branch to leave if not found
+        bne __ret__                  ;branch to leave if not found
         sta Whirlpool_Flag          ;otherwise initialize whirlpool flag
         lda TimerControl            ;if master timer control set,
-        bne ExitWh                  ;branch to leave
+        bne __ret__                  ;branch to leave
         ldy #$04                    ;otherwise start with last whirlpool data
 WhLoop: lda Whirlpool_LeftExtent,y  ;get left extent of whirlpool
         clc
@@ -6642,7 +6637,7 @@ WhLoop: lda Whirlpool_LeftExtent,y  ;get left extent of whirlpool
         bpl WhirlpoolActivate       ;if player within right extent, branch to whirlpool code
 NextWh: dey                         ;move onto next whirlpool data
         bpl WhLoop                  ;do this until all whirlpools are checked
-ExitWh: rts                         ;leave
+        rts                         ;leave
 
 WhirlpoolActivate:
         lda Whirlpool_Length,y      ;get length of whirlpool
@@ -6703,7 +6698,7 @@ FlagpoleRoutine:
            stx ObjectOffset          ;to special use slot
            lda Enemy_ID,x
            cmp #FlagpoleFlagObject   ;if flagpole flag not found,
-           bne ExitFlagP             ;branch to leave
+           bne __ret__             ;branch to leave
            lda GameEngineSubroutine
            cmp #$04                  ;if flagpole slide routine not running,
            bne SkipScore             ;branch to near the end of code
@@ -6740,7 +6735,7 @@ GiveFPScr: ldy FlagpoleScore         ;get score offset from earlier (when player
 FPGfx:     jsr GetEnemyOffscreenBits ;get offscreen information
            jsr RelativeEnemyPosition ;get relative coordinates
            jsr FlagpoleGfxHandler    ;draw flagpole flag and floatey number
-ExitFlagP: rts
+           rts
 
 ;-------------------------------------------------------------------------------------
 
@@ -6786,13 +6781,13 @@ DrawJSpr:  jsr RelativeEnemyPosition   ;get jumpspring's relative coordinates
            jsr EnemyGfxHandler         ;draw jumpspring
            jsr OffscreenBoundsCheck    ;check to see if we need to kill it
            lda JumpspringAnimCtrl      ;if frame control at zero, don't bother
-           beq ExJSpring               ;trying to animate it, just leave
+           beq __ret__               ;trying to animate it, just leave
            lda JumpspringTimer
-           bne ExJSpring               ;if jumpspring timer not expired yet, leave
+           bne __ret__               ;if jumpspring timer not expired yet, leave
            lda #$04
            sta JumpspringTimer         ;otherwise initialize jumpspring timer
            inc JumpspringAnimCtrl      ;increment frame control to animate jumpspring
-ExJSpring: rts                         ;leave
+           rts                         ;leave
 
 ;-------------------------------------------------------------------------------------
 
@@ -6884,7 +6879,7 @@ CannonBitmasks:
 
 ProcessCannons:
            lda AreaType                ;get area type
-           beq ExCannon                ;if water type area, branch to leave
+           beq __ret__                ;if water type area, branch to leave
            ldx #$02
 ThreeSChk: stx ObjectOffset            ;start at third enemy slot
            lda Enemy_Flag,x            ;check enemy buffer flag
@@ -6936,7 +6931,7 @@ Chk_BB:   lda Enemy_ID,x             ;check enemy identifier for bullet bill (ca
           jsr BulletBillHandler      ;then do sub to handle bullet bill
 Next3Slt: dex                        ;move onto next slot
           bpl ThreeSChk              ;do this until first three slots are checked
-ExCannon: rts                        ;then leave
+          rts                        ;then leave
 
 ;--------------------------------
 
@@ -7283,7 +7278,7 @@ PowerUpObjHandler:
          ldx #$05                   ;set object offset for last slot in enemy object buffer
          stx ObjectOffset
          lda Enemy_State+5          ;check power-up object's state
-         beq ExitPUp                ;if not set, branch to leave
+         beq __ret__                ;if not set, branch to leave
          asl                        ;shift to check if d7 was set in object state
          bcc GrowThePowerUp         ;if not set, branch ahead to skip this part
          lda TimerControl           ;if master timer control set,
@@ -7320,14 +7315,14 @@ GrowThePowerUp:
            sta Enemy_MovingDir,x      ;set moving direction
 ChkPUSte:  lda Enemy_State+5          ;check power-up object's state
            cmp #$06                   ;for if power-up has risen enough
-           bcc ExitPUp                ;if not, don't even bother running these routines
+           bcc __ret__                ;if not, don't even bother running these routines
 RunPUSubs: jsr RelativeEnemyPosition  ;get coordinates relative to screen
            jsr GetEnemyOffscreenBits  ;get offscreen bits
            jsr GetEnemyBoundBox       ;get bounding box coordinates
            jsr DrawPowerUp            ;draw the power-up object
            jsr PlayerEnemyCollision   ;check for collision with player
            jsr OffscreenBoundsCheck   ;check to see if it went offscreen
-ExitPUp:   rts                        ;and we're done
+           rts                        ;and we're done
 
 ;-------------------------------------------------------------------------------------
 ;These apply to all routines in this section unless otherwise noted:
@@ -7493,11 +7488,11 @@ BrickQBlockMetatiles:
 BlockBumpedChk:
              ldy #$0d                    ;start at end of metatile data
 BumpChkLoop: cmp BrickQBlockMetatiles,y  ;check to see if current metatile matches
-             beq MatchBump               ;metatile found in block buffer, branch if so
+             beq __ret__               ;metatile found in block buffer, branch if so
              dey                         ;otherwise move onto next metatile
              bpl BumpChkLoop             ;do this until all metatiles are checked
              clc                         ;if none match, return with carry clear
-MatchBump:   rts                         ;note carry is set if found match
+             rts                         ;note carry is set if found match
 
 ;--------------------------------
 
@@ -7520,7 +7515,7 @@ BrickShatter:
 CheckTopOfBlock:
        ldx SprDataOffset_Ctrl  ;load control bit
        ldy $02                 ;get vertical high nybble offset used in block buffer
-       beq TopEx               ;branch to leave if set to zero, because we're at the top
+       beq __ret__               ;branch to leave if set to zero, because we're at the top
        tya                     ;otherwise set to A
        sec
        sbc #$10                ;subtract $10 to move up one row in the block buffer
@@ -7528,13 +7523,13 @@ CheckTopOfBlock:
        tay
        lda ($06),y             ;get contents of block buffer in same column, one row up
        cmp #$c2                ;is it a coin? (not underwater)
-       bne TopEx               ;if not, branch to leave
+       bne __ret__               ;if not, branch to leave
        lda #$00
        sta ($06),y             ;otherwise put blank metatile where coin was
        jsr RemoveCoin_Axe      ;write blank metatile to vram buffer
        ldx SprDataOffset_Ctrl  ;get control bit
        jsr SetupJumpCoin       ;create jumping coin object and update coin variables
-TopEx: rts                     ;leave!
+       rts                     ;leave!
 
 ;--------------------------------
 
@@ -7660,10 +7655,9 @@ MoveEnemyHorizontally:
 
 MovePlayerHorizontally:
       lda JumpspringAnimCtrl  ;if jumpspring currently animating,
-      bne MovePlayerHorizontallyExit ;branch to leave
+      bne __ret__ ;branch to leave
       tax                     ;otherwise set zero for offset to use player's stuff
       jmp MoveObjectHorizontally
-MovePlayerHorizontallyExit:
       rts
 
 MoveObjectHorizontally:
@@ -7716,12 +7710,11 @@ MovePlayerVertically:
          lda TimerControl
          bne NoJSChk             ;if master timer control set, branch ahead
          lda JumpspringAnimCtrl  ;otherwise check to see if jumpspring is animating
-         bne MovePlayerVerticallyExit ;branch to leave if so
+         bne __ret__ ;branch to leave if so
 NoJSChk: lda VerticalForce       ;dump vertical force
          sta $00
          lda #$04                ;set maximum vertical speed here
          jsr ImposeGravitySprObj ;then jump to move player vertically
-MovePlayerVerticallyExit:
         rts
 
 ;--------------------------------
@@ -7871,7 +7864,7 @@ AlterYP: sty $07                      ;store Y here
          lda #$00
          sta SprObject_Y_MoveForce,x  ;clear fractional
 ChkUpM:  pla                          ;get value from stack
-         beq ExVMove                  ;if set to zero, branch to leave
+         beq __ret__                  ;if set to zero, branch to leave
          lda $02
          eor #%11111111               ;otherwise get two's compliment of maximum speed
          tay
@@ -7885,15 +7878,15 @@ ChkUpM:  pla                          ;get value from stack
          sbc #$00                     ;subtract borrow from vertical speed and store
          sta SprObject_Y_Speed,x
          cmp $07                      ;compare vertical speed to two's compliment
-         bpl ExVMove                  ;if less negatively than preset maximum, skip this part
+         bpl __ret__                  ;if less negatively than preset maximum, skip this part
          lda SprObject_Y_MoveForce,x
          cmp #$80                     ;check if fractional part is above certain amount,
-         bcs ExVMove                  ;and if so, branch to leave
+         bcs __ret__                  ;and if so, branch to leave
          lda $07
          sta SprObject_Y_Speed,x      ;keep vertical speed within maximum value
          lda #$ff
          sta SprObject_Y_MoveForce,x  ;clear fractional
-ExVMove: rts                          ;leave!
+         rts                          ;leave!
 
 ;-------------------------------------------------------------------------------------
 
@@ -7909,16 +7902,16 @@ EnemiesAndLoopsCore:
 ChkAreaTsk: lda AreaParserTaskNum    ;check number of tasks to perform
             and #$07
             cmp #$07                 ;if at a specific task, jump and leave
-            beq ExitELCore
+            beq __ret__
             jsr ProcLoopCommand      ;otherwise, jump to process loop command/load enemies
             rts
 ChkBowserF: pla                      ;get data from stack
             and #%00001111           ;mask out high nybble
             tay
             lda Enemy_Flag,y         ;use as pointer and load same place with different offset
-            bne ExitELCore
+            bne __ret__
             sta Enemy_Flag,x         ;if second enemy flag not set, also clear first one
-ExitELCore: rts
+            rts
 
 ;--------------------------------
 
@@ -8785,7 +8778,7 @@ FireworksYPosData:
 
 InitFireworks:
           lda FrenzyEnemyTimer         ;if timer not expired yet, branch to leave
-          bne ExitFWk
+          bne __ret__
           lda #$20                     ;otherwise reset timer
           sta FrenzyEnemyTimer
           dec FireworksCounter         ;decrement for each explosion
@@ -8821,7 +8814,7 @@ StarFChk: dey
           sta ExplosionGfxCounter,x    ;initialize explosion counter
           lda #$08
           sta ExplosionTimerCounter,x  ;set explosion timing counter
-ExitFWk:  rts
+          rts
 
 ;--------------------------------
 
@@ -9529,12 +9522,12 @@ MoveDefeatedEnemy:
 
 ChkKillGoomba__sub:
         cmp #$0e              ;check to see if enemy timer has reached
-        bne NKGmba            ;a certain point, and branch to leave if not
+        bne __ret__            ;a certain point, and branch to leave if not
         lda Enemy_ID,x
         cmp #Goomba           ;check for goomba object
-        bne NKGmba            ;branch if not found
+        bne __ret__            ;branch if not found
         jsr EraseEnemyObject  ;otherwise, kill this goomba object
-NKGmba: rts                   ;leave!
+        rts                   ;leave!
 
 ;--------------------------------
 
@@ -9555,9 +9548,9 @@ ProcMoveRedPTroopa:
           bcs MoveRedPTUpOrDown       ;if current => original, skip ahead to more code
           lda FrameCounter            ;get frame counter
           and #%00000111              ;mask out all but 3 LSB
-          bne NoIncPT                 ;if any bits set, branch to leave
+          bne __ret__                 ;if any bits set, branch to leave
           inc Enemy_Y_Position,x      ;otherwise increment red paratroopa's vertical position
-NoIncPT:  rts                         ;leave
+          rts                         ;leave
 
 MoveRedPTUpOrDown:
           lda Enemy_Y_Position,x      ;check current vs. central vertical coordinate
@@ -9578,7 +9571,7 @@ MoveFlyGreenPTroopa:
         ldy #$01                   ;set Y to move green paratroopa down
         lda FrameCounter
         and #%00000011             ;check frame counter 2 LSB for any bits set
-        bne NoMGPT                 ;branch to leave if set to move up/down every fourth frame
+        bne __ret__                 ;branch to leave if set to move up/down every fourth frame
         lda FrameCounter
         and #%01000000             ;check frame counter for d6 set
         bne YSway                  ;branch to move green paratroopa down if set
@@ -9588,7 +9581,7 @@ YSway:  sty $00                    ;store adder here
         clc                        ;add or subtract from vertical position
         adc $00                    ;to give green paratroopa a wavy flight
         sta Enemy_Y_Position,x
-NoMGPT: rts                        ;leave!
+        rts                        ;leave!
 
 XMoveCntr_GreenPTroopa:
          lda #$13                    ;load preset maximum value for secondary counter
@@ -9792,7 +9785,7 @@ CCSwim: sta $03                   ;save enemy state in $03
         lda #$20
         sta $02                   ;save new value here
         cpx #$02                  ;check enemy object offset
-        bcc ExSwCC                ;if in first or second slot, branch to leave
+        bcc __ret__                ;if in first or second slot, branch to leave
         lda CheepCheepMoveMFlag,x ;check movement flag
         cmp #$10                  ;if movement speed set to $00,
         bcc CCSwimUpwards         ;branch to move upwards
@@ -9830,10 +9823,10 @@ ChkSwimYPos:
         clc                       ;get two's compliment of result
         adc #$01                  ;to obtain total difference of original vs. current
 YPDiff: cmp #$0f                  ;if difference between original vs. current vertical
-        bcc ExSwCC                ;coordinates < 15 pixels, leave movement speed alone
+        bcc __ret__                ;coordinates < 15 pixels, leave movement speed alone
         tya
         sta CheepCheepMoveMFlag,x ;otherwise change movement speed
-ExSwCC: rts                       ;leave
+        rts                       ;leave
 
 ;--------------------------------
 ;$00 - used as counter for firebar parts
@@ -9877,7 +9870,7 @@ ProcFirebar:
           jsr GetEnemyOffscreenBits   ;get offscreen information
           lda Enemy_OffscreenBits     ;check for d3 set
           and #%00001000              ;if so, branch to leave
-          bne SkipFBar
+          bne __ret__
           lda TimerControl            ;if master timer control set, branch
           bne SusFbar                 ;ahead of this part
           lda FirebarSpinSpeed,x      ;load spinning speed of firebar
@@ -9929,7 +9922,7 @@ NextFbar: inc $00                     ;move onto the next firebar part
           lda $00
           cmp $ed                     ;if we end up at the maximum part, go on and leave
           bcc DrawFbar                ;otherwise go back and do another
-SkipFBar: rts
+          rts
 
 DrawFirebar_Collision:
          lda $03                  ;store mirror data elsewhere
@@ -10201,7 +10194,7 @@ ChkLakDif: lda $00                    ;get low byte of horizontal difference
            beq SetLMovD               ;branch and alter without delay
            dec LakituMoveSpeed,x      ;decrement horizontal speed
            lda LakituMoveSpeed,x      ;if horizontal speed not yet at zero, branch to leave
-           bne ExMoveLak
+           bne __ret__
 SetLMovD:  tya                        ;set horizontal direction depending on horizontal
            sta LakituMoveDirection,x  ;difference between enemy and player if necessary
 ChkPSpeed: lda $00
@@ -10236,7 +10229,7 @@ SPixelLak: sec                        ;subtract one for each pixel of horizontal
            sbc #$01                   ;from one of three saved values
            dey
            bpl SPixelLak              ;branch until all pixels are subtracted, to adjust difference
-ExMoveLak: rts                        ;leave!!!
+           rts                        ;leave!!!
 
 ;-------------------------------------------------------------------------------------
 ;$04-$05 - used to store name table address in little endian order
@@ -10479,12 +10472,11 @@ ProcessBowserHalf:
       inc BowserGfxFlag         ;increment bowser's graphics flag, then run subroutines
       jsr RunRetainerObj        ;to get offscreen bits, relative position and draw bowser (finally!)
       lda Enemy_State,x
-      bne ProcessBowserHalfExit ;if either enemy object not in normal state, branch to leave
+      bne __ret__ ;if either enemy object not in normal state, branch to leave
       lda #$0a
       sta Enemy_BoundBoxCtrl,x  ;set bounding box size control
       jsr GetEnemyBoundBox      ;get bounding box coordinates
       jsr PlayerEnemyCollision  ;do player-to-enemy collision detection
-ProcessBowserHalfExit:
       rts
 
 ;-------------------------------------------------------------------------------------
@@ -10530,7 +10522,7 @@ SFlmX:   sta $00                     ;store value here
          sta Enemy_Y_Position,x      ;as new vertical coordinate
 SetGfxF: jsr RelativeEnemyPosition   ;get new relative coordinates
          lda Enemy_State,x           ;if bowser's flame not in normal state,
-         bne ExFlmeD                 ;branch to leave
+         bne __ret__                 ;branch to leave
          lda #$51                    ;otherwise, continue
          sta $00                     ;write first tile number
          ldy #$02                    ;load attributes without vertical flip by default
@@ -10585,10 +10577,10 @@ M2FOfs:  pla                        ;get bits from stack again
          sta Sprite_Y_Position+4,y
 M1FOfs:  pla                        ;get bits from stack one last time
          lsr                        ;move d3 to carry
-         bcc ExFlmeD                ;branch if carry not set one last time
+         bcc __ret__                ;branch if carry not set one last time
          lda #$f8
          sta Sprite_Y_Position,y    ;otherwise move first sprite offscreen
-ExFlmeD: rts                        ;leave
+         rts                        ;leave
 
 ;--------------------------------
 
@@ -10747,11 +10739,9 @@ IncrementSFTask2__sub:
 DelayToAreaEnd:
       jsr DrawStarFlag          ;do sub to draw star flag
       lda EnemyIntervalTimer,x  ;if interval timer set in previous task
-      bne StarFlagExit2         ;not yet expired, branch to leave
+      bne __ret__         ;not yet expired, branch to leave
       lda EventMusicBuffer      ;if event music buffer empty,
       beq IncrementSFTask2__sub      ;branch to increment task
-
-StarFlagExit2:
       rts                       ;otherwise leave
 
 ;--------------------------------
@@ -11037,11 +11027,11 @@ GetHRp: txa                     ;move vertical coordinate to A
         sta $00                 ;save as name table low byte
         lda Enemy_Y_Position,y
         cmp #$e8                ;if vertical position not below the
-        bcc ExPRp               ;bottom of the screen, we're done, branch to leave
+        bcc __ret__               ;bottom of the screen, we're done, branch to leave
         lda $00
         and #%10111111          ;mask out d6 of low byte of name table address
         sta $00
-ExPRp:  rts                     ;leave!
+        rts                     ;leave!
 
 InitPlatformFall:
       tya                        ;move offset of other platform from Y to X
@@ -11105,9 +11095,9 @@ YMDown: jsr MovePlatformDown         ;start slowing ascent/moving downwards
 
 ChkYPCollision:
        lda PlatformCollisionFlag,x  ;if collision flag not set here, branch
-       bmi ExYPl                    ;to leave
+       bmi __ret__                    ;to leave
        jsr PositionPlayerOnVPlat    ;otherwise position player appropriately
-ExYPl: rts                          ;leave
+       rts                          ;leave
 
 ;--------------------------------
 ;$00 - used as adder to position player hotizontally
@@ -11139,10 +11129,10 @@ SetPVar: sta Player_PageLoc        ;save result to player's page location
 
 DropPlatform:
        lda PlatformCollisionFlag,x  ;if no collision between platform and player
-       bmi ExDPl                    ;occurred, just leave without moving anything
+       bmi __ret__                    ;occurred, just leave without moving anything
        jsr MoveDropPlatform         ;otherwise do a sub to move platform down very quickly
        jsr PositionPlayerOnVPlat    ;do a sub to position player appropriately
-ExDPl: rts                          ;leave
+       rts                          ;leave
 
 ;--------------------------------
 ;$00 - residual value from sub
@@ -11151,11 +11141,11 @@ RightPlatform:
        jsr MoveEnemyHorizontally     ;move platform with current horizontal speed, if any
        sta $00                       ;store saved value here (residual code)
        lda PlatformCollisionFlag,x   ;check collision flag, if no collision between player
-       bmi ExRPl                     ;and platform, branch ahead, leave speed unaltered
+       bmi __ret__                     ;and platform, branch ahead, leave speed unaltered
        lda #$10
        sta Enemy_X_Speed,x           ;otherwise set new speed (gets moving if motionless)
        jsr PositionPlayerOnHPlat     ;use saved value from earlier sub to position player
-ExRPl: rts                           ;then leave
+       rts                           ;then leave
 
 ;--------------------------------
 
@@ -11171,7 +11161,7 @@ MoveSmallPlatform:
 
 MoveLiftPlatforms:
       lda TimerControl          ;if master timer control set, skip all of this
-      bne MoveLiftPlatformsExit ;and branch to leave
+      bne __ret__ ;and branch to leave
       lda Enemy_YMF_Dummy,x
       clc                       ;add contents of movement amount to whatever's here
       adc Enemy_Y_MoveForce,x
@@ -11179,14 +11169,13 @@ MoveLiftPlatforms:
       lda Enemy_Y_Position,x    ;add whatever vertical speed is set to current
       adc Enemy_Y_Speed,x       ;vertical position plus carry to move up or down
       sta Enemy_Y_Position,x    ;and then leave
-MoveLiftPlatformsExit:
       rts
 
 ChkSmallPlatCollision:
          lda PlatformCollisionFlag,x ;get bounding box counter saved in collision flag
-         beq ExLiftP                 ;if none found, leave player position alone
+         beq __ret__                 ;if none found, leave player position alone
          jsr PositionPlayerOnS_Plat  ;use to position player correctly
-ExLiftP: rts                         ;then leave
+         rts                         ;then leave
 
 ;-------------------------------------------------------------------------------------
 ;$00 - page location of extended left boundary
@@ -11197,7 +11186,7 @@ ExLiftP: rts                         ;then leave
 OffscreenBoundsCheck:
           lda Enemy_ID,x          ;check for cheep-cheep object
           cmp #FlyingCheepCheep   ;branch to leave if found
-          beq ExScrnBd
+          beq __ret__
           lda ScreenLeft_X_Pos    ;get horizontal coordinate for left side of screen
           ldy Enemy_ID,x
           cpy #HammerBro          ;check for hammer bro object
@@ -11225,20 +11214,20 @@ ExtendLB: sbc #$48                ;subtract 72 pixels regardless of enemy object
           cmp $03                 ;to modified horizontal right edge coordinate to get carry
           lda Enemy_PageLoc,x
           sbc $02                 ;then subtract it from the page coordinate of the enemy object
-          bmi ExScrnBd            ;if enemy object is on the screen, leave, do not erase enemy
+          bmi __ret__            ;if enemy object is on the screen, leave, do not erase enemy
           lda Enemy_State,x       ;if at this point, enemy is offscreen to the right, so check
           cmp #HammerBro          ;if in state used by spiny's egg, do not erase
-          beq ExScrnBd
+          beq __ret__
           cpy #PiranhaPlant       ;if piranha plant, do not erase
-          beq ExScrnBd
+          beq __ret__
           cpy #FlagpoleFlagObject ;if flagpole flag, do not erase
-          beq ExScrnBd
+          beq __ret__
           cpy #StarFlagObject     ;if star flag, do not erase
-          beq ExScrnBd
+          beq __ret__
           cpy #JumpspringObject   ;if jumpspring, do not erase
-          beq ExScrnBd            ;erase all others too far to the right
+          beq __ret__            ;erase all others too far to the right
 TooFar:   jsr EraseEnemyObject    ;erase object if necessary
-ExScrnBd: rts                     ;leave
+          rts                     ;leave
 
 ;-------------------------------------------------------------------------------------
 
@@ -11395,10 +11384,10 @@ EnemySmackScore:
 PlayerHammerCollision:
         lda FrameCounter          ;get frame counter
         lsr                       ;shift d0 into carry
-        bcc ExPHC                 ;branch to leave if d0 not set to execute every other frame
+        bcc __ret__                 ;branch to leave if d0 not set to execute every other frame
         lda TimerControl          ;if either master timer control
         ora Misc_OffscreenBits    ;or any offscreen bits for hammer are set,
-        bne ExPHC                 ;branch to leave
+        bne __ret__                 ;branch to leave
         txa
         asl                       ;multiply misc object offset by four
         asl
@@ -11409,7 +11398,7 @@ PlayerHammerCollision:
         ldx ObjectOffset          ;get misc object offset
         bcc ClHCol                ;if no collision, then branch
         lda Misc_Collision_Flag,x ;otherwise read collision flag
-        bne ExPHC                 ;if collision flag already set, branch to leave
+        bne __ret__                 ;if collision flag already set, branch to leave
         lda #$01
         sta Misc_Collision_Flag,x ;otherwise set collision flag now
         lda Misc_X_Speed,x
@@ -11418,12 +11407,12 @@ PlayerHammerCollision:
         adc #$01
         sta Misc_X_Speed,x        ;set to send hammer flying the opposite direction
         lda StarInvincibleTimer   ;if star mario invincibility timer set,
-        bne ExPHC                 ;branch to leave
+        bne __ret__                 ;branch to leave
         jsr InjurePlayer          ;otherwise jump to hurt player, do not return
         rts
 ClHCol: lda #$00                  ;clear collision flag
         sta Misc_Collision_Flag,x
-ExPHC:  rts
+        rts
 
 ;-------------------------------------------------------------------------------------
 
@@ -12056,10 +12045,10 @@ PositionPlayerOnVPlat:
 PositionPlayerOnVPlatSkip:
          ldy GameEngineSubroutine
          cpy #$0b                  ;if certain routine being executed on this frame,
-         beq ExPlPos               ;skip all of this
+         beq __ret__               ;skip all of this
          ldy Enemy_Y_HighPos,x
          cpy #$01                  ;if vertical high byte offscreen, skip this
-         bne ExPlPos
+         bne __ret__
          sec                       ;subtract 32 pixels from vertical coordinate
          sbc #$20                  ;for the player object's height
          sta Player_Y_Position     ;save as player's new vertical coordinate
@@ -12069,20 +12058,20 @@ PositionPlayerOnVPlatSkip:
          lda #$00
          sta Player_Y_Speed        ;initialize vertical speed and low byte of force
          sta Player_Y_MoveForce    ;and then leave
-ExPlPos: rts
+         rts
 
 ;-------------------------------------------------------------------------------------
 
 CheckPlayerVertical:
        lda Player_OffscreenBits  ;if player object is completely offscreen
        cmp #$f0                  ;vertically, leave this routine
-       bcs ExCPV
+       bcs __ret__
        ldy Player_Y_HighPos      ;if player high vertical byte is not
        dey                       ;within the screen, leave this routine
-       bne ExCPV
+       bne __ret__
        lda Player_Y_Position     ;if on the screen, check to see how far down
        cmp #$d0                  ;the player is vertically
-ExCPV: rts
+       rts
 
 ;-------------------------------------------------------------------------------------
 
@@ -12436,20 +12425,20 @@ SetVXPl: ldy PlayerFacingDir     ;get current facing direction, use as offset
          adc ClimbXPosAdder-1,y  ;add pixels depending on facing direction
          sta Player_X_Position   ;store as player's horizontal coordinate
          lda $06                 ;get low byte of block buffer address again
-         bne ExPVne              ;if not zero, branch
+         bne __ret__              ;if not zero, branch
          lda ScreenRight_PageLoc ;load page location of right side of screen
          clc
          adc ClimbPLocAdder-1,y  ;add depending on facing location
          sta Player_PageLoc      ;store as player's page location
-ExPVne:  rts                     ;finally, we're done!
+         rts                     ;finally, we're done!
 
 ;--------------------------------
 
 ChkInvisibleMTiles:
          cmp #$5f       ;check for hidden coin block
-         beq ExCInvT    ;branch to leave if found
+         beq __ret__    ;branch to leave if found
          cmp #$60       ;check for hidden 1-up block
-ExCInvT: rts            ;leave with zero flag set if either found
+         rts            ;leave with zero flag set if either found
 
 ;--------------------------------
 ;$00-$01 - used to hold bottom right and bottom left metatiles (in that order)
@@ -12457,7 +12446,7 @@ ExCInvT: rts            ;leave with zero flag set if either found
 
 ChkForLandJumpSpring:
         jsr ChkJumpspringMetatiles  ;do sub to check if player landed on jumpspring
-        bcc ExCJSp                  ;if carry not set, jumpspring not found, therefore leave
+        bcc __ret__                  ;if carry not set, jumpspring not found, therefore leave
         lda #$70
         sta VerticalForce           ;otherwise set vertical movement force for player
         lda #$f9
@@ -12466,27 +12455,27 @@ ChkForLandJumpSpring:
         sta JumpspringTimer         ;set jumpspring timer to be used later
         lsr
         sta JumpspringAnimCtrl      ;set jumpspring animation control to start animating
-ExCJSp: rts                         ;and leave
+        rts                         ;and leave
 
 ChkJumpspringMetatiles:
          cmp #$67      ;check for top jumpspring metatile
          beq JSFnd     ;branch to set carry if found
          cmp #$68      ;check for bottom jumpspring metatile
          clc           ;clear carry flag
-         bne NoJSFnd   ;branch to use cleared carry if not found
+         bne __ret__   ;branch to use cleared carry if not found
 JSFnd:   sec           ;set carry if found
-NoJSFnd: rts           ;leave
+         rts           ;leave
 
 HandlePipeEntry:
          lda Up_Down_Buttons       ;check saved controller bits from earlier
          and #%00000100            ;for pressing down
-         beq ExPipeE               ;if not pressing down, branch to leave
+         beq __ret__               ;if not pressing down, branch to leave
          lda $00
          cmp #$11                  ;check right foot metatile for warp pipe right metatile
-         bne ExPipeE               ;branch to leave if not found
+         bne __ret__               ;branch to leave if not found
          lda $01
          cmp #$10                  ;check left foot metatile for warp pipe left metatile
-         bne ExPipeE               ;branch to leave if not found
+         bne __ret__               ;branch to leave if not found
          lda #$30
          sta ChangeAreaTimer       ;set timer for change of area
          lda #$03
@@ -12496,7 +12485,7 @@ HandlePipeEntry:
          lda #%00100000
          sta Player_SprAttrib      ;set background priority bit in player's attributes
          lda WarpZoneControl       ;check warp zone control
-         beq ExPipeE               ;branch to leave if none found
+         beq __ret__               ;branch to leave if none found
          and #%00000011            ;mask out all but 2 LSB
          asl
          asl                       ;multiply by four
@@ -12523,7 +12512,7 @@ GetWNum: ldy WarpZoneNumbers,x     ;get warp zone numbers
          sta AltEntranceControl    ;initialize mode of entry
          inc Hidden1UpFlag         ;set flag for hidden 1-up blocks
          inc FetchNewGameTimerFlag ;set flag to load new game timer
-ExPipeE: rts                       ;leave!!!
+         rts                       ;leave!!!
 
 ImpedePlayerMove:
        lda #$00                  ;initialize value here
@@ -12807,7 +12796,7 @@ SetD6Ste:    sta Enemy_State,x         ;set as new state
 DoEnemySideCheck:
           lda Enemy_Y_Position,x     ;if enemy within status bar, branch to leave
           cmp #$20                   ;because there's nothing there that impedes movement
-          bcc ExESdeC
+          bcc __ret__
           ldy #$16                   ;start by finding block to the left of enemy ($00,$14)
           lda #$02                   ;set value here in what is also used as
           sta $eb                    ;OAM data offset
@@ -12823,7 +12812,7 @@ NextSdeC: dec $eb                    ;move to the next direction
           iny
           cpy #$18                   ;increment Y, loop only if Y < $18, thus we check
           bcc SdeCLoop               ;enemy ($00, $14) and ($10, $14) pixel coordinates
-ExESdeC:  rts
+          rts
 
 ChkForBump_HammerBroJ:
         cpx #$05               ;check if we're on the special use slot
@@ -12928,15 +12917,15 @@ ChkUnderEnemy:
 
 ChkForNonSolids:
        cmp #$26       ;blank metatile used for vines?
-       beq NSFnd
+       beq __ret__
        cmp #$c2       ;regular coin?
-       beq NSFnd
+       beq __ret__
        cmp #$c3       ;underwater coin?
-       beq NSFnd
+       beq __ret__
        cmp #$5f       ;hidden coin block?
-       beq NSFnd
+       beq __ret__
        cmp #$60       ;hidden 1-up block?
-NSFnd: rts
+       rts
 
 ;-------------------------------------------------------------------------------------
 
@@ -13458,12 +13447,12 @@ RenderH:    lda Misc_Rel_YPos           ;get relative vertical coordinate
             ldx ObjectOffset            ;get misc object offset
             lda Misc_OffscreenBits
             and #%11111100              ;check offscreen bits
-            beq NoHOffscr               ;if all bits clear, leave object alone
+            beq __ret__               ;if all bits clear, leave object alone
             lda #$00
             sta Misc_State,x            ;otherwise nullify misc object state
             lda #$f8
             jsr DumpTwoSpr              ;do sub to move hammer sprites offscreen
-NoHOffscr:  rts                         ;leave
+            rts                         ;leave
 
 ;-------------------------------------------------------------------------------------
 ;$00-$01 - used to hold tile numbers ($01 addressed in draw floatey number part)
@@ -13626,9 +13615,9 @@ SChk6:  pla                         ;get bits from stack
         sta Sprite_Y_Position+20,y  ;if d2 was set, move sixth sprite offscreen
 SLChk:  lda Enemy_OffscreenBits     ;check d7 of offscreen bits
         asl                         ;and if d7 is not set, skip sub
-        bcc ExDLPl
+        bcc __ret__
         jsr MoveSixSpritesOffscreen ;otherwise branch to move all sprites offscreen
-ExDLPl: rts
+        rts
 
 ;-------------------------------------------------------------------------------------
 
@@ -14271,18 +14260,16 @@ Row23C:  pla                       ;get from stack
          jsr MoveESprRowOffscreen  ;move them offscreen
 AllRowC: pla                       ;get from stack once more
          lsr                       ;move d7 into carry
-         bcc ExEGHandler
+         bcc __ret__
          jsr MoveESprRowOffscreen  ;move all sprites offscreen (A should be 0 by now)
          lda Enemy_ID,x
          cmp #Podoboo              ;check enemy identifier for podoboo
-         beq ExEGHandler           ;skip this part if found, we do not want to erase podoboo!
+         beq __ret__           ;skip this part if found, we do not want to erase podoboo!
          lda Enemy_Y_HighPos,x     ;check high byte of vertical position
          cmp #$02                  ;if not yet past the bottom of the screen, branch
-         bne ExEGHandler
+         bne __ret__
          jsr EraseEnemyObject      ;what it says
-
-ExEGHandler:
-      rts
+    rts
 
 DrawEnemyObjRow:
       lda EnemyGraphicsTable,x    ;load two tiles of enemy graphics
@@ -14441,14 +14428,14 @@ DChunks: ldy Block_SprDataOffset,x  ;get OAM data offset
          lda #$f8
          jsr DumpTwoSpr             ;otherwise move top sprites offscreen
 ChnkOfs: lda $00                    ;if relative position on left side of screen,
-         bpl ExBCDr                 ;go ahead and leave
+         bpl __ret__                 ;go ahead and leave
          lda Sprite_X_Position,y    ;otherwise compare left-side X coordinate
          cmp Sprite_X_Position+4,y  ;to right-side X coordinate
-         bcc ExBCDr                 ;branch to leave if less
+         bcc __ret__                 ;branch to leave if less
          lda #$f8                   ;otherwise move right half of sprites offscreen
          sta Sprite_Y_Position+4,y
          sta Sprite_Y_Position+12,y
-ExBCDr:  rts                        ;leave
+         rts                        ;leave
 
 ;-------------------------------------------------------------------------------------
 
@@ -14598,10 +14585,10 @@ ExSPl: ldx ObjectOffset            ;get enemy object offset and leave
 DrawBubble:
         ldy Player_Y_HighPos        ;if player's vertical high position
         dey                         ;not within screen, skip all of this
-        bne ExDBub
+        bne __ret__
         lda Bubble_OffscreenBits    ;check air bubble's offscreen bits
         and #%00001000
-        bne ExDBub                  ;if bit set, branch to leave
+        bne __ret__                 ;if bit set, branch to leave
         ldy Bubble_SprDataOffset,x  ;get air bubble's OAM data offset
         lda Bubble_Rel_XPos         ;get relative horizontal coordinate
         sta Sprite_X_Position,y     ;store as X coordinate here
@@ -14611,7 +14598,7 @@ DrawBubble:
         sta Sprite_Tilenumber,y     ;put air bubble tile into OAM data
         lda #$02
         sta Sprite_Attributes,y     ;set attribute byte
-ExDBub: rts                         ;leave
+        rts                         ;leave
 
 ;-------------------------------------------------------------------------------------
 ;$00 - used to store player's vertical offscreen bits
@@ -14663,7 +14650,7 @@ PlayerGfxHandler:
         beq CntPl                   ;not set, skip checkpoint and continue code
         lda FrameCounter
         lsr                         ;otherwise check frame counter and branch
-        bcs ExPGH                   ;to leave on every other frame (when d0 is set)
+        bcs __ret__                 ;to leave on every other frame (when d0 is set)
 CntPl:  lda GameEngineSubroutine    ;if executing specific game engine routine,
         cmp #$0b                    ;branch ahead to some other part
         beq PlayerKilled__sub
@@ -14677,7 +14664,7 @@ CntPl:  lda GameEngineSubroutine    ;if executing specific game engine routine,
         jsr FindPlayerAction        ;otherwise jump and return
         lda FrameCounter
         and #%00000100              ;check frame counter for d2 set (8 frames every
-        bne ExPGH                   ;eighth frame), and branch if set to leave
+        bne __ret__                 ;eighth frame), and branch if set to leave
         tax                         ;initialize X to zero
         ldy Player_SprDataOffset    ;get player sprite data offset
         lda PlayerFacingDir         ;get player's facing direction
@@ -14691,11 +14678,11 @@ SwimKT: lda PlayerSize              ;check player's size
         beq BigKTS                  ;if big, use first tile
         lda Sprite_Tilenumber+24,y  ;check tile number of seventh/eighth sprite
         cmp SwimTileRepOffset       ;against tile number in player graphics table
-        beq ExPGH                   ;if spr7/spr8 tile number = value, branch to leave
+        beq __ret__                   ;if spr7/spr8 tile number = value, branch to leave
         inx                         ;otherwise increment X for second tile
 BigKTS: lda SwimKickTileNum,x       ;overwrite tile number in sprite 7/8
         sta Sprite_Tilenumber+24,y  ;to animate player's feet when swimming
-ExPGH:  rts                         ;then leave
+        rts                         ;then leave
 
 FindPlayerAction:
       jsr ProcessPlayerAction       ;find proper offset to graphics table by player's actions
@@ -14911,12 +14898,12 @@ ExAnimC:  pla                       ;get offset to graphics table from stack and
 
 GetGfxOffsetAdder:
         lda PlayerSize  ;get player's size
-        beq SzOfs       ;if player big, use current offset as-is
+        beq __ret__     ;if player big, use current offset as-is
         tya             ;for big player
         clc             ;otherwise add eight bytes to offset
         adc #$08        ;for small player
         tay
-SzOfs:  rts             ;go back
+        rts             ;go back
 
 ChangeSizeOffsetAdder:
         .db $00, $01, $00, $01, $00, $01, $02, $00, $01, $02
@@ -14970,7 +14957,7 @@ ChkForPlayerAttrib:
            cmp #$c0                    ;fourth row OAM attributes only
            beq C_S_IGAtt
            cmp #$c8
-           bne ExPlyrAt                ;if none of these, branch to leave
+           bne __ret__                ;if none of these, branch to leave
 KilledAtt: lda Sprite_Attributes+16,y
            and #%00111111              ;mask out horizontal and vertical flip bits
            sta Sprite_Attributes+16,y  ;for third row sprites and save
@@ -14985,7 +14972,7 @@ C_S_IGAtt: lda Sprite_Attributes+24,y
            and #%00111111
            ora #%01000000              ;set horizontal flip bit for second
            sta Sprite_Attributes+28,y  ;sprite in the fourth row
-ExPlyrAt:  rts                         ;leave
+           rts                         ;leave
 
 ;-------------------------------------------------------------------------------------
 ;$00 - used in adding to get proper offset
@@ -15170,10 +15157,10 @@ XOfsLoop: lda ScreenEdge_X_Pos,y      ;get pixel coordinate of edge
 XLdBData: lda XOffscreenBitsData,x    ;get bits here
           ldx $04                     ;reobtain position in buffer
           cmp #$00                    ;if bits not zero, branch to leave
-          bne ExXOfsBS
+          bne __ret__
           dey                         ;otherwise, do left side of screen now
           bpl XOfsLoop                ;branch if not already done with left side
-ExXOfsBS: rts
+          rts
 
 ;--------------------------------
 
@@ -15210,10 +15197,10 @@ YOfsLoop: lda HighPosUnitData,y        ;load coordinate for edge of vertical uni
 YLdBData: lda YOffscreenBitsData,x     ;get offscreen data bits using offset
           ldx $04                      ;reobtain position in buffer
           cmp #$00
-          bne ExYOfsBS                 ;if bits not zero, branch to leave
+          bne __ret__                  ;if bits not zero, branch to leave
           dey                          ;otherwise, do bottom of the screen now
           bpl YOfsLoop
-ExYOfsBS: rts
+          rts
 
 ;--------------------------------
 
@@ -15221,7 +15208,7 @@ DividePDiff:
           sta $05       ;store current value in A here
           lda $07       ;get pixel difference
           cmp $06       ;compare to preset value
-          bcs ExDivPD   ;if pixel difference >= preset value, branch
+          bcs __ret__   ;if pixel difference >= preset value, branch
           lsr           ;divide by eight
           lsr
           lsr
@@ -15230,7 +15217,7 @@ DividePDiff:
           bcs SetOscrO  ;if so, branch, use difference / 8 as offset
           adc $05       ;if not, add value to difference / 8
 SetOscrO: tax           ;use as offset
-ExDivPD:  rts           ;leave
+          rts           ;leave
 
 ;-------------------------------------------------------------------------------------
 ;$00-$01 - tile numbers
@@ -15383,12 +15370,12 @@ SetFreq_Squ1:
 Dump_Freq_Regs__sub:
         tay
         lda FreqRegLookupTbl+1,y  ;use previous contents of A for sound reg offset
-        beq NoTone                ;if zero, then do not load
+        beq __ret__                ;if zero, then do not load
         sta SND_REGISTER+2,x      ;first byte goes into LSB of frequency divider
         lda FreqRegLookupTbl,y    ;second byte goes into 3 MSB plus extra bit for
         ora #%00001000            ;length counter
         sta SND_REGISTER+3,x
-NoTone: rts
+        rts
 
 Dump_Sq2_Regs:
       stx SND_SQUARE2_REG    ;dump the contents of X and Y into square 2's control regs
@@ -15817,12 +15804,12 @@ PlayNoiseSfx__sub:
 
 DecrementSfx3Length__sub:
         dec Noise_SfxLenCounter  ;decrement length of sfx
-        bne ExSfx3
+        bne __ret__
         lda #$f0                 ;if done, stop playing the sfx
         sta SND_NOISE_REG
         lda #$00
         sta NoiseSoundBuffer
-ExSfx3: rts
+        rts
 
 NoiseSfxHandler:
         ldy NoiseSoundQueue   ;check for sfx in queue
@@ -16108,9 +16095,9 @@ LoadTriCtrlReg:
 HandleNoiseMusic:
         lda AreaMusicBuffer       ;check if playing underground or castle music
         and #%11110011
-        beq ExitMusicHandler      ;if so, skip the noise routine
+        beq __ret__      ;if so, skip the noise routine
         dec Noise_BeatLenCounter  ;decrement noise beat length
-        bne ExitMusicHandler      ;is it time for more data?
+        bne __ret__      ;is it time for more data?
 
 FetchNoiseBeatData:
         ldy MusicOffset_Noise       ;increment noise beat offset and fetch data
@@ -16157,8 +16144,6 @@ PlayBeat:
         sta SND_NOISE_REG    ;load beat data into noise regs
         stx SND_NOISE_REG+2
         sty SND_NOISE_REG+3
-
-ExitMusicHandler:
         rts
 
 AlternateLengthHandler:
