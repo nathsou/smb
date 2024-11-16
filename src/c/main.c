@@ -1,5 +1,8 @@
 #include "common.h"
 #include "raylib.h"
+#include <string.h>
+#include <stdio.h>
+#include "state.h"
 
 #define CONTROLLER_RIGHT 0b10000000
 #define CONTROLLER_LEFT 0b01000000
@@ -20,6 +23,11 @@
 #define CONTROLLER1_SELECT_KEY KEY_SPACE
 
 #define AUDIO_SAMPLE_RATE 48000
+#define SAVE_FILE "smb.sav"
+
+bool last_save_state_loaded = false;
+bool should_save_state = false;
+bool should_load_state = false;
 
 void handle_inputs(void) {
     uint8_t state = 0;
@@ -32,6 +40,8 @@ void handle_inputs(void) {
     if (IsKeyDown(CONTROLLER1_B_KEY)) state |= CONTROLLER_B;
     if (IsKeyDown(CONTROLLER1_START_KEY)) state |= CONTROLLER_START;
     if (IsKeyDown(CONTROLLER1_SELECT_KEY)) state |= CONTROLLER_SELECT;
+    if (IsKeyPressed(KEY_Z)) should_save_state = true;
+    if (IsKeyPressed(KEY_X)) should_load_state = true;
 
     update_controller1(state);
 }
@@ -39,6 +49,26 @@ void handle_inputs(void) {
 void audio_input_callback(void* output_buffer, unsigned int frames) {
     uint8_t *samples = (uint8_t*)output_buffer;
     apu_fill_buffer(samples, (size_t)frames);
+}
+
+void read_save_state(char *path, uint8_t *buffer) {
+    FILE *file = fopen(path, "rb");
+    if (file == NULL) {
+        return;
+    }
+
+    fread(buffer, 1, SAVE_STATE_SIZE, file);
+    fclose(file);
+}
+
+void write_save_state(char *path, uint8_t *buffer) {
+    FILE *file = fopen(path, "wb");
+    if (file == NULL) {
+        return;
+    }
+
+    fwrite(buffer, 1, SAVE_STATE_SIZE, file);
+    fclose(file);
 }
 
 int main(void) {
@@ -90,6 +120,21 @@ int main(void) {
             ClearBackground(WHITE);
             DrawTexturePro(texture, source, dest, (Vector2){ 0, 0 }, 0.0f, WHITE);
         EndDrawing();
+
+        if (should_save_state) {
+            save_state(last_save_state);
+            write_save_state(SAVE_FILE, last_save_state);
+            should_save_state = false;
+            last_save_state_loaded = true;
+        } else if (should_load_state) {
+            if (!last_save_state_loaded) {
+                read_save_state(SAVE_FILE, last_save_state);
+                last_save_state_loaded = true;
+            }
+
+            load_state(last_save_state);
+            should_load_state = false;
+        }
     }
 
     StopAudioStream(stream);

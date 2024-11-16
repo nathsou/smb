@@ -13,6 +13,8 @@ Static recompilation of Super Mario Bros. using [doppelganger's disassembly](htt
 - A: L
 - start: Enter
 - select: Space
+- z: Save state
+- x: Load state
 
 ## Checkpoints
 

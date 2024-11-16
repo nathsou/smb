@@ -1,11 +1,11 @@
 #ifndef SMB_COMMON_H
 #define SMB_COMMON_H
 
-#include <stdlib.h>
 #include "code.h"
 #include "cpu.h"
 #include "ppu.h"
 #include "apu.h"
+#include "external.h"
 
 #define ROM_PATH "Super Mario Bros.nes"
 #define CHR_ROM_SIZE 8192 // 8KB

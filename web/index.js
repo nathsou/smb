@@ -1,6 +1,8 @@
 const SCREEN_WIDTH = 256;
 const SCREEN_HEIGHT = 240;
 const AUDIO_CHUNK_SIZE = 1024;
+const SAVE_STATE_SIZE = 4384; // RAM_SIZE + NAMETABLE_SIZE + PALETTE_SIZE + OAM_SIZE
+const SAVE_STATE_LOCAL_STORAGE_KEY = 'save_state';
 
 function createCanvas() {
     const canvas = document.createElement('canvas');
@@ -15,7 +17,7 @@ function createCanvas() {
                 Math.floor(window.innerWidth / SCREEN_WIDTH),
                 Math.floor(window.innerHeight / SCREEN_HEIGHT),
             ), 1);
-    
+
         canvas.style.width = `${SCREEN_WIDTH * scalingFactor}px`;
         canvas.style.height = `${SCREEN_HEIGHT * scalingFactor}px`;
     };
@@ -33,7 +35,7 @@ function createCanvas() {
     return { canvas, context, updateSize };
 }
 
-function createController(onStart) {
+function createController(onStart, saveState) {
     let state = 0;
 
     const CONTROLLER_RIGHT = 0b10000000;
@@ -54,6 +56,8 @@ function createController(onStart) {
         b: 'k',
         start: 'Enter',
         select: ' ',
+        saveState: 'z',
+        loadState: 'x',
     };
 
     window.addEventListener('keydown', (event) => {
@@ -84,6 +88,13 @@ function createController(onStart) {
                 break;
             case keyMap.select:
                 state |= CONTROLLER_SELECT;
+                break;
+            case keyMap.saveState:
+                saveState.save();
+                break;
+            case keyMap.loadState:
+                onStart();
+                saveState.load();
                 break;
         }
     });
@@ -146,7 +157,7 @@ const CHR_ROM_LOCAL_STORAGE_KEY = 'chr_rom';
 
 async function getCHRROM() {
     const chrRomData = localStorage.getItem(CHR_ROM_LOCAL_STORAGE_KEY);
-    
+
     if (chrRomData) {
         const byteString = atob(chrRomData);
         const array = new Uint8Array(byteString.length);
@@ -214,7 +225,7 @@ function readUint16(buffer, ptr) {
 }
 
 async function main() {
-    const memory = new WebAssembly.Memory({ initial: 6, maximum: 6 });
+    const memory = new WebAssembly.Memory({ initial: 6 });
     const uint8View = new Uint8Array(memory.buffer);
 
     const { instance } = await WebAssembly.instantiateStreaming(fetch('smb.wasm'), {
@@ -243,12 +254,18 @@ async function main() {
         apu_fill_buffer: fillAPUBuffer,
         apu_step_frame: stepAPUFrame,
         NonMaskableInterrupt: nmi,
+        load_state: loadState,
+        save_state: saveState,
     } = instance.exports;
 
     const chrRomPtr = instance.exports.chr_rom.value;
     const audioBufferSizePtr = instance.exports.audio_buffer_size.value;
     const audioBufferSize = readUint16(uint8View, audioBufferSizePtr);
     const webAudioBufferPtr = instance.exports.web_audio_buffer.value;
+    const samples = new Uint8Array(uint8View.buffer, webAudioBufferPtr, audioBufferSize);
+    const lastSaveStatePtr = instance.exports.last_save_state.value;
+    const lastSaveState = new Uint8Array(uint8View.buffer, lastSaveStatePtr, SAVE_STATE_SIZE);
+    let saveStateReady = false;
 
     const chrRom = await getCHRROM();
     uint8View.set(chrRom, chrRomPtr);
@@ -286,7 +303,6 @@ async function main() {
 
     let audioInitialized = false;
     let audioWorklet = null;
-    const samples = new Uint8Array(uint8View.buffer, webAudioBufferPtr, audioBufferSize);
     let lastAudioTime = 0;
 
     const initAudio = async () => {
@@ -297,13 +313,13 @@ async function main() {
                 sampleRate: audioContext.sampleRate
             }
         });
-        
+
         audioWorklet.port.onmessage = (event) => {
             if (event.data.type === 'bufferLow') {
                 processAudio();
             }
         };
-        
+
         audioWorklet.connect(audioContext.destination);
     };
 
@@ -333,14 +349,27 @@ async function main() {
         lastAudioTime = currentTime;
     };
 
-    const joypad1 = createController(async () => {
-        if (!audioInitialized) {
-            await audioContext.resume();
-            await initAudio();
-            lastAudioTime = audioContext.currentTime;
-            audioInitialized = true;
-        }
-    });
+    let shouldSaveState = false;
+    let shouldLoadState = false;
+
+    const joypad1 = createController(
+        async () => {
+            if (!audioInitialized) {
+                await audioContext.resume();
+                await initAudio();
+                lastAudioTime = audioContext.currentTime;
+                audioInitialized = true;
+            }
+        },
+        {
+            save() {
+                shouldSaveState = true;
+            },
+            load() {
+                shouldLoadState = true;
+            },
+        },
+    );
 
     initCPU();
     initPPU(chrRomPtr);
@@ -358,22 +387,43 @@ async function main() {
         const delta = currentTime - lastUpdateTime;
         currentFrameTime += delta;
         lastUpdateTime = currentTime;
-        
+
         if (currentFrameTime >= targetFrameTime) {
             updateController1(joypad1.getState());
             nmi();
             stepAPUFrame();
-            
+
             if (audioInitialized) {
                 processAudio();
             }
-            
+
             renderPPU();
             renderFrame();
             lastFrameTime = currentTime;
             currentFrameTime = currentFrameTime - targetFrameTime;
+
+            if (shouldSaveState) {
+                saveState(lastSaveState.byteOffset);
+                localStorage.setItem(SAVE_STATE_LOCAL_STORAGE_KEY, JSON.stringify(Array.from(lastSaveState)));
+                shouldSaveState = false;
+                saveStateReady = true;
+            } else if (shouldLoadState) {
+                if (saveStateReady) {
+                    loadState(lastSaveState.byteOffset);
+                } else {
+                    const saveStateData = localStorage.getItem(SAVE_STATE_LOCAL_STORAGE_KEY);
+
+                    if (saveStateData) {
+                        const saveStateArray = JSON.parse(saveStateData);
+                        lastSaveState.set(saveStateArray);
+                        saveStateReady = true;
+                    }
+                }
+
+                shouldLoadState = false;
+            }
         }
-        
+
         requestAnimationFrame(update);
     };
 
