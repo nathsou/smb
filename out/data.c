@@ -219,8 +219,8 @@ const uint8_t data[] = {
   0xbe, 0xbe, 0xbf, 0xbf, // tree trunk
   0x75, 0xba, 0x76, 0xbb, // mushroom stump top
   0xba, 0xba, 0xbb, 0xbb, // mushroom stump bottom
-  0x45, 0x47, 0x45, 0x47, // breakable brick w/ line 
-  0x47, 0x47, 0x47, 0x47, // breakable brick 
+  0x45, 0x47, 0x45, 0x47, // breakable brick w/ line
+  0x47, 0x47, 0x47, 0x47, // breakable brick
   0x45, 0x47, 0x45, 0x47, // breakable brick (not used)
   0xb4, 0xb6, 0xb5, 0xb7, // cracked rock terrain
   0x45, 0x47, 0x45, 0x47, // brick with line (power-up)
@@ -2014,7 +2014,7 @@ const uint8_t data[] = {
   GroundLevelPart3AHdr - MHD, GroundLevelPart3BHdr - MHD, GroundLevelPart3AHdr - MHD, GroundLevelLeadInHdr - MHD,
   GroundLevelPart4AHdr - MHD, GroundLevelPart4BHdr - MHD, GroundLevelPart4AHdr - MHD, GroundLevelPart4CHdr - MHD,
   // music headers
-  // header format is as follows: 
+  // header format is as follows:
   // 1 byte - length byte offset
   // 2 bytes -  music data address
   // 1 byte - triangle data offset
@@ -2187,7 +2187,7 @@ const uint8_t data[] = {
   0x22, 0x22, 0x82, 0x2c, 0x2c, 0x22, 0x4,
   
   // DeathMusData
-  0x86, 0x4, // death music share data with fourth part c of ground level music 
+  0x86, 0x4, // death music share data with fourth part c of ground level music
   
   // GroundM_P4CData
   0x82, 0x2a, 0x36, 0x4, 0x36, 0x87, 0x36, 0x34, 0x30, 0x86, 0x2c, 0x4, 0x0,

@@ -11,7 +11,6 @@ pub struct AsmLowering {
   basic_blocks: Array[BasicBlock]
   bb_by_label: Map[String, BasicBlock]
   subroutines: Array[AsmSubroutine]
-  self_contained_subroutine_labels: Set[String]
 } derive (Show)
 
 pub type! LoweringError String derive(Show)
@@ -29,7 +28,6 @@ pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
     basic_blocks: [],
     bb_by_label: {},
     subroutines: [],
-    self_contained_subroutine_labels: Set::new(),
   }
 }
 
@@ -394,6 +392,20 @@ fn last_non_comment_item(self: BasicBlock) -> AsmItem? {
   None
 }
 
+fn has_fallthrough(self: BasicBlock) -> Bool!LoweringError {
+  let last_item = self.last_non_comment_item().or_error!(LoweringError("Empty basic block"))
+
+  match last_item {
+    Inst(~op, ..) => {
+      match op {
+        RTI | RTS | BRK | JMP => false
+        _ => true
+      }
+    }
+    _ => false
+  }
+}
+
 fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
   let leader_indices = self.collect_basic_block_leaders()
 
@@ -452,7 +464,11 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
           Some(target_bb) => {
             connect(bb, target_bb, false)
           }
-          None => raise LoweringError("Unknown jump target: \{label}")
+          None => {
+            if not(label.starts_with("__")) { // allow special labels
+              raise LoweringError("Unknown jump target: \{label}")
+            }
+          }
         }
       }
       JumpEngine(~jump_table) => {
@@ -461,7 +477,11 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
             Some(target_bb) => {
               connect(bb, target_bb, false)
             }
-            None => raise LoweringError("Unknown jump target: \{label}")
+            None => {
+              if not(label.starts_with("__")) { // allow special labels
+                raise LoweringError("Unknown jump target: \{label}")
+              }
+            }
           }
         }
       }
@@ -469,17 +489,7 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
     }
 
     // check for fallthrough to the next basic block
-    let fallthrough = match last_item {
-      Inst(~op, ..) => {
-        match op {
-          RTI | RTS | BRK | JMP => false
-          _ => true
-        }
-      }
-      _ => false
-    }
-
-    if fallthrough && bb.id + 1 < self.basic_blocks.length() {
+    if bb.has_fallthrough!() && bb.id + 1 < self.basic_blocks.length() {
       connect(bb, self.basic_blocks[bb.id + 1], true)
     }
   }
@@ -519,61 +529,72 @@ fn collect_external_labels(self: BasicBlock, internal_labels: Set[String], exter
   }
 }
 
-fn collect_external_labels(self: AsmSubroutine, targets: JumpTargets) -> Unit {
-  for bb in self.blocks {
-      bb.collect_external_labels(self.internal_labels, self.external_jumps)
+fn rewrite_bb(self: AsmLowering, bb: BasicBlock, visited: Set[Int]) -> Unit!LoweringError {
+  if visited.contains(bb.id) {
+    return
+  }
 
-      for label in self.external_jumps {
-        targets.externals.insert(label)
+  match bb.name {
+    Some(name) => {
+      if self.is_subroutine_label(name) {
+        let sub: AsmSubroutine = {
+          name,
+          blocks: [bb],
+          entry: bb,
+          exit: bb,
+          internal_labels: Set::new(),
+        }
+
+        let mut i = bb.id + 1
+
+        while i < self.basic_blocks.length() {
+          let next_bb = self.basic_blocks[i]
+
+          // if this is an exit bb, or if it's a subroutine entry, we're done for this function
+          if next_bb.predecessors.is_empty() || next_bb.is_subroutine_entry {
+            break
+          }
+
+          match next_bb.name {
+            Some(next_name) => {
+              if self.is_subroutine_label(next_name) {
+                // insert fallthrough call to the next subroutine
+                let prev_bb = sub.blocks[sub.blocks.length() - 1]
+                if prev_bb.successors.length() > 0 && prev_bb.has_fallthrough!() {
+                  prev_bb.items.push(Inst(op=JSR, mode=Absolute(Ident(name=next_name, ty=LabelTy)), comment=Some("<fallthrough>")))
+                  prev_bb.items.push(Inst(op=RTS, mode=Implied, comment=Some("<fallthrough>")))
+                }
+                break
+              }
+            }
+            None => ()
+          }
+
+          sub.blocks.push(next_bb)
+          visited.insert(next_bb.id)
+          i += 1
+        }
+
+        sub.exit = sub.blocks[sub.blocks.length() - 1]
+        self.subroutines.push(sub)
       }
+    }
+    None => ()
   }
 }
 
-fn collect_subroutines(self: AsmLowering) -> Unit {
+pub fn is_subroutine_label(self: AsmLowering, label: String) -> Bool {
+  self.targets.subroutines.contains(label) || label.ends_with("__sub")
+}
+
+fn collect_subroutines(self: AsmLowering) -> Unit!LoweringError {
   let components = self.collect_connected_components()
+  let visited = Set::new()
 
   for component in components {
-    let entry_idx = match component.search_by(fn(bb) { bb.predecessors.is_empty() }) {
-      Some(idx) => idx
-      None => {
-        println("Warning: no entry point found in component \{component[0].id}")
-        0
-      }
-    }
-
-    let entry = component[entry_idx]
-    entry.is_subroutine_entry = true
-    let name = entry.name.or_else(fn() { "Sub\{entry.id}" })
-
-    let exit_idx = match component
-      .search_by(fn(bb) { bb.successors.is_empty() }) {
-      Some(idx) => idx
-      None => {
-        println("Warning: no exit point found in component \{name}")
-        return
-      }
-    }
-
-    let exit = component[exit_idx]
-
-    let sub = {
-      name,
-      blocks: component,
-      entry,
-      exit,
-      internal_labels: Set::new(),
-      external_jumps: Set::new(),
-      is_self_contained: false,
-    }
-
     for bb in component {
-      bb.subroutine = Some(sub)
-      bb.collect_labels(sub.internal_labels)
+      let _ = self.rewrite_bb!(bb,visited)
     }
-
-    sub.collect_external_labels(self.targets)
-
-    self.subroutines.push(sub)
   }
 }
 
@@ -612,149 +633,10 @@ fn collect_connected_components(self: AsmLowering) -> Array[Array[BasicBlock]] {
   components
 }
 
-fn _write_connected_components_dotfile(components: Array[Array[BasicBlock]]) -> Unit {
-  let builder = StringBuilder::new()
-
-  builder.write_string("digraph G {\n")
-
-  for i, component in components {
-    builder.write_string("\tsubgraph cluster_\{i} {\n")
-    builder.write_string("\t\tstyle=filled;\n")
-    builder.write_string("\t\tcolor=lightgrey;\n")
-    let label = component[0].name.or_else(fn() { "Component \{i}" })
-    builder.write_string("\t\tlabel = \"\{label}\"\n")
-
-    for bb in component {
-      let name = match bb.name {
-        Some(name) => name
-        None => bb.id.to_string()
-      }
-
-      builder.write_string("\t\t\{name} [label=\"\{name}\"]\n")
-    }
-
-    builder.write_string("\t}\n")
-  }
-
-  builder.write_string("}\n")
-
-  @fs.write_string_to_file(path="components.dot", content=builder.to_string())
-}
-
-// a subroutine is considered self-contained if it doesn't call any external labels
-// and if it doesn't contain any labels that are called from outside
-fn is_self_contained(self: AsmSubroutine, targets: JumpTargets) -> Bool {
-  if self.external_jumps.size() > 0 {
-    return false
-  }
-
-  for label in self.internal_labels {
-    if label != self.name && targets.externals.contains(label) {
-      return false
-    }
-  }
-
-  true
-}
-
-// as a first step, only convert self-contained subroutines into functions
-fn collect_self_contained_subroutines(self: AsmLowering) -> Unit {
-  let global_labels = Set::new()
-
-  for bb in self.basic_blocks {
-    if bb.subroutine.is_empty() {
-      bb.collect_labels(global_labels)
-      bb.collect_external_labels(global_labels, self.targets.externals)
-    }
-  }
-
-  fn update_self_contained_list() -> Unit {
-    for sub in self.subroutines {
-      if not(sub.is_self_contained) && sub.is_self_contained(self.targets) {
-        self.self_contained_subroutine_labels.insert(sub.name)
-        sub.is_self_contained = true
-
-        // insert a jump instruction in place of automatic fallthroughs to subroutines
-        for pred in sub.entry.predecessors {
-          if pred.is_fallthrough {
-            pred.bb.items.push(Inst(op=JMP, mode=Absolute(Ident(name=sub.name, ty=LabelTy)), comment=Some("<fallthrough>")))
-          }
-        }
-      }
-    }
-  }
-
-  // remove external jump targets that are self-contained subroutines
-  fn remove_external_jumps_to_self_contained_subs() -> Bool {
-    let mut changed = false
-
-    for sub in self.subroutines {
-      for label in self.self_contained_subroutine_labels {
-        if sub.external_jumps.contains(label) {
-          sub.external_jumps.remove(label)
-          changed = true
-        }
-      }
-    }
-
-    changed
-  }
-
-  update_self_contained_list()
-
-  while remove_external_jumps_to_self_contained_subs() {
-    update_self_contained_list()
-  }
-}
-
-fn _show_cfg_dotfile(self: AsmLowering) -> Unit {
-  let builder = StringBuilder::new()
-
-  builder.write_string("digraph G {\n")
-
-  for bb in self.basic_blocks {
-    let name = match bb.name {
-      Some(name) => name
-      None => bb.id.to_string()
-    }
-
-    builder.write_string("\t\{name} [label=\"\{name}\"]\n")
-
-    for succ in bb.successors {
-      let succ_name = match succ.bb.name {
-        Some(name) => name
-        None => succ.bb.id.to_string()
-      }
-
-      builder.write_string("\t\{name} -> \{succ_name}\n")
-    }
-  }
-
-  builder.write_string("}\n")
-
-  println(builder.to_string())
-}
-
-fn _show_bbs(self: AsmLowering) -> Unit {
-  for bb in self.basic_blocks {
-    let preds = String::concat(bb.predecessors.map(fn(link) { link.bb.id.to_string() }), separator=", ")
-    let succs = String::concat(bb.successors.map(fn(link) { link.bb.id.to_string() }), separator=", ")
-
-    println("Basic block \{bb.id} (\{bb.name.or_default()}), preds: [\{preds}], succs: [\{succs}]")
-
-    for item in bb.items {
-      println("\{item}")
-    }
-
-    println("")
-  }
-}
-
 pub fn lower(self: AsmLowering) -> Unit!LoweringError {
   self.collect_labels_and_tables!()
   self.collect_defines!()
   self.collect_instructions!()
   self.collect_basic_blocks!()
-  self.collect_subroutines()
-  self.collect_self_contained_subroutines()
+  self.collect_subroutines!()
 }
