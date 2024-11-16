@@ -49,7 +49,7 @@ int main(void) {
         return 1;
     }
 
-    smb(RUN_STATE_RESET);
+    Start();
 
     SetTargetFPS(60);
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "SMB");
@@ -81,7 +81,7 @@ int main(void) {
 
     while (!WindowShouldClose()) {
         handle_inputs();
-        smb(RUN_STATE_NMI_HANDLER);
+        next_frame();
         ppu_render();
         apu_step_frame();
         UpdateTexture(texture, frame);

@@ -1,12 +1,5 @@
 #include "code.h"
 
-void smb(RunState state) {
-  switch (state) {
-    case RUN_STATE_RESET: Start();
-    case RUN_STATE_NMI_HANDLER: NonMaskableInterrupt();
-  }
-}
-
 void Start(void) {
   sei(); // pretty standard 6502 type init here
   cld();

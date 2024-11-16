@@ -61,13 +61,13 @@ int main(void) {
         return 1;
     }
 
-    smb(RUN_STATE_RESET);
+    Start();
 
     uint32_t cumulative_hash = HASH_OFFSET_BASIS;
 
     for (size_t i = 0; i < RECORDING_FRAME_COUNT; i++) {
         handle_inputs();
-        smb(RUN_STATE_NMI_HANDLER);
+        next_frame();
         ppu_render();
 
         // update the cumulative hash

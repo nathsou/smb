@@ -28,6 +28,8 @@
         "apu.h": "c",
         "external.h": "c",
         "math.h": "c",
-        "rec.h": "c"
+        "rec.h": "c",
+        "common.h": "c",
+        "stdlib.h": "c"
     }
 }

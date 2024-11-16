@@ -1,6 +1,4 @@
 
-const GEN_FUNCS = true
-
 pub struct Emitter {
   output: StringBuilder
   mut indentation: Int
@@ -174,15 +172,9 @@ fn emit_code_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"data.h\"")
   self.emit("#include \"instructions.h\"")
   self.emit("")
-  self.emit("typedef enum { RUN_STATE_RESET, RUN_STATE_NMI_HANDLER } RunState;")
-  self.emit("")
-  self.emit("void smb(RunState state);")
-  self.emit("")
 
-  if GEN_FUNCS {
-    for sub in low.subroutines {
-      self.emit("void \{rename_label(sub.name)}(void);")
-    }
+  for sub in low.subroutines {
+    self.emit("void \{rename_label(sub.name)}(void);")
   }
 
   self.emit("")
@@ -202,15 +194,9 @@ fn gen_jump(target: String, low: @lower.AsmLowering) -> String {
   let renamed_label = rename_label(target)
 
   match target {
-    "__ret__" => {
-      if GEN_FUNCS {
-        "return;"
-      } else {
-        "goto rts;"
-      }
-    }
+    "__ret__" => "return;"
     _ => {
-      if GEN_FUNCS && low.targets.subroutines.contains(target) {
+      if low.targets.subroutines.contains(target) {
         "\{renamed_label}(); return;"
       } else {
         "goto \{renamed_label};"
@@ -225,7 +211,7 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering, bb: @
         // do not output labels for subroutines
         let is_subroutine_label = low.is_subroutine_label(name);
 
-        if not(GEN_FUNCS) || not(is_subroutine_label) {
+        if not(is_subroutine_label) {
           self.indentation = 1
           self.emit("\n\{rename_label(name)}:")
           self.indentation = 2
@@ -302,20 +288,9 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering, bb: @
                   _ => ""
                 }
 
-                if GEN_FUNCS {
-                  "\{target}();"
-                } else {
-                  self.jsr_return_index += 1
-                  "jsr(\{target}, \{self.jsr_return_index - 1});"
-                }
+                "\{target}();"
               }
-              (RTS, _) => {
-                if GEN_FUNCS {
-                  "return;"
-                } else {
-                  "goto rts;"
-                }
-              }
+              (RTS, _) => "return;"
               _ => "\{op.to_string().to_lower()}\{mode.suffix()}(\{args});"
             }
           }
@@ -369,48 +344,9 @@ fn emit_subroutine(self: Emitter, subroutine: @lower.AsmSubroutine, low: @lower.
 fn emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
 self.emit("#include \"code.h\"")
   self.emit("")
-  self.emit("void smb(RunState state) {")
-  self.indentation += 1
 
-  self.emit("switch (state) {")
-  self.indentation += 1
-  let goto_start = if GEN_FUNCS { "Start();" } else { "goto Start;" }
-  let goto_nmi = if GEN_FUNCS { "NonMaskableInterrupt();" } else { "goto NonMaskableInterrupt;" }
-  self.emit("case RUN_STATE_RESET: \{goto_start}")
-  self.emit("case RUN_STATE_NMI_HANDLER: \{goto_nmi}")
-  self.indentation -= 1
-  self.emit("}")
-
-  if not(GEN_FUNCS) {
-    for bb in low.basic_blocks {
-      self.emit_basic_block(bb, low)
-    }
-  }
-
-  if not(GEN_FUNCS) {
-    self.emit("")
-    self.indentation = 0
-    self.emit("rts:")
-    self.indentation += 1
-    self.emit("switch (pop_jsr()) {")
-    self.indentation += 1
-
-    for i in 0..<self.jsr_return_index {
-      self.emit("case \{i}: goto jsr_ret_\{i};")
-    }
-
-    self.indentation -= 1
-    self.emit("}")
-  } 
-
-  self.indentation = 0
-  self.emit("}")
-  self.emit("")
-
-  if GEN_FUNCS {
-    for sub in low.subroutines {
-      self.emit_subroutine(sub, low)
-    }
+  for sub in low.subroutines {
+    self.emit_subroutine(sub, low)
   }
 }
 
