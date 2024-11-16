@@ -236,12 +236,13 @@ async function main() {
         cpu_init: initCPU,
         ppu_init: initPPU,
         apu_init: initAPU,
-        smb,
+        Start: start,
         ppu_render: renderPPU,
         frame: framePtr,
         update_controller1: updateController1,
         apu_fill_buffer: fillAPUBuffer,
         apu_step_frame: stepAPUFrame,
+        NonMaskableInterrupt: nmi,
     } = instance.exports;
 
     const chrRomPtr = instance.exports.chr_rom.value;
@@ -345,7 +346,7 @@ async function main() {
     initPPU(chrRomPtr);
     initAPU(audioContext.sampleRate);
 
-    smb(0);
+    start();
 
     let lastFrameTime = performance.now();
     let currentFrameTime = lastFrameTime;
@@ -360,7 +361,7 @@ async function main() {
         
         if (currentFrameTime >= targetFrameTime) {
             updateController1(joypad1.getState());
-            smb(1);
+            nmi();
             stepAPUFrame();
             
             if (audioInitialized) {
