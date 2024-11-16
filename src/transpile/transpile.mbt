@@ -1,5 +1,5 @@
 
-const GEN_FUNCS = false
+const GEN_FUNCS = true
 
 pub struct Emitter {
   output: StringBuilder
@@ -181,7 +181,7 @@ fn emit_code_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
 
   if GEN_FUNCS {
     for sub in low.subroutines {
-      self.emit("void \{sub.name}(void);")
+      self.emit("void \{rename_label(sub.name)}(void);")
     }
   }
 
@@ -190,11 +190,32 @@ fn emit_code_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#endif")
 }
 
-fn gen_jump(target: String, low: @lower.AsmLowering, bb: @lower.BasicBlock) -> String {
-  if GEN_FUNCS && low.targets.subroutines.contains(target) {
-    "\{target}(); return;"
+fn rename_label(label: String) -> String {
+  if label.ends_with("__sub") {
+    label.split("__sub").iter().peek().unwrap()
   } else {
-    "goto \{target};"
+    label
+  }
+}
+
+fn gen_jump(target: String, low: @lower.AsmLowering) -> String {
+  let renamed_label = rename_label(target)
+
+  match target {
+    "__ret__" => {
+      if GEN_FUNCS {
+        "return;"
+      } else {
+        "goto rts;"
+      }
+    }
+    _ => {
+      if GEN_FUNCS && low.targets.subroutines.contains(target) {
+        "\{renamed_label}(); return;"
+      } else {
+        "goto \{renamed_label};"
+      }
+    }
   }
 }
 
@@ -202,13 +223,13 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering, bb: @
     match item {
       Label(name) => {
         // do not output labels for subroutines
-        // let is_standalone_subroutine_label = match bb.subroutine { Some(sub) => sub.is_self_contained && sub.name == name; _ => false }
-        
-        // if not(is_standalone_subroutine_label) {
+        let is_subroutine_label = low.is_subroutine_label(name);
+
+        if not(GEN_FUNCS) || not(is_subroutine_label) {
           self.indentation = 1
-          self.emit("\n\{name}:")
+          self.emit("\n\{rename_label(name)}:")
           self.indentation = 2
-        // }
+        }
       }
       Inst(~op, ~mode, ~comment) => {
         let stmt = match (op, mode) {
@@ -270,14 +291,14 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering, bb: @
                   _ => abort("unreachable")
                 }
 
-                "if (\{cond}) { \{gen_jump(target, low, bb)} }"
+                "if (\{cond}) { \{gen_jump(target, low)} }"
               }
               (JMP, _) => {
-                gen_jump(args, low, bb)
+                gen_jump(args, low)
               }
               (JSR, _) => {
                 let target = match mode {
-                  Absolute(Ident(~name, ty=_)) => name
+                  Absolute(Ident(~name, ty=_)) => rename_label(name)
                   _ => ""
                 }
 
@@ -313,12 +334,11 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering, bb: @
         self.emit("// \{comment}")
       }
       JumpEngine(~jump_table) => {
-        self.emit("// jsr JumpEngine")
         self.emit("switch (a) {")
         self.indentation += 1
 
         for idx, label in jump_table {
-          self.emit("case \{idx}: \{gen_jump(label, low, bb)}")
+          self.emit("case \{idx}: \{gen_jump(label, low)}")
         }
 
         self.indentation -= 1
@@ -335,7 +355,7 @@ fn emit_basic_block(self: Emitter, bb: @lower.BasicBlock, low: @lower.AsmLowerin
 
 fn emit_subroutine(self: Emitter, subroutine: @lower.AsmSubroutine, low: @lower.AsmLowering) -> Unit {
   self.indentation = 0
-  self.emit("void \{subroutine.name}(void) {")
+  self.emit("void \{rename_label(subroutine.name)}(void) {")
   self.indentation = 1
 
   for block in subroutine.blocks {
@@ -360,29 +380,31 @@ self.emit("#include \"code.h\"")
   self.emit("case RUN_STATE_NMI_HANDLER: \{goto_nmi}")
   self.indentation -= 1
   self.emit("}")
-  
+
   if not(GEN_FUNCS) {
     for bb in low.basic_blocks {
       self.emit_basic_block(bb, low)
     }
   }
 
-  self.emit("")
+  if not(GEN_FUNCS) {
+    self.emit("")
+    self.indentation = 0
+    self.emit("rts:")
+    self.indentation += 1
+    self.emit("switch (pop_jsr()) {")
+    self.indentation += 1
+
+    for i in 0..<self.jsr_return_index {
+      self.emit("case \{i}: goto jsr_ret_\{i};")
+    }
+
+    self.indentation -= 1
+    self.emit("}")
+  } 
+
   self.indentation = 0
-  self.emit("rts:")
-  self.indentation += 1
-  self.emit("switch (pop_jsr()) {")
-  self.indentation += 1
-
-  for i in 0..<self.jsr_return_index {
-    self.emit("case \{i}: goto jsr_ret_\{i};")
-  }
-
-  self.indentation -= 1
   self.emit("}")
-  self.indentation = 0
-  self.emit("}")
-
   self.emit("")
 
   if GEN_FUNCS {

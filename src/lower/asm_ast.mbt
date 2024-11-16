@@ -76,8 +76,6 @@ pub struct AsmSubroutine {
   entry: BasicBlock
   mut exit: BasicBlock
   internal_labels: Set[String]
-  external_jumps: Set[String]
-  mut is_self_contained: Bool
 } derive (Show)
 
 pub fn ty(self: TypedExpr) -> Type {
