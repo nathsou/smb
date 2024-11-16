@@ -13,8 +13,6 @@ bool carry_flag;
 bool zero_flag;
 bool neg_flag;
 
-size_t jsr_return_stack[JSR_STACK_SIZE];
-size_t jsr_return_stack_top;
 uint8_t ram[2048];
 
 uint8_t controller1_state;
@@ -36,9 +34,6 @@ void cpu_init(void) {
     carry_flag = false;
     zero_flag = false;
     neg_flag = false;
-
-    // jsr return stack
-    jsr_return_stack_top = 0;
 
     // controller
     controller1_state = 0;
@@ -113,14 +108,6 @@ void write_word(uint16_t addr, uint16_t value) {
     write_byte(addr + 1, value >> 8);
 }
 
-void push_jsr(size_t return_index) {
-    jsr_return_stack[jsr_return_stack_top++] = return_index;
-}
-
-size_t pop_jsr() {
-    return jsr_return_stack[--jsr_return_stack_top];
-}
-
 // addressing mode utils
 
 void update_nz(uint8_t value) {
@@ -168,6 +155,6 @@ uint8_t indirect_y_val(uint8_t addr) {
     return read_byte(indirect_y_addr(addr));
 }
 
-void next_frame(void) {
-    smb(RUN_STATE_NMI_HANDLER);
+inline void next_frame(void) {
+    NonMaskableInterrupt();
 }

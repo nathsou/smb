@@ -5,8 +5,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define JSR_STACK_SIZE 64
-
 // registers
 extern uint8_t a, x, y, sp;
 
@@ -22,15 +20,6 @@ void write_byte(uint16_t addr, uint8_t value);
 
 uint16_t read_word(uint16_t addr);
 void write_word(uint16_t addr, uint16_t value);
-
-// jsr return stack
-extern size_t jsr_return_stack[JSR_STACK_SIZE]; // TODO: experiment with the stack size
-extern size_t jsr_return_stack_top;
-
-void push_jsr(size_t return_index);
-size_t pop_jsr();
-
-#define jsr(target, return_index) push_jsr(return_index); goto target; jsr_ret_##return_index:
 
 // controllers
 extern uint8_t controller1_state;
