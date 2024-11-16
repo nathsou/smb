@@ -6,10 +6,15 @@
 #define SCREEN_WIDTH 256
 #define SCREEN_HEIGHT 240
 
-extern uint8_t chr_rom[8192]; // 1 page of CHR ROM (8KB)
-extern uint8_t nametable[2048]; // 2KB of nametable RAM
-extern uint8_t palette_table[32]; // 32 bytes of palette RAM
-extern uint8_t oam[256]; // 256 bytes of OAM RAM
+#define CHR_ROM_SIZE 8192
+#define NAMETABLE_SIZE 2048
+#define PALETTE_SIZE 32
+#define OAM_SIZE 256
+
+extern uint8_t chr_rom[CHR_ROM_SIZE]; // 1 page of CHR ROM (8KB)
+extern uint8_t nametable[NAMETABLE_SIZE]; // 2KB of nametable RAM
+extern uint8_t palette_table[PALETTE_SIZE]; // 32 bytes of palette RAM
+extern uint8_t oam[OAM_SIZE]; // 256 bytes of OAM RAM
 
 extern uint16_t ppu_v; // current VRAM address
 extern uint8_t ppu_w; // write toggle (1 bit)

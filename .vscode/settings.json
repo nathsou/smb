@@ -30,6 +30,7 @@
         "math.h": "c",
         "rec.h": "c",
         "common.h": "c",
-        "stdlib.h": "c"
+        "stdlib.h": "c",
+        "state.h": "c"
     }
 }

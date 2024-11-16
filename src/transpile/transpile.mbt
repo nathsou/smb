@@ -410,6 +410,8 @@ pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
   let common_h = File::read!(name="common.h", path="src/c/common.h")
   let common_c = File::read!(name="common.c", path="src/c/common.c")
   let hash_c = File::read!(name="hash.c", path="src/c/hash.c")
+  let state_h = File::read!(name="state.h", path="src/c/state.h")
+  let state_c = File::read!(name="state.c", path="src/c/state.c")
 
   let code_h = {
     name: "code.h",
@@ -444,6 +446,7 @@ pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
       rec_h, rec_c,
       common_h, common_c,
       main_c, hash_c,
+      state_h, state_c,
     ],
   }
 }

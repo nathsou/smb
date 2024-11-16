@@ -21,6 +21,7 @@ SOURCES += out/data.c
 SOURCES += out/cpu.c
 SOURCES += out/ppu.c
 SOURCES += out/apu.c
+SOURCES += out/state.c
 MAIN = out/main.c
 
 .PHONY: codegen clean

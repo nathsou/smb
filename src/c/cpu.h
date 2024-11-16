@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define RAM_SIZE 2048 // 2KB
+
 // registers
 extern uint8_t a, x, y, sp;
 
@@ -13,7 +15,7 @@ extern bool carry_flag, zero_flag, neg_flag;
 // the overflow flag is never used :)
 
 // memory
-extern uint8_t ram[0x800]; // 2KB
+extern uint8_t ram[RAM_SIZE];
 
 uint8_t read_byte(uint16_t addr);
 void write_byte(uint16_t addr, uint8_t value);
