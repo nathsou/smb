@@ -1,8 +1,10 @@
-#include "common.h"
+#include "lib/common.h"
 #include "raylib.h"
 #include <string.h>
 #include <stdio.h>
-#include "state.h"
+#include "lib/state.h"
+
+#define ROM_PATH "smb.nes"
 
 #define CONTROLLER_RIGHT 0b10000000
 #define CONTROLLER_LEFT 0b01000000
@@ -75,7 +77,7 @@ int main(void) {
     cpu_init();
     apu_init(AUDIO_SAMPLE_RATE);
 
-    if (read_chr_rom()) {
+    if (read_chr_rom(ROM_PATH)) {
         return 1;
     }
 

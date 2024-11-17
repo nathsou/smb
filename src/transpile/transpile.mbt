@@ -353,11 +353,12 @@ self.emit("#include \"code.h\"")
 pub struct File {
   name: String
   contents: String
+  is_lib: Bool
 }
 
-fn File::read(~name: String, ~path: String) -> File!Error {
+fn File::read(~name: String, ~path: String, ~is_lib: Bool = true) -> File!Error {
   let contents = @fs.read_file_to_string!(~path)
-  { name, contents: contents }
+  { name, contents, is_lib }
 }
 
 pub fn write(self: File, ~dir: String) -> Unit {
@@ -369,13 +370,14 @@ pub struct Transpiler {
 }
 
 pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
-  let constants_h = {
+  let constants_h: File = {
     name: "constants.h",
     contents: {
       let emitter = Emitter::new()
       emitter.emit_constants_h(low)
       emitter.output.to_string()
-    }
+    },
+    is_lib: true,
   }
 
   let data_h = {
@@ -384,7 +386,8 @@ pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
       let emitter = Emitter::new()
       emitter.emit_data_h(low)
       emitter.output.to_string()
-    }
+    },
+    is_lib: true,
   }
 
   let data_c = {
@@ -393,7 +396,8 @@ pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
       let emitter = Emitter::new()
       emitter.emit_data_c(low)
       emitter.output.to_string()
-    }
+    },
+    is_lib: true,
   }
 
   let cpu_h = File::read!(name="cpu.h", path="src/c/cpu.h")
@@ -409,17 +413,16 @@ pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
   let rec_c = File::read!(name="rec.c", path="src/c/rec.c")
   let common_h = File::read!(name="common.h", path="src/c/common.h")
   let common_c = File::read!(name="common.c", path="src/c/common.c")
-  let hash_c = File::read!(name="hash.c", path="src/c/hash.c")
   let state_h = File::read!(name="state.h", path="src/c/state.h")
   let state_c = File::read!(name="state.c", path="src/c/state.c")
-
   let code_h = {
     name: "code.h",
     contents: {
       let emitter = Emitter::new()
       emitter.emit_code_h(low)
       emitter.output.to_string()
-    }
+    },
+    is_lib: true,
   }
 
   let code_c = {
@@ -428,10 +431,12 @@ pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
       let emitter = Emitter::new()
       emitter.emit_code_c(low)
       emitter.output.to_string()
-    }
+    },
+    is_lib: true,
   }
-
-  let main_c = File::read!(name="main.c", path="src/c/main.c")
+  
+  let hash_c = File::read!(name="hash.c", path="src/c/hash.c", is_lib=false)
+  let main_c = File::read!(name="main.c", path="src/c/main.c", is_lib=false)
 
   {
     files: [

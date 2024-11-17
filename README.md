@@ -33,7 +33,7 @@ In the root folder:
 
 1. Clone and build raylib using [raylib-quickstart](https://github.com/raylib-extras/raylib-quickstart)
 2. Run `make build`
-3. Place a legally obtained dump/ROM of SMB called `Super Mario Bros.nes` in the root folder to extract graphics data from
+3. Place a legally obtained dump/ROM of SMB called `smb.nes` in the root folder to extract graphics data from
 4. You can now run `./smb`
 
 ## WebAssembly
