@@ -10,7 +10,8 @@
 
 uint8_t chr_rom[8192];
 uint8_t nametable[2048];
-uint8_t palette_table[32];
+Palette palette;
+
 uint8_t oam[256];
 
 uint16_t ppu_v;
@@ -28,7 +29,9 @@ uint16_t vram_addr;
 uint8_t vram_internal_buffer;
 uint8_t oam_dma;
 
-uint8_t frame[SCREEN_WIDTH * SCREEN_HEIGHT * 3];
+#define FRAME_BUFFER_SIZE (SCREEN_WIDTH * SCREEN_HEIGHT * 3)
+
+uint8_t frame[FRAME_BUFFER_SIZE];
 bool opaque_bg_mask[SCREEN_WIDTH * SCREEN_HEIGHT];
 
 // 64 RGB colors
@@ -48,6 +51,17 @@ uint8_t COLOR_PALETTE[] = {
    0x99, 0xFF, 0xFC, 0xDD, 0xDD, 0xDD, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
 };
 
+typedef struct {
+    bool is_ready;
+    uint8_t pixels[8 * 8 * 3];
+    bool opaque_mask[8 * 8];
+    uint32_t palette_mask; // mask of palette indices used in this tile
+    uint32_t palette; // palette value, masked by palette_mask
+    uint8_t universal_color;
+} Tile;
+
+Tile bg_cached_tiles[256][4]; // 256 tiles, 4 palettes
+
 void clear_frame(void) {
     memset(frame, 0, SCREEN_WIDTH * SCREEN_HEIGHT * 3);
 }
@@ -60,6 +74,13 @@ void ppu_init(uint8_t* chr) {
     // copy CHR ROM
     memcpy(chr_rom, chr, 8192);
     clear_frame();
+
+    // init tiles
+    for (int i = 0; i < 256; i++) {
+        for (int j = 0; j < 4; j++) {
+            bg_cached_tiles[i][j].is_ready = false;
+        }
+    }
 }
 
 bool status_clear = false;
@@ -78,7 +99,7 @@ uint8_t ppu_read_register(uint16_t addr) {
             // as some loops wait for a flag to be set or cleared
 
             status_clear = !status_clear;
-            
+
             ppu_w = 0;
             // vblank and sprite 0 hit
             return status_clear ? 0 : 0b11000000;
@@ -156,17 +177,17 @@ uint8_t ppu_read(uint16_t addr) {
     if (addr < 0x2000) {
         return chr_rom[addr];
     }
-    
+
     if (addr < 0x3f00) {
         return nametable[addr - 0x2000];
     }
 
     if (addr == 0x3f10 || addr == 0x3f14 || addr == 0x3f18 || addr == 0x3f1c) {
-        return palette_table[addr - 0x3f10];
+        return palette.u8[addr - 0x3f10];
     }
-    
+
     if (addr < 0x4000) {
-        return palette_table[(addr - 0x3f00) & 31];
+        return palette.u8[(addr - 0x3f00) & 31];
     }
 
     return 0;
@@ -176,9 +197,9 @@ void ppu_write(uint16_t addr, uint8_t value) {
     if (addr >= 0x2000 && addr < 0x3f00) {
         nametable[addr - 0x2000] = value;
     } else if (addr == 0x3f10 || addr == 0x3f14 || addr == 0x3f18 || addr == 0x3f1c) {
-        palette_table[addr - 0x3f10] = value;
+        palette.u8[addr - 0x3f10] = value;
     } else if (addr < 0x4000) {
-        palette_table[(addr - 0x3f00) & 31] = value;
+        palette.u8[(addr - 0x3f00) & 31] = value;
     }
 }
 
@@ -207,6 +228,66 @@ size_t get_background_palette_index(size_t tile_col, size_t tile_row, size_t nam
     return ((attr_table_byte >> shift) & 0b11) * BYTES_PER_PALETTE;
 }
 
+Tile* get_cached_background_tile(size_t n, size_t bank_offset, size_t palette_offset) {
+    size_t palette_idx = palette_offset / 4;
+    Tile *tile = &bg_cached_tiles[n][palette_idx];
+
+    if (
+        tile->is_ready &&
+        tile->universal_color == palette.u8[0] &&
+        tile->palette == (palette.u32[palette_idx] & tile->palette_mask)
+    ) {
+        return tile;
+    }
+
+    uint32_t palette_mask = 0;
+
+    for (size_t tile_y = 0; tile_y < 8; tile_y++) {
+        uint8_t plane1 = chr_rom[bank_offset + n * 16 + tile_y];
+        uint8_t plane2 = chr_rom[bank_offset + n * 16 + tile_y + 8];
+
+        for (size_t tile_x = 0; tile_x < 8; tile_x++) {
+            uint8_t bit0 = plane1 & 1;
+            uint8_t bit1 = plane2 & 1;
+            uint8_t color_index = (uint8_t)((bit1 << 1) | bit0);
+
+            plane1 >>= 1;
+            plane2 >>= 1;
+
+            uint8_t palette_idx;
+            bool is_universal_bg_color = color_index == 0;
+            palette_mask |= (uint32_t)(0xff << (color_index * 8));
+
+            if (is_universal_bg_color) {
+                palette_idx = palette.u8[0];
+            } else {
+                palette_idx = palette.u8[palette_offset + color_index];
+            }
+
+            size_t palette_offset = palette_idx * 3;
+
+            uint8_t r = COLOR_PALETTE[palette_offset];
+            uint8_t g = COLOR_PALETTE[palette_offset + 1];
+            uint8_t b = COLOR_PALETTE[palette_offset + 2];
+
+            size_t tile_offset = (tile_y * 8 + tile_x);
+            size_t tile_offset_times_3 = tile_offset * 3;
+
+            tile->pixels[tile_offset_times_3] = r;
+            tile->pixels[tile_offset_times_3 + 1] = g;
+            tile->pixels[tile_offset_times_3 + 2] = b;
+            tile->opaque_mask[tile_offset] = !is_universal_bg_color;
+        }
+    }
+
+    tile->palette_mask = palette_mask;
+    tile->palette = palette.u32[palette_idx] & palette_mask;
+    tile->universal_color = palette.u8[0];
+    tile->is_ready = true;
+
+    return tile;
+}
+
 void draw_background_tile(
     size_t n,
     size_t x,
@@ -217,37 +298,23 @@ void draw_background_tile(
     int min_x,
     int max_x
 ) {
+    if ((int)(x + 7) < min_x || (int)x >= (max_x + 7)) {
+        return;
+    }
+
+    Tile *tile = get_cached_background_tile(n, bank_offset, palette_idx);
+
     for (size_t tile_y = 0; tile_y < 8; tile_y++) {
-        uint8_t plane1 = chr_rom[bank_offset + n * 16 + tile_y];
-        uint8_t plane2 = chr_rom[bank_offset + n * 16 + tile_y + 8];
-
         for (size_t tile_x = 0; tile_x < 8; tile_x++) {
-            uint8_t bit0 = plane1 & 1;
-            uint8_t bit1 = plane2 & 1;
-            uint8_t color_index = (uint8_t)((bit1 << 1) | bit0);
-            
-            plane1 >>= 1;
-            plane2 >>= 1;
-
-            uint8_t palette_offset;
-            bool is_universal_bg_color = color_index == 0;
-
-            if (is_universal_bg_color) {
-                palette_offset = palette_table[0];
-            } else {
-                palette_offset = palette_table[palette_idx + color_index];
-            }
-
+            size_t tile_offset = (tile_y * 8 + tile_x);
             int nametable_x = (int)x + ((int)(7 - (int)tile_x));
 
             if (nametable_x >= min_x && nametable_x < max_x) {
                 size_t screen_x = (size_t)(shift_x + nametable_x);
                 size_t screen_y = y + tile_y;
-                set_pixel(screen_x, screen_y, palette_offset);
 
-                if (!is_universal_bg_color && screen_x >= 0 && screen_x < SCREEN_WIDTH) {
-                    opaque_bg_mask[screen_y * SCREEN_WIDTH + screen_x] = true;
-                }
+                memcpy(&frame[(screen_y * SCREEN_WIDTH + screen_x) * 3], &tile->pixels[tile_offset * 3], 3);
+                opaque_bg_mask[screen_y * SCREEN_WIDTH + screen_x] = tile->opaque_mask[tile_offset];
             }
         }
     }
@@ -329,12 +396,12 @@ void draw_sprite_tile(
             uint8_t bit0 = plane1 & 1;
             uint8_t bit1 = plane2 & 1;
             uint8_t color_index = (uint8_t)((bit1 << 1) | bit0);
-            
+
             plane1 >>= 1;
             plane2 >>= 1;
 
             if (color_index != 0) {
-                uint8_t palette_offset = palette_table[palette_idx + color_index - 1];
+                uint8_t palette_offset = palette.u8[palette_idx + color_index - 1];
                 uint8_t flipped_x = (uint8_t)(flip_x ? tile_x : 7 - tile_x);
                 uint8_t flipped_y = (uint8_t)(flip_y ? 7 - tile_y : tile_y);
                 size_t screen_x = x + flipped_x;
