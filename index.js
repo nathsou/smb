@@ -225,7 +225,7 @@ function readUint16(buffer, ptr) {
 }
 
 async function main() {
-    const memory = new WebAssembly.Memory({ initial: 6 });
+    const memory = new WebAssembly.Memory({ initial: 10 });
     const uint8View = new Uint8Array(memory.buffer);
 
     const { instance } = await WebAssembly.instantiateStreaming(fetch('smb.wasm'), {
