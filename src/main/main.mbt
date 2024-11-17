@@ -50,6 +50,7 @@ fn transpile() -> @transpile.Transpiler!PipelineError {
   }
 }
 
+let lib_output_dir: String = "out/lib"
 let output_dir: String = "out"
 
 fn main {
@@ -57,10 +58,14 @@ fn main {
     @fs.create_dir(path=output_dir)
   }
 
+  if not(@fs.path_exists(path=lib_output_dir)) {
+    @fs.create_dir(path=lib_output_dir)
+  }
+
   match transpile?() {
       Ok(tr) => {
           for file in tr.files {
-              file.write(dir=output_dir)
+              file.write(dir=if file.is_lib { lib_output_dir } else { output_dir })
           }
       }
       Err(err) => {

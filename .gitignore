@@ -5,7 +5,7 @@ smb
 hash
 smb.wasm
 web/*.nes
-Super Mario Bros.nes
+*.nes
 raylib-quickstart/
 .idea/
 fm2/
@@ -16,3 +16,8 @@ smb.dSYM
 *.dot
 *.svg
 *.sav
+3ds/build
+3ds/*.3dsx
+3ds/*.elf
+3ds/*.smdh
+3ds/source/chr_rom.h

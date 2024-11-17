@@ -1,15 +1,15 @@
 #include "common.h"
 #include <stdio.h>
 
-int read_chr_rom(void) {
+int read_chr_rom(char *rom_path) {
     FILE *input_file, *output_file;
     uint8_t chr_rom[CHR_ROM_SIZE];
     uint8_t header[NES_HEADER_SIZE];
     
     // Open input file
-    input_file = fopen(ROM_PATH, "rb");
+    input_file = fopen(rom_path, "rb");
     if (input_file == NULL) {
-        fprintf(stderr, "Error: Could not open rom file: %s\n", ROM_PATH);
+        fprintf(stderr, "Error: Could not open rom file: %s\n", rom_path);
         return 1;
     }
     

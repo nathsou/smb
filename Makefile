@@ -15,13 +15,13 @@ endif
 
 OBJECTS = raylib-quickstart/bin/Debug/libraylib.a
 
-SOURCES += out/instructions.c
-SOURCES += out/code.c
-SOURCES += out/data.c
-SOURCES += out/cpu.c
-SOURCES += out/ppu.c
-SOURCES += out/apu.c
-SOURCES += out/state.c
+SOURCES += out/lib/instructions.c
+SOURCES += out/lib/code.c
+SOURCES += out/lib/data.c
+SOURCES += out/lib/cpu.c
+SOURCES += out/lib/ppu.c
+SOURCES += out/lib/apu.c
+SOURCES += out/lib/state.c
 MAIN = out/main.c
 
 .PHONY: codegen clean
@@ -30,13 +30,13 @@ codegen:
 	moon run src/main
 
 build: clean
-	$(CC) $(CFLAGS) -o smb ${MAIN} $(SOURCES) out/common.c $(RAYLIB_FLAGS) $(OBJECTS)
+	$(CC) $(CFLAGS) -o smb ${MAIN} $(SOURCES) out/lib/common.c $(RAYLIB_FLAGS) $(OBJECTS)
 
 wasm: clean
 	$(CC) -O3 --target=wasm32 -nostdlib -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined -o web/smb.wasm $(SOURCES)
 
 hash: clean
-	$(CC) $(CFLAGS) -o hash out/hash.c $(SOURCES) out/rec.c out/common.c
+	$(CC) $(CFLAGS) -o hash out/hash.c $(SOURCES) out/lib/rec.c out/lib/common.c
 
 clean:
 	rm -f smb hash smb.wasm

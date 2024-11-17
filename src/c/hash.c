@@ -1,6 +1,8 @@
-#include "common.h"
-#include "rec.h"
+#include "lib/common.h"
+#include "lib/rec.h"
+#include <stdlib.h>
 
+#define ROM_PATH "smb.nes"
 #define REC_FILE "rec/warpless.rec"
 #define HASH_OFFSET_BASIS 2166136261
 #define HASH_PRIME 16777619
@@ -56,7 +58,7 @@ int main(void) {
     cpu_init();
     rec_init();
 
-    if (read_chr_rom()) {
+    if (read_chr_rom(ROM_PATH)) {
         rec_close(&recording);
         return 1;
     }
