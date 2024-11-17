@@ -65,7 +65,7 @@ bool handle_inputs(void) {
 }
 
 int main(int argc, char* argv[]) {
-    gfxInitDefault();
+    gfxInit(GSP_BGR8_OES, GSP_BGR8_OES, false);
     consoleInit(GFX_BOTTOM, NULL);
     gfxSetDoubleBuffering(GFX_TOP, false);
     gfxSwapBuffers();

@@ -13,7 +13,7 @@ void save_state(uint8_t *dest) {
     }
 
     for (size_t i = 0; i < PALETTE_SIZE; i++) {
-        dest[SAVE_STATE_PALETTE_OFFSET + i] = palette_table[i];
+        dest[SAVE_STATE_PALETTE_OFFSET + i] = palette.u8[i];
     }
 
     for (size_t i = 0; i < OAM_SIZE; i++) {
@@ -24,7 +24,7 @@ void save_state(uint8_t *dest) {
 void load_state(uint8_t *state) {
     memcpy(ram, state, RAM_SIZE);
     memcpy(nametable, state + SAVE_STATE_NAMETABLE_OFFSET, NAMETABLE_SIZE);
-    memcpy(palette_table, state + SAVE_STATE_PALETTE_OFFSET, PALETTE_SIZE);
+    memcpy(palette.u8, state + SAVE_STATE_PALETTE_OFFSET, PALETTE_SIZE);
     memcpy(oam, state + SAVE_STATE_OAM_OFFSET, OAM_SIZE);
     memset(audio_buffer, 0, AUDIO_BUFFER_SIZE); // clear audio buffer
 }
