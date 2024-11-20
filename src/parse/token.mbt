@@ -1,23 +1,23 @@
-pub enum OpCode {
+pub(all) enum OpCode {
   ADC; AND; ASL; BCC; BCS; BEQ; BIT; BMI; BNE; BPL; BRK; BVC; BVS; CLC
   CLD; CLI; CLV; CMP; CPX; CPY; DEC; DEX; DEY; EOR; INC; INX; INY; JMP
   JSR; LDA; LDX; LDY; LSR; NOP; ORA; PHA; PHP; PLA; PLP; ROL; ROR; RTI
   RTS; SBC; SEC; SED; SEI; STA; STX; STY; TAX; TAY; TSX; TXA; TXS; TYA
 } derive (Show, Eq, Hash)
 
-pub enum ConstantBase {
+pub(all) enum ConstantBase {
   Binary; Decimal; Hexadecimal
 } derive (Show, Eq)
 
-pub enum ConstantSize {
+pub(all) enum ConstantSize {
   Byte; Word
 } derive (Show, Eq)
 
 enum Token {
-  Comment(~comment: String, ~is_inline: Bool)
+  Comment(comment~: String, is_inline~: Bool)
   Identifier(String)
   Label(String)
-  Constant(~base: ConstantBase, ~value: Int, ~size: ConstantSize)
+  Constant(base~: ConstantBase, value~: Int, size~: ConstantSize)
   OpCode(OpCode)
   Directive(String)
   Equal

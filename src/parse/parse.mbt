@@ -1,11 +1,11 @@
-pub struct Parser {
+pub(all) struct Parser {
   tokens: Array[Token]
   defines: Map[String, ConstantSize]
   mut index: Int
 }
 
-pub type! ParserError {
-  UnexpectedToken(~expected: Token, ~received: Token)
+pub(readonly) type! ParserError {
+  UnexpectedToken(expected~: Token, received~: Token)
   ExpectedIdentifier(Token)
   ExpectedExpr(Token)
   Unreachable(String)
@@ -32,7 +32,7 @@ fn expect(self: Parser, expected: Token) -> Unit!ParserError {
   if token == expected {
     self.advance()
   } else {
-    raise UnexpectedToken(~expected, received=token)
+    raise UnexpectedToken(expected~, received=token)
   }
 }
 
@@ -72,9 +72,9 @@ fn parse_identifier(self: Parser) -> String!ParserError {
 fn parse_primary_expr(self: Parser) -> SourceExpr!ParserError {
   let token = self.peek()
   match token {
-    Constant(~base, ~value, ~size) => {
+    Constant(base~, value~, size~) => {
       self.advance()
-      Const(~value, ~base, ~size)
+      Const(value~, base~, size~)
     }
     Identifier(name) => {
       self.advance()
@@ -89,12 +89,12 @@ fn parse_primary_expr(self: Parser) -> SourceExpr!ParserError {
     LeftChevron => {
       self.advance()
       let expr = self.parse_expr!()
-      Unary(op=GetLowByte, ~expr)
+      Unary(op=GetLowByte, expr~)
     }
     RightChevron => {
       self.advance()
       let expr = self.parse_expr!()
-      Unary(op=GetHighByte, ~expr)
+      Unary(op=GetHighByte, expr~)
     }
     _ => raise ExpectedExpr(token)
   }
@@ -105,10 +105,10 @@ fn parse_additive_expr(self: Parser) -> SourceExpr!ParserError {
   while true {
     if self.consumes(Plus) {
       let rhs = self.parse_primary_expr!()
-      lhs = Binary(op=Add, ~lhs, ~rhs)
+      lhs = Binary(op=Add, lhs~, rhs~)
     } else if self.consumes(Minus) {
       let rhs = self.parse_primary_expr!()
-      lhs = Binary(op=Sub, ~lhs, ~rhs)
+      lhs = Binary(op=Sub, lhs~, rhs~)
     } else {
       break
     }
@@ -134,7 +134,7 @@ fn parse_directive_args(self: Parser) -> Array[SourceExpr]!ParserError {
 
 fn parse_addressing_mode(
   self: Parser,
-  ~opcode: OpCode
+  opcode~: OpCode
 ) -> SourceAddressingMode!ParserError {
   if opcode.is_implied() {
     Implied
@@ -152,7 +152,7 @@ fn parse_addressing_mode(
 
         if self.consumes(Comma) {
           if self.consumes(Identifier("x")) {
-            return IndexedIndirect(~addr)
+            return IndexedIndirect(addr~)
           } else {
             raise Unreachable("Expected 'x' after comma in indexed indirect addressing mode")
           }
@@ -162,31 +162,31 @@ fn parse_addressing_mode(
 
         if self.consumes(Comma) {
           if self.consumes(Identifier("y")) {
-            IndirectIndexed(~addr)
+            IndirectIndexed(addr~)
           } else {
             raise Unreachable("Expected 'y' after comma in indirect indexed addressing mode")
           }
         } else {
-          Indirect(~addr)
+          Indirect(addr~)
         }
       }
       _ =>
         if opcode.is_relative() {
           let addr = self.parse_expr!()
-          Relative(~addr)
+          Relative(addr~)
         } else {
           match self.parse_expr?() {
             Ok(addr) =>
               if self.consumes(Comma) {
                 if self.consumes(Identifier("x")) {
-                  AbsoluteOrZeroPageX(~addr)
+                  AbsoluteOrZeroPageX(addr~)
                 } else if self.consumes(Identifier("y")) {
-                  AbsoluteOrZeroPageY(~addr)
+                  AbsoluteOrZeroPageY(addr~)
                 } else {
                   raise Unreachable("Expected 'x' or 'y' after comma")
                 }
               } else {
-                AbsoluteOrZeroPage(~addr)
+                AbsoluteOrZeroPage(addr~)
               }
             Err(err) =>
               if opcode.supports_accumulator_addr_mode() {
@@ -208,7 +208,7 @@ fn parse_inst(self: Parser) -> SourceItem!ParserError {
       self.advance()
       self.expect!(Equal)
       let rhs = self.parse_expr!()
-      Define(~name, ~rhs)
+      Define(name~, rhs~)
     }
     Label(name) => {
       self.advance()
@@ -217,16 +217,16 @@ fn parse_inst(self: Parser) -> SourceItem!ParserError {
     Directive(name) => {
       self.advance()
       let args = self.parse_directive_args!()
-      Directive(~name, ~args)
+      Directive(name~, args~)
     }
     OpCode(op) => {
       self.advance()
       let mode = self.parse_addressing_mode!(opcode=op)
-      Inst(~op, ~mode)
+      Inst(op~, mode~)
     }
-    Comment(~comment, ~is_inline) => {
+    Comment(comment~, is_inline~) => {
       self.advance()
-      Comment(~comment, ~is_inline)
+      Comment(comment~, is_inline~)
     }
     _ => raise Unreachable("Expected instruction, got: \{token}")
   }
