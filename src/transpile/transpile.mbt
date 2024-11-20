@@ -1,5 +1,5 @@
 
-pub struct Emitter {
+pub(all) struct Emitter {
   output: StringBuilder
   mut indentation: Int
   mut jsr_return_index: Int
@@ -13,7 +13,7 @@ pub fn Emitter::new() -> Emitter {
   }
 }
 
-fn emit(self: Emitter, s: String, ~newline: Bool = true) -> Unit {
+fn emit(self: Emitter, s: String, newline~: Bool = true) -> Unit {
   let indent = "  ".repeat(self.indentation)
   self.output.write_string("\{indent}\{s}")
 
@@ -68,7 +68,7 @@ fn bin(n: Int) -> String {
   b.to_string().rev().pad_start(8, '0')
 }
 
-fn show_const(~base: @parse.ConstantBase, ~value: Int) -> String {
+fn show_const(base~: @parse.ConstantBase, value~: Int) -> String {
   match base {
     Decimal => value.to_string()
     Hexadecimal => "0x\{hex(value)}"
@@ -78,17 +78,17 @@ fn show_const(~base: @parse.ConstantBase, ~value: Int) -> String {
 
 fn show_expr(expr: @lower.TypedExpr) -> String {
   match expr {
-    Const(~base, ~value, size=_, ty=_) => show_const(~base, ~value)
-    Ident(~name, ty=_) => name
-    Unary(~op, ~expr, ty=_) => {
-      let macro = match op {
+    Const(base~, value~, size=_, ty=_) => show_const(base~, value~)
+    Ident(name~, ty=_) => name
+    Unary(op~, expr~, ty=_) => {
+      let macro_ = match op {
         GetHighByte => "HIGH_BYTE"
         GetLowByte => "LOW_BYTE"
       }
 
-      "\{macro}(\{show_expr(expr)})"
+      "\{macro_}(\{show_expr(expr)})"
     }
-    Binary(~op, ~lhs, ~rhs, ty=_) => {
+    Binary(op~, lhs~, rhs~, ty=_) => {
       let op = match op {
         Add => "+"
         Sub => "-"
@@ -99,7 +99,7 @@ fn show_expr(expr: @lower.TypedExpr) -> String {
   }
 }
 
-pub type! EmitterError String derive(Show)
+pub(all) type! EmitterError String derive(Show)
 
 fn emit_constants_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#ifndef SMB_CONSTANTS_H")
@@ -146,7 +146,7 @@ fn emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
 
     for line in table.lines {
       match line {
-        Data(~data, ~comment) => {
+        Data(data~, comment~) => {
           let data = String::concat(data.map(show_expr), separator=", ")
 
           match comment.val {
@@ -205,7 +205,7 @@ fn gen_jump(target: String, low: @lower.AsmLowering) -> String {
   }
 }
 
-fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering, bb: @lower.BasicBlock) -> Unit {
+fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering) -> Unit {
     match item {
       Label(name) => {
         // do not output labels for subroutines
@@ -217,7 +217,7 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering, bb: @
           self.indentation = 2
         }
       }
-      Inst(~op, ~mode, ~comment) => {
+      Inst(op~, mode~, comment~) => {
         let stmt = match (op, mode) {
           (TXS, _) => "sp = x;"
           (RTI, _) => "return; // <rti>"
@@ -284,7 +284,7 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering, bb: @
               }
               (JSR, _) => {
                 let target = match mode {
-                  Absolute(Ident(~name, ty=_)) => rename_label(name)
+                  Absolute(Ident(name~, ty=_)) => rename_label(name)
                   _ => ""
                 }
 
@@ -308,7 +308,7 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering, bb: @
       Comment(comment) => {
         self.emit("// \{comment}")
       }
-      JumpEngine(~jump_table) => {
+      JumpEngine(jump_table~) => {
         self.emit("switch (a) {")
         self.indentation += 1
 
@@ -324,7 +324,7 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering, bb: @
 
 fn emit_basic_block(self: Emitter, bb: @lower.BasicBlock, low: @lower.AsmLowering) -> Unit {
   for item in bb.items {
-    self.emit_item(item, low, bb)
+    self.emit_item(item, low)
   }
 }
 
@@ -350,22 +350,22 @@ self.emit("#include \"code.h\"")
   }
 }
 
-pub struct File {
+pub(all) struct File {
   name: String
   contents: String
   is_lib: Bool
 }
 
-fn File::read(~name: String, ~path: String, ~is_lib: Bool = true) -> File!Error {
-  let contents = @fs.read_file_to_string!(~path)
+fn File::read(name~: String, path~: String, is_lib~: Bool = true) -> File!Error {
+  let contents = @fs.read_file_to_string!(path~)
   { name, contents, is_lib }
 }
 
-pub fn write(self: File, ~dir: String) -> Unit {
+pub fn write(self: File, dir~: String) -> Unit {
   @fs.write_string_to_file(path="\{dir}/\{self.name}", content=self.contents)
 }
 
-pub struct Transpiler {
+pub(all) struct Transpiler {
   files: Array[File]
 }
 

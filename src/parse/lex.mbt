@@ -1,12 +1,12 @@
 
-pub struct Lexer {
+pub(all) struct Lexer {
   input: String
   mut index: Int
 }
 
-pub type! LexerError {
-  UnexepectedChar(~char: Char, ~index: Int)
-  InvalidConstant(~lexeme: String, ~base: ConstantBase)
+pub(readonly) type! LexerError {
+  UnexepectedChar(char~: Char, index~: Int)
+  InvalidConstant(lexeme~: String, base~: ConstantBase)
 } derive(Show)
 
 fn is_whitespace(c: Char) -> Bool {
@@ -27,7 +27,7 @@ fn is_hex_digit(c: Char) -> Bool {
   is_decimal_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
-fn is_valid_digit(char: Char, ~base: ConstantBase) -> Bool {
+fn is_valid_digit(char: Char, base~: ConstantBase) -> Bool {
   match base {
     Binary => char == '0' || char == '1'
     Decimal => is_decimal_digit(char)
@@ -101,13 +101,13 @@ fn parse_identifier(self: Lexer) -> String {
   identifier.to_string()
 }
 
-fn parse_constant(self: Lexer, ~base: ConstantBase) -> LexerResult {
+fn parse_constant(self: Lexer, base~: ConstantBase) -> LexerResult {
   let lexeme = StringBuilder::new()
 
   for i in self.index..<self.input.length() {
     let char = self.input[i]
 
-    if is_valid_digit(char, ~base) {
+    if is_valid_digit(char, base~) {
       lexeme.write_char(char)
       self.advance()
     } else {
@@ -119,7 +119,7 @@ fn parse_constant(self: Lexer, ~base: ConstantBase) -> LexerResult {
 
   let value = match @strconv.parse_int?(lexeme, base=base.to_int()) {
     Ok(value) => value
-    Err(_) => return Grr(InvalidConstant(~lexeme, ~base))
+    Err(_) => return Grr(InvalidConstant(lexeme~, base~))
   }
 
   let size = match base {
@@ -146,7 +146,7 @@ fn parse_constant(self: Lexer, ~base: ConstantBase) -> LexerResult {
     }
   }
 
-  Yay(Constant(~base, ~value, ~size))
+  Yay(Constant(base~, value~, size~))
 }
 
 fn parse_opcode(str: String) -> OpCode? {
@@ -347,7 +347,7 @@ fn next(self: Lexer) -> LexerResult {
 
       self.advance()
       let comment = self.parse_comment()
-      Yay(Comment(~comment, ~is_inline))
+      Yay(Comment(comment~, is_inline~))
     }
     '%' => {
       self.advance()
@@ -372,7 +372,7 @@ fn next(self: Lexer) -> LexerResult {
       } else if is_decimal_digit(char) {
         self.parse_constant(base=Decimal)
       } else {
-        Grr(UnexepectedChar(~char, index=self.index))
+        Grr(UnexepectedChar(char~, index=self.index))
       }
     }
   }

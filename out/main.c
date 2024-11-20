@@ -31,19 +31,108 @@ bool last_save_state_loaded = false;
 bool should_save_state = false;
 bool should_load_state = false;
 
-void handle_inputs(void) {
-    uint8_t state = 0;
+typedef struct {
+    char *name;
+    uint8_t left;
+    uint8_t right;
+    uint8_t up;
+    uint8_t down;
+    uint8_t a;
+    uint8_t b;
+    uint8_t start;
+    uint8_t select;
+    uint8_t save;
+    uint8_t load;
+} GamepadMapping;
 
-    if (IsKeyDown(CONTROLLER1_UP_KEY)) state |= CONTROLLER_UP;
-    if (IsKeyDown(CONTROLLER1_LEFT_KEY)) state |= CONTROLLER_LEFT;
-    if (IsKeyDown(CONTROLLER1_DOWN_KEY)) state |= CONTROLLER_DOWN;
-    if (IsKeyDown(CONTROLLER1_RIGHT_KEY)) state |= CONTROLLER_RIGHT;
-    if (IsKeyDown(CONTROLLER1_A_KEY)) state |= CONTROLLER_A;
-    if (IsKeyDown(CONTROLLER1_B_KEY)) state |= CONTROLLER_B;
-    if (IsKeyDown(CONTROLLER1_START_KEY)) state |= CONTROLLER_START;
-    if (IsKeyDown(CONTROLLER1_SELECT_KEY)) state |= CONTROLLER_SELECT;
+GamepadMapping default_gamepad_mapping = {
+    .name = "<default>",
+    .left = GAMEPAD_BUTTON_LEFT_FACE_LEFT,
+    .right = GAMEPAD_BUTTON_LEFT_FACE_RIGHT,
+    .up = GAMEPAD_BUTTON_LEFT_FACE_UP,
+    .down = GAMEPAD_BUTTON_LEFT_FACE_DOWN,
+    .a = GAMEPAD_BUTTON_RIGHT_FACE_DOWN,
+    .b = GAMEPAD_BUTTON_RIGHT_FACE_RIGHT,
+    .start = GAMEPAD_BUTTON_MIDDLE_LEFT,
+    .select = GAMEPAD_BUTTON_MIDDLE_RIGHT,
+    .save = GAMEPAD_BUTTON_LEFT_TRIGGER_1,
+    .load = GAMEPAD_BUTTON_RIGHT_TRIGGER_1,
+};
+
+GamepadMapping gamepad_mappings[] = {
+    {
+        // 8BitDo SN30 Pro+ (MacOS mode: START + A)
+        .name = "DUALSHOCK 4 Wireless Controller",
+        .left = 4,
+        .right = 2,
+        .up = 1,
+        .down = 3,
+        .a = 7,
+        .b = 8,
+        .start = 15,
+        .select = 13,
+        .save = 11,
+        .load = 9,
+    },
+};
+
+GamepadMapping *get_gamepad_mapping(const char *name) {
+    size_t len  = sizeof(gamepad_mappings) / sizeof(GamepadMapping);
+
+    for (size_t i = 0; i < len; i++) {
+        if (strcmp(gamepad_mappings[i].name, name) == 0) {
+            return &gamepad_mappings[i];
+        }
+    }
+
+    return &default_gamepad_mapping;
+}
+
+void handle_inputs(int gamepad, GamepadMapping *mapping) {
+    bool up = false;
+    bool down = false;
+    bool left = false;
+    bool right = false;
+    bool a = false;
+    bool b = false;
+    bool start = false;
+    bool select = false;
+    
+    // Keyboard inputs
+    if (IsKeyDown(CONTROLLER1_UP_KEY)) up = true;
+    if (IsKeyDown(CONTROLLER1_LEFT_KEY)) left = true;
+    if (IsKeyDown(CONTROLLER1_DOWN_KEY)) down = true;
+    if (IsKeyDown(CONTROLLER1_RIGHT_KEY)) right = true;
+    if (IsKeyDown(CONTROLLER1_A_KEY)) a = true;
+    if (IsKeyDown(CONTROLLER1_B_KEY)) b = true;
+    if (IsKeyDown(CONTROLLER1_START_KEY)) start = true;
+    if (IsKeyDown(CONTROLLER1_SELECT_KEY)) select = true;
     if (IsKeyPressed(KEY_Z)) should_save_state = true;
     if (IsKeyPressed(KEY_X)) should_load_state = true;
+
+    // Gamepad inputs
+    if (mapping != NULL) {
+        if (IsGamepadButtonDown(gamepad, mapping->left)) left = true;
+        if (IsGamepadButtonDown(gamepad, mapping->right)) right = true;
+        if (IsGamepadButtonDown(gamepad, mapping->up)) up = true;
+        if (IsGamepadButtonDown(gamepad, mapping->down)) down = true;
+        if (IsGamepadButtonDown(gamepad, mapping->a)) a = true;
+        if (IsGamepadButtonDown(gamepad, mapping->b)) b = true;
+        if (IsGamepadButtonDown(gamepad, mapping->start)) start = true;
+        if (IsGamepadButtonDown(gamepad, mapping->select)) select = true;
+        if (IsGamepadButtonDown(gamepad, mapping->save)) should_save_state = true;
+        if (IsGamepadButtonDown(gamepad, mapping->load)) should_load_state = true;
+    }
+
+    uint8_t state = 0;
+    if (up) state |= CONTROLLER_UP;
+    if (down) state |= CONTROLLER_DOWN;
+    if (left) state |= CONTROLLER_LEFT;
+    if (right) state |= CONTROLLER_RIGHT;
+    if (a) state |= CONTROLLER_A;
+    if (b) state |= CONTROLLER_B;
+    if (start) state |= CONTROLLER_START;
+    if (select) state |= CONTROLLER_SELECT;
 
     update_controller1(state);
 }
@@ -110,9 +199,18 @@ int main(void) {
 
     Rectangle source = { 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
     Rectangle dest = { 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT };
+    
+    int gamepad = 0;
+    GamepadMapping *mapping = NULL;
 
     while (!WindowShouldClose()) {
-        handle_inputs();
+        if (mapping == NULL && IsGamepadAvailable(gamepad)) {
+            const char *name = GetGamepadName(gamepad);
+            mapping = get_gamepad_mapping(name);
+            printf("Gamepad %d name: %s\n detected", gamepad, name);
+        }
+        
+        handle_inputs(gamepad, mapping);
         next_frame();
         ppu_render();
         apu_step_frame();

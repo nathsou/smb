@@ -1,5 +1,5 @@
 
-pub struct AsmLowering {
+pub(all) struct AsmLowering {
   items: Array[@parse.SourceItem]
   lowered: Array[AsmItem]
   defines: Map[String, TypedExpr]
@@ -13,7 +13,7 @@ pub struct AsmLowering {
   subroutines: Array[AsmSubroutine]
 } derive (Show)
 
-pub type! LoweringError String derive(Show)
+pub(readonly) type! LoweringError String derive(Show)
 
 pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
   {
@@ -39,7 +39,7 @@ fn detect_table(self: AsmLowering, name: String, index: Int) -> AsmTable?!Loweri
 
   while i < self.items.length() {
     match self.items[i] {
-      Directive(name="db" | "dw" as name, ~args) => {
+      Directive(name="db" | "dw" as name, args~) => {
         let directive_elem_size: @parse.ConstantSize = if name == "db" { Byte } else { Word }
 
         match elem_size {
@@ -61,9 +61,9 @@ fn detect_table(self: AsmLowering, name: String, index: Int) -> AsmTable?!Loweri
           data.push(self.type_expr!(arg))
         }
 
-        lines.push(Data(~data, comment=Ref::new("")))
+        lines.push(Data(data~, comment=Ref::new("")))
       }
-      Comment(~comment, ~is_inline) => {
+      Comment(comment~, is_inline~) => {
         if is_inline {
           match lines.last() {
             Some(Data(data=_, comment=comment_ref)) => {
@@ -117,18 +117,18 @@ fn collect_labels_and_tables(self: AsmLowering) -> Unit!LoweringError {
             self.tables_by_label[table.name] = table
 
             if is_alias {
-              let alias = match self.items[idx + 1] {
+              let alias_ = match self.items[idx + 1] {
                 Label(name) => name
                 _ => raise LoweringError("Expected alias label")
               }
 
-              self.tables_by_label[alias] = table
+              self.tables_by_label[alias_] = table
             }
 
             idx_increment = table.items_count
           }
           None => {
-            self.jump_target_labels.insert(name)
+            self.jump_target_labels.add(name)
           }
         }
       }
@@ -141,31 +141,31 @@ fn collect_labels_and_tables(self: AsmLowering) -> Unit!LoweringError {
 
 fn type_expr(self: AsmLowering, expr: @parse.SourceExpr) -> TypedExpr!LoweringError {
   match expr {
-    Const(~base, ~value, ~size) => {
+    Const(base~, value~, size~) => {
       let ty = match size {
         Byte => ConstTy(Byte)
         Word => ConstTy(Word)
       }
 
-      Const(~base, ~value, ~size, ~ty)
+      Const(base~, value~, size~, ty~)
     }
     Ident(name) => {
       match self.tables_by_label[name] {
-        Some(table) => Ident(~name, ty=ArrayTy(table.elem_size))
+        Some(table) => Ident(name~, ty=ArrayTy(table.elem_size))
         None => match self.defines[name] {
-          Some(expr) => Ident(~name, ty=expr.ty())
-          None => Ident(~name, ty=LabelTy)
+          Some(expr) => Ident(name~, ty=expr.ty())
+          None => Ident(name~, ty=LabelTy)
         }
       }
     }
-    Unary(~op, ~expr) => {
+    Unary(op~, expr~) => {
       let expr = self.type_expr!(expr)
-      Unary(~op, ~expr, ty=expr.ty())
+      Unary(op~, expr~, ty=expr.ty())
     }
-    Binary(~op, ~lhs, ~rhs) => {
+    Binary(op~, lhs~, rhs~) => {
       let lhs = self.type_expr!(lhs)
       let rhs = self.type_expr!(rhs)
-      Binary(~op, ~lhs, ~rhs, ty=lhs.ty())
+      Binary(op~, lhs~, rhs~, ty=lhs.ty())
     }
   }
 }
@@ -173,7 +173,7 @@ fn type_expr(self: AsmLowering, expr: @parse.SourceExpr) -> TypedExpr!LoweringEr
 fn collect_defines(self: AsmLowering) -> Unit!LoweringError {
   for item in self.items {
     match item {
-      Define(~name, ~rhs) => {
+      Define(name~, rhs~) => {
         self.defines[name] = self.type_expr!(rhs)
       }
       _ => ()
@@ -200,14 +200,14 @@ fn collect_instructions(self: AsmLowering) -> Unit!LoweringError {
           inside_table = true
         }
       }
-      Inst(~op, ~mode) => {
+      Inst(op~, mode~) => {
         if op == JSR && (match mode { AbsoluteOrZeroPage(addr=Ident("JumpEngine")) => true; _ => false }) {
           let jump_table: Array[String] = []
           inside_table = true
 
           for i in (item_idx + 1)..<self.items.length() {
             match self.items[i] {
-              Directive(name="dw", ~args) => {
+              Directive(name="dw", args~) => {
                 for arg in args {
                   match arg {
                     Ident(label) => {
@@ -229,14 +229,14 @@ fn collect_instructions(self: AsmLowering) -> Unit!LoweringError {
             }
           }
 
-          self.lowered.push(JumpEngine(~jump_table))
+          self.lowered.push(JumpEngine(jump_table~))
         } else {
           let addr_mode: AsmAddressingMode = match mode {
             Accumulator => Accumulator
             Implied => Implied
             Immediate(operand) => Immediate(self.type_expr!(operand))
-            Relative(~addr) => Relative(self.type_expr!(addr))
-            AbsoluteOrZeroPage(~addr) | AbsoluteOrZeroPageX(~addr) | AbsoluteOrZeroPageY(~addr) => {
+            Relative(addr~) => Relative(self.type_expr!(addr))
+            AbsoluteOrZeroPage(addr~) | AbsoluteOrZeroPageX(addr~) | AbsoluteOrZeroPageY(addr~) => {
               let addr = self.type_expr!(addr)
               let size: @parse.ConstantSize = match addr.ty() {
                 ConstTy(size) => size
@@ -253,25 +253,25 @@ fn collect_instructions(self: AsmLowering) -> Unit!LoweringError {
                 _ => raise LoweringError("Invalid addressing mode")
               }
             }
-            Indirect(~addr) => Indirect(self.type_expr!(addr))
-            IndexedIndirect(~addr) => IndexedIndirect(self.type_expr!(addr))
-            IndirectIndexed(~addr) => IndirectIndexed(self.type_expr!(addr))
+            Indirect(addr~) => Indirect(self.type_expr!(addr))
+            IndexedIndirect(addr~) => IndexedIndirect(self.type_expr!(addr))
+            IndirectIndexed(addr~) => IndirectIndexed(self.type_expr!(addr))
           }
 
           let comment = match self.items[item_idx + 1] {
-            Comment(~comment, is_inline=true) => Some(comment)
+            Comment(comment~, is_inline=true) => Some(comment)
             _ => None
           }
 
-          self.lowered.push(Inst(~op, mode=addr_mode, ~comment))
+          self.lowered.push(Inst(op~, mode=addr_mode, comment~))
         }
       }
-      Comment(~comment, is_inline=false) => {
+      Comment(comment~, is_inline=false) => {
         if not(inside_table) {
           self.lowered.push(Comment(comment))
         }
       }
-      Directive(name="db" | "dw" as name, ~args) => {
+      Directive(name="db" | "dw" as name, args~) => {
         if not(inside_table) {
           raise LoweringError("Raw data in code detected: \{name} \{args}")
         }
@@ -283,7 +283,7 @@ fn collect_instructions(self: AsmLowering) -> Unit!LoweringError {
   }
 }
 
-pub struct JumpTargets {
+pub(all) struct JumpTargets {
   jump_targets: Set[String]
   subroutines: Set[String]
   externals: Set[String]
@@ -298,20 +298,20 @@ fn collect_jump_targets(self: AsmLowering) -> Unit {
         ..
       ) => {
         if op == JSR {
-          self.targets.subroutines.insert(label)
+          self.targets.subroutines.add(label)
         } else {
-          self.targets.jump_targets.insert(label)
+          self.targets.jump_targets.add(label)
         }
       }
-      JumpEngine(~jump_table) => {
+      JumpEngine(jump_table~) => {
         for label in jump_table {
-          self.targets.subroutines.insert(label)
+          self.targets.subroutines.add(label)
         }
       }
       Label(name) => {
         // manually annotated subroutines
         if name.ends_with("__sub") {
-          self.targets.subroutines.insert(name)
+          self.targets.subroutines.add(name)
         }
       }
       _ => ()
@@ -363,7 +363,7 @@ fn collect_basic_block_leaders(self: AsmLowering) -> Array[Int] {
           insert_leader_index(Some(i))
         }
       }
-      Inst(~op, ..) => {
+      Inst(op~, ..) => {
         if op.is_branching() {
           // the next non-comment instruction after a branching instruction is a leader
           insert_leader_index(self.next_non_comment_item_index(i + 1))
@@ -401,7 +401,7 @@ fn has_fallthrough(self: BasicBlock) -> Bool!LoweringError {
   let last_item = self.last_non_comment_item().or_error!(LoweringError("Empty basic block"))
 
   match last_item.item {
-    Inst(~op, ..) => {
+    Inst(op~, ..) => {
       match op {
         RTI | RTS | BRK | JMP => false
         _ => true
@@ -476,7 +476,7 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
           }
         }
       }
-      JumpEngine(~jump_table) => {
+      JumpEngine(jump_table~) => {
         for label in jump_table {
           match self.bb_by_label[label] {
             Some(target_bb) => {
@@ -503,7 +503,7 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
 fn collect_labels(self: BasicBlock, labels: Set[String]) -> Unit {
   for item in self.items {
     match item {
-      Label(name) => labels.insert(name)
+      Label(name) => labels.add(name)
       _ => ()
     }
   }
@@ -519,13 +519,13 @@ fn collect_external_labels(self: BasicBlock, internal_labels: Set[String], exter
         ..
       ) => {
         if not(internal_labels.contains(label)) {
-          external_labels.insert(label)
+          external_labels.add(label)
         }
       }
-      JumpEngine(~jump_table) => {
+      JumpEngine(jump_table~) => {
         for label in jump_table {
           if not(internal_labels.contains(label)) {
-            external_labels.insert(label)
+            external_labels.add(label)
           }
         }
       }
@@ -576,7 +576,7 @@ fn rewrite_bb(self: AsmLowering, bb: BasicBlock, visited: Set[Int]) -> Unit!Lowe
           }
 
           sub.blocks.push(next_bb)
-          visited.insert(next_bb.id)
+          visited.add(next_bb.id)
           i += 1
         }
 
@@ -611,7 +611,7 @@ fn dfs(self: BasicBlock, visited: Set[Int]) -> Array[BasicBlock] {
     let bb = stack.pop().unwrap()
 
     if not(visited.contains(bb.id)) {
-      visited.insert(bb.id)
+      visited.add(bb.id)
       blocks.push(bb)
 
       for link in bb.successors {
@@ -652,6 +652,29 @@ fn remove_unused_rts(self: AsmLowering) -> Unit!LoweringError {
   }
 }
 
+fn  _cfg_dotfile(self: AsmLowering) -> String {
+  let builder = StringBuilder::new()
+
+  builder.write_string("digraph G {\n")
+
+  for bb in self.basic_blocks {
+    let label = match bb.name {
+      Some(name) => name
+      None => bb.id.to_string()
+    }
+
+    builder.write_string("  \{bb.id} [label=\"\{label}\"]\n")
+
+    for link in bb.successors {
+      builder.write_string("  \{bb.id} -> \{link.bb.id}\n")
+    }
+  }
+
+  builder.write_string("}\n")
+
+  builder.to_string()
+}
+
 pub fn lower(self: AsmLowering) -> Unit!LoweringError {
   self.collect_labels_and_tables!()
   self.collect_defines!()
@@ -659,4 +682,6 @@ pub fn lower(self: AsmLowering) -> Unit!LoweringError {
   self.collect_basic_blocks!()
   self.collect_subroutines!()
   self.remove_unused_rts!()
+
+  // @fs.write_string_to_file(path="cfg.dot", content=self.cfg_dotfile())
 }
