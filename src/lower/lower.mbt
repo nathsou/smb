@@ -11,6 +11,7 @@ pub(all) struct AsmLowering {
   basic_blocks: Array[BasicBlock]
   bb_by_label: Map[String, BasicBlock]
   subroutines: Array[AsmSubroutine]
+  flat_subroutines: Array[AsmFlatSubroutine]
 } derive (Show)
 
 pub(readonly) type! LoweringError String derive(Show)
@@ -28,6 +29,7 @@ pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
     basic_blocks: [],
     bb_by_label: {},
     subroutines: [],
+    flat_subroutines: [],
   }
 }
 
@@ -675,6 +677,174 @@ fn  _cfg_dotfile(self: AsmLowering) -> String {
   builder.to_string()
 }
 
+struct ControlFlowStackEntry {
+  exit_label: String
+  cond: @parse.OpCode
+  body: Array[AsmItem]
+  comment: String?
+} derive (Show)
+
+fn negate(cond: @parse.OpCode) -> @parse.OpCode!LoweringError {
+  match cond {
+    BCS => BCC
+    BCC => BCS
+    BEQ => BNE
+    BNE => BEQ
+    BPL => BMI
+    BMI => BPL
+    _ => raise LoweringError("Invalid condition")
+  }
+}
+
+fn recognize_control_flow(self: AsmLowering, sub: AsmSubroutine) -> AsmFlatSubroutine!LoweringError {
+  let items = sub.blocks.map(fn(bb) { bb.items }).flatten()
+  let labels = Set::new()
+  let new_items = []
+  let stack: Array[ControlFlowStackEntry] = []
+  let loop_labels = Set::new()
+  let unconditional_jump_labels = Set::new()
+
+  // detect backward jumps
+  for item in items {
+    match item {
+      Label(name) => {
+        labels.add(name)
+      }
+      Inst(op=JMP, mode=Relative(Ident(name=label, ..)) | Absolute(Ident(name=label, ..)), ..) => {
+        unconditional_jump_labels.add(label)
+      }
+      Inst(
+        op=BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS,
+        mode=Relative(Ident(name=label, ..)) | Absolute(Ident(name=label, ..)),
+        ..
+      ) => {
+        if labels.contains(label) {
+          loop_labels.add(label)
+        }
+      }
+      _ => ()
+    }
+  }
+
+  fn push_item(item: AsmItem) {
+    match stack.last() {
+      Some(entry) => {
+        entry.body.push(item)
+      }
+      None => {
+        new_items.push(item)
+      }
+    }
+  }
+
+  let mut is_simple_control_flow = true
+  
+  for item in items {
+    match item {
+      Label(name) => {
+        while true {
+          match stack.last() {
+            Some(entry) => {
+              if entry.exit_label == name {
+                let _ = stack.pop()
+
+                push_item(AsmItem::If(
+                  cond=negate!(entry.cond),
+                  then=entry.body,
+                  otherwise=None,
+                  comment=entry.comment,
+                ))
+              } else {
+                break
+              }
+            }
+            None => break
+          }
+        }
+
+        // if an old control flow block is closed
+        // before the current one ends
+        // then we failed to recognize the control flow
+        if stack.iter().any(fn(entry) { entry.exit_label == name }) {
+          is_simple_control_flow = false
+          break
+        }
+
+        if loop_labels.contains(name) || unconditional_jump_labels.contains(name) {
+          push_item(item)
+        } else if name != sub.name {
+          push_item(AsmItem::Comment("\{name}:"))
+        }
+      }
+      Inst(
+        op=BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS as cond,
+        mode=Relative(Ident(name=label, ..)) | Absolute(Ident(name=label, ..)),
+        comment~,
+      ) => {
+        // if this is a subroutine call
+        if self.targets.subroutines.contains(label) {
+          push_item(If(
+            cond=cond,
+            then=[
+              Inst(op=JSR, mode=Absolute(Ident(name=label, ty=LabelTy)), comment=None),
+              Inst(op=RTS, mode=Implied, comment=None),
+            ],
+            otherwise=None,
+            comment=comment,
+          ))
+        } else if not(loop_labels.contains(label)) {
+        // if this is not a loop
+          let entry = {
+            exit_label: label,
+            cond,
+            body: [],
+            comment,
+          }
+
+          stack.push(entry)
+        } else {
+          push_item(item)
+        }
+      }
+      _ => {
+        push_item(item)
+      }
+    }
+  }
+
+  if stack.length() < 2 {
+    match stack.last() {
+      Some(entry) => {
+        new_items.push(
+          AsmItem::If(
+            cond=negate!(entry.cond),
+            then=entry.body,
+            otherwise=None,
+            comment=None,
+          )
+        )
+        let _ = stack.pop()
+      }
+      None => ()
+    }
+  } else {
+    // some control flow blocks are not closed
+    is_simple_control_flow = false
+  }
+
+  if is_simple_control_flow {
+    { name: sub.name, items: new_items }
+  } else {
+    { name: sub.name, items: items }
+  }
+}
+
+fn collect_flat_subroutines(self: AsmLowering) -> Unit!LoweringError {
+  for sub in self.subroutines {
+    self.flat_subroutines.push(self.recognize_control_flow!(sub))
+  }
+}
+
 pub fn lower(self: AsmLowering) -> Unit!LoweringError {
   self.collect_labels_and_tables!()
   self.collect_defines!()
@@ -682,6 +852,7 @@ pub fn lower(self: AsmLowering) -> Unit!LoweringError {
   self.collect_basic_blocks!()
   self.collect_subroutines!()
   self.remove_unused_rts!()
+  self.collect_flat_subroutines!()
 
   // @fs.write_string_to_file(path="cfg.dot", content=self.cfg_dotfile())
 }
