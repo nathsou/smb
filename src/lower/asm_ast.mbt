@@ -17,7 +17,6 @@ pub(all) enum TypedExpr {
   Binary(op~: @parse.BinaryOp, lhs~: TypedExpr, rhs~: TypedExpr, ty~: Type)
 } derive (Show)
 
-
 pub(all) enum AsmTableLine {
   Data(data~: Array[TypedExpr], comment~: Ref[String])
   Comment(String)
@@ -79,7 +78,7 @@ pub(all) struct AsmSubroutine {
   internal_labels: Set[String]
 } derive (Show)
 
-// subroutines with a flat arrays of items instead of basic blocks
+// subroutines with a flat array of items instead of basic blocks
 pub(all) struct AsmFlatSubroutine {
   name: String
   items: Array[AsmItem]

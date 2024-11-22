@@ -122,54 +122,32 @@ void ppu_transfer_oam(uint16_t start_addr) {
     memcpy(oam, ram + start_addr, 256);
 }
 
-void ppu_write_register(uint16_t addr, uint8_t value) {
-    switch (addr) {
-        case 0x2000: {
-            ppu_ctrl = value;
-            break;
-        }
-        case 0x2001: {
-            ppu_mask = value;
-            break;
-        }
-        case 0x2003: {
-            oam_addr = value;
-            break;
-        }
-        case 0x2004: {
-            oam[oam_addr] = value;
-            oam_addr++;
-            break;
-        }
-        case 0x2005: {
-            if (!ppu_w) {
-                ppu_scroll_x = value;
-                ppu_w = 1;
-            } else {
-                ppu_scroll_y = value;
-                ppu_w = 0;
-            }
-            break;
-        }
-        case 0x2006: {
-            if (ppu_w) {
-                // low byte
-                vram_addr = (vram_addr & 0xff00) | value;
-                ppu_w = 0;
-            } else {
-                // high byte
-                vram_addr = ((((uint16_t)value) << 8) & 0xff00) | (vram_addr & 0xff);
-                ppu_w = 1;
-            }
-            break;
-        }
-        case 0x2007: {
-            ppu_write(vram_addr, value);
-            uint16_t increment = ppu_ctrl & 0b100 ? 32 : 1;
-            vram_addr += increment;
-            break;
-        }
+void ppu_write_scroll(uint8_t value) {
+    if (!ppu_w) {
+        ppu_scroll_x = value;
+        ppu_w = 1;
+    } else {
+        ppu_scroll_y = value;
+        ppu_w = 0;
     }
+}
+
+void ppu_write_address(uint8_t value) {
+    if (ppu_w) {
+        // low byte
+        vram_addr = (vram_addr & 0xff00) | value;
+        ppu_w = 0;
+    } else {
+        // high byte
+        vram_addr = ((((uint16_t)value) << 8) & 0xff00) | (vram_addr & 0xff);
+        ppu_w = 1;
+    }
+}
+
+void ppu_write_data(uint8_t value) {
+    ppu_write(vram_addr, value);
+    uint16_t increment = ppu_ctrl & 0b100 ? 32 : 1;
+    vram_addr += increment;
 }
 
 // https://www.nesdev.org/wiki/PPU_memory_map

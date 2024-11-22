@@ -171,6 +171,8 @@ fn emit_code_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("")
   self.emit("#include \"data.h\"")
   self.emit("#include \"instructions.h\"")
+  self.emit("#include \"ppu.h\"")
+  self.emit("#include \"apu.h\"")
   self.emit("")
 
   for sub in low.subroutines {
@@ -219,6 +221,106 @@ fn show_cond_opcode(op: @parse.OpCode) -> String {
   }
 }
 
+enum Reg { A; X; Y }
+struct Range { min: Int; max: Int }
+
+fn op_add(self: Range, other: Range) -> Range {
+  { min: self.min + other.min, max: self.max + other.max }
+}
+
+fn op_sub(self: Range, other: Range) -> Range {
+  { min: self.min - other.max, max: self.max - other.min }
+}
+
+fn compute_expr_range(expr: @lower.TypedExpr, low: @lower.AsmLowering) -> Range? {
+  match expr {
+    Const(value~, ..) => Some({ min: value, max: value })
+    Ident(name~, ..) => match low.defines[name] {
+      Some(expr) => compute_expr_range(expr, low)
+      None => None
+    }
+    Binary(op~, lhs~, rhs~, ..) => {
+      let lhs_range = compute_expr_range(lhs, low)
+      let rhs_range = compute_expr_range(rhs, low)
+
+      match (lhs_range, rhs_range) {
+        (Some(lhs_range), Some(rhs_range)) => match op {
+          Add => Some(lhs_range + rhs_range)
+          Sub => Some(lhs_range - rhs_range)
+        }
+        _ => None
+      }
+    }
+    _ => None
+  }
+}
+
+fn compute_range(expr: @lower.TypedExpr, mode: @lower.AsmAddressingMode, low: @lower.AsmLowering) -> Range? {
+  let mode_range = match mode {
+    ZeroPageX(_) | AbsoluteX(_) | ZeroPageY(_) | AbsoluteY(_) => { min: 0, max: 0xff }
+    _ => { min: 0, max: 0 }
+  }
+
+  match compute_expr_range(expr, low) {
+    Some(expr_range) => Some(expr_range + mode_range)
+    None => None
+  }
+}
+
+fn write_byte(mode: @lower.AsmAddressingMode, target: Reg, low: @lower.AsmLowering) -> String {
+  let target = match target {
+    A => "a"
+    X => "x"
+    Y => "y"
+  }
+
+  fn rewrite(addr: @lower.TypedExpr, suffix: String) -> String {
+    match addr {
+      Ident(name="PPU_CTRL_REG1", ..) => "ppu_ctrl = \{target};"
+      Ident(name="PPU_CTRL_REG2", ..) => "ppu_mask = \{target};"
+      Ident(name="PPU_SPR_ADDR", ..) => "oam_addr = \{target};"
+      Ident(name="PPU_SPR_DATA", ..) => "oam[oam_addr++] = \{target};"
+      Ident(name="PPU_SCROLL_REG", ..) => "ppu_write_scroll(\{target});"
+      Ident(name="PPU_ADDRESS", ..) => "ppu_write_address(\{target});"
+      Ident(name="PPU_DATA", ..) => "ppu_write_data(\{target});"
+      Ident(name="SPR_DMA", ..) => "ppu_transfer_oam((uint16_t)(\{target} << 8));"
+      Ident(name="JOYPAD_PORT", ..) => "write_joypad1(\{target});"
+      Ident(name="JOYPAD_PORT2", ..) => "write_joypad2(\{target});"
+      Ident(
+        name=("SND_REGISTER" | "SND_SQUARE1_REG" | "SND_SQUARE2_REG" | "SND_TRIANGLE_REG" |
+        "SND_NOISE_REG" | "SND_DELTA_REG" | "SND_MASTERCTRL_REG") as name,
+        ..
+      ) => {
+        "apu_write(\{name}, \{target});"
+      }
+      _ => {
+        let value = "\{show_expr(addr)}\{suffix}"
+
+        match compute_range(addr, mode, low) {
+          Some({ min: _, max }) => {
+            if max < 0x2000 {
+              return "ram[\{value}] = \{target};"
+            } else if max < 0x4000 {
+              return "ppu_write_register(0x2000 + (\{show_expr(addr)} & 0b111), \{target});"
+            }
+          }
+          None => ()
+        }
+
+        "dynamic_ram_write(\{value}, \{target});"
+      }
+    }
+  }
+
+  match mode {
+      ZeroPage(addr) | Absolute(addr) => rewrite(addr, "")
+      ZeroPageX(addr) | AbsoluteX(addr) => rewrite(addr, " + x")
+      ZeroPageY(addr) | AbsoluteY(addr) => rewrite(addr, " + y")
+      IndirectIndexed(addr) => "dynamic_ram_write(read_word(\{show_expr(addr)}) + y, \{target});"
+      Implied | Immediate(_) | Relative(_) | Accumulator| Indirect(_) | IndexedIndirect(_) => abort("unreachable")
+  }
+}
+
 fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering) -> Unit {
     match item {
       Label(name) => {
@@ -235,19 +337,9 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering) -> Un
           (RTI, _) => "return; // <rti>"
           (CLC, _) => "carry_flag = false;"
           (SEC, _) => "carry_flag = true;"
-          (STA, ZeroPage(addr)) => "write_byte(\{show_expr(addr)}, a);"
-          (STA, ZeroPageX(addr)) => "write_byte(\{show_expr(addr)} + x, a);"
-          (STA, ZeroPageY(addr)) => "write_byte(\{show_expr(addr)} + y, a);"
-          (STA, Absolute(addr)) => "write_byte(\{show_expr(addr)}, a);"
-          (STA, AbsoluteX(addr)) => "write_byte(\{show_expr(addr)} + x, a);"
-          (STA, AbsoluteY(addr)) => "write_byte(\{show_expr(addr)} + y, a);"
-          (STA, IndirectIndexed(addr)) => "write_byte(read_word(\{show_expr(addr)}) + y, a);"
-          (STX, ZeroPage(addr)) => "write_byte(\{show_expr(addr)}, x);"
-          (STX, ZeroPageY(addr)) => "write_byte(\{show_expr(addr)} + y, x);"
-          (STX, Absolute(addr)) => "write_byte(\{show_expr(addr)}, x);"
-          (STY, ZeroPage(addr)) => "write_byte(\{show_expr(addr)}, y);"
-          (STY, ZeroPageX(addr)) => "write_byte(\{show_expr(addr)} + x, y);"
-          (STY, Absolute(addr)) => "write_byte(\{show_expr(addr)}, y);"
+          (STA, _) => write_byte(mode, A, low)
+          (STX, _) => write_byte(mode, X, low)
+          (STY, _) => write_byte(mode, Y, low)
           _ => {
             let args = match mode {
               Accumulator => ""
