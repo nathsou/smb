@@ -35,8 +35,34 @@ function createCanvas() {
     return { canvas, context, updateSize };
 }
 
+const SUPPORTED_GAMEPAD_MAPPINGS = {
+    'SNES Controller (Vendor: 057e Product: 2017)': {
+        a: gamepad => gamepad.buttons[1].pressed,
+        b: gamepad => gamepad.buttons[0].pressed || gamepad.buttons[3].pressed,
+        select: gamepad => gamepad.buttons[8].pressed,
+        start: gamepad => gamepad.buttons[9].pressed,
+        load: gamepad => gamepad.buttons[4].pressed,
+        save: gamepad => gamepad.buttons[5].pressed,
+        up: gamepad => Math.abs(gamepad.axes[9] - -1) < 0.01,
+        down: gamepad => Math.abs(gamepad.axes[9] - 0.14285719394683838) < 0.01,
+        left: gamepad => Math.abs(gamepad.axes[9] - 0.7142857313156128) < 0.01,
+        right: gamepad => Math.abs(gamepad.axes[9] - -0.4285714030265808) < 0.01,
+    },
+};
+
+function getGamepad() {
+    for (const gamepad of navigator.getGamepads()) {
+        if (gamepad && gamepad.connected && SUPPORTED_GAMEPAD_MAPPINGS[gamepad.id]) {
+            return { gamepad, mapping: SUPPORTED_GAMEPAD_MAPPINGS[gamepad.id] };
+        }
+    }
+
+    return null;
+}
+
 function createController(onStart, saveState) {
     let state = 0;
+    let gamepadConnected = false;
 
     const CONTROLLER_RIGHT = 0b10000000;
     const CONTROLLER_LEFT = 0b01000000;
@@ -59,6 +85,21 @@ function createController(onStart, saveState) {
         saveState: 'z',
         loadState: 'x',
     };
+
+    window.addEventListener('gamepadconnected', () => {
+        gamepadConnected = true;
+    });
+
+    window.addEventListener('gamepaddisconnected', () => {
+        for (const gamepad of navigator.getGamepads()) {
+            if (gamepad && gamepad.connected) {
+                gamepadConnected = true;
+                return;
+            }
+        }
+
+        gamepadConnected = false;
+    });
 
     window.addEventListener('keydown', (event) => {
         const key = event.key;
@@ -130,8 +171,65 @@ function createController(onStart, saveState) {
         }
     });
 
+    function pollGamepad() {
+        if (gamepadConnected) {
+            // we need to call navigator.getGamepads to get the latest gamepad state
+            const gamepadInfo = getGamepad();
+            if (gamepadInfo) {
+                const { gamepad, mapping } = gamepadInfo;
+                let controllerState = 0;
+
+                if (mapping.a(gamepad)) {
+                    controllerState |= CONTROLLER_A;
+                }
+
+                if (mapping.b(gamepad)) {
+                    controllerState |= CONTROLLER_B;
+                }
+
+                if (mapping.up(gamepad)) {
+                    controllerState |= CONTROLLER_UP;
+                }
+
+                if (mapping.down(gamepad)) {
+                    controllerState |= CONTROLLER_DOWN;
+                }
+
+                if (mapping.left(gamepad)) {
+                    controllerState |= CONTROLLER_LEFT;
+                }
+
+                if (mapping.right(gamepad)) {
+                    controllerState |= CONTROLLER_RIGHT;
+                }
+
+                if (mapping.start(gamepad)) {
+                    controllerState |= CONTROLLER_START;
+                    onStart();
+                }
+
+                if (mapping.select(gamepad)) {
+                    controllerState |= CONTROLLER_SELECT;
+                }
+
+                if (mapping.save(gamepad)) {
+                    saveState.save();
+                }
+
+                if (mapping.load(gamepad)) {
+                    onStart();
+                    saveState.load();
+                }
+
+                return controllerState;
+            }
+        }
+
+        return 0;
+    }
+
     return {
-        getState: () => state,
+        getState: () => state | pollGamepad(),
     };
 }
 

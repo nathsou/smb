@@ -52,6 +52,7 @@ pub(all) enum AsmItem {
   Label(String)
   Inst(op~: @parse.OpCode, mode~: AsmAddressingMode, comment~: String?)
   JumpEngine(jump_table~: Array[String])
+  If(cond~: @parse.OpCode, then~: Array[AsmItem], otherwise~: Array[AsmItem]?, comment~: String?)
   Comment(String)
 } derive (Show)
 
@@ -76,6 +77,12 @@ pub(all) struct AsmSubroutine {
   entry: BasicBlock
   mut exit: BasicBlock
   internal_labels: Set[String]
+} derive (Show)
+
+// subroutines with a flat arrays of items instead of basic blocks
+pub(all) struct AsmFlatSubroutine {
+  name: String
+  items: Array[AsmItem]
 } derive (Show)
 
 pub fn ty(self: TypedExpr) -> Type {

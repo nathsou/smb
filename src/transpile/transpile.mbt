@@ -205,6 +205,20 @@ fn gen_jump(target: String, low: @lower.AsmLowering) -> String {
   }
 }
 
+fn show_cond_opcode(op: @parse.OpCode) -> String {
+  match op {
+    BCC => "!carry_flag"
+    BCS => "carry_flag"
+    BEQ => "zero_flag"
+    BNE => "!zero_flag"
+    BMI => "neg_flag"
+    BPL => "!neg_flag"
+    BVC => "!overflow_flag"
+    BVS => "overflow_flag"
+    _ => abort("unreachable")
+  }
+}
+
 fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering) -> Unit {
     match item {
       Label(name) => {
@@ -212,9 +226,7 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering) -> Un
         let is_subroutine_label = low.is_subroutine_label(name);
 
         if not(is_subroutine_label) {
-          self.indentation = 1
           self.emit("\n\{rename_label(name)}:")
-          self.indentation = 2
         }
       }
       Inst(op~, mode~, comment~) => {
@@ -260,17 +272,7 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering) -> Un
 
             match (op, is_relative) {
               (BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS , true) => {
-                let cond = match op {
-                  BCC => "!carry_flag"
-                  BCS => "carry_flag"
-                  BEQ => "zero_flag"
-                  BNE => "!zero_flag"
-                  BMI => "neg_flag"
-                  BPL => "!neg_flag"
-                  BVC => "!overflow_flag"
-                  BVS => "overflow_flag"
-                  _ => abort("unreachable")
-                }
+                let cond = show_cond_opcode(op)
 
                 let target = match mode {
                   Relative(expr) => "\{show_expr(expr)}"
@@ -305,9 +307,6 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering) -> Un
 
         self.emit(stmt)
       }
-      Comment(comment) => {
-        self.emit("// \{comment}")
-      }
       JumpEngine(jump_table~) => {
         self.emit("switch (a) {")
         self.indentation += 1
@@ -318,6 +317,43 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering) -> Un
 
         self.indentation -= 1
         self.emit("}")
+      }
+      If(cond~, then~, otherwise~, comment~) => {
+        let cond = show_cond_opcode(cond)
+
+        match comment {
+          Some(comment) => {
+            self.emit("// \{comment}")
+          }
+          None => ()
+        }
+
+        self.emit("if (\{cond}) {")
+
+        self.indentation += 1
+
+        for item in then {
+          self.emit_item(item, low)
+        }
+
+        self.indentation -= 1
+        
+        match otherwise {
+          Some(otherwise) => {
+            self.emit("} else {")
+            self.indentation += 1
+
+            for item in otherwise {
+              self.emit_item(item, low)
+            }
+
+            self.indentation -= 1
+          }
+          None => self.emit("}")
+        }
+      }
+      Comment(comment) => {
+        self.emit("// \{comment}")
       }
     }
 }
@@ -341,12 +377,25 @@ fn emit_subroutine(self: Emitter, subroutine: @lower.AsmSubroutine, low: @lower.
   self.emit("}\n")
 }
 
+fn emit_flat_subroutine(self: Emitter, subroutine: @lower.AsmFlatSubroutine, low: @lower.AsmLowering) -> Unit {
+  self.indentation = 0
+  self.emit("void \{rename_label(subroutine.name)}(void) {")
+  self.indentation = 1
+
+  for item in subroutine.items {
+    self.emit_item(item, low)
+  }
+
+  self.indentation = 0
+  self.emit("}\n")
+}
+
 fn emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
 self.emit("#include \"code.h\"")
   self.emit("")
 
-  for sub in low.subroutines {
-    self.emit_subroutine(sub, low)
+  for sub in low.flat_subroutines {
+    self.emit_flat_subroutine(sub, low)
   }
 }
 
