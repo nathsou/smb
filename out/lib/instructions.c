@@ -261,7 +261,7 @@ void asl_abs(uint16_t addr) {
     uint8_t val = read_byte(addr);
     carry_flag = val & 0x80;
     val <<= 1;
-    write_byte(addr, val);
+    dynamic_ram_write(addr, val);
     update_nz(val);
 }
 
@@ -277,7 +277,7 @@ void _lsr(uint16_t addr) {
     uint8_t val = read_byte(addr);
     carry_flag = val & 1;
     val >>= 1;
-    write_byte(addr, val);
+    dynamic_ram_write(addr, val);
     update_nz(val);
 }
 
@@ -294,7 +294,7 @@ void lsr_abs(uint16_t addr) {
 void _inc(uint16_t addr) {
     uint8_t val = read_byte(addr);
     val++;
-    write_byte(addr, val);
+    dynamic_ram_write(addr, val);
     update_nz(val);
 }
 
@@ -333,7 +333,7 @@ void iny(void) {
 void _dec(uint16_t addr) {
     uint8_t val = read_byte(addr);
     val--;
-    write_byte(addr, val);
+    dynamic_ram_write(addr, val);
     update_nz(val);
 }
 
@@ -453,7 +453,7 @@ void cpy_abs(uint16_t addr) {
 // PHA - Push Accumulator
 
 void pha(void) {
-    write_byte(sp | 0x100, a);
+    dynamic_ram_write(sp | 0x100, a);
     sp--;
 }
 
@@ -488,7 +488,7 @@ void _rol(uint16_t addr) {
     val <<= 1;
     val |= carry_flag;
     carry_flag = next_carry_flag;
-    write_byte(addr, val);
+    dynamic_ram_write(addr, val);
     update_nz(val);
 }
 
@@ -532,6 +532,6 @@ void ror_absx(uint16_t addr) {
         val |= 0x80;
     }
 
-    write_byte(addr, val);
+    dynamic_ram_write(addr, val);
     update_nz(val);
 }

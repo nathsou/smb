@@ -19,6 +19,10 @@ uint8_t controller1_state;
 bool controller1_strobe;
 uint8_t controller1_btn_index;
 
+uint8_t controller2_state;
+bool controller2_strobe;
+uint8_t controller2_btn_index;
+
 inline void update_controller1(uint8_t state) {
     controller1_state = state;
 }
@@ -75,21 +79,25 @@ uint8_t read_byte(uint16_t addr) {
     return 0;
 }
 
-void write_byte(uint16_t addr, uint8_t value) {
+void write_joypad1(uint8_t value) {
+    controller1_strobe = (value & 1) == 1;
+    
+    if (controller1_strobe) {
+        controller1_btn_index = 0;
+    }
+}
+
+void write_joypad2(uint8_t value) {
+    controller2_strobe = (value & 1) == 1;
+    
+    if (controller2_strobe) {
+        controller2_btn_index = 0;
+    }
+}
+
+void dynamic_ram_write(uint16_t addr, uint8_t value) {
     if (addr < 0x2000) {
         ram[addr & 0b0000011111111111] = value;
-    } else if (addr < 0x4000) {
-        ppu_write_register(0x2000 + (addr & 0b111), value);
-    } else if (addr == 0x4014) {
-        uint16_t start_addr = (uint16_t)(value << 8);
-        ppu_transfer_oam(start_addr);
-    } else if (addr == 0x4016) {
-        // controller 1
-        controller1_strobe = (value & 1) == 1;
-        
-        if (controller1_strobe) {
-            controller1_btn_index = 0;
-        }
     } else if (addr < 0x4020) {
         apu_write(addr, value);
     }
@@ -104,8 +112,8 @@ uint16_t read_word(uint16_t addr) {
 }
 
 void write_word(uint16_t addr, uint16_t value) {
-    write_byte(addr, value & 0xff);
-    write_byte(addr + 1, value >> 8);
+    dynamic_ram_write(addr, value & 0xff);
+    dynamic_ram_write(addr + 1, value >> 8);
 }
 
 // addressing mode utils

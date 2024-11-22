@@ -3,6 +3,8 @@
 
 #include "data.h"
 #include "instructions.h"
+#include "ppu.h"
+#include "apu.h"
 
 void Start(void);
 void NonMaskableInterrupt(void);

@@ -18,14 +18,16 @@ extern bool carry_flag, zero_flag, neg_flag;
 extern uint8_t ram[RAM_SIZE];
 
 uint8_t read_byte(uint16_t addr);
-void write_byte(uint16_t addr, uint8_t value);
+void dynamic_ram_write(uint16_t addr, uint8_t value);
 
 uint16_t read_word(uint16_t addr);
 void write_word(uint16_t addr, uint16_t value);
 
 // controllers
-extern uint8_t controller1_state;
+extern uint8_t controller1_state, controller2_state;
 void update_controller1(uint8_t state);
+void write_joypad1(uint8_t value);
+void write_joypad2(uint8_t value);
 
 void cpu_init(void);
 
