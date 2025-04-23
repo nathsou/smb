@@ -185,9 +185,10 @@ void set_pixel(size_t x, size_t y, uint8_t palette_color) {
     size_t index = (y * SCREEN_WIDTH + x) * 3;
 
     if (index < SCREEN_WIDTH * SCREEN_HEIGHT * 3) {
-        uint8_t r = COLOR_PALETTE[palette_color * 3];
-        uint8_t g = COLOR_PALETTE[palette_color * 3 + 1];
-        uint8_t b = COLOR_PALETTE[palette_color * 3 + 2];
+        size_t palette_offset = palette_color * 3;
+        uint8_t r = COLOR_PALETTE[palette_offset];
+        uint8_t g = COLOR_PALETTE[palette_offset + 1];
+        uint8_t b = COLOR_PALETTE[palette_offset + 2];
 
         frame[index] = r;
         frame[index + 1] = g;
@@ -199,8 +200,8 @@ size_t get_background_palette_index(size_t tile_col, size_t tile_row, size_t nam
     size_t attr_table_index = (tile_row / 4) * 8 + (tile_col / 4);
     // the attribute table is stored after the nametable (960 bytes)
     size_t attr_table_byte = nametable[nametable_offset + 960 + attr_table_index];
-    size_t block_x = (tile_col % 4) / 2;
-    size_t block_y = (tile_row % 4) / 2;
+    size_t block_x = (tile_col & 3) / 2;
+    size_t block_y = (tile_row & 3) / 2;
     size_t shift = block_y * 4 + block_x * 2;
 
     return ((attr_table_byte >> shift) & 0b11) * BYTES_PER_PALETTE;
@@ -224,7 +225,7 @@ Tile* get_cached_background_tile(size_t n, size_t bank_offset, size_t palette_of
         uint8_t plane1 = chr_rom[bank_offset + n * 16 + tile_y];
         uint8_t plane2 = chr_rom[bank_offset + n * 16 + tile_y + 8];
 
-        for (size_t tile_x = 0; tile_x < 8; tile_x++) {
+        for (int tile_x = 7; tile_x >= 0; tile_x--) {
             uint8_t bit0 = plane1 & 1;
             uint8_t bit1 = plane2 & 1;
             uint8_t color_index = (uint8_t)((bit1 << 1) | bit0);
@@ -248,7 +249,7 @@ Tile* get_cached_background_tile(size_t n, size_t bank_offset, size_t palette_of
             uint8_t g = COLOR_PALETTE[palette_offset + 1];
             uint8_t b = COLOR_PALETTE[palette_offset + 2];
 
-            size_t tile_offset = (tile_y * 8 + tile_x);
+            size_t tile_offset = tile_y * 8 + (size_t)tile_x;
             size_t tile_offset_times_3 = tile_offset * 3;
 
             tile->pixels[tile_offset_times_3] = r;
@@ -282,53 +283,73 @@ void draw_background_tile(
 
     Tile *tile = get_cached_background_tile(n, bank_offset, palette_idx);
 
+    // copy the tile, row by row
     for (size_t tile_y = 0; tile_y < 8; tile_y++) {
-        for (size_t tile_x = 0; tile_x < 8; tile_x++) {
-            size_t tile_offset = (tile_y * 8 + tile_x);
-            int nametable_x = (int)x + ((int)(7 - (int)tile_x));
+        int screen_x = (int)x + shift_x;
+        size_t screen_y = y + tile_y;
+        
+        if ((int)x >= min_x && (int)(x + 7) < max_x) {
+            size_t tile_offset = tile_y * 8;
+            size_t frame_offset = screen_y * SCREEN_WIDTH + (size_t)screen_x;
+            
+            memcpy(&frame[frame_offset * 3], &tile->pixels[tile_offset * 3], 8 * 3);
+            memcpy(&opaque_bg_mask[frame_offset], &tile->opaque_mask[tile_offset], 8);
+        } else {
+            // clipping
+            for (size_t tile_x = 0; tile_x < 8; tile_x++) {
+                size_t tile_offset = tile_y * 8 + tile_x;
+                int nametable_x = (int)x + (int)tile_x;
 
-            if (nametable_x >= min_x && nametable_x < max_x) {
-                size_t screen_x = (size_t)(shift_x + nametable_x);
-                size_t screen_y = y + tile_y;
+                if (nametable_x >= min_x && nametable_x < max_x) {
+                    size_t screen_x = (size_t)(shift_x + nametable_x);
+                    size_t frame_offset = screen_y * SCREEN_WIDTH + screen_x;
 
-                memcpy(&frame[(screen_y * SCREEN_WIDTH + screen_x) * 3], &tile->pixels[tile_offset * 3], 3);
-                opaque_bg_mask[screen_y * SCREEN_WIDTH + screen_x] = tile->opaque_mask[tile_offset];
+                    memcpy(&frame[frame_offset * 3], &tile->pixels[tile_offset * 3], 3);
+                    opaque_bg_mask[frame_offset] = tile->opaque_mask[tile_offset];
+                }
             }
         }
     }
 }
 
-bool show_status_bar() {
+inline bool show_status_bar() {
     return ram[Sprite0HitDetectFlag];
 }
 
 void render_status_bar(size_t bank_offset) {
-    // the status bar spans the top 4 rows
-    for (size_t i = 0; i < 4 * TILES_PER_ROW; i++) {
-        uint8_t tile_x = i % TILES_PER_ROW;
-        uint8_t tile_y = (uint8_t)(i / TILES_PER_ROW);
-        uint8_t tile = nametable[i];
-        size_t palette_index = get_background_palette_index(tile_x, tile_y, 0);
+    for (size_t tile_y = 0; tile_y < 4; ++tile_y) {
+        for (size_t tile_x = 0; tile_x < TILES_PER_ROW; ++tile_x) {
+            size_t i = tile_y * TILES_PER_ROW + tile_x;
 
-        draw_background_tile(tile, tile_x * 8, tile_y * 8, bank_offset, palette_index, 0, 0, SCREEN_WIDTH);
+            uint8_t tile = nametable[i]; 
+            size_t palette_index = get_background_palette_index(tile_x, tile_y, 0);
+
+            size_t screen_x = tile_x * 8;
+            size_t screen_y = tile_y * 8;
+
+            draw_background_tile(tile, screen_x, screen_y, bank_offset, palette_index, 0, 0, SCREEN_WIDTH);
+        }
     }
 }
 
 void render_nametable(size_t nametable_offset, size_t bank_offset, int shift_x, int min_x, int max_x, size_t min_tile_y) {
     bool draw_leftmost_tile = ppu_mask & 0b10;
 
-    for (size_t i = min_tile_y * TILES_PER_ROW; i < TILES_PER_ROW * TILES_PER_COLUMN; i++) {
-        uint8_t tile_x = i % TILES_PER_ROW;
-        uint8_t tile_y = (uint8_t)(i / TILES_PER_ROW);
+    for (size_t tile_y = min_tile_y; tile_y < TILES_PER_COLUMN; ++tile_y) {
+        for (size_t tile_x = 0; tile_x < TILES_PER_ROW; ++tile_x) {
+            if (!draw_leftmost_tile && tile_x == 0) {
+                continue;
+            }
 
-        if (!draw_leftmost_tile && tile_x == 0) {
-            continue;
+            size_t i = tile_y * TILES_PER_ROW + tile_x;
+            uint8_t tile = nametable[nametable_offset + i];
+            size_t palette_index = get_background_palette_index(tile_x, tile_y, nametable_offset);
+
+            size_t screen_x = tile_x << 3;
+            size_t screen_y = tile_y << 3;
+
+            draw_background_tile(tile, screen_x, screen_y, bank_offset, palette_index, shift_x, min_x, max_x);
         }
-
-        uint8_t tile = nametable[nametable_offset + i];
-        size_t palette_index = get_background_palette_index(tile_x, tile_y, nametable_offset);
-
-        draw_background_tile(tile, tile_x * 8, tile_y * 8, bank_offset, palette_index, shift_x, min_x, max_x);
     }
 }
 
