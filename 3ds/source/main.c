@@ -58,7 +58,7 @@ bool handle_inputs(void) {
 	if (is_key_active(KEY_SELECT, kDown, kHeld)) state |= CONTROLLER_SELECT;
 	if (is_key_active(KEY_B, kDown, kHeld) || is_key_active(KEY_X, kDown, kHeld)) state |= CONTROLLER_B;
 	if (is_key_active(KEY_A, kDown, kHeld) || is_key_active(KEY_Y, kDown, kHeld)) state |= CONTROLLER_A;
-	if (is_key_active(KEY_L, kDown, kHeld) || is_key_active(KEY_R, kDown, kHeld)) return true;
+	if (is_key_active(KEY_L, kDown, kHeld) && is_key_active(KEY_R, kDown, kHeld)) return true;
 
     update_controller1(state);
     return false;
