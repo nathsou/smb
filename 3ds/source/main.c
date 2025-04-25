@@ -2,10 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <3ds.h>
-#include "../../out/lib/cpu.h"
-#include "../../out/lib/ppu.h"
-#include "../../out/lib/code.h"
-#include "../../out/lib/common.h"
+#include "../../codegen/lib/cpu.h"
+#include "../../codegen/lib/ppu.h"
+#include "../../codegen/lib/code.h"
+#include "../../codegen/lib/common.h"
 #include "chr_rom.h"
 
 #define NES_SCREEN_WIDTH 256 // px
@@ -67,9 +67,8 @@ bool handle_inputs(void) {
 int main(int argc, char* argv[]) {
     gfxInit(GSP_BGR8_OES, GSP_BGR8_OES, false);
     consoleInit(GFX_BOTTOM, NULL);
-    gfxSetDoubleBuffering(GFX_TOP, false);
+    gfxSetDoubleBuffering(GFX_TOP, true);
     gfxSwapBuffers();
-    u8* fb = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
 
     cpu_init();
     ppu_init(______smb_nes);
@@ -87,6 +86,7 @@ int main(int argc, char* argv[]) {
 
         // Measure ppu_render duration
         start = svcGetSystemTick();
+        u8* fb = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
         ppu_render();
         end = svcGetSystemTick();
         u64 ppu_duration = (end - start) * 1000 / SYSCLOCK_ARM11;
