@@ -44,14 +44,11 @@ fn lower() -> @lower.AsmLowering!PipelineError {
 
 fn transpile() -> @transpile.Transpiler!PipelineError {
   let low = lower!()
-  match @transpile.Transpiler::new?(low) {
-    Ok(tr) => tr
-    Err(err) => raise IOError(Show::to_string(err))
-  }
+  @transpile.Transpiler::transpile(low)
 }
 
-let lib_output_dir: String = "out/lib"
-let output_dir: String = "out"
+let output_dir: String = "codegen"
+let lib_output_dir: String = "\{output_dir}/lib"
 
 fn run() -> Unit!Error {
   if not(@fs.path_exists(output_dir)) {

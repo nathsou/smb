@@ -510,7 +510,7 @@ pub(all) struct Transpiler {
   files: Array[File]
 }
 
-pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
+pub fn Transpiler::transpile(low: @lower.AsmLowering) -> Transpiler {
   let constants_h: File = {
     name: "constants.h",
     contents: {
@@ -541,21 +541,6 @@ pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
     is_lib: true,
   }
 
-  let cpu_h = File::read!(name="cpu.h", path="src/c/cpu.h")
-  let cpu_c = File::read!(name="cpu.c", path="src/c/cpu.c")
-  let instructions_h = File::read!(name="instructions.h", path="src/c/instructions.h")
-  let instructions_c = File::read!(name="instructions.c", path="src/c/instructions.c")
-  let ppu_h = File::read!(name="ppu.h", path="src/c/ppu.h")
-  let ppu_c = File::read!(name="ppu.c", path="src/c/ppu.c")
-  let apu_h = File::read!(name="apu.h", path="src/c/apu.h")
-  let apu_c = File::read!(name="apu.c", path="src/c/apu.c")
-  let external_h = File::read!(name="external.h", path="src/c/external.h")
-  let rec_h = File::read!(name="rec.h", path="src/c/rec.h")
-  let rec_c = File::read!(name="rec.c", path="src/c/rec.c")
-  let common_h = File::read!(name="common.h", path="src/c/common.h")
-  let common_c = File::read!(name="common.c", path="src/c/common.c")
-  let state_h = File::read!(name="state.h", path="src/c/state.h")
-  let state_c = File::read!(name="state.c", path="src/c/state.c")
   let code_h = {
     name: "code.h",
     contents: {
@@ -575,24 +560,12 @@ pub fn Transpiler::new(low: @lower.AsmLowering) -> Transpiler!Error {
     },
     is_lib: true,
   }
-  
-  let hash_c = File::read!(name="hash.c", path="src/c/hash.c", is_lib=false)
-  let main_c = File::read!(name="main.c", path="src/c/main.c", is_lib=false)
 
   {
     files: [
       constants_h,
       data_h, data_c,
-      cpu_h, cpu_c,
-      instructions_h, instructions_c,
       code_h, code_c,
-      ppu_h, ppu_c,
-      apu_h, apu_c,
-      external_h,
-      rec_h, rec_c,
-      common_h, common_c,
-      main_c, hash_c,
-      state_h, state_c,
     ],
   }
 }
