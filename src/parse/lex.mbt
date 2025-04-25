@@ -4,7 +4,7 @@ pub(all) struct Lexer {
   mut index: Int
 }
 
-pub(readonly) type! LexerError {
+pub type! LexerError {
   UnexepectedChar(char~: Char, index~: Int)
   InvalidConstant(lexeme~: String, base~: ConstantBase)
 } derive(Show)
@@ -117,9 +117,14 @@ fn parse_constant(self: Lexer, base~: ConstantBase) -> LexerResult {
 
   let lexeme = lexeme.to_string()
 
-  let value = match @strconv.parse_int?(lexeme, base=base.to_int()) {
-    Ok(value) => value
-    Err(_) => return Grr(InvalidConstant(lexeme~, base~))
+  let value = match (lexeme, base) {
+    ("0b", Hexadecimal) => 11 // https://github.com/moonbitlang/core/issues/2006
+    _ => {
+      match @strconv.parse_int?(lexeme, base=base.to_int()) {
+        Ok(value) => value
+        Err(_) => return Grr(InvalidConstant(lexeme~, base~))
+      }
+    }
   }
 
   let size = match base {
@@ -285,7 +290,7 @@ fn advance(self: Lexer) -> Unit {
   self.index += 1
 }
 
-enum LexerResult {
+priv enum LexerResult {
   Yay(Token)
   Grr(LexerError)
   EOF

@@ -31,7 +31,7 @@ enum Token {
   RightChevron
 } derive (Show, Eq)
 
-fn to_int(self: ConstantBase) -> Int {
+fn ConstantBase::to_int(self: ConstantBase) -> Int {
   match self {
     Binary => 2
     Decimal => 10

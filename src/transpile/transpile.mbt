@@ -147,7 +147,7 @@ fn emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
     for line in table.lines {
       match line {
         Data(data~, comment~) => {
-          let data = String::concat(data.map(show_expr), separator=", ")
+          let data = @string.concat(data.map(show_expr), separator=", ")
 
           match comment.val {
             "" => self.emit(data + ",")
@@ -185,8 +185,8 @@ fn emit_code_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
 }
 
 fn rename_label(label: String) -> String {
-  if label.ends_with("__sub") {
-    label.split("__sub").iter().peek().unwrap()
+  if label.has_suffix("__sub") {
+    label.split("__sub").iter().peek().unwrap().to_string()
   } else {
     label
   }
@@ -221,15 +221,15 @@ fn show_cond_opcode(op: @parse.OpCode) -> String {
   }
 }
 
-enum Reg { A; X; Y }
-struct Range { min: Int; max: Int }
+priv enum Reg { A; X; Y }
+priv struct Range { min: Int; max: Int }
 
-fn op_add(self: Range, other: Range) -> Range {
+impl Add for Range with op_add(self: Range, other: Range) -> Range {
   { min: self.min + other.min, max: self.max + other.max }
 }
 
-fn op_sub(self: Range, other: Range) -> Range {
-  { min: self.min - other.max, max: self.max - other.min }
+impl Sub for Range with op_sub(self: Range, other: Range) -> Range {
+  { min: self.min - other.min, max: self.max - other.max }
 }
 
 fn compute_expr_range(expr: @lower.TypedExpr, low: @lower.AsmLowering) -> Range? {
@@ -498,12 +498,12 @@ pub(all) struct File {
 }
 
 fn File::read(name~: String, path~: String, is_lib~: Bool = true) -> File!Error {
-  let contents = @fs.read_file_to_string!(path~)
+  let contents = @fs.read_file_to_string!(path)
   { name, contents, is_lib }
 }
 
-pub fn write(self: File, dir~: String) -> Unit {
-  @fs.write_string_to_file(path="\{dir}/\{self.name}", content=self.contents)
+pub fn File::write(self: File, dir~: String) -> Unit!Error {
+  @fs.write_string_to_file!("\{dir}/\{self.name}", self.contents)
 }
 
 pub(all) struct Transpiler {

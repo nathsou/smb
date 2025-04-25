@@ -7,7 +7,7 @@ type! PipelineError {
 } derive(Show)
 
 fn read_rom() -> String!PipelineError {
-  match @fs.read_file_to_string?(path="src/smb.asm") {
+  match @fs.read_file_to_string?("src/smb.asm") {
     Ok(asm) => asm
     Err(err) => raise IOError(Show::to_string(err))
   }
@@ -53,23 +53,32 @@ fn transpile() -> @transpile.Transpiler!PipelineError {
 let lib_output_dir: String = "out/lib"
 let output_dir: String = "out"
 
-fn main {
-  if not(@fs.path_exists(path=output_dir)) {
-    @fs.create_dir(path=output_dir)
+fn run() -> Unit!Error {
+  if not(@fs.path_exists(output_dir)) {
+    @fs.create_dir!(output_dir)
   }
 
-  if not(@fs.path_exists(path=lib_output_dir)) {
-    @fs.create_dir(path=lib_output_dir)
+  if not(@fs.path_exists(lib_output_dir)) {
+    @fs.create_dir!(lib_output_dir)
   }
 
   match transpile?() {
       Ok(tr) => {
           for file in tr.files {
-              file.write(dir=if file.is_lib { lib_output_dir } else { output_dir })
+              file.write!(dir=if file.is_lib { lib_output_dir } else { output_dir })
           }
       }
       Err(err) => {
           println(err)
       }
+  }
+}
+
+fn main {
+  match run?() {
+    Ok(_) => ()
+    Err(err) => {
+      println("Error: \{Show::to_string(err)}")
+    }
   }
 }
