@@ -33,7 +33,7 @@ include $(DEVKITARM)/3ds_rules
 #---------------------------------------------------------------------------------
 TARGET		:=	smb
 BUILD		:=	build
-SOURCES		:=	source ../out/lib
+SOURCES		:=	source ../codegen/lib
 DATA		:=	data
 INCLUDES	:=	include
 GRAPHICS	:=	gfx
