@@ -2,7 +2,7 @@
   "name": "nathsou/smb",
   "version": "0.1.0",
   "deps": {
-    "moonbitlang/x": "0.4.11"
+    "moonbitlang/x": "0.4.26"
   },
   "readme": "README.md",
   "repository": "",

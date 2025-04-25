@@ -14,7 +14,7 @@ pub(all) struct AsmLowering {
   flat_subroutines: Array[AsmFlatSubroutine]
 } derive (Show)
 
-pub(readonly) type! LoweringError String derive(Show)
+pub type! LoweringError String derive(Show)
 
 pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
   {
@@ -312,7 +312,7 @@ fn collect_jump_targets(self: AsmLowering) -> Unit {
       }
       Label(name) => {
         // manually annotated subroutines
-        if name.ends_with("__sub") {
+        if name.has_suffix("__sub") {
           self.targets.subroutines.add(name)
         }
       }
@@ -379,7 +379,7 @@ fn collect_basic_block_leaders(self: AsmLowering) -> Array[Int] {
   leader_indices
 }
 
-struct ItemInfo {
+priv struct ItemInfo {
   item: AsmItem
   index: Int
 }
@@ -472,7 +472,7 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
             connect(bb, target_bb, false)
           }
           None => {
-            if not(label.starts_with("__")) { // allow special labels
+            if not(label.has_prefix("__")) { // allow special labels
               raise LoweringError("Unknown jump target: \{label}")
             }
           }
@@ -485,7 +485,7 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
               connect(bb, target_bb, false)
             }
             None => {
-              if not(label.starts_with("__")) { // allow special labels
+              if not(label.has_prefix("__")) { // allow special labels
                 raise LoweringError("Unknown jump target: \{label}")
               }
             }
@@ -591,7 +591,7 @@ fn rewrite_bb(self: AsmLowering, bb: BasicBlock, visited: Set[Int]) -> Unit!Lowe
 }
 
 pub fn is_subroutine_label(self: AsmLowering, label: String) -> Bool {
-  self.targets.subroutines.contains(label) || label.ends_with("__sub")
+  self.targets.subroutines.contains(label) || label.has_suffix("__sub")
 }
 
 fn collect_subroutines(self: AsmLowering) -> Unit!LoweringError {
@@ -677,7 +677,7 @@ fn  _cfg_dotfile(self: AsmLowering) -> String {
   builder.to_string()
 }
 
-struct ControlFlowStackEntry {
+priv struct ControlFlowStackEntry {
   exit_label: String
   cond: @parse.OpCode
   body: Array[AsmItem]
