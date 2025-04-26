@@ -1,6 +1,6 @@
 #include "apu.h"
 #include "external.h"
-#define PI 3.14159265358979323846
+#define PI 3.141592653f
 
 #define CPU_FREQUENCY 1789773
 #define FRAME_RATE 60
@@ -131,15 +131,15 @@ typedef struct {
     bool sweep_mute;
 } Pulse;
 
-static const double PULSE_MIXER_LOOKUP[] = {
-    0.0, 0.011609139, 0.02293948, 0.034000948,
-    0.044803, 0.05535466, 0.06566453, 0.07574082,
-    0.0855914, 0.09522375, 0.10464504, 0.11386215,
-    0.12288164, 0.1317098, 0.14035264, 0.14881596,
-    0.15710525, 0.16522588, 0.17318292, 0.18098126,
-    0.18862559, 0.19612046, 0.20347017, 0.21067894,
-    0.21775076, 0.2246895, 0.23149887, 0.23818247,
-    0.24474378, 0.25118607, 0.25751257, 0.26372638,
+static const float PULSE_MIXER_LOOKUP[] = {
+    0.0f, 0.011609139f, 0.02293948f, 0.034000948f,
+    0.044803f, 0.05535466f, 0.06566453f, 0.07574082f,
+    0.0855914f, 0.09522375f, 0.10464504f, 0.11386215f,
+    0.12288164f, 0.1317098f, 0.14035264f, 0.14881596f,
+    0.15710525f, 0.16522588f, 0.17318292f, 0.18098126f,
+    0.18862559f, 0.19612046f, 0.20347017f, 0.21067894f,
+    0.21775076f, 0.2246895f, 0.23149887f, 0.23818247f,
+    0.24474378f, 0.25118607f, 0.25751257f, 0.26372638f,
 };
 
 static const uint8_t PULSE_DUTY_TABLE[][8] = {
@@ -267,33 +267,32 @@ static const uint8_t SEQUENCER_LOOKUP[32] = {
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
 };
 
-static const double TRIANGLE_MIXER_LOOKUP[] = {
-    0.0, 0.006699824, 0.01334502, 0.019936256, 0.02647418, 0.032959443, 0.039392676, 0.0457745,
-    0.052105535, 0.05838638, 0.064617634, 0.07079987, 0.07693369, 0.08301962, 0.08905826, 0.095050134,
-    0.100995794, 0.10689577, 0.11275058, 0.118560754, 0.12432679, 0.13004918, 0.13572845, 0.14136505,
-    0.1469595, 0.15251222, 0.1580237, 0.1634944, 0.16892476, 0.17431524, 0.17966628, 0.1849783,
-    0.19025174, 0.19548698, 0.20068447, 0.20584463, 0.21096781, 0.21605444, 0.22110492, 0.2261196,
-    0.23109888, 0.23604311, 0.24095272, 0.245828, 0.25066936, 0.2554771, 0.26025164, 0.26499328,
-    0.26970237, 0.27437922, 0.27902418, 0.28363758, 0.28821972, 0.29277095, 0.29729152, 0.3017818,
-    0.3062421, 0.31067267, 0.31507385, 0.31944588, 0.32378912, 0.32810378, 0.3323902, 0.3366486,
-    0.3408793, 0.34508255, 0.34925863, 0.35340777, 0.35753027, 0.36162636, 0.36569634, 0.36974037,
-    0.37375876, 0.37775174, 0.38171956, 0.38566244, 0.38958064, 0.39347437, 0.39734384, 0.4011893,
-    0.405011, 0.40880907, 0.41258383, 0.41633546, 0.42006415, 0.42377013, 0.4274536, 0.43111476,
-    0.43475384, 0.43837097, 0.44196644, 0.4455404, 0.449093, 0.45262453, 0.45613506, 0.4596249,
-    0.46309412, 0.46654293, 0.46997157, 0.47338015, 0.47676894, 0.48013794, 0.48348752, 0.4868177,
-    0.49012873, 0.4934207, 0.49669388, 0.49994832, 0.50318426, 0.50640184, 0.5096012, 0.51278245,
-    0.51594585, 0.5190914, 0.5222195, 0.52533007, 0.52842325, 0.5314993, 0.53455836, 0.5376005,
-    0.54062593, 0.5436348, 0.54662704, 0.54960304, 0.55256283, 0.55550647, 0.5584343, 0.56134623,
-    0.5642425, 0.56712323, 0.5699885, 0.5728384, 0.5756732, 0.57849294, 0.5812977, 0.5840876,
-    0.5868628, 0.58962345, 0.59236956, 0.59510136, 0.5978189, 0.6005223, 0.6032116, 0.605887,
-    0.60854864, 0.6111966, 0.6138308, 0.61645156, 0.619059, 0.62165314, 0.624234, 0.62680185,
-    0.6293567, 0.63189864, 0.6344277, 0.6369442, 0.63944805, 0.64193934, 0.64441824, 0.64688486,
-    0.6493392, 0.6517814, 0.6542115, 0.65662974, 0.65903604, 0.6614306, 0.6638134, 0.66618466,
-    0.66854435, 0.6708926, 0.67322946, 0.67555505, 0.67786944, 0.68017274, 0.68246496, 0.6847462,
-    0.6870166, 0.6892762, 0.69152504, 0.6937633, 0.6959909, 0.69820803, 0.7004148, 0.7026111,
-    0.7047972, 0.7069731, 0.7091388, 0.7112945, 0.7134401, 0.7155759, 0.7177018, 0.7198179,
-    0.72192425, 0.72402096, 0.726108, 0.72818565, 0.7302538, 0.73231256, 0.73436195, 0.7364021,
-    0.7384331, 0.7404549, 0.7424676, 0.7444713,
+static const float TRIANGLE_MIXER_LOOKUP[] = {
+    0.0f, 0.006699824f, 0.01334502f, 0.019936256f, 0.02647418f, 0.032959443f, 0.039392676f, 0.0457745f,
+    0.052105535f, 0.05838638f, 0.064617634f, 0.07079987f, 0.07693369f, 0.08301962f, 0.08905826f, 0.095050134f,
+    0.100995794f, 0.10689577f, 0.11275058f, 0.118560754f, 0.12432679f, 0.13004918f, 0.13572845f, 0.14136505f,
+    0.1469595f, 0.15251222f, 0.1580237f, 0.1634944f, 0.16892476f, 0.17431524f, 0.17966628f, 0.1849783f,
+    0.19025174f, 0.19548698f, 0.20068447f, 0.20584463f, 0.21096781f, 0.21605444f, 0.22110492f, 0.2261196f,
+    0.23109888f, 0.23604311f, 0.24095272f, 0.245828f, 0.25066936f, 0.2554771f, 0.26025164f, 0.26499328f,
+    0.26970237f, 0.27437922f, 0.27902418f, 0.28363758f, 0.28821972f, 0.29277095f, 0.29729152f, 0.3017818f,
+    0.3062421f, 0.31067267f, 0.31507385f, 0.31944588f, 0.32378912f, 0.32810378f, 0.3323902f, 0.3366486f,
+    0.3408793f, 0.34508255f, 0.34925863f, 0.35340777f, 0.35753027f, 0.36162636f, 0.36569634f, 0.36974037f,
+    0.37375876f, 0.37775174f, 0.38171956f, 0.38566244f, 0.38958064f, 0.39347437f, 0.39734384f, 0.4011893f,
+    0.405011f, 0.40880907f, 0.41258383f, 0.41633546f, 0.42006415f, 0.42377013f, 0.4274536f, 0.43111476f,
+    0.43475384f, 0.43837097f, 0.44196644f, 0.4455404f, 0.449093f, 0.45262453f, 0.45613506f, 0.4596249f,
+    0.46309412f, 0.46654293f, 0.46997157f, 0.47338015f, 0.47676894f, 0.48013794f, 0.48348752f, 0.4868177f,
+    0.49012873f, 0.4934207f, 0.49669388f, 0.49994832f, 0.50318426f, 0.50640184f, 0.5096012f, 0.51278245f,
+    0.51594585f, 0.5190914f, 0.5222195f, 0.52533007f, 0.52842325f, 0.5314993f, 0.53455836f, 0.5376005f,
+    0.54062593f, 0.5436348f, 0.54662704f, 0.54960304f, 0.55256283f, 0.55550647f, 0.5584343f, 0.56134623f,
+    0.5642425f, 0.56712323f, 0.5699885f, 0.5728384f, 0.5756732f, 0.57849294f, 0.5812977f, 0.5840876f,
+    0.5868628f, 0.58962345f, 0.59236956f, 0.59510136f, 0.5978189f, 0.6005223f, 0.6032116f, 0.605887f,
+    0.60854864f, 0.6111966f, 0.6138308f, 0.61645156f, 0.619059f, 0.62165314f, 0.624234f, 0.62680185f,
+    0.6293567f, 0.63189864f, 0.6344277f, 0.6369442f, 0.63944805f, 0.64193934f, 0.64441824f, 0.64688486f,
+    0.6493392f, 0.6517814f, 0.6542115f, 0.65662974f, 0.65903604f, 0.6614306f, 0.6638134f, 0.66618466f,
+    0.66854435f, 0.6708926f, 0.67322946f, 0.67555505f, 0.67786944f, 0.68017274f, 0.68246496f, 0.6847462f,
+    0.6870166f, 0.6892762f, 0.69152504f, 0.6937633f, 0.6959909f, 0.69820803f, 0.7004148f, 0.7026111f,
+    0.7047972f, 0.7069731f, 0.7091388f, 0.7112945f, 0.7134401f, 0.7155759f, 0.7177018f, 0.7198179f,
+    0.72192425f, 0.72402096f, 0.726108f, 0.72818565f, 0.7302538f, 0.73231256f, 0.73436195f, 0.7364021f,
 };
 
 typedef struct {
@@ -605,37 +604,37 @@ inline uint8_t dmc_output(const DeltaModulationChannel* dmc) {
 // Filters
 
 typedef struct {
-    double b0;
-    double b1;
-    double a1;
-    double prev_x;
-    double prev_y;
+    float b0;
+    float b1;
+    float a1;
+    float prev_x;
+    float prev_y;
 } Filter;
 
-void filter_init_low_pass(Filter* f, size_t sample_rate, double cutoff) {
-    double c = (double)sample_rate / (cutoff * PI);
-    double a0 = 1.0 / (1.0 + c);
+void filter_init_low_pass(Filter* f, size_t sample_rate, float cutoff) {
+    float c = (float)sample_rate / (cutoff * PI);
+    float a0 = 1.0f / (1.0f + c);
 
     f->b0 = a0;
     f->b1 = a0;
-    f->a1 = (1.0 - c) * a0;
-    f->prev_x = 0.0;
-    f->prev_y = 0.0;
+    f->a1 = (1.0f - c) * a0;
+    f->prev_x = 0.0f;
+    f->prev_y = 0.0f;
 }
 
-void filter_init_high_pass(Filter* f, size_t sample_rate, double cutoff) {
-    double c = (double)sample_rate / (cutoff * PI);
-    double a0 = 1.0 / (1.0 + c);
+void filter_init_high_pass(Filter* f, size_t sample_rate, float cutoff) {
+    float c = (float)sample_rate / (cutoff * PI);
+    float a0 = 1.0f / (1.0f + c);
 
     f->b0 = c * a0;
     f->b1 = -c * a0;
-    f->a1 = (1.0 - c) * a0;
-    f->prev_x = 0.0;
-    f->prev_y = 0.0;
+    f->a1 = (1.0f - c) * a0;
+    f->prev_x = 0.0f;
+    f->prev_y = 0.0f;
 }
 
-double filter_output(Filter* f, double x) {
-    double y = f->b0 * x + f->b1 * f->prev_x - f->a1 * f->prev_y;
+float filter_output(Filter* f, float x) {
+    float y = f->b0 * x + f->b1 * f->prev_x - f->a1 * f->prev_y;
     f->prev_x = x;
     f->prev_y = y;
 
@@ -668,13 +667,13 @@ void apu_init(size_t frequency) {
     audio_buffer_index = 0;
     frame_counter = 0;
 
-    filter_init_high_pass(&filter1, sample_rate, 90.0);
-    filter_init_high_pass(&filter2, sample_rate, 440.0);
-    filter_init_low_pass(&filter3, sample_rate, 14000.0);
+    filter_init_high_pass(&filter1, sample_rate, 90.0f);
+    filter_init_high_pass(&filter2, sample_rate, 440.0f);
+    filter_init_low_pass(&filter3, sample_rate, 14000.0f);
 }
 
-inline double clamp(double d, double min, double max) {
-  const double t = d < min ? min : d;
+inline float clamp(float d, float min, float max) {
+  const float t = d < min ? min : d;
   return t > max ? max : t;
 }
 
@@ -686,18 +685,18 @@ uint8_t apu_get_sample(void) {
     uint8_t n = noise_output(&noise);
     uint8_t d = dmc_output(&dmc);
 
-    double pulse_out = PULSE_MIXER_LOOKUP[p1 + p2];
-    double triangle_out = TRIANGLE_MIXER_LOOKUP[3 * t + 2 * n + d];
-    double sample = pulse_out + triangle_out;
+    float pulse_out = PULSE_MIXER_LOOKUP[p1 + p2];
+    float triangle_out = TRIANGLE_MIXER_LOOKUP[3 * t + 2 * n + d];
+    float sample = pulse_out + triangle_out;
 
     sample = filter_output(&filter1, sample);
     sample = filter_output(&filter2, sample);
     sample = filter_output(&filter3, sample);
 
     // normalize to [0, 1] (constants found by running the game and measuring the output)
-    sample = clamp((sample + 0.325022) * 1.5792998016399449, 0.0, 1.0);
+    sample = clamp((sample + 0.325022f) * 1.5792998016399449f, 0.0f, 1.0f);
 
-    return (uint8_t)(255.0 * sample);
+    return (uint8_t)(255.0f * sample);
 }
 
 void apu_write(uint16_t addr, uint8_t value) {
@@ -832,10 +831,9 @@ const size_t CYCLES_PER_FRAME = CPU_FREQUENCY / FRAME_RATE;
 
 void apu_step_quarter_frame(void) {
     static size_t quarter_frame_counter = 0;
-    size_t samples_per_quarter_frame = sample_rate / (4 * FRAME_RATE);
-    double cycles_per_quarter_frame = (double)CYCLES_PER_FRAME / 4.0;
-    frame_counter = (frame_counter + 1) % 5; // TODO: confirm that 4-step sequence is never used
 
+    /* sequencer steps */
+    frame_counter = (frame_counter + 1) % 5;  // TODO: confirm 4‑step never used
     if (frame_counter & 1) {
         apu_step_envelope();
     } else {
@@ -844,24 +842,22 @@ void apu_step_quarter_frame(void) {
         apu_step_sweep();
     }
 
-    size_t samples_written = 0;
-    size_t samples_to_write = samples_per_quarter_frame;
-    // on the final step of the sequencer, output the remaining samples for this frame
-    if (quarter_frame_counter == 3) {
-        samples_to_write = (sample_rate / FRAME_RATE) - 3 * samples_per_quarter_frame;
-    }
+    size_t cycles = CYCLES_PER_FRAME / 4;
+    size_t spf_quarter = sample_rate / (4 * FRAME_RATE);
+    size_t spf_frame = sample_rate / FRAME_RATE;
+    size_t to_write = (quarter_frame_counter == 3)
+                      ? (spf_frame - 3 * spf_quarter)
+                      : spf_quarter;
 
-    for (size_t i = 0; i < (size_t)cycles_per_quarter_frame; i++) {
-        double progress_counter = (double)i / cycles_per_quarter_frame;
-        double progress_samples = (double)samples_written / (double)samples_to_write;
-
-        if (samples_written < samples_to_write && progress_counter > progress_samples) {
+    size_t acc = 0;
+    for (size_t i = 0; i < cycles; ++i) {
+        acc += to_write;
+        if (acc >= cycles) {
+            acc -= cycles;
             if (audio_buffer_index < AUDIO_BUFFER_SIZE) {
                 audio_buffer[audio_buffer_index++] = apu_get_sample();
-                samples_written++;
             }
         }
-
         apu_step_timer();
     }
 
@@ -872,7 +868,6 @@ void apu_step_frame(void) {
     // step the frame sequencer 4 times per frame
     // https://www.nesdev.org/wiki/APU_Frame_Counter
 
-    
     for (size_t i = 0; i < 4; i++) {
         apu_step_quarter_frame();
     }
