@@ -210,7 +210,6 @@ int main(int argc, char* argv[]) {
         }
 
         printf("\x1b[1;1H"); // Move cursor top-left
-        printf("NES 3DS Emulator       \n");
         printf("Press L + R to exit    \n");
         printf("Press SELECT to %s audio\n", audio_muted ? "Unmute" : "  Mute");
         printf("----------------------\n");
