@@ -123,43 +123,63 @@ void update_nz(uint8_t value) {
     neg_flag = (value & 0b010000000) != 0;
 }
 
-uint8_t zero_page(uint8_t addr) {
+inline uint8_t zero_page(uint8_t addr) {
+    return read_byte((uint16_t)addr);
+}
+
+inline uint8_t zero_page_x_addr(uint8_t addr) {
+    return addr + x;
+}
+
+inline uint8_t zero_page_x(uint8_t addr) {
+    return read_byte((uint16_t)zero_page_x_addr(addr));
+}
+
+inline uint8_t zero_page_y_addr(uint8_t addr) {
+    return addr + y;
+}
+
+inline uint8_t zero_page_y(uint8_t addr) {
+    return read_byte((uint16_t)zero_page_y_addr(addr));
+}
+
+inline uint8_t absolute(uint16_t addr) {
     return read_byte(addr);
 }
 
-uint8_t zero_page_x(uint8_t addr) {
-    return read_byte((addr + x) & 0xff); // TODO: check if wrapping is necessary
+inline uint16_t absolute_x_addr(uint16_t addr) {
+    return addr + x;
 }
 
-uint8_t zero_page_y(uint8_t addr) {
+inline uint8_t absolute_x(uint16_t addr) {
+    return read_byte(absolute_x_addr(addr));
+}
+
+inline uint8_t absolute_y(uint16_t addr) {
     return read_byte(addr + y);
 }
 
-uint8_t absolute(uint16_t addr) {
-    return read_byte(addr);
+inline uint16_t indirect_x_addr(uint8_t addr) {
+    uint8_t addr1 = addr + x;
+    uint8_t addr2 = addr1 + 1; // zero page wrap around
+    uint16_t low_byte = (uint16_t)read_byte(addr1);
+    uint16_t high_byte = (uint16_t)(((uint16_t)read_byte(addr2)) << 8);
+    return high_byte | low_byte;
+    return read_word(addr1);
 }
 
-uint8_t absolute_x(uint16_t addr) {
-    return read_byte(addr + x);
+inline uint16_t indirect_y_addr(uint8_t addr) {
+    uint8_t addr2 = addr + 1; // zero page wrap around
+    uint16_t low_byte = (uint16_t)read_byte(addr);
+    uint16_t high_byte = (uint16_t)(((uint16_t)read_byte(addr2)) << 8);
+    return (high_byte | low_byte) + (uint16_t)y;
 }
 
-uint8_t absolute_y(uint16_t addr) {
-    return read_byte(addr + y);
-}
-
-uint16_t indirect_x_addr(uint8_t addr) {
-    return read_word(addr + x);
-}
-
-uint16_t indirect_y_addr(uint8_t addr) {
-    return read_word(addr) + y;
-}
-
-uint8_t indirect_x_val(uint8_t addr) {
+inline uint8_t indirect_x_val(uint8_t addr) {
     return read_byte(indirect_x_addr(addr));
 }
 
-uint8_t indirect_y_val(uint8_t addr) {
+inline uint8_t indirect_y_val(uint8_t addr) {
     return read_byte(indirect_y_addr(addr));
 }
 
