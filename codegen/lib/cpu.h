@@ -40,6 +40,7 @@ uint8_t zero_page_x(uint8_t addr);
 uint8_t zero_page_y(uint8_t addr);
 
 uint8_t absolute(uint16_t addr);
+uint16_t absolute_x_addr(uint16_t addr);
 uint8_t absolute_x(uint16_t addr);
 uint8_t absolute_y(uint16_t addr);
 

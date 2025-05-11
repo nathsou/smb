@@ -7,7 +7,7 @@
 #define HASH_OFFSET_BASIS 2166136261
 #define HASH_PRIME 16777619
 #define RECORDING_FRAME_COUNT 7987
-#define EXPECTED_CUMULATIVE_HASH 788985578
+#define EXPECTED_CUMULATIVE_HASH 1633679932
 
 static NESInputRecording recording;
 static uint32_t frame_counter = 0;

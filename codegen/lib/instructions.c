@@ -84,8 +84,8 @@ void ldy_absx(uint16_t addr) {
 // ADC - Add with Carry
 
 void adc_imm(uint8_t value) {
-    uint16_t sum = a + value + (carry_flag ? 1 : 0);
-    carry_flag = sum > 0xff;
+    uint16_t sum = (uint16_t)a + (uint16_t)value + (uint16_t)carry_flag;
+    carry_flag = sum & 0x100;
     a = (uint8_t)sum;
     update_nz(a);
 }
@@ -510,7 +510,21 @@ void rol_abs(uint16_t addr) {
 
 // ROR - Rotate Right
 
-void ror_acc(void) {
+void _ror(uint16_t addr) {
+    uint8_t val = read_byte(addr);
+    bool old_carry = carry_flag;
+    carry_flag = val & 1;
+    val >>= 1;
+
+    if (old_carry) {
+        val |= 0x80;
+    }
+
+    dynamic_ram_write(addr, val);
+    update_nz(val);
+}
+
+inline void ror_acc(void) {
     bool old_carry = carry_flag;
     carry_flag = a & 1;
     a >>= 1;
@@ -522,16 +536,6 @@ void ror_acc(void) {
     update_nz(a);
 }
 
-void ror_absx(uint16_t addr) {
-    uint8_t val = absolute_x(addr);
-    bool old_carry = carry_flag;
-    carry_flag = val & 1;
-    val >>= 1;
-
-    if (old_carry) {
-        val |= 0x80;
-    }
-
-    dynamic_ram_write(addr, val);
-    update_nz(val);
+inline void ror_absx(uint16_t addr) {
+    _ror(absolute_x_addr(addr));
 }
