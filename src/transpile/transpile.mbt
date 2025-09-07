@@ -13,7 +13,7 @@ pub fn Emitter::new() -> Emitter {
   }
 }
 
-fn emit(self: Emitter, s: String, newline~: Bool = true) -> Unit {
+fn Emitter::emit(self: Emitter, s: String, newline~: Bool = true) -> Unit {
   let indent = "  ".repeat(self.indentation)
   self.output.write_string("\{indent}\{s}")
 
@@ -99,7 +99,7 @@ fn show_expr(expr: @lower.TypedExpr) -> String {
   }
 }
 
-pub(all) type! EmitterError String derive(Show)
+pub(all) suberror EmitterError String derive(Show)
 
 fn emit_constants_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#ifndef SMB_CONSTANTS_H")
@@ -133,6 +133,7 @@ fn emit_data_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("")
   self.emit("#endif")
 }
+
 fn emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"data.h\"")
   self.emit("")
@@ -147,7 +148,7 @@ fn emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
     for line in table.lines {
       match line {
         Data(data~, comment~) => {
-          let data = @string.concat(data.map(show_expr), separator=", ")
+          let data = data.map(show_expr).join(", ")
 
           match comment.val {
             "" => self.emit(data + ",")
@@ -224,18 +225,18 @@ fn show_cond_opcode(op: @parse.OpCode) -> String {
 priv enum Reg { A; X; Y }
 priv struct Range { min: Int; max: Int }
 
-impl Add for Range with op_add(self: Range, other: Range) -> Range {
+impl Add for Range with add(self: Range, other: Range) -> Range {
   { min: self.min + other.min, max: self.max + other.max }
 }
 
-impl Sub for Range with op_sub(self: Range, other: Range) -> Range {
+impl Sub for Range with sub(self: Range, other: Range) -> Range {
   { min: self.min - other.min, max: self.max - other.max }
 }
 
 fn compute_expr_range(expr: @lower.TypedExpr, low: @lower.AsmLowering) -> Range? {
   match expr {
     Const(value~, ..) => Some({ min: value, max: value })
-    Ident(name~, ..) => match low.defines[name] {
+    Ident(name~, ..) => match low.defines.get(name) {
       Some(expr) => compute_expr_range(expr, low)
       None => None
     }
@@ -450,25 +451,6 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering) -> Un
     }
 }
 
-fn emit_basic_block(self: Emitter, bb: @lower.BasicBlock, low: @lower.AsmLowering) -> Unit {
-  for item in bb.items {
-    self.emit_item(item, low)
-  }
-}
-
-fn emit_subroutine(self: Emitter, subroutine: @lower.AsmSubroutine, low: @lower.AsmLowering) -> Unit {
-  self.indentation = 0
-  self.emit("void \{rename_label(subroutine.name)}(void) {")
-  self.indentation = 1
-
-  for block in subroutine.blocks {
-    self.emit_basic_block(block, low)
-  }
-
-  self.indentation = 0
-  self.emit("}\n")
-}
-
 fn emit_flat_subroutine(self: Emitter, subroutine: @lower.AsmFlatSubroutine, low: @lower.AsmLowering) -> Unit {
   self.indentation = 0
   self.emit("void \{rename_label(subroutine.name)}(void) {")
@@ -497,13 +479,8 @@ pub(all) struct File {
   is_lib: Bool
 }
 
-fn File::read(name~: String, path~: String, is_lib~: Bool = true) -> File!Error {
-  let contents = @fs.read_file_to_string!(path)
-  { name, contents, is_lib }
-}
-
-pub fn File::write(self: File, dir~: String) -> Unit!Error {
-  @fs.write_string_to_file!("\{dir}/\{self.name}", self.contents)
+pub fn File::write(self: File, dir~: String) -> Unit raise Error {
+  @fs.write_string_to_file("\{dir}/\{self.name}", self.contents)
 }
 
 pub(all) struct Transpiler {

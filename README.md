@@ -44,6 +44,18 @@ In the root folder:
 3. Run an HTTP server in the `web/` folder and open `index.html` in your browser
 4. Select a legally obtained dump/ROM of SMB to extract graphics data from
 
+## Codegen
+
+The output of the code generator is in the `codegen/` folder. To regenerate it:
+
+1. Install [Moonbit](https://www.moonbitlang.com/):
+
+```bash
+$ curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s '0.6.26+4cdee97dd'
+```
+
+2. Run `make codegen`
+
 ## References & Resources
 
 - [doppelganger's disassembly](https://www.romhacking.net/documents/344/)

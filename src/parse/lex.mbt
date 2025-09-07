@@ -4,8 +4,8 @@ pub(all) struct Lexer {
   mut index: Int
 }
 
-pub type! LexerError {
-  UnexepectedChar(char~: Char, index~: Int)
+pub suberror LexerError {
+  UnexpectedChar(char~: Char, index~: Int)
   InvalidConstant(lexeme~: String, base~: ConstantBase)
 } derive(Show)
 
@@ -48,25 +48,11 @@ pub fn Lexer::new(input: String) -> Lexer {
 }
 
 fn peek(self: Lexer) -> Char {
-  self.input[self.index]
-}
-
-fn lookahead(self: Lexer, n: Int) -> Char {
-  self.input[self.index + n]
+  self.input[self.index].to_char().unwrap()
 }
 
 fn matches(self: Lexer, char: Char) -> Bool {
   self.peek() == char
-}
-
-fn matches_str(self: Lexer, chars: String) -> Bool {
-  for i, char in chars {
-    if self.lookahead(i) != char {
-      return false
-    }
-  }
-
-  true
 }
 
 fn consumes(self: Lexer, char: Char) -> Bool {
@@ -88,7 +74,7 @@ fn parse_identifier(self: Lexer) -> String {
   let identifier = StringBuilder::new()
   
   for i in self.index..<self.input.length() {
-    let char = self.input[i]
+    let char = self.input[i].to_char().unwrap()
 
     if is_alphanumeric(char) {
       identifier.write_char(char)
@@ -105,7 +91,7 @@ fn parse_constant(self: Lexer, base~: ConstantBase) -> LexerResult {
   let lexeme = StringBuilder::new()
 
   for i in self.index..<self.input.length() {
-    let char = self.input[i]
+    let char = self.input[i].to_char().unwrap()
 
     if is_valid_digit(char, base~) {
       lexeme.write_char(char)
@@ -120,7 +106,7 @@ fn parse_constant(self: Lexer, base~: ConstantBase) -> LexerResult {
   let value = match (lexeme, base) {
     ("0b", Hexadecimal) => 11 // https://github.com/moonbitlang/core/issues/2006
     _ => {
-      match @strconv.parse_int?(lexeme, base=base.to_int()) {
+      match (try? @strconv.parse_int(lexeme, base=base.to_int())) {
         Ok(value) => value
         Err(_) => return Grr(InvalidConstant(lexeme~, base~))
       }
@@ -300,7 +286,7 @@ fn parse_comment(self: Lexer) -> String {
   let comment = StringBuilder::new()
 
   for i in self.index..<self.input.length() {
-    let char = self.input[i]
+    let char = self.input[i].to_char().unwrap()
 
     if char == '\n' {
       break
@@ -342,7 +328,7 @@ fn next(self: Lexer) -> LexerResult {
       let mut is_inline = false
 
       while i >= 0 && self.input[i] != '\n' {
-        if not(is_whitespace(self.input[i])) {
+        if not(is_whitespace(self.input[i].to_char().unwrap())) {
           is_inline = true
           break
         }
@@ -377,13 +363,13 @@ fn next(self: Lexer) -> LexerResult {
       } else if is_decimal_digit(char) {
         self.parse_constant(base=Decimal)
       } else {
-        Grr(UnexepectedChar(char~, index=self.index))
+        Grr(UnexpectedChar(char~, index=self.index))
       }
     }
   }
 }
 
-pub fn lex(self: Lexer) -> Array[Token]!LexerError {
+pub fn Lexer::tokenize(self: Lexer) -> Array[Token] raise LexerError {
   let tokens = []
 
   while true {

@@ -4,9 +4,8 @@ pub(all) struct Parser {
   mut index: Int
 }
 
-pub type! ParserError {
+pub suberror ParserError {
   UnexpectedToken(expected~: Token, received~: Token)
-  ExpectedIdentifier(Token)
   ExpectedExpr(Token)
   Unreachable(String)
 } derive(Show)
@@ -19,15 +18,11 @@ fn Parser::peek(self: Parser) -> Token {
   self.tokens[self.index]
 }
 
-fn Parser::lookahead(self: Parser, n: Int) -> Token {
-  self.tokens[self.index + n]
-}
-
 fn Parser::advance(self: Parser) -> Unit {
   self.index += 1
 }
 
-fn expect(self: Parser, expected: Token) -> Unit!ParserError {
+fn Parser::expect(self: Parser, expected: Token) -> Unit raise ParserError {
   let token = self.peek()
   if token == expected {
     self.advance()
@@ -40,10 +35,6 @@ fn Parser::matches(self: Parser, token: Token) -> Bool {
   self.peek() == token
 }
 
-fn matches_predicate(self: Parser, predicate: (Token) -> Bool) -> Bool {
-  predicate(self.peek())
-}
-
 fn Parser::consumes(self: Parser, token: Token) -> Bool {
   if self.matches(token) {
     self.advance()
@@ -53,23 +44,7 @@ fn Parser::consumes(self: Parser, token: Token) -> Bool {
   }
 }
 
-fn Parser::consumeIfPresent(self: Parser, token: Token) -> Unit {
-  let _ = self.consumes(token)
-
-}
-
-fn Parser::parse_identifier(self: Parser) -> String!ParserError {
-  let token = self.peek()
-  match token {
-    Identifier(name) => {
-      self.advance()
-      name
-    }
-    _ => raise ExpectedIdentifier(token)
-  }
-}
-
-fn Parser::parse_primary_expr(self: Parser) -> SourceExpr!ParserError {
+fn Parser::parse_primary_expr(self: Parser) -> SourceExpr raise ParserError {
   let token = self.peek()
   match token {
     Constant(base~, value~, size~) => {
@@ -82,32 +57,32 @@ fn Parser::parse_primary_expr(self: Parser) -> SourceExpr!ParserError {
     }
     LeftParen => {
       self.advance()
-      let expr = self.parse_expr!()
-      self.expect!(RightParen)
+      let expr = self.parse_expr()
+      self.expect(RightParen)
       expr
     }
     LeftChevron => {
       self.advance()
-      let expr = self.parse_expr!()
+      let expr = self.parse_expr()
       Unary(op=GetLowByte, expr~)
     }
     RightChevron => {
       self.advance()
-      let expr = self.parse_expr!()
+      let expr = self.parse_expr()
       Unary(op=GetHighByte, expr~)
     }
     _ => raise ExpectedExpr(token)
   }
 }
 
-fn Parser::parse_additive_expr(self: Parser) -> SourceExpr!ParserError {
-  let mut lhs = self.parse_primary_expr!()
+fn Parser::parse_additive_expr(self: Parser) -> SourceExpr raise ParserError {
+  let mut lhs = self.parse_primary_expr()
   while true {
     if self.consumes(Plus) {
-      let rhs = self.parse_primary_expr!()
+      let rhs = self.parse_primary_expr()
       lhs = Binary(op=Add, lhs~, rhs~)
     } else if self.consumes(Minus) {
-      let rhs = self.parse_primary_expr!()
+      let rhs = self.parse_primary_expr()
       lhs = Binary(op=Sub, lhs~, rhs~)
     } else {
       break
@@ -116,14 +91,14 @@ fn Parser::parse_additive_expr(self: Parser) -> SourceExpr!ParserError {
   lhs
 }
 
-fn Parser::parse_expr(self: Parser) -> SourceExpr!ParserError {
-  self.parse_additive_expr!()
+fn Parser::parse_expr(self: Parser) -> SourceExpr raise ParserError {
+  self.parse_additive_expr()
 }
 
-fn Parser::parse_directive_args(self: Parser) -> Array[SourceExpr]!ParserError {
+fn Parser::parse_directive_args(self: Parser) -> Array[SourceExpr] raise ParserError {
   let args: Array[SourceExpr] = []
   while true {
-    let expr = self.parse_expr!()
+    let expr = self.parse_expr()
     args.push(expr)
     if not(self.consumes(Comma)) {
       break
@@ -135,7 +110,7 @@ fn Parser::parse_directive_args(self: Parser) -> Array[SourceExpr]!ParserError {
 fn Parser::parse_addressing_mode(
   self: Parser,
   opcode~: OpCode
-) -> SourceAddressingMode!ParserError {
+) -> SourceAddressingMode raise ParserError {
   if opcode.is_implied() {
     Implied
   } else {
@@ -143,12 +118,12 @@ fn Parser::parse_addressing_mode(
     match token {
       Hash => {
         self.advance()
-        let expr = self.parse_expr!()
+        let expr = self.parse_expr()
         Immediate(expr)
       }
       LeftParen => {
         self.advance()
-        let addr = self.parse_expr!()
+        let addr = self.parse_expr()
 
         if self.consumes(Comma) {
           if self.consumes(Identifier("x")) {
@@ -158,7 +133,7 @@ fn Parser::parse_addressing_mode(
           }
         }
 
-        self.expect!(RightParen)
+        self.expect(RightParen)
 
         if self.consumes(Comma) {
           if self.consumes(Identifier("y")) {
@@ -172,10 +147,10 @@ fn Parser::parse_addressing_mode(
       }
       _ =>
         if opcode.is_relative() {
-          let addr = self.parse_expr!()
+          let addr = self.parse_expr()
           Relative(addr~)
         } else {
-          match self.parse_expr?() {
+          match (try? self.parse_expr()) {
             Ok(addr) =>
               if self.consumes(Comma) {
                 if self.consumes(Identifier("x")) {
@@ -200,14 +175,14 @@ fn Parser::parse_addressing_mode(
   }
 }
 
-fn Parser::parse_inst(self: Parser) -> SourceItem!ParserError {
+fn Parser::parse_inst(self: Parser) -> SourceItem raise ParserError {
   let token = self.peek()
 
   match token {
     Identifier(name) => {
       self.advance()
-      self.expect!(Equal)
-      let rhs = self.parse_expr!()
+      self.expect(Equal)
+      let rhs = self.parse_expr()
       Define(name~, rhs~)
     }
     Label(name) => {
@@ -216,12 +191,12 @@ fn Parser::parse_inst(self: Parser) -> SourceItem!ParserError {
     }
     Directive(name) => {
       self.advance()
-      let args = self.parse_directive_args!()
+      let args = self.parse_directive_args()
       Directive(name~, args~)
     }
     OpCode(op) => {
       self.advance()
-      let mode = self.parse_addressing_mode!(opcode=op)
+      let mode = self.parse_addressing_mode(opcode=op)
       Inst(op~, mode~)
     }
     Comment(comment~, is_inline~) => {
@@ -232,11 +207,11 @@ fn Parser::parse_inst(self: Parser) -> SourceItem!ParserError {
   }
 }
 
-pub fn Parser::parse(self: Parser) -> Array[SourceItem]!ParserError {
+pub fn Parser::parse(self: Parser) -> Array[SourceItem] raise ParserError {
   let insts: Array[SourceItem] = []
 
   while self.index < self.tokens.length() {
-    let inst = self.parse_inst!()
+    let inst = self.parse_inst()
     insts.push(inst)
   }
 

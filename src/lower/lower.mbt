@@ -14,7 +14,7 @@ pub(all) struct AsmLowering {
   flat_subroutines: Array[AsmFlatSubroutine]
 } derive (Show)
 
-pub type! LoweringError String derive(Show)
+pub suberror LoweringError String derive(Show)
 
 pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
   {
@@ -33,7 +33,7 @@ pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
   }
 }
 
-fn detect_table(self: AsmLowering, name: String, index: Int) -> AsmTable?!LoweringError {
+fn AsmLowering::detect_table(self: AsmLowering, name: String, index: Int) -> AsmTable? raise LoweringError {
   let lines: Array[AsmTableLine] = []
   let mut elem_size: @parse.ConstantSize? = None
   let mut length = 0
@@ -60,7 +60,7 @@ fn detect_table(self: AsmLowering, name: String, index: Int) -> AsmTable?!Loweri
         let data = []
 
         for arg in args {
-          data.push(self.type_expr!(arg))
+          data.push(self.type_expr(arg))
         }
 
         lines.push(Data(data~, comment=Ref::new("")))
@@ -98,7 +98,7 @@ fn detect_table(self: AsmLowering, name: String, index: Int) -> AsmTable?!Loweri
   }
 }
 
-fn collect_labels_and_tables(self: AsmLowering) -> Unit!LoweringError {
+fn AsmLowering::collect_labels_and_tables(self: AsmLowering) -> Unit raise LoweringError {
   let mut idx = 0
 
   while idx < self.items.length() {
@@ -112,7 +112,7 @@ fn collect_labels_and_tables(self: AsmLowering) -> Unit!LoweringError {
           _ => false
         }
 
-        match self.detect_table!(name, idx + (if is_alias { 1 } else { 0 })) {
+        match self.detect_table(name, idx + (if is_alias { 1 } else { 0 })) {
           Some(table) => {
             self.tables.push(table)
             self.table_offset += table.size
@@ -141,7 +141,7 @@ fn collect_labels_and_tables(self: AsmLowering) -> Unit!LoweringError {
   }
 }
 
-fn type_expr(self: AsmLowering, expr: @parse.SourceExpr) -> TypedExpr!LoweringError {
+fn AsmLowering::type_expr(self: AsmLowering, expr: @parse.SourceExpr) -> TypedExpr raise LoweringError {
   match expr {
     Const(base~, value~, size~) => {
       let ty = match size {
@@ -152,38 +152,38 @@ fn type_expr(self: AsmLowering, expr: @parse.SourceExpr) -> TypedExpr!LoweringEr
       Const(base~, value~, size~, ty~)
     }
     Ident(name) => {
-      match self.tables_by_label[name] {
+      match self.tables_by_label.get(name) {
         Some(table) => Ident(name~, ty=ArrayTy(table.elem_size))
-        None => match self.defines[name] {
+        None => match self.defines.get(name) {
           Some(expr) => Ident(name~, ty=expr.ty())
           None => Ident(name~, ty=LabelTy)
         }
       }
     }
     Unary(op~, expr~) => {
-      let expr = self.type_expr!(expr)
+      let expr = self.type_expr(expr)
       Unary(op~, expr~, ty=expr.ty())
     }
     Binary(op~, lhs~, rhs~) => {
-      let lhs = self.type_expr!(lhs)
-      let rhs = self.type_expr!(rhs)
+      let lhs = self.type_expr(lhs)
+      let rhs = self.type_expr(rhs)
       Binary(op~, lhs~, rhs~, ty=lhs.ty())
     }
   }
 }
 
-fn collect_defines(self: AsmLowering) -> Unit!LoweringError {
+fn AsmLowering::collect_defines(self: AsmLowering) -> Unit raise LoweringError {
   for item in self.items {
     match item {
       Define(name~, rhs~) => {
-        self.defines[name] = self.type_expr!(rhs)
+        self.defines[name] = self.type_expr(rhs)
       }
       _ => ()
     }
   }
 }
 
-fn collect_instructions(self: AsmLowering) -> Unit!LoweringError {
+fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringError {
   let mut inside_table = false
   let mut item_idx = 0
 
@@ -236,10 +236,10 @@ fn collect_instructions(self: AsmLowering) -> Unit!LoweringError {
           let addr_mode: AsmAddressingMode = match mode {
             Accumulator => Accumulator
             Implied => Implied
-            Immediate(operand) => Immediate(self.type_expr!(operand))
-            Relative(addr~) => Relative(self.type_expr!(addr))
+            Immediate(operand) => Immediate(self.type_expr(operand))
+            Relative(addr~) => Relative(self.type_expr(addr))
             AbsoluteOrZeroPage(addr~) | AbsoluteOrZeroPageX(addr~) | AbsoluteOrZeroPageY(addr~) => {
-              let addr = self.type_expr!(addr)
+              let addr = self.type_expr(addr)
               let size: @parse.ConstantSize = match addr.ty() {
                 ConstTy(size) => size
                 ArrayTy(_) | LabelTy => Word
@@ -255,9 +255,9 @@ fn collect_instructions(self: AsmLowering) -> Unit!LoweringError {
                 _ => raise LoweringError("Invalid addressing mode")
               }
             }
-            Indirect(addr~) => Indirect(self.type_expr!(addr))
-            IndexedIndirect(addr~) => IndexedIndirect(self.type_expr!(addr))
-            IndirectIndexed(addr~) => IndirectIndexed(self.type_expr!(addr))
+            Indirect(addr~) => Indirect(self.type_expr(addr))
+            IndexedIndirect(addr~) => IndexedIndirect(self.type_expr(addr))
+            IndirectIndexed(addr~) => IndirectIndexed(self.type_expr(addr))
           }
 
           let comment = match self.items[item_idx + 1] {
@@ -291,7 +291,7 @@ pub(all) struct JumpTargets {
   externals: Set[String]
 } derive (Show)
 
-fn collect_jump_targets(self: AsmLowering) -> Unit {
+fn AsmLowering::collect_jump_targets(self: AsmLowering) -> Unit {
   for item in self.lowered {
     match item {
       Inst(
@@ -321,11 +321,11 @@ fn collect_jump_targets(self: AsmLowering) -> Unit {
   }
 }
 
-fn contains(self: JumpTargets, label: String) -> Bool {
+fn JumpTargets::contains(self: JumpTargets, label: String) -> Bool {
   self.jump_targets.contains(label) || self.subroutines.contains(label)
 }
 
-fn next_non_comment_item_index(self: AsmLowering, start: Int) -> Int? {
+fn AsmLowering::next_non_comment_item_index(self: AsmLowering, start: Int) -> Int? {
   for i in start..<self.lowered.length() {
     match self.lowered[i] {
       Comment(_) => ()
@@ -336,7 +336,7 @@ fn next_non_comment_item_index(self: AsmLowering, start: Int) -> Int? {
   None
 }
 
-fn collect_basic_block_leaders(self: AsmLowering) -> Array[Int] {
+fn AsmLowering::collect_basic_block_leaders(self: AsmLowering) -> Array[Int] {
   self.collect_jump_targets()
   let leader_indices = []
 
@@ -384,7 +384,7 @@ priv struct ItemInfo {
   index: Int
 }
 
-fn last_non_comment_item(self: BasicBlock) -> ItemInfo? {
+fn BasicBlock::last_non_comment_item(self: BasicBlock) -> ItemInfo? {
   let mut i = self.items.length() - 1
 
   while i >= 0 {
@@ -399,8 +399,8 @@ fn last_non_comment_item(self: BasicBlock) -> ItemInfo? {
   None
 }
 
-fn has_fallthrough(self: BasicBlock) -> Bool!LoweringError {
-  let last_item = self.last_non_comment_item().or_error!(LoweringError("Empty basic block"))
+fn BasicBlock::has_fallthrough(self: BasicBlock) -> Bool raise LoweringError {
+  let last_item = self.last_non_comment_item().or_error(LoweringError("Empty basic block"))
 
   match last_item.item {
     Inst(op~, ..) => {
@@ -413,7 +413,7 @@ fn has_fallthrough(self: BasicBlock) -> Bool!LoweringError {
   }
 }
 
-fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
+fn AsmLowering::collect_basic_blocks(self: AsmLowering) -> Unit raise LoweringError {
   let leader_indices = self.collect_basic_block_leaders()
 
   // Starting from a leader, the set of all following instructions until and not including the next leader
@@ -459,7 +459,7 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
 
   // connect basic blocks
   for bb in self.basic_blocks {
-    let last_item = bb.last_non_comment_item().or_error!(LoweringError("Empty basic block"))
+    let last_item = bb.last_non_comment_item().or_error(LoweringError("Empty basic block"))
 
     match last_item.item {
       Inst(
@@ -467,7 +467,7 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
         mode=Relative(Ident(name=label, ..)) | Absolute(Ident(name=label, ..)),
         ..
       ) => {
-        match self.bb_by_label[label] {
+        match self.bb_by_label.get(label) {
           Some(target_bb) => {
             connect(bb, target_bb, false)
           }
@@ -480,7 +480,7 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
       }
       JumpEngine(jump_table~) => {
         for label in jump_table {
-          match self.bb_by_label[label] {
+          match self.bb_by_label.get(label) {
             Some(target_bb) => {
               connect(bb, target_bb, false)
             }
@@ -496,47 +496,13 @@ fn collect_basic_blocks(self: AsmLowering) -> Unit!LoweringError {
     }
 
     // check for fallthrough to the next basic block
-    if bb.has_fallthrough!() && bb.id + 1 < self.basic_blocks.length() {
+    if bb.has_fallthrough() && bb.id + 1 < self.basic_blocks.length() {
       connect(bb, self.basic_blocks[bb.id + 1], true)
     }
   }
 }
 
-fn collect_labels(self: BasicBlock, labels: Set[String]) -> Unit {
-  for item in self.items {
-    match item {
-      Label(name) => labels.add(name)
-      _ => ()
-    }
-  }
-}
-
-// collect jump targets that are not defined in the current subroutine
-fn collect_external_labels(self: BasicBlock, internal_labels: Set[String], external_labels: Set[String]) -> Unit {
-    for item in self.items {
-      match item {
-      Inst(
-        op=JSR | JMP | BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS,
-        mode=Relative(Ident(name=label, ..)) | Absolute(Ident(name=label, ..)),
-        ..
-      ) => {
-        if not(internal_labels.contains(label)) {
-          external_labels.add(label)
-        }
-      }
-      JumpEngine(jump_table~) => {
-        for label in jump_table {
-          if not(internal_labels.contains(label)) {
-            external_labels.add(label)
-          }
-        }
-      }
-        _ => ()
-      }
-  }
-}
-
-fn rewrite_bb(self: AsmLowering, bb: BasicBlock, visited: Set[Int]) -> Unit!LoweringError {
+fn AsmLowering::rewrite_bb(self: AsmLowering, bb: BasicBlock, visited: Set[Int]) -> Unit raise LoweringError {
   if visited.contains(bb.id) {
     return
   }
@@ -567,7 +533,7 @@ fn rewrite_bb(self: AsmLowering, bb: BasicBlock, visited: Set[Int]) -> Unit!Lowe
               if self.is_subroutine_label(next_name) {
                 // insert fallthrough call to the next subroutine
                 let prev_bb = sub.blocks[sub.blocks.length() - 1]
-                if prev_bb.successors.length() > 0 && prev_bb.has_fallthrough!() {
+                if prev_bb.successors.length() > 0 && prev_bb.has_fallthrough() {
                   prev_bb.items.push(Inst(op=JSR, mode=Absolute(Ident(name=next_name, ty=LabelTy)), comment=Some("<fallthrough>")))
                   prev_bb.items.push(Inst(op=RTS, mode=Implied, comment=None))
                 }
@@ -590,22 +556,22 @@ fn rewrite_bb(self: AsmLowering, bb: BasicBlock, visited: Set[Int]) -> Unit!Lowe
   }
 }
 
-pub fn is_subroutine_label(self: AsmLowering, label: String) -> Bool {
+pub fn AsmLowering::is_subroutine_label(self: AsmLowering, label: String) -> Bool {
   self.targets.subroutines.contains(label) || label.has_suffix("__sub")
 }
 
-fn collect_subroutines(self: AsmLowering) -> Unit!LoweringError {
+fn AsmLowering::collect_subroutines(self: AsmLowering) -> Unit raise LoweringError {
   let components = self.collect_connected_components()
   let visited = Set::new()
 
   for component in components {
     for bb in component {
-      let _ = self.rewrite_bb!(bb,visited)
+      let _ = self.rewrite_bb(bb,visited)
     }
   }
 }
 
-fn dfs(self: BasicBlock, visited: Set[Int]) -> Array[BasicBlock] {
+fn BasicBlock::dfs(self: BasicBlock, visited: Set[Int]) -> Array[BasicBlock] {
   let stack = [self]
   let blocks = []
 
@@ -622,11 +588,11 @@ fn dfs(self: BasicBlock, visited: Set[Int]) -> Array[BasicBlock] {
     }
   }
 
-  blocks.sort_by(fn(a, b) { a.id - b.id })
+  blocks.sort_by((a, b) => a.id - b.id)
   blocks
 }
 
-fn collect_connected_components(self: AsmLowering) -> Array[Array[BasicBlock]] {
+fn AsmLowering::collect_connected_components(self: AsmLowering) -> Array[Array[BasicBlock]] {
   let components = []
   let visited = Set::new()
 
@@ -640,10 +606,10 @@ fn collect_connected_components(self: AsmLowering) -> Array[Array[BasicBlock]] {
   components
 }
 
-fn remove_unused_rts(self: AsmLowering) -> Unit!LoweringError {
+fn AsmLowering::remove_unused_rts(self: AsmLowering) -> Unit raise LoweringError {
   for sub in self.subroutines {
     let last_bb = sub.exit
-    let last_item = last_bb.last_non_comment_item().or_error!(LoweringError("Empty basic block"))
+    let last_item = last_bb.last_non_comment_item().or_error(LoweringError("Empty basic block"))
 
     match last_item.item {
       Inst(op=RTS, ..) => {
@@ -654,7 +620,7 @@ fn remove_unused_rts(self: AsmLowering) -> Unit!LoweringError {
   }
 }
 
-fn  _cfg_dotfile(self: AsmLowering) -> String {
+fn  AsmLowering::_cfg_dotfile(self: AsmLowering) -> String {
   let builder = StringBuilder::new()
 
   builder.write_string("digraph G {\n")
@@ -682,9 +648,9 @@ priv struct ControlFlowStackEntry {
   cond: @parse.OpCode
   body: Array[AsmItem]
   comment: String?
-} derive (Show)
+}
 
-fn negate(cond: @parse.OpCode) -> @parse.OpCode!LoweringError {
+fn negate(cond: @parse.OpCode) -> @parse.OpCode raise LoweringError {
   match cond {
     BCS => BCC
     BCC => BCS
@@ -696,7 +662,7 @@ fn negate(cond: @parse.OpCode) -> @parse.OpCode!LoweringError {
   }
 }
 
-fn recognize_control_flow(self: AsmLowering, sub: AsmSubroutine) -> AsmFlatSubroutine!LoweringError {
+fn AsmLowering::recognize_control_flow(self: AsmLowering, sub: AsmSubroutine) -> AsmFlatSubroutine raise LoweringError {
   let items = sub.blocks.map(fn(bb) { bb.items }).flatten()
   let labels = Set::new()
   let new_items = []
@@ -749,7 +715,7 @@ fn recognize_control_flow(self: AsmLowering, sub: AsmSubroutine) -> AsmFlatSubro
                 let _ = stack.pop()
 
                 push_item(AsmItem::If(
-                  cond=negate!(entry.cond),
+                  cond=negate(entry.cond),
                   then=entry.body,
                   otherwise=None,
                   comment=entry.comment,
@@ -817,7 +783,7 @@ fn recognize_control_flow(self: AsmLowering, sub: AsmSubroutine) -> AsmFlatSubro
       Some(entry) => {
         new_items.push(
           AsmItem::If(
-            cond=negate!(entry.cond),
+            cond=negate(entry.cond),
             then=entry.body,
             otherwise=None,
             comment=None,
@@ -839,20 +805,20 @@ fn recognize_control_flow(self: AsmLowering, sub: AsmSubroutine) -> AsmFlatSubro
   }
 }
 
-fn collect_flat_subroutines(self: AsmLowering) -> Unit!LoweringError {
+fn AsmLowering::collect_flat_subroutines(self: AsmLowering) -> Unit raise LoweringError {
   for sub in self.subroutines {
-    self.flat_subroutines.push(self.recognize_control_flow!(sub))
+    self.flat_subroutines.push(self.recognize_control_flow(sub))
   }
 }
 
-pub fn lower(self: AsmLowering) -> Unit!LoweringError {
-  self.collect_labels_and_tables!()
-  self.collect_defines!()
-  self.collect_instructions!()
-  self.collect_basic_blocks!()
-  self.collect_subroutines!()
-  self.remove_unused_rts!()
-  self.collect_flat_subroutines!()
+pub fn lower(self: AsmLowering) -> Unit raise LoweringError {
+  self.collect_labels_and_tables()
+  self.collect_defines()
+  self.collect_instructions()
+  self.collect_basic_blocks()
+  self.collect_subroutines()
+  self.remove_unused_rts()
+  self.collect_flat_subroutines()
 
   // @fs.write_string_to_file(path="cfg.dot", content=self.cfg_dotfile())
 }
