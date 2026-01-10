@@ -99,9 +99,9 @@ fn show_expr(expr: @lower.TypedExpr) -> String {
   }
 }
 
-pub(all) suberror EmitterError String derive(Show)
+pub(all) suberror EmitterError { EmitterError(String) } derive(Show)
 
-fn emit_constants_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
+fn Emitter::emit_constants_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#ifndef SMB_CONSTANTS_H")
   self.emit("#define SMB_CONSTANTS_H")
   self.emit("")
@@ -116,7 +116,7 @@ fn emit_constants_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("\n#endif")
 }
 
-fn emit_data_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
+fn Emitter::emit_data_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#ifndef SMB_DATA_H")
   self.emit("#define SMB_DATA_H")
   self.emit("")
@@ -134,7 +134,7 @@ fn emit_data_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#endif")
 }
 
-fn emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
+fn Emitter::emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"data.h\"")
   self.emit("")
 
@@ -166,7 +166,7 @@ fn emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
     self.emit("};\n")
 }
 
-fn emit_code_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
+fn Emitter::emit_code_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#ifndef SMB_CODE_H")
   self.emit("#define SMB_CODE_H")
   self.emit("")
@@ -187,7 +187,7 @@ fn emit_code_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
 
 fn rename_label(label: String) -> String {
   if label.has_suffix("__sub") {
-    label.split("__sub").iter().peek().unwrap().to_string()
+    label.split("__sub").iter().next().unwrap().to_string()
   } else {
     label
   }
@@ -322,7 +322,7 @@ fn write_byte(mode: @lower.AsmAddressingMode, target: Reg, low: @lower.AsmLoweri
   }
 }
 
-fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering) -> Unit {
+fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering) -> Unit {
     match item {
       Label(name) => {
         // do not output labels for subroutines
@@ -451,7 +451,7 @@ fn emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering) -> Un
     }
 }
 
-fn emit_flat_subroutine(self: Emitter, subroutine: @lower.AsmFlatSubroutine, low: @lower.AsmLowering) -> Unit {
+fn Emitter::emit_flat_subroutine(self: Emitter, subroutine: @lower.AsmFlatSubroutine, low: @lower.AsmLowering) -> Unit {
   self.indentation = 0
   self.emit("void \{rename_label(subroutine.name)}(void) {")
   self.indentation = 1
@@ -464,8 +464,8 @@ fn emit_flat_subroutine(self: Emitter, subroutine: @lower.AsmFlatSubroutine, low
   self.emit("}\n")
 }
 
-fn emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
-self.emit("#include \"code.h\"")
+fn Emitter::emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
+  self.emit("#include \"code.h\"")
   self.emit("")
 
   for sub in low.flat_subroutines {

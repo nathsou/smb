@@ -7,9 +7,10 @@ suberror PipelineError {
 } derive(Show)
 
 fn read_rom() -> String raise PipelineError {
-  match (try? @fs.read_file_to_string("src/smb.asm")) {
-    Ok(assembly) => assembly
-    Err(err) => raise IOError(Show::to_string(err))
+  try @fs.read_file_to_string("src/smb.asm") catch {
+    err => raise IOError(Show::to_string(err))
+  } noraise {
+    assembly => assembly
   }
 }
 
@@ -17,9 +18,10 @@ fn tokenize() -> Array[@parse.Token] raise PipelineError {
   let assembly = read_rom()
   let lexer = @parse.Lexer::new(assembly)
 
-  match (try? lexer.tokenize()) {
-    Ok(tokens) => tokens
-    Err(err) => raise LexerError(err)
+  try lexer.tokenize() catch {
+    err => raise LexerError(err)
+  } noraise {
+    tokens => tokens
   }
 }
 
@@ -27,18 +29,20 @@ fn parse() -> Array[@parse.SourceItem] raise PipelineError {
   let tokens = tokenize()
   let parser = @parse.Parser::new(tokens)
 
-  match (try? parser.parse()) {
-    Ok(instructions) => instructions
-    Err(err) => raise ParserError(err)
+  try parser.parse() catch {
+    err => raise ParserError(err)
+  } noraise {
+    instructions => instructions
   }
 }
 
 fn lower() -> @lower.AsmLowering raise PipelineError {
   let instructions = parse()
   let lowering = @lower.AsmLowering::new(instructions)
-  match (try? lowering.lower()) {
-    Ok(_) => lowering
-    Err(err) => raise LoweringError(err)
+  try lowering.lower() catch {
+    err => raise LoweringError(err)
+  } noraise {
+    _ => lowering
   }
 }
 
@@ -59,22 +63,22 @@ fn run() -> Unit raise Error {
     @fs.create_dir(lib_output_dir)
   }
 
-  match (try? transpile()) {
-      Ok(tr) => {
+  try transpile() catch {
+      err => {
+          println(err)
+      }
+  } noraise {
+      tr => {
           for file in tr.files {
               file.write(dir=if file.is_lib { lib_output_dir } else { output_dir })
           }
-      }
-      Err(err) => {
-          println(err)
       }
   }
 }
 
 fn main {
-  match (try? run()) {
-    Ok(_) => ()
-    Err(err) => {
+  try run() catch {
+    err => {
       println("Error: \{Show::to_string(err)}")
     }
   }

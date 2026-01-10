@@ -30,12 +30,20 @@ Static recompilation of Super Mario Bros. using [doppelganger's disassembly](htt
 
 ### Linux & MacOS
 
-In the root folder:
+1. Fetch the submodules:
+```bash
+$ git submodule update --init --recursive
+```
 
-1. Clone and build raylib using [raylib-quickstart](https://github.com/raylib-extras/raylib-quickstart)
-2. Run `make build`
-3. Place a legally obtained dump/ROM of SMB called `smb.nes` in the root folder to extract graphics data from
-4. You can now run `./smb`
+2. Build raylib, follow the instructions [here](https://github.com/raylib-extras/raylib-quickstart)
+
+3. Run `make build` in the root folder:
+```bash
+$ make build
+```
+
+4. Place a legally obtained dump/ROM of SMB called `smb.nes` in the root folder to extract graphics data from
+5. You can now run `./smb`
 
 ## WebAssembly
 
@@ -51,7 +59,7 @@ The output of the code generator is in the `codegen/` folder. To regenerate it:
 1. Install [Moonbit](https://www.moonbitlang.com/):
 
 ```bash
-$ curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s '0.6.26+4cdee97dd'
+$ curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s '0.7.1+c0b22a8b0'
 ```
 
 2. Run `make codegen`

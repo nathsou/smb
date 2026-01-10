@@ -1,0 +1,3 @@
+[submodule "raylib-quickstart"]
+	path = raylib-quickstart
+	url = https://github.com/raylib-extras/raylib-quickstart
