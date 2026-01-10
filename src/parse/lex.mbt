@@ -47,15 +47,15 @@ pub fn Lexer::new(input: String) -> Lexer {
   { input, index: 0 }
 }
 
-fn peek(self: Lexer) -> Char {
+fn Lexer::peek(self: Lexer) -> Char {
   self.input[self.index].to_char().unwrap()
 }
 
-fn matches(self: Lexer, char: Char) -> Bool {
+fn Lexer::matches(self: Lexer, char: Char) -> Bool {
   self.peek() == char
 }
 
-fn consumes(self: Lexer, char: Char) -> Bool {
+fn Lexer::consumes(self: Lexer, char: Char) -> Bool {
   if self.matches(char) {
     self.index += 1
     true
@@ -64,13 +64,13 @@ fn consumes(self: Lexer, char: Char) -> Bool {
   }
 }
 
-fn skip_whitespaces(self: Lexer) -> Unit {
+fn Lexer::skip_whitespaces(self: Lexer) -> Unit {
   while self.index < self.input.length() && is_whitespace(self.peek()) {
     self.index += 1
   }
 }
 
-fn parse_identifier(self: Lexer) -> String {
+fn Lexer::parse_identifier(self: Lexer) -> String {
   let identifier = StringBuilder::new()
   
   for i in self.index..<self.input.length() {
@@ -87,7 +87,7 @@ fn parse_identifier(self: Lexer) -> String {
   identifier.to_string()
 }
 
-fn parse_constant(self: Lexer, base~: ConstantBase) -> LexerResult {
+fn Lexer::parse_constant(self: Lexer, base~: ConstantBase) -> LexerResult {
   let lexeme = StringBuilder::new()
 
   for i in self.index..<self.input.length() {
@@ -106,9 +106,10 @@ fn parse_constant(self: Lexer, base~: ConstantBase) -> LexerResult {
   let value = match (lexeme, base) {
     ("0b", Hexadecimal) => 11 // https://github.com/moonbitlang/core/issues/2006
     _ => {
-      match (try? @strconv.parse_int(lexeme, base=base.to_int())) {
-        Ok(value) => value
-        Err(_) => return Grr(InvalidConstant(lexeme~, base~))
+      try @strconv.parse_int(lexeme, base=base.to_int()) catch {
+        _ => return Grr(InvalidConstant(lexeme~, base~))
+      } noraise {
+        value => value
       }
     }
   }
@@ -272,7 +273,7 @@ fn parse_opcode(str: String) -> OpCode? {
   }
 }
 
-fn advance(self: Lexer) -> Unit {
+fn Lexer::advance(self: Lexer) -> Unit {
   self.index += 1
 }
 
@@ -282,7 +283,7 @@ priv enum LexerResult {
   EOF
 }
 
-fn parse_comment(self: Lexer) -> String {
+fn Lexer::parse_comment(self: Lexer) -> String {
   let comment = StringBuilder::new()
 
   for i in self.index..<self.input.length() {
@@ -299,7 +300,7 @@ fn parse_comment(self: Lexer) -> String {
   comment.to_string()
 }
 
-fn next(self: Lexer) -> LexerResult {
+fn Lexer::next(self: Lexer) -> LexerResult {
   self.skip_whitespaces()
 
   if self.index >= self.input.length() {

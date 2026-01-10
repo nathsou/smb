@@ -150,8 +150,15 @@ fn Parser::parse_addressing_mode(
           let addr = self.parse_expr()
           Relative(addr~)
         } else {
-          match (try? self.parse_expr()) {
-            Ok(addr) =>
+          try self.parse_expr() catch {
+            err =>
+              if opcode.supports_accumulator_addr_mode() {
+                Accumulator
+              } else {
+                raise err
+              }
+          } noraise {
+            addr =>
               if self.consumes(Comma) {
                 if self.consumes(Identifier("x")) {
                   AbsoluteOrZeroPageX(addr~)
@@ -162,12 +169,6 @@ fn Parser::parse_addressing_mode(
                 }
               } else {
                 AbsoluteOrZeroPage(addr~)
-              }
-            Err(err) =>
-              if opcode.supports_accumulator_addr_mode() {
-                Accumulator
-              } else {
-                raise err
               }
           }
         }

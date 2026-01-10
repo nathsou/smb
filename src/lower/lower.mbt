@@ -14,7 +14,7 @@ pub(all) struct AsmLowering {
   flat_subroutines: Array[AsmFlatSubroutine]
 } derive (Show)
 
-pub suberror LoweringError String derive(Show)
+pub suberror LoweringError { LoweringError(String) } derive(Show)
 
 pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
   {
@@ -400,7 +400,7 @@ fn BasicBlock::last_non_comment_item(self: BasicBlock) -> ItemInfo? {
 }
 
 fn BasicBlock::has_fallthrough(self: BasicBlock) -> Bool raise LoweringError {
-  let last_item = self.last_non_comment_item().or_error(LoweringError("Empty basic block"))
+  let last_item = self.last_non_comment_item().unwrap_or_error(LoweringError("Empty basic block"))
 
   match last_item.item {
     Inst(op~, ..) => {
@@ -459,7 +459,7 @@ fn AsmLowering::collect_basic_blocks(self: AsmLowering) -> Unit raise LoweringEr
 
   // connect basic blocks
   for bb in self.basic_blocks {
-    let last_item = bb.last_non_comment_item().or_error(LoweringError("Empty basic block"))
+    let last_item = bb.last_non_comment_item().unwrap_or_error(LoweringError("Empty basic block"))
 
     match last_item.item {
       Inst(
@@ -609,7 +609,7 @@ fn AsmLowering::collect_connected_components(self: AsmLowering) -> Array[Array[B
 fn AsmLowering::remove_unused_rts(self: AsmLowering) -> Unit raise LoweringError {
   for sub in self.subroutines {
     let last_bb = sub.exit
-    let last_item = last_bb.last_non_comment_item().or_error(LoweringError("Empty basic block"))
+    let last_item = last_bb.last_non_comment_item().unwrap_or_error(LoweringError("Empty basic block"))
 
     match last_item.item {
       Inst(op=RTS, ..) => {
@@ -811,7 +811,7 @@ fn AsmLowering::collect_flat_subroutines(self: AsmLowering) -> Unit raise Loweri
   }
 }
 
-pub fn lower(self: AsmLowering) -> Unit raise LoweringError {
+pub fn AsmLowering::lower(self: AsmLowering) -> Unit raise LoweringError {
   self.collect_labels_and_tables()
   self.collect_defines()
   self.collect_instructions()

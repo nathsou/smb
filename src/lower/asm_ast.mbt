@@ -84,7 +84,7 @@ pub(all) struct AsmFlatSubroutine {
   items: Array[AsmItem]
 } derive (Show)
 
-pub fn ty(self: TypedExpr) -> Type {
+pub fn TypedExpr::ty(self: TypedExpr) -> Type {
   match self {
     Const(base=_, value=_, size=_, ty~) => ty
     Ident(name=_, ty~) => ty
@@ -93,7 +93,7 @@ pub fn ty(self: TypedExpr) -> Type {
   }
 }
 
-pub fn suffix(self: AsmAddressingMode) -> String {
+pub fn AsmAddressingMode::suffix(self: AsmAddressingMode) -> String {
   match self {
     Accumulator => "_acc"
     Implied => ""

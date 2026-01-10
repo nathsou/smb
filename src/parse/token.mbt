@@ -39,7 +39,7 @@ fn ConstantBase::to_int(self: ConstantBase) -> Int {
   }
 }
 
-pub fn is_implied(self: OpCode) -> Bool {
+pub fn OpCode::is_implied(self: OpCode) -> Bool {
   match self {
     BRK | CLC | CLD | CLI | CLV | DEX | DEY | INX | INY | NOP | PHA | PHP
     | PLA | PLP | RTI | RTS | SEC | SED | SEI | TAX | TAY | TSX | TXA | TXS
@@ -48,32 +48,32 @@ pub fn is_implied(self: OpCode) -> Bool {
   }
 }
 
-pub fn is_relative(self: OpCode) -> Bool {
+pub fn OpCode::is_relative(self: OpCode) -> Bool {
   match self {
     BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS => true
     _ => false
   }
 }
 
-pub fn is_unconditional_branch(self: OpCode) -> Bool {
+pub fn OpCode::is_unconditional_branch(self: OpCode) -> Bool {
   match self {
     JMP | JSR | RTS => true
     _ => false
   }
 }
 
-pub fn is_branching(self: OpCode) -> Bool {
+pub fn OpCode::is_branching(self: OpCode) -> Bool {
   self.is_relative() || self.is_unconditional_branch()
 }
 
-pub fn supports_accumulator_addr_mode(self: OpCode) -> Bool {
+pub fn OpCode::supports_accumulator_addr_mode(self: OpCode) -> Bool {
   match self {
     ASL | LSR | ROL | ROR => true
     _ => false
   }
 }
 
-pub fn byte_size(self: ConstantSize) -> Int {
+pub fn ConstantSize::byte_size(self: ConstantSize) -> Int {
   match self {
     Byte => 1
     Word => 2
