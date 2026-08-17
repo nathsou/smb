@@ -4,6 +4,7 @@
     "nathsou/smb/parse",
     "nathsou/smb/lower",
     "moonbitlang/x/fs",
+    "moonbitlang/core/debug",
     "nathsou/smb/transpile"
   ]
 }

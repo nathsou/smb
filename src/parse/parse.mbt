@@ -8,7 +8,7 @@ pub suberror ParserError {
   UnexpectedToken(expected~: Token, received~: Token)
   ExpectedExpr(Token)
   Unreachable(String)
-} derive(Show)
+} derive(Debug)
 
 pub fn Parser::new(tokens: Array[Token]) -> Parser {
   { tokens, index: 0, defines: {} }
@@ -100,7 +100,7 @@ fn Parser::parse_directive_args(self: Parser) -> Array[SourceExpr] raise ParserE
   while true {
     let expr = self.parse_expr()
     args.push(expr)
-    if not(self.consumes(Comma)) {
+    if !(self.consumes(Comma)) {
       break
     }
   }
@@ -204,7 +204,7 @@ fn Parser::parse_inst(self: Parser) -> SourceItem raise ParserError {
       self.advance()
       Comment(comment~, is_inline~)
     }
-    _ => raise Unreachable("Expected instruction, got: \{token}")
+    _ => raise Unreachable("Expected instruction, got: \{Repr(token)}")
   }
 }
 

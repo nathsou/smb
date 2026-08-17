@@ -7,7 +7,7 @@ pub(all) struct Lexer {
 pub suberror LexerError {
   UnexpectedChar(char~: Char, index~: Int)
   InvalidConstant(lexeme~: String, base~: ConstantBase)
-} derive(Show)
+} derive(Debug)
 
 fn is_whitespace(c: Char) -> Bool {
   match c {
@@ -106,7 +106,7 @@ fn Lexer::parse_constant(self: Lexer, base~: ConstantBase) -> LexerResult {
   let value = match (lexeme, base) {
     ("0b", Hexadecimal) => 11 // https://github.com/moonbitlang/core/issues/2006
     _ => {
-      try @strconv.parse_int(lexeme, base=base.to_int()) catch {
+      try @string.parse_int(lexeme, base=base.to_int()) catch {
         _ => return Grr(InvalidConstant(lexeme~, base~))
       } noraise {
         value => value
@@ -329,7 +329,7 @@ fn Lexer::next(self: Lexer) -> LexerResult {
       let mut is_inline = false
 
       while i >= 0 && self.input[i] != '\n' {
-        if not(is_whitespace(self.input[i].to_char().unwrap())) {
+        if !(is_whitespace(self.input[i].to_char().unwrap())) {
           is_inline = true
           break
         }
