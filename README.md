@@ -59,7 +59,7 @@ The output of the code generator is in the `codegen/` folder. To regenerate it:
 1. Install [Moonbit](https://www.moonbitlang.com/):
 
 ```bash
-$ curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s '0.7.1+c0b22a8b0'
+$ curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s '0.10.7+bc794d341'
 ```
 
 2. Run `make codegen`
