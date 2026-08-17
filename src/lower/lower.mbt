@@ -12,9 +12,9 @@ pub(all) struct AsmLowering {
   bb_by_label: Map[String, BasicBlock]
   subroutines: Array[AsmSubroutine]
   flat_subroutines: Array[AsmFlatSubroutine]
-} derive (Show)
+} derive (Debug)
 
-pub suberror LoweringError { LoweringError(String) } derive(Show)
+pub suberror LoweringError { LoweringError(String) } derive(Debug)
 
 pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
   {
@@ -23,9 +23,9 @@ pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
     defines: {},
     tables: [],
     table_offset: 0, // in bytes
-    jump_target_labels: Set::new(),
+    jump_target_labels: Set([]),
     tables_by_label: {},
-    targets: { jump_targets: Set::new(), subroutines: Set::new(), externals: Set::new() },
+    targets: { jump_targets: Set([]), subroutines: Set([]), externals: Set([]) },
     basic_blocks: [],
     bb_by_label: {},
     subroutines: [],
@@ -63,7 +63,7 @@ fn AsmLowering::detect_table(self: AsmLowering, name: String, index: Int) -> Asm
           data.push(self.type_expr(arg))
         }
 
-        lines.push(Data(data~, comment=Ref::new("")))
+        lines.push(Data(data~, comment=Ref("")))
       }
       Comment(comment~, is_inline~) => {
         if is_inline {
@@ -193,7 +193,7 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
 
     match item {
       Label(name) => {
-        if not(self.tables_by_label.contains(name)) {
+        if !(self.tables_by_label.contains(name)) {
           // this label is a jump target if it's not a table label
           
           self.lowered.push(Label(name))
@@ -213,7 +213,7 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
                 for arg in args {
                   match arg {
                     Ident(label) => {
-                      if not(self.jump_target_labels.contains(label)) {
+                      if !(self.jump_target_labels.contains(label)) {
                         raise LoweringError("Unknown label in jump table")
                       }
 
@@ -269,13 +269,13 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
         }
       }
       Comment(comment~, is_inline=false) => {
-        if not(inside_table) {
+        if !(inside_table) {
           self.lowered.push(Comment(comment))
         }
       }
       Directive(name="db" | "dw" as name, args~) => {
-        if not(inside_table) {
-          raise LoweringError("Raw data in code detected: \{name} \{args}")
+        if !(inside_table) {
+          raise LoweringError("Raw data in code detected: \{name} \{Repr(args)}")
         }
       }
       _ => ()
@@ -289,7 +289,7 @@ pub(all) struct JumpTargets {
   jump_targets: Set[String]
   subroutines: Set[String]
   externals: Set[String]
-} derive (Show)
+} derive (Debug)
 
 fn AsmLowering::collect_jump_targets(self: AsmLowering) -> Unit {
   for item in self.lowered {
@@ -448,11 +448,11 @@ fn AsmLowering::collect_basic_blocks(self: AsmLowering) -> Unit raise LoweringEr
   }
 
   fn connect(a: BasicBlock, b: BasicBlock, is_fallthrough: Bool) -> Unit {
-    if not(a.successors.iter().any(fn(link) { link.bb.id == b.id })) {
+    if !(a.successors.iter().any(fn(link) { link.bb.id == b.id })) {
       a.successors.push({ bb: b, is_fallthrough })
     }
 
-    if not(b.predecessors.iter().any(fn(link) { link.bb.id == a.id })) {
+    if !(b.predecessors.iter().any(fn(link) { link.bb.id == a.id })) {
       b.predecessors.push({ bb: a, is_fallthrough })
     }
   }
@@ -472,7 +472,7 @@ fn AsmLowering::collect_basic_blocks(self: AsmLowering) -> Unit raise LoweringEr
             connect(bb, target_bb, false)
           }
           None => {
-            if not(label.has_prefix("__")) { // allow special labels
+            if !(label.has_prefix("__")) { // allow special labels
               raise LoweringError("Unknown jump target: \{label}")
             }
           }
@@ -485,7 +485,7 @@ fn AsmLowering::collect_basic_blocks(self: AsmLowering) -> Unit raise LoweringEr
               connect(bb, target_bb, false)
             }
             None => {
-              if not(label.has_prefix("__")) { // allow special labels
+              if !(label.has_prefix("__")) { // allow special labels
                 raise LoweringError("Unknown jump target: \{label}")
               }
             }
@@ -515,7 +515,7 @@ fn AsmLowering::rewrite_bb(self: AsmLowering, bb: BasicBlock, visited: Set[Int])
           blocks: [bb],
           entry: bb,
           exit: bb,
-          internal_labels: Set::new(),
+          internal_labels: Set([]),
         }
 
         let mut i = bb.id + 1
@@ -562,7 +562,7 @@ pub fn AsmLowering::is_subroutine_label(self: AsmLowering, label: String) -> Boo
 
 fn AsmLowering::collect_subroutines(self: AsmLowering) -> Unit raise LoweringError {
   let components = self.collect_connected_components()
-  let visited = Set::new()
+  let visited = Set([])
 
   for component in components {
     for bb in component {
@@ -575,10 +575,10 @@ fn BasicBlock::dfs(self: BasicBlock, visited: Set[Int]) -> Array[BasicBlock] {
   let stack = [self]
   let blocks = []
 
-  while not(stack.is_empty()) {
+  while !(stack.is_empty()) {
     let bb = stack.pop().unwrap()
 
-    if not(visited.contains(bb.id)) {
+    if !(visited.contains(bb.id)) {
       visited.add(bb.id)
       blocks.push(bb)
 
@@ -594,10 +594,10 @@ fn BasicBlock::dfs(self: BasicBlock, visited: Set[Int]) -> Array[BasicBlock] {
 
 fn AsmLowering::collect_connected_components(self: AsmLowering) -> Array[Array[BasicBlock]] {
   let components = []
-  let visited = Set::new()
+  let visited = Set([])
 
   for bb in self.basic_blocks {
-    if not(visited.contains(bb.id)) {
+    if !(visited.contains(bb.id)) {
       let blocks = bb.dfs(visited)
       components.push(blocks)
     }
@@ -664,11 +664,11 @@ fn negate(cond: @parse.OpCode) -> @parse.OpCode raise LoweringError {
 
 fn AsmLowering::recognize_control_flow(self: AsmLowering, sub: AsmSubroutine) -> AsmFlatSubroutine raise LoweringError {
   let items = sub.blocks.map(fn(bb) { bb.items }).flatten()
-  let labels = Set::new()
+  let labels = Set([])
   let new_items = []
   let stack: Array[ControlFlowStackEntry] = []
-  let loop_labels = Set::new()
-  let unconditional_jump_labels = Set::new()
+  let loop_labels = Set([])
+  let unconditional_jump_labels = Set([])
 
   // detect backward jumps
   for item in items {
@@ -758,7 +758,7 @@ fn AsmLowering::recognize_control_flow(self: AsmLowering, sub: AsmSubroutine) ->
             otherwise=None,
             comment=comment,
           ))
-        } else if not(loop_labels.contains(label)) {
+        } else if !(loop_labels.contains(label)) {
         // if this is not a loop
           let entry = {
             exit_label: label,

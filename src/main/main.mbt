@@ -4,7 +4,7 @@ suberror PipelineError {
   LexerError(@parse.LexerError)
   ParserError(@parse.ParserError)
   LoweringError(@lower.LoweringError)
-} derive(Show)
+} derive(Debug)
 
 fn read_rom() -> String raise PipelineError {
   try @fs.read_file_to_string("src/smb.asm") catch {
@@ -55,17 +55,17 @@ let output_dir: String = "codegen"
 let lib_output_dir: String = "\{output_dir}/lib"
 
 fn run() -> Unit raise Error {
-  if not(@fs.path_exists(output_dir)) {
+  if !(@fs.path_exists(output_dir)) {
     @fs.create_dir(output_dir)
   }
 
-  if not(@fs.path_exists(lib_output_dir)) {
+  if !(@fs.path_exists(lib_output_dir)) {
     @fs.create_dir(lib_output_dir)
   }
 
   try transpile() catch {
       err => {
-          println(err)
+          println(@debug.to_string(err))
       }
   } noraise {
       tr => {

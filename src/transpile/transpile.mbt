@@ -99,7 +99,7 @@ fn show_expr(expr: @lower.TypedExpr) -> String {
   }
 }
 
-pub(all) suberror EmitterError { EmitterError(String) } derive(Show)
+pub(all) suberror EmitterError { EmitterError(String) } derive(Debug)
 
 fn Emitter::emit_constants_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#ifndef SMB_CONSTANTS_H")
@@ -187,7 +187,7 @@ fn Emitter::emit_code_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
 
 fn rename_label(label: String) -> String {
   if label.has_suffix("__sub") {
-    label.split("__sub").iter().next().unwrap().to_string()
+    label.split("__sub").iter().next().unwrap().to_owned()
   } else {
     label
   }
@@ -328,7 +328,7 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
         // do not output labels for subroutines
         let is_subroutine_label = low.is_subroutine_label(name);
 
-        if not(is_subroutine_label) {
+        if !(is_subroutine_label) {
           self.emit("\n\{rename_label(name)}:")
         }
       }
@@ -386,7 +386,7 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
                 "\{target}();"
               }
               (RTS, _) => "return;"
-              _ => "\{op.to_string().to_lower()}\{mode.suffix()}(\{args});"
+              _ => "\{@debug.to_string(op).to_lower()}\{mode.suffix()}(\{args});"
             }
           }
         }
