@@ -3,7 +3,7 @@ pub(all) enum Type {
   ConstTy(@parse.ConstantSize)
   ArrayTy(@parse.ConstantSize)
   LabelTy
-} derive (Show, Eq)
+} derive (Debug, Eq)
 
 pub(all) enum TypedExpr {
   Const(
@@ -15,12 +15,12 @@ pub(all) enum TypedExpr {
   Ident(name~: String, ty~: Type)
   Unary(op~: @parse.UnaryOp, expr~: TypedExpr, ty~: Type)
   Binary(op~: @parse.BinaryOp, lhs~: TypedExpr, rhs~: TypedExpr, ty~: Type)
-} derive (Show)
+} derive (Debug)
 
 pub(all) enum AsmTableLine {
   Data(data~: Array[TypedExpr], comment~: Ref[String])
   Comment(String)
-} derive (Show)
+} derive (Debug)
 
 pub(all) struct AsmTable {
   name: String
@@ -29,7 +29,7 @@ pub(all) struct AsmTable {
   size: Int
   elem_size: @parse.ConstantSize
   items_count: Int
-} derive (Show)
+} derive (Debug)
 
 pub(all) enum AsmAddressingMode {
   Accumulator
@@ -45,7 +45,7 @@ pub(all) enum AsmAddressingMode {
   Indirect(TypedExpr)
   IndexedIndirect(TypedExpr)
   IndirectIndexed(TypedExpr)
-} derive (Show)
+} derive (Debug)
 
 pub(all) enum AsmItem {
   Label(String)
@@ -53,12 +53,12 @@ pub(all) enum AsmItem {
   JumpEngine(jump_table~: Array[String])
   If(cond~: @parse.OpCode, then~: Array[AsmItem], otherwise~: Array[AsmItem]?, comment~: String?)
   Comment(String)
-} derive (Show)
+} derive (Debug)
 
 pub(all) struct BasicBlockLink {
   bb: BasicBlock
   is_fallthrough: Bool
-} derive (Show)
+} derive (Debug)
 
 pub(all) struct BasicBlock {
   id: Int
@@ -68,7 +68,7 @@ pub(all) struct BasicBlock {
   successors: Array[BasicBlockLink]
   mut is_subroutine_entry: Bool
   mut subroutine: AsmSubroutine?
-} derive (Show)
+} derive (Debug)
 
 pub(all) struct AsmSubroutine {
   name: String
@@ -76,13 +76,13 @@ pub(all) struct AsmSubroutine {
   entry: BasicBlock
   mut exit: BasicBlock
   internal_labels: Set[String]
-} derive (Show)
+} derive (Debug)
 
 // subroutines with a flat array of items instead of basic blocks
 pub(all) struct AsmFlatSubroutine {
   name: String
   items: Array[AsmItem]
-} derive (Show)
+} derive (Debug)
 
 pub fn TypedExpr::ty(self: TypedExpr) -> Type {
   match self {

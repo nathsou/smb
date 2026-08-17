@@ -2,18 +2,18 @@
 
 pub(all) enum UnaryOp {
   GetLowByte; GetHighByte
-} derive (Show)
+} derive (Debug)
 
 pub(all) enum BinaryOp {
   Add; Sub
-} derive (Show)
+} derive (Debug)
 
 pub(all) enum SourceExpr {
   Const(base~: ConstantBase, value~: Int, size~: ConstantSize)
   Ident(String)
   Unary(op~: UnaryOp, expr~: SourceExpr)
   Binary(op~: BinaryOp, lhs~: SourceExpr, rhs~: SourceExpr)
-} derive (Show)
+} derive (Debug)
 
 // https://www.nesdev.org/wiki/CPU_addressing_modes
 pub(all) enum SourceAddressingMode {
@@ -27,7 +27,7 @@ pub(all) enum SourceAddressingMode {
   Indirect(addr~: SourceExpr)
   IndexedIndirect(addr~: SourceExpr) // (d,x)
   IndirectIndexed(addr~: SourceExpr) // (d),y
-} derive (Show)
+} derive (Debug)
 
 pub(all) enum SourceItem {
   Label(String)
@@ -35,4 +35,4 @@ pub(all) enum SourceItem {
   Define(name~: String, rhs~: SourceExpr)
   Directive(name~: String, args~: Array[SourceExpr])
   Comment(comment~: String, is_inline~: Bool)
-} derive (Show)
+} derive (Debug)

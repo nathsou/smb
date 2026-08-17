@@ -3,15 +3,15 @@ pub(all) enum OpCode {
   CLD; CLI; CLV; CMP; CPX; CPY; DEC; DEX; DEY; EOR; INC; INX; INY; JMP
   JSR; LDA; LDX; LDY; LSR; NOP; ORA; PHA; PHP; PLA; PLP; ROL; ROR; RTI
   RTS; SBC; SEC; SED; SEI; STA; STX; STY; TAX; TAY; TSX; TXA; TXS; TYA
-} derive (Show, Eq, Hash)
+} derive (Debug, Eq, Hash)
 
 pub(all) enum ConstantBase {
   Binary; Decimal; Hexadecimal
-} derive (Show, Eq)
+} derive (Debug, Eq)
 
 pub(all) enum ConstantSize {
   Byte; Word
-} derive (Show, Eq)
+} derive (Debug, Eq)
 
 enum Token {
   Comment(comment~: String, is_inline~: Bool)
@@ -29,7 +29,7 @@ enum Token {
   RightParen
   LeftChevron
   RightChevron
-} derive (Show, Eq)
+} derive (Debug, Eq)
 
 fn ConstantBase::to_int(self: ConstantBase) -> Int {
   match self {
