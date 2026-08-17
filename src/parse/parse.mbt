@@ -100,7 +100,7 @@ fn Parser::parse_directive_args(self: Parser) -> Array[SourceExpr] raise ParserE
   while true {
     let expr = self.parse_expr()
     args.push(expr)
-    if !(self.consumes(Comma)) {
+    if !self.consumes(Comma) {
       break
     }
   }

@@ -55,11 +55,11 @@ let output_dir: String = "codegen"
 let lib_output_dir: String = "\{output_dir}/lib"
 
 fn run() -> Unit raise Error {
-  if !(@fs.path_exists(output_dir)) {
+  if !@fs.path_exists(output_dir) {
     @fs.create_dir(output_dir)
   }
 
-  if !(@fs.path_exists(lib_output_dir)) {
+  if !@fs.path_exists(lib_output_dir) {
     @fs.create_dir(lib_output_dir)
   }
 
