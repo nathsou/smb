@@ -328,7 +328,7 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
         // do not output labels for subroutines
         let is_subroutine_label = low.is_subroutine_label(name);
 
-        if !(is_subroutine_label) {
+        if !is_subroutine_label {
           self.emit("\n\{rename_label(name)}:")
         }
       }

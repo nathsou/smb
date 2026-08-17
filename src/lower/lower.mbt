@@ -193,7 +193,7 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
 
     match item {
       Label(name) => {
-        if !(self.tables_by_label.contains(name)) {
+        if !self.tables_by_label.contains(name) {
           // this label is a jump target if it's not a table label
           
           self.lowered.push(Label(name))
@@ -213,7 +213,7 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
                 for arg in args {
                   match arg {
                     Ident(label) => {
-                      if !(self.jump_target_labels.contains(label)) {
+                      if !self.jump_target_labels.contains(label) {
                         raise LoweringError("Unknown label in jump table")
                       }
 
@@ -269,12 +269,12 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
         }
       }
       Comment(comment~, is_inline=false) => {
-        if !(inside_table) {
+        if !inside_table {
           self.lowered.push(Comment(comment))
         }
       }
       Directive(name="db" | "dw" as name, args~) => {
-        if !(inside_table) {
+        if !inside_table {
           raise LoweringError("Raw data in code detected: \{name} \{Repr(args)}")
         }
       }
@@ -448,11 +448,11 @@ fn AsmLowering::collect_basic_blocks(self: AsmLowering) -> Unit raise LoweringEr
   }
 
   fn connect(a: BasicBlock, b: BasicBlock, is_fallthrough: Bool) -> Unit {
-    if !(a.successors.iter().any(fn(link) { link.bb.id == b.id })) {
+    if !a.successors.iter().any(fn(link) { link.bb.id == b.id }) {
       a.successors.push({ bb: b, is_fallthrough })
     }
 
-    if !(b.predecessors.iter().any(fn(link) { link.bb.id == a.id })) {
+    if !b.predecessors.iter().any(fn(link) { link.bb.id == a.id }) {
       b.predecessors.push({ bb: a, is_fallthrough })
     }
   }
@@ -472,7 +472,7 @@ fn AsmLowering::collect_basic_blocks(self: AsmLowering) -> Unit raise LoweringEr
             connect(bb, target_bb, false)
           }
           None => {
-            if !(label.has_prefix("__")) { // allow special labels
+            if !label.has_prefix("__") { // allow special labels
               raise LoweringError("Unknown jump target: \{label}")
             }
           }
@@ -485,7 +485,7 @@ fn AsmLowering::collect_basic_blocks(self: AsmLowering) -> Unit raise LoweringEr
               connect(bb, target_bb, false)
             }
             None => {
-              if !(label.has_prefix("__")) { // allow special labels
+              if !label.has_prefix("__") { // allow special labels
                 raise LoweringError("Unknown jump target: \{label}")
               }
             }
@@ -575,10 +575,10 @@ fn BasicBlock::dfs(self: BasicBlock, visited: Set[Int]) -> Array[BasicBlock] {
   let stack = [self]
   let blocks = []
 
-  while !(stack.is_empty()) {
+  while !stack.is_empty() {
     let bb = stack.pop().unwrap()
 
-    if !(visited.contains(bb.id)) {
+    if !visited.contains(bb.id) {
       visited.add(bb.id)
       blocks.push(bb)
 
@@ -597,7 +597,7 @@ fn AsmLowering::collect_connected_components(self: AsmLowering) -> Array[Array[B
   let visited = Set([])
 
   for bb in self.basic_blocks {
-    if !(visited.contains(bb.id)) {
+    if !visited.contains(bb.id) {
       let blocks = bb.dfs(visited)
       components.push(blocks)
     }
@@ -758,7 +758,7 @@ fn AsmLowering::recognize_control_flow(self: AsmLowering, sub: AsmSubroutine) ->
             otherwise=None,
             comment=comment,
           ))
-        } else if !(loop_labels.contains(label)) {
+        } else if !loop_labels.contains(label) {
         // if this is not a loop
           let entry = {
             exit_label: label,

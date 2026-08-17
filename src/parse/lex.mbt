@@ -329,7 +329,7 @@ fn Lexer::next(self: Lexer) -> LexerResult {
       let mut is_inline = false
 
       while i >= 0 && self.input[i] != '\n' {
-        if !(is_whitespace(self.input[i].to_char().unwrap())) {
+        if !is_whitespace(self.input[i].to_char().unwrap()) {
           is_inline = true
           break
         }
