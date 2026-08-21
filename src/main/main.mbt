@@ -3,6 +3,7 @@ suberror PipelineError {
   IOError(String)
   LexerError(@parse.LexerError)
   ParserError(@parse.ParserError)
+  LayoutError(@layout.LayoutError)
   LoweringError(@lower.LoweringError)
 } derive(Debug)
 
@@ -38,7 +39,12 @@ fn parse() -> Array[@parse.SourceItem] raise PipelineError {
 
 fn lower() -> @lower.AsmLowering raise PipelineError {
   let instructions = parse()
-  let lowering = @lower.AsmLowering::new(instructions)
+  let image = try @layout.layout(instructions) catch {
+    err => raise LayoutError(err)
+  } noraise {
+    image => image
+  }
+  let lowering = @lower.AsmLowering::new(instructions, image)
   try lowering.lower() catch {
     err => raise LoweringError(err)
   } noraise {
