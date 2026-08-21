@@ -123,6 +123,7 @@ fn Emitter::emit_data_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"stdint.h\"")
   self.emit("#include \"constants.h\"")
   self.emit("")
+  self.emit("#define PRG_ROM_BYTES \{low.image.bytes.length()}")
   self.emit("extern const uint8_t prg_rom[\{low.image.bytes.length()}];")
   self.emit("")
 
