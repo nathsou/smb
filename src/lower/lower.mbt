@@ -820,8 +820,11 @@ fn AsmLowering::collect_flat_subroutines(self: AsmLowering) -> Unit raise Loweri
 }
 
 pub fn AsmLowering::lower(self: AsmLowering) -> Unit raise LoweringError {
-  // Keep symbolic hardware/RAM constants for the surrounding runtime, but do
-  // not partition source labels into C routines.  The PC dispatcher preserves
-  // JSR/RTS and indirect transfers directly.
+  self.collect_labels_and_tables()
   self.collect_defines()
+  self.collect_instructions()
+  self.collect_basic_blocks()
+  self.collect_subroutines()
+  self.remove_unused_rts()
+  self.collect_flat_subroutines()
 }

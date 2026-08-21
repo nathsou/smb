@@ -73,10 +73,7 @@ uint8_t read_byte(uint16_t addr) {
     }
 
     if (addr >= 0x8000) {
-        // NROM-128 mirrors its 16 KiB PRG at $c000; NROM-256 maps the full
-        // 32 KiB directly. The generated image size selects the mapping.
-        uint16_t index = PRG_ROM_BYTES == 0x4000 ? (addr & 0x3fff) : (addr - 0x8000);
-        return prg_rom[index];
+        return data[addr - 0x8000];
     }
 
     return 0;
