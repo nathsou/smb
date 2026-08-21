@@ -1276,7 +1276,7 @@ void DemoEngine(void) {
   if (!zero_flag) { goto DoAction; } // if timer still counting down, skip
   inx_nf();
   inc_abs_nf(DemoAction); // if expired, increment action, X, and
-   // set carry by default for demo over
+  carry_flag = true; // set carry by default for demo over
   lda_absx(DemoTimingData - 1); // get next timer
   ram[DemoActionTimer] = a; // store as current timer
   if (zero_flag) { return; } // if timer already at zero, skip
@@ -2588,7 +2588,7 @@ void PlayerLoseLife(void) {
 }
 
 void TransposePlayers(void) {
-   // set carry flag by default to end game
+  carry_flag = true; // set carry flag by default to end game
   lda_abs(NumberOfPlayers); // if only a 1 player game, leave
   if (zero_flag) { return; }
   lda_abs(OffScr_NumberofLives); // does offscreen player have any lives left?
@@ -3945,7 +3945,7 @@ void FindEmptyEnemySlot(void) {
   ldx_imm_nf(0x0); // start at first enemy slot
   
 EmptyChkLoop:
-   // clear carry flag by default
+  carry_flag = false; // clear carry flag by default
   lda_zpx(Enemy_Flag); // check enemy buffer for nonzero
   if (!zero_flag) {
     inx_nf();
@@ -3970,7 +3970,7 @@ void ChkLrgObjLength(void) {
 
 void ChkLrgObjFixedLength(void) {
   lda_absx(AreaObjectLength); // check for set length counter
-   // clear carry flag for not just starting
+  carry_flag = false; // clear carry flag for not just starting
   if (neg_flag) {
     tya(); // save length into length counter
     ram[AreaObjectLength + x] = a;
@@ -12374,7 +12374,7 @@ SetVXPl:
   asl_acc_nf();
   asl_acc_nf();
   carry_flag = false;
-  adc_absy_nf(ClimbXPosAdder - 1); // add pixels depending on facing direction
+  adc_absy(ClimbXPosAdder - 1); // add pixels depending on facing direction
   ram[Player_X_Position] = a; // store as player's horizontal coordinate
   lda_zp(0x6); // get low byte of block buffer address again
   if (!zero_flag) { return; } // if not zero, branch
@@ -12413,7 +12413,7 @@ void ChkJumpspringMetatiles(void) {
   cmp_imm(0x67); // check for top jumpspring metatile
   if (zero_flag) { goto JSFnd; } // branch to set carry if found
   cmp_imm(0x68); // check for bottom jumpspring metatile
-   // clear carry flag
+  carry_flag = false; // clear carry flag
   if (!zero_flag) { return; } // branch to use cleared carry if not found
   
 JSFnd:
