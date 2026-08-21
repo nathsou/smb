@@ -2,6 +2,7 @@
 pub(all) struct AsmLowering {
   items: Array[@parse.SourceItem]
   lowered: Array[AsmItem]
+  mut next_instruction_id: Int
   defines: Map[String, TypedExpr]
   jump_target_labels: Set[String]
   tables: Array[AsmTable]
@@ -12,6 +13,7 @@ pub(all) struct AsmLowering {
   bb_by_label: Map[String, BasicBlock]
   subroutines: Array[AsmSubroutine]
   flat_subroutines: Array[AsmFlatSubroutine]
+  flag_liveness: Map[Int, FlagLiveness]
 } derive (Debug)
 
 pub suberror LoweringError { LoweringError(String) } derive(Debug)
@@ -20,6 +22,7 @@ pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
   {
     items,
     lowered: [],
+    next_instruction_id: 0,
     defines: {},
     tables: [],
     table_offset: 0, // in bytes
@@ -30,6 +33,7 @@ pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
     bb_by_label: {},
     subroutines: [],
     flat_subroutines: [],
+    flag_liveness: {},
   }
 }
 
@@ -265,7 +269,9 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
             _ => None
           }
 
-          self.lowered.push(Inst(op~, mode=addr_mode, comment~))
+          let id = self.next_instruction_id
+          self.next_instruction_id += 1
+          self.lowered.push(Inst(id~, op~, mode=addr_mode, comment~))
         }
       }
       Comment(comment~, is_inline=false) => {
@@ -502,6 +508,132 @@ fn AsmLowering::collect_basic_blocks(self: AsmLowering) -> Unit raise LoweringEr
   }
 }
 
+pub fn flag_reads(op: @parse.OpCode) -> FlagLiveness {
+  match op {
+    ADC | SBC | ROL | ROR => { carry: true, zero: false, negative: false }
+    BCC | BCS => { carry: true, zero: false, negative: false }
+    BEQ | BNE => { carry: false, zero: true, negative: false }
+    BMI | BPL => { carry: false, zero: false, negative: true }
+    JSR => FlagLiveness::all()
+    _ => FlagLiveness::none()
+  }
+}
+
+pub fn flag_writes(op: @parse.OpCode) -> FlagLiveness {
+  match op {
+    ADC | SBC | ASL | LSR | ROL | ROR | CMP | CPX | CPY => FlagLiveness::all()
+    LDA | LDX | LDY | AND | ORA | EOR | INC | INX | INY | DEC | DEX | DEY |
+    PLA | BIT | TAX | TAY | TSX | TXA | TYA => {
+      { carry: false, zero: true, negative: true }
+    }
+    CLC | SEC => { carry: true, zero: false, negative: false }
+    JSR => FlagLiveness::all()
+    _ => FlagLiveness::none()
+  }
+}
+
+priv struct FlagUsage {
+  uses: FlagLiveness
+  defs: FlagLiveness
+}
+
+fn BasicBlock::flag_usage(self: BasicBlock) -> FlagUsage {
+  let mut uses = FlagLiveness::none()
+  let mut defs = FlagLiveness::none()
+
+  for item in self.items {
+    match item {
+      Inst(op~, ..) => {
+        uses = uses.union(flag_reads(op).subtract(defs))
+        defs = defs.union(flag_writes(op))
+      }
+      // JumpEngine dispatches to a subroutine. Keep all flags live across it
+      // until call summaries are available.
+      JumpEngine(_) => {
+        uses = uses.union(FlagLiveness::all().subtract(defs))
+        defs = defs.union(FlagLiveness::all())
+      }
+      _ => ()
+    }
+  }
+
+  { uses, defs }
+}
+
+fn AsmLowering::collect_flag_liveness(self: AsmLowering) -> Unit {
+  let usages = self.basic_blocks.map(fn(bb) { bb.flag_usage() })
+  let live_in = self.basic_blocks.map(fn(_) { FlagLiveness::none() })
+  let mut changed = true
+
+  while changed {
+    changed = false
+
+    let mut i = self.basic_blocks.length() - 1
+    while i >= 0 {
+      let bb = self.basic_blocks[i]
+      let mut live_out = FlagLiveness::none()
+
+      if bb.successors.is_empty() {
+        // Flags are observable at a subroutine return. This conservative
+        // boundary also keeps externally entered code correct.
+        live_out = FlagLiveness::all()
+      } else {
+        for link in bb.successors {
+          live_out = live_out.union(live_in[link.bb.id])
+        }
+      }
+
+      let usage = usages[bb.id]
+      let new_live_in = usage.uses.union(live_out.subtract(usage.defs))
+
+      if new_live_in != live_in[bb.id] {
+        live_in[bb.id] = new_live_in
+        changed = true
+      }
+
+      i -= 1
+    }
+  }
+
+  for bb in self.basic_blocks {
+    let mut live_after = FlagLiveness::none()
+
+    if bb.successors.is_empty() {
+      live_after = FlagLiveness::all()
+    } else {
+      for link in bb.successors {
+        live_after = live_after.union(live_in[link.bb.id])
+      }
+    }
+
+    let mut i = bb.items.length() - 1
+    while i >= 0 {
+      match bb.items[i] {
+        Inst(id~, op~, ..) => {
+          if id >= 0 {
+            self.flag_liveness[id] = live_after
+          }
+
+          live_after = flag_reads(op).union(live_after.subtract(flag_writes(op)))
+        }
+        JumpEngine(_) => {
+          live_after = FlagLiveness::all()
+        }
+        _ => ()
+      }
+
+      i -= 1
+    }
+  }
+}
+
+pub fn AsmLowering::flag_live_after(self: AsmLowering, id: Int) -> FlagLiveness {
+  match self.flag_liveness.get(id) {
+    Some(flags) => flags
+    None => FlagLiveness::all()
+  }
+}
+
 fn AsmLowering::rewrite_bb(self: AsmLowering, bb: BasicBlock, visited: Set[Int]) -> Unit raise LoweringError {
   if visited.contains(bb.id) {
     return
@@ -534,8 +666,8 @@ fn AsmLowering::rewrite_bb(self: AsmLowering, bb: BasicBlock, visited: Set[Int])
                 // insert fallthrough call to the next subroutine
                 let prev_bb = sub.blocks[sub.blocks.length() - 1]
                 if prev_bb.successors.length() > 0 && prev_bb.has_fallthrough() {
-                  prev_bb.items.push(Inst(op=JSR, mode=Absolute(Ident(name=next_name, ty=LabelTy)), comment=Some("<fallthrough>")))
-                  prev_bb.items.push(Inst(op=RTS, mode=Implied, comment=None))
+                  prev_bb.items.push(Inst(id=-1, op=JSR, mode=Absolute(Ident(name=next_name, ty=LabelTy)), comment=Some("<fallthrough>")))
+                  prev_bb.items.push(Inst(id=-1, op=RTS, mode=Implied, comment=None))
                 }
                 break
               }
@@ -743,6 +875,7 @@ fn AsmLowering::recognize_control_flow(self: AsmLowering, sub: AsmSubroutine) ->
         }
       }
       Inst(
+        id=_,
         op=BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS as cond,
         mode=Relative(Ident(name=label, ..)) | Absolute(Ident(name=label, ..)),
         comment~,
@@ -752,8 +885,8 @@ fn AsmLowering::recognize_control_flow(self: AsmLowering, sub: AsmSubroutine) ->
           push_item(If(
             cond=cond,
             then=[
-              Inst(op=JSR, mode=Absolute(Ident(name=label, ty=LabelTy)), comment=None),
-              Inst(op=RTS, mode=Implied, comment=None),
+              Inst(id=-1, op=JSR, mode=Absolute(Ident(name=label, ty=LabelTy)), comment=None),
+              Inst(id=-1, op=RTS, mode=Implied, comment=None),
             ],
             otherwise=None,
             comment=comment,
@@ -816,6 +949,7 @@ pub fn AsmLowering::lower(self: AsmLowering) -> Unit raise LoweringError {
   self.collect_defines()
   self.collect_instructions()
   self.collect_basic_blocks()
+  self.collect_flag_liveness()
   self.collect_subroutines()
   self.remove_unused_rts()
   self.collect_flat_subroutines()
