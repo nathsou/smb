@@ -49,11 +49,53 @@ pub(all) enum AsmAddressingMode {
 
 pub(all) enum AsmItem {
   Label(String)
-  Inst(op~: @parse.OpCode, mode~: AsmAddressingMode, comment~: String?)
+  Inst(id~: Int, op~: @parse.OpCode, mode~: AsmAddressingMode, comment~: String?)
   JumpEngine(jump_table~: Array[String])
   If(cond~: @parse.OpCode, then~: Array[AsmItem], otherwise~: Array[AsmItem]?, comment~: String?)
   Comment(String)
 } derive (Debug)
+
+pub(all) struct FlagLiveness {
+  carry: Bool
+  zero: Bool
+  negative: Bool
+} derive (Debug, Eq)
+
+pub fn FlagLiveness::none() -> FlagLiveness {
+  { carry: false, zero: false, negative: false }
+}
+
+pub fn FlagLiveness::all() -> FlagLiveness {
+  { carry: true, zero: true, negative: true }
+}
+
+pub fn FlagLiveness::union(self: FlagLiveness, other: FlagLiveness) -> FlagLiveness {
+  {
+    carry: self.carry || other.carry,
+    zero: self.zero || other.zero,
+    negative: self.negative || other.negative,
+  }
+}
+
+pub fn FlagLiveness::subtract(self: FlagLiveness, other: FlagLiveness) -> FlagLiveness {
+  {
+    carry: self.carry && !other.carry,
+    zero: self.zero && !other.zero,
+    negative: self.negative && !other.negative,
+  }
+}
+
+pub fn FlagLiveness::intersect(self: FlagLiveness, other: FlagLiveness) -> FlagLiveness {
+  {
+    carry: self.carry && other.carry,
+    zero: self.zero && other.zero,
+    negative: self.negative && other.negative,
+  }
+}
+
+pub fn FlagLiveness::is_none(self: FlagLiveness) -> Bool {
+  !self.carry && !self.zero && !self.negative
+}
 
 pub(all) struct BasicBlockLink {
   bb: BasicBlock

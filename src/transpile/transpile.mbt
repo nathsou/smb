@@ -222,6 +222,32 @@ fn show_cond_opcode(op: @parse.OpCode) -> String {
   }
 }
 
+fn flag_helper_suffix(op: @parse.OpCode, id: Int, low: @lower.AsmLowering) -> String {
+  let writes = @lower.flag_writes(op)
+
+  if writes.is_none() {
+    ""
+  } else if writes.intersect(low.flag_live_after(id)).is_none() {
+    "_nf"
+  } else {
+    ""
+  }
+}
+
+fn is_dead_flag_only_instruction(
+  op: @parse.OpCode,
+  mode: @lower.AsmAddressingMode,
+  id: Int,
+  low: @lower.AsmLowering,
+) -> Bool {
+  match (op, mode) {
+    (CMP | CPX | CPY, Immediate(_)) => {
+      @lower.flag_writes(op).intersect(low.flag_live_after(id)).is_none()
+    }
+    _ => false
+  }
+}
+
 priv enum Reg { A; X; Y }
 priv struct Range { min: Int; max: Int }
 
@@ -332,12 +358,24 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
           self.emit("\n\{rename_label(name)}:")
         }
       }
-      Inst(op~, mode~, comment~) => {
+      Inst(id~, op~, mode~, comment~) => {
         let stmt = match (op, mode) {
           (TXS, _) => "sp = x;"
           (RTI, _) => "return; // <rti>"
-          (CLC, _) => "carry_flag = false;"
-          (SEC, _) => "carry_flag = true;"
+          (CLC, _) => {
+            if low.flag_live_after(id).carry {
+              "carry_flag = false;"
+            } else {
+              ""
+            }
+          }
+          (SEC, _) => {
+            if low.flag_live_after(id).carry {
+              "carry_flag = true;"
+            } else {
+              ""
+            }
+          }
           (STA, _) => write_byte(mode, A, low)
           (STX, _) => write_byte(mode, X, low)
           (STY, _) => write_byte(mode, Y, low)
@@ -386,7 +424,14 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
                 "\{target}();"
               }
               (RTS, _) => "return;"
-              _ => "\{@debug.to_string(op).to_lower()}\{mode.suffix()}(\{args});"
+              _ => {
+                if is_dead_flag_only_instruction(op, mode, id, low) {
+                  ""
+                } else {
+                  let helper = "\{@debug.to_string(op).to_lower()}\{mode.suffix()}\{flag_helper_suffix(op, id, low)}"
+                  "\{helper}(\{args});"
+                }
+              }
             }
           }
         }
