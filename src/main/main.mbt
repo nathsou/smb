@@ -44,6 +44,8 @@ fn lower() -> @lower.AsmLowering raise PipelineError {
   } noraise {
     image => image
   }
+  // Vector roots come from the assembled image, not source routine names.
+  let _ = @analysis.recover_vectors(image)
   let lowering = @lower.AsmLowering::new(instructions, image)
   try lowering.lower() catch {
     err => raise LoweringError(err)

@@ -2,6 +2,7 @@
   "is-main": true,
   "import": [
     "nathsou/smb/parse",
+    "nathsou/smb/analysis",
     "nathsou/smb/lower",
     "nathsou/smb/layout",
     "moonbitlang/x/fs",
