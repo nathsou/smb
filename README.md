@@ -22,7 +22,7 @@ Static recompilation of Super Mario Bros. using [doppelganger's disassembly](htt
 - [x] PPU & APU emulation layers
 - [x] Convert subroutines to C functions
 - [x] Convert most gotos to if statements
-- [ ] Remove unused flag updates
+- [x] Remove unused flag updates
 - [ ] Replace PPU with direct draw calls
 - [ ] Manually rewrite portions of the code to higher level C
 
