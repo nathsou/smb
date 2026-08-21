@@ -98,6 +98,14 @@ void write_joypad2(uint8_t value) {
 void dynamic_ram_write(uint16_t addr, uint8_t value) {
     if (addr < 0x2000) {
         ram[addr & 0b0000011111111111] = value;
+    } else if (addr < 0x4000) {
+        ppu_write_register(0x2000 + (addr & 7), value);
+    } else if (addr == 0x4014) {
+        ppu_transfer_oam((uint16_t)value << 8);
+    } else if (addr == 0x4016) {
+        write_joypad1(value);
+    } else if (addr == 0x4017) {
+        write_joypad2(value);
     } else if (addr < 0x4020) {
         apu_write(addr, value);
     }

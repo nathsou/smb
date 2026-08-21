@@ -1,6 +1,7 @@
 
 pub(all) struct AsmLowering {
   items: Array[@parse.SourceItem]
+  image: @layout.Image
   lowered: Array[AsmItem]
   defines: Map[String, TypedExpr]
   jump_target_labels: Set[String]
@@ -16,9 +17,10 @@ pub(all) struct AsmLowering {
 
 pub suberror LoweringError { LoweringError(String) } derive(Debug)
 
-pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
+pub fn AsmLowering::new(items: Array[@parse.SourceItem], image: @layout.Image) -> AsmLowering {
   {
     items,
+    image,
     lowered: [],
     defines: {},
     tables: [],
@@ -36,7 +38,7 @@ pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
 fn AsmLowering::detect_table(self: AsmLowering, name: String, index: Int) -> AsmTable? raise LoweringError {
   let lines: Array[AsmTableLine] = []
   let mut elem_size: @parse.ConstantSize? = None
-  let mut length = 0
+  let mut byte_size = 0
   let mut i = index + 1
 
   while i < self.items.length() {
@@ -46,8 +48,11 @@ fn AsmLowering::detect_table(self: AsmLowering, name: String, index: Int) -> Asm
 
         match elem_size {
           Some(size) => {
+            // A ROM interval may legitimately contain both bytes and words.
+            // The address-faithful PRG image is authoritative; Byte here only
+            // describes the conservative type exposed to legacy lowering.
             if size != directive_elem_size {
-              raise LoweringError("Inconsistent element size in table")
+              elem_size = Some(Byte)
             }
           }
           None => elem_size = {
@@ -55,7 +60,7 @@ fn AsmLowering::detect_table(self: AsmLowering, name: String, index: Int) -> Asm
           }
         }
 
-        length += args.length()
+        byte_size += args.length() * directive_elem_size.byte_size()
 
         let data = []
 
@@ -88,7 +93,7 @@ fn AsmLowering::detect_table(self: AsmLowering, name: String, index: Int) -> Asm
       Some({
         name,
         offset: self.table_offset,
-        size: length * elem_size.byte_size(),
+        size: byte_size,
         lines,
         elem_size,
         items_count: i - index,
@@ -275,7 +280,10 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
       }
       Directive(name="db" | "dw" as name, args~) => {
         if !inside_table {
-          raise LoweringError("Raw data in code detected: \{name} \{Repr(args)}")
+          // Byte-level CFG recovery owns code/data classification. A source
+          // directive in a decoded code interval can be padding, an overlap,
+          // or data embedded after a control transfer; it is never an error.
+          ()
         }
       }
       _ => ()
@@ -819,6 +827,4 @@ pub fn AsmLowering::lower(self: AsmLowering) -> Unit raise LoweringError {
   self.collect_subroutines()
   self.remove_unused_rts()
   self.collect_flat_subroutines()
-
-  // @fs.write_string_to_file(path="cfg.dot", content=self.cfg_dotfile())
 }

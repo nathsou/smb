@@ -144,20 +144,16 @@ fn Emitter::emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
   for table in low.tables {
     self.emit("")
     self.emit("// \{table.name}")
-
     for line in table.lines {
       match line {
         Data(data~, comment~) => {
           let data = data.map(show_expr).join(", ")
-
           match comment.val {
             "" => self.emit(data + ",")
             _ => self.emit("\{data}, // \{comment.val}")
           }
         }
-        Comment(comment) => {
-          self.emit("// \{comment}")
-        }
+        Comment(comment) => self.emit("// \{comment}")
       }
     }
   }
@@ -223,52 +219,8 @@ fn show_cond_opcode(op: @parse.OpCode) -> String {
 }
 
 priv enum Reg { A; X; Y }
-priv struct Range { min: Int; max: Int }
 
-impl Add for Range with add(self: Range, other: Range) -> Range {
-  { min: self.min + other.min, max: self.max + other.max }
-}
-
-impl Sub for Range with sub(self: Range, other: Range) -> Range {
-  { min: self.min - other.min, max: self.max - other.max }
-}
-
-fn compute_expr_range(expr: @lower.TypedExpr, low: @lower.AsmLowering) -> Range? {
-  match expr {
-    Const(value~, ..) => Some({ min: value, max: value })
-    Ident(name~, ..) => match low.defines.get(name) {
-      Some(expr) => compute_expr_range(expr, low)
-      None => None
-    }
-    Binary(op~, lhs~, rhs~, ..) => {
-      let lhs_range = compute_expr_range(lhs, low)
-      let rhs_range = compute_expr_range(rhs, low)
-
-      match (lhs_range, rhs_range) {
-        (Some(lhs_range), Some(rhs_range)) => match op {
-          Add => Some(lhs_range + rhs_range)
-          Sub => Some(lhs_range - rhs_range)
-        }
-        _ => None
-      }
-    }
-    _ => None
-  }
-}
-
-fn compute_range(expr: @lower.TypedExpr, mode: @lower.AsmAddressingMode, low: @lower.AsmLowering) -> Range? {
-  let mode_range = match mode {
-    ZeroPageX(_) | AbsoluteX(_) | ZeroPageY(_) | AbsoluteY(_) => { min: 0, max: 0xff }
-    _ => { min: 0, max: 0 }
-  }
-
-  match compute_expr_range(expr, low) {
-    Some(expr_range) => Some(expr_range + mode_range)
-    None => None
-  }
-}
-
-fn write_byte(mode: @lower.AsmAddressingMode, target: Reg, low: @lower.AsmLowering) -> String {
+fn write_byte(mode: @lower.AsmAddressingMode, target: Reg) -> String {
   let target = match target {
     A => "a"
     X => "x"
@@ -276,41 +228,11 @@ fn write_byte(mode: @lower.AsmAddressingMode, target: Reg, low: @lower.AsmLoweri
   }
 
   fn rewrite(addr: @lower.TypedExpr, suffix: String) -> String {
-    match addr {
-      Ident(name="PPU_CTRL_REG1", ..) => "ppu_ctrl = \{target};"
-      Ident(name="PPU_CTRL_REG2", ..) => "ppu_mask = \{target};"
-      Ident(name="PPU_SPR_ADDR", ..) => "oam_addr = \{target};"
-      Ident(name="PPU_SPR_DATA", ..) => "oam[oam_addr++] = \{target};"
-      Ident(name="PPU_SCROLL_REG", ..) => "ppu_write_scroll(\{target});"
-      Ident(name="PPU_ADDRESS", ..) => "ppu_write_address(\{target});"
-      Ident(name="PPU_DATA", ..) => "ppu_write_data(\{target});"
-      Ident(name="SPR_DMA", ..) => "ppu_transfer_oam((uint16_t)(\{target} << 8));"
-      Ident(name="JOYPAD_PORT", ..) => "write_joypad1(\{target});"
-      Ident(name="JOYPAD_PORT2", ..) => "write_joypad2(\{target});"
-      Ident(
-        name=("SND_REGISTER" | "SND_SQUARE1_REG" | "SND_SQUARE2_REG" | "SND_TRIANGLE_REG" |
-        "SND_NOISE_REG" | "SND_DELTA_REG" | "SND_MASTERCTRL_REG") as name,
-        ..
-      ) => {
-        "apu_write(\{name}, \{target});"
-      }
-      _ => {
-        let value = "\{show_expr(addr)}\{suffix}"
-
-        match compute_range(addr, mode, low) {
-          Some({ min: _, max }) => {
-            if max < 0x2000 {
-              return "ram[\{value}] = \{target};"
-            } else if max < 0x4000 {
-              return "ppu_write_register(0x2000 + (\{show_expr(addr)} & 0b111), \{target});"
-            }
-          }
-          None => ()
-        }
-
-        "dynamic_ram_write(\{value}, \{target});"
-      }
-    }
+    // Hardware behaviour is selected by the evaluated bus address, not the
+    // spelling of a source-level symbol. This also covers renamed NROM
+    // disassemblies and indexed register accesses.
+    let value = "\{show_expr(addr)}\{suffix}"
+    "dynamic_ram_write(\{value}, \{target});"
   }
 
   match mode {
@@ -338,9 +260,9 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
           (RTI, _) => "return; // <rti>"
           (CLC, _) => "carry_flag = false;"
           (SEC, _) => "carry_flag = true;"
-          (STA, _) => write_byte(mode, A, low)
-          (STX, _) => write_byte(mode, X, low)
-          (STY, _) => write_byte(mode, Y, low)
+          (STA, _) => write_byte(mode, A)
+          (STX, _) => write_byte(mode, X)
+          (STY, _) => write_byte(mode, Y)
           _ => {
             let args = match mode {
               Accumulator => ""
@@ -467,7 +389,6 @@ fn Emitter::emit_flat_subroutine(self: Emitter, subroutine: @lower.AsmFlatSubrou
 fn Emitter::emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"code.h\"")
   self.emit("")
-
   for sub in low.flat_subroutines {
     self.emit_flat_subroutine(sub, low)
   }

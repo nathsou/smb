@@ -54,7 +54,12 @@ $ make build
 
 ## Codegen
 
-The output of the code generator is in the `codegen/` folder. To regenerate it:
+The output of the code generator is in the `codegen/` folder. It deliberately
+uses the curated `src/smb.asm` input: `__sub` marks a safe C-function entry and
+`__ret__` marks a source-level early return. These small annotations let the
+generated C retain named routines, source comments, direct calls, and local
+control flow instead of falling back to a whole-program program-counter
+dispatcher. To regenerate it:
 
 1. Install [Moonbit](https://www.moonbitlang.com/):
 
