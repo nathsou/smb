@@ -47,6 +47,7 @@ extern uint8_t frame[SCREEN_WIDTH * SCREEN_HEIGHT * 3]; // 3 bytes per pixel (RG
 void ppu_init(uint8_t* chr);
 
 uint8_t ppu_read_register(uint16_t addr);
+void ppu_write_register(uint16_t addr, uint8_t value);
 void ppu_write_scroll(uint8_t value);
 void ppu_write_address(uint8_t value);
 void ppu_write_data(uint8_t value);
