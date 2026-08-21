@@ -7,6 +7,7 @@ pub(all) struct Image {
   bytes: Array[Int]
   symbols: Map[String, Int]
   define_values: Map[String, Int]
+  word_targets: Map[Int, Int]
 } derive(Debug)
 
 pub suberror LayoutError {
@@ -43,7 +44,9 @@ priv struct Assembler {
   define_values: Map[String, Value]
   mut origin: Int
   mut pc: Int
+  mut end: Int
   bytes: Array[Int]
+  word_targets: Map[Int, Int]
 }
 
 pub fn layout(items: Array[@parse.SourceItem]) -> Image raise LayoutError {
@@ -56,6 +59,7 @@ pub fn layout(items: Array[@parse.SourceItem]) -> Image raise LayoutError {
     bytes: assembler.bytes,
     symbols: assembler.symbols,
     define_values: assembler.define_values.map(fn(_name, value) { value.value }),
+    word_targets: assembler.word_targets,
   }
 }
 
@@ -67,7 +71,9 @@ fn Assembler::new(items: Array[@parse.SourceItem]) -> Assembler {
     define_values: {},
     origin: 0,
     pc: 0,
+    end: 0,
     bytes: [],
+    word_targets: {},
   }
 }
 
@@ -178,6 +184,7 @@ fn Assembler::first_pass(self: Assembler) -> Unit raise LayoutError {
       _ => ()
     }
   }
+  self.end = self.pc
 }
 
 fn Assembler::emit_byte(self: Assembler, value: Int) -> Unit raise LayoutError {
@@ -415,7 +422,12 @@ fn Assembler::second_pass(self: Assembler) -> Unit raise LayoutError {
       }
       Directive(name="dw", args~) => {
         for arg in args {
-          self.emit_word(self.eval_expr(arg).value)
+          let address = self.pc
+          let value = self.eval_expr(arg).value
+          self.emit_word(value)
+          if value >= self.origin && value < self.end {
+            self.word_targets[address] = value
+          }
         }
       }
       Directive(name~, ..) => raise UnsupportedDirective(name)
