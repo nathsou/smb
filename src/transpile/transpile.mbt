@@ -265,41 +265,11 @@ fn write_byte(mode: @lower.AsmAddressingMode, target: Reg, low: @lower.AsmLoweri
   }
 
   fn rewrite(addr: @lower.TypedExpr, suffix: String) -> String {
-    match addr {
-      Ident(name="PPU_CTRL_REG1", ..) => "ppu_ctrl = \{target};"
-      Ident(name="PPU_CTRL_REG2", ..) => "ppu_mask = \{target};"
-      Ident(name="PPU_SPR_ADDR", ..) => "oam_addr = \{target};"
-      Ident(name="PPU_SPR_DATA", ..) => "oam[oam_addr++] = \{target};"
-      Ident(name="PPU_SCROLL_REG", ..) => "ppu_write_scroll(\{target});"
-      Ident(name="PPU_ADDRESS", ..) => "ppu_write_address(\{target});"
-      Ident(name="PPU_DATA", ..) => "ppu_write_data(\{target});"
-      Ident(name="SPR_DMA", ..) => "ppu_transfer_oam((uint16_t)(\{target} << 8));"
-      Ident(name="JOYPAD_PORT", ..) => "write_joypad1(\{target});"
-      Ident(name="JOYPAD_PORT2", ..) => "write_joypad2(\{target});"
-      Ident(
-        name=("SND_REGISTER" | "SND_SQUARE1_REG" | "SND_SQUARE2_REG" | "SND_TRIANGLE_REG" |
-        "SND_NOISE_REG" | "SND_DELTA_REG" | "SND_MASTERCTRL_REG") as name,
-        ..
-      ) => {
-        "apu_write(\{name}, \{target});"
-      }
-      _ => {
-        let value = "\{show_expr(addr)}\{suffix}"
-
-        match compute_range(addr, mode, low) {
-          Some({ min: _, max }) => {
-            if max < 0x2000 {
-              return "ram[\{value}] = \{target};"
-            } else if max < 0x4000 {
-              return "ppu_write_register(0x2000 + (\{show_expr(addr)} & 0b111), \{target});"
-            }
-          }
-          None => ()
-        }
-
-        "dynamic_ram_write(\{value}, \{target});"
-      }
-    }
+    // Hardware behaviour is selected by the evaluated bus address, not the
+    // spelling of a source-level symbol. This also covers renamed NROM
+    // disassemblies and indexed register accesses.
+    let value = "\{show_expr(addr)}\{suffix}"
+    "dynamic_ram_write(\{value}, \{target});"
   }
 
   match mode {

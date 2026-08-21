@@ -150,6 +150,19 @@ void ppu_write_data(uint8_t value) {
     vram_addr += increment;
 }
 
+void ppu_write_register(uint16_t addr, uint8_t value) {
+    switch (addr & 7) {
+        case 0: ppu_ctrl = value; break;
+        case 1: ppu_mask = value; break;
+        case 3: oam_addr = value; break;
+        case 4: oam[oam_addr++] = value; break;
+        case 5: ppu_write_scroll(value); break;
+        case 6: ppu_write_address(value); break;
+        case 7: ppu_write_data(value); break;
+        default: break;
+    }
+}
+
 // https://www.nesdev.org/wiki/PPU_memory_map
 uint8_t ppu_read(uint16_t addr) {
     if (addr < 0x2000) {
