@@ -1,8 +1,9 @@
 {
     "is-main": false,
     "import": [
-      "nathsou/smb/parse",
-      "nathsou/smb/lower",
+    "nathsou/smb/parse",
+    "nathsou/smb/lower",
+    "nathsou/smb/layout",
       "moonbitlang/x/fs",
       "moonbitlang/core/debug"
     ]

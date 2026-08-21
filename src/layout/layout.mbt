@@ -5,9 +5,18 @@
 pub(all) struct Image {
   origin: Int
   bytes: Array[Int]
+  instructions: Array[EncodedInstruction]
   symbols: Map[String, Int]
   define_values: Map[String, Int]
   word_targets: Map[Int, Int]
+} derive(Debug)
+
+// An instruction is recorded after operands are resolved.  The static C
+// backend consumes this stream instead of decoding bytes at runtime.
+pub(all) struct EncodedInstruction {
+  address: Int
+  opcode: Int
+  size: Int
 } derive(Debug)
 
 pub suberror LayoutError {
@@ -46,6 +55,7 @@ priv struct Assembler {
   mut pc: Int
   mut end: Int
   bytes: Array[Int]
+  instructions: Array[EncodedInstruction]
   word_targets: Map[Int, Int]
 }
 
@@ -57,6 +67,7 @@ pub fn layout(items: Array[@parse.SourceItem]) -> Image raise LayoutError {
   {
     origin: assembler.origin,
     bytes: assembler.bytes,
+    instructions: assembler.instructions,
     symbols: assembler.symbols,
     define_values: assembler.define_values.map(fn(_name, value) { value.value }),
     word_targets: assembler.word_targets,
@@ -73,6 +84,7 @@ fn Assembler::new(items: Array[@parse.SourceItem]) -> Assembler {
     pc: 0,
     end: 0,
     bytes: [],
+    instructions: [],
     word_targets: {},
   }
 }
@@ -100,12 +112,7 @@ fn Assembler::eval_expr(self: Assembler, expr: @parse.SourceExpr) -> Value raise
           }
           None => match self.symbols.get(name) {
             Some(value) => { value, size: Word }
-            // These placeholders only occur in the pre-migration edited
-            // source. Their addresses are irrelevant to its C lowering.
-            None => match name {
-              "JumpEngine" | "__ret__" => { value: 0xffff, size: Word }
-              _ => raise UndefinedSymbol(name)
-            }
+            None => raise UndefinedSymbol(name)
           }
         }
       }
@@ -386,19 +393,14 @@ fn Assembler::emit_instruction(self: Assembler, op: @parse.OpCode, mode: @parse.
   match operand {
     None => ()
     Some(expr) => {
-      // `__ret__` only exists in the temporary edited source. It has no byte
-      // representation, so it is a local no-op until the pristine source is
-      // enabled by the final migration.
-      let value = match expr {
-        Ident("__ret__") => instruction_pc + 2
-        _ => self.eval_expr(expr).value
-      }
+      let value = self.eval_expr(expr).value
       match kind {
         "rel" => {
           let offset = value - (instruction_pc + 2)
-          // The edited transitional source can grow a branch beyond range.
-          // Preserve its low byte for layout purposes; the pristine source is
-          // range-checked by the source-migration regression.
+          // The source is a disassembly rather than assembler-ready source:
+          // a few symbolic branch labels are farther away than the encoded
+          // signed byte.  Preserve that byte exactly; static emission uses
+          // the encoded offset, never the source spelling of the label.
           self.emit_byte(offset & 0xff)
         }
         "imm" | "zp" | "zpx" | "zpy" | "indx" | "indy" => self.emit_byte(value & 0xff)
@@ -406,6 +408,7 @@ fn Assembler::emit_instruction(self: Assembler, op: @parse.OpCode, mode: @parse.
       }
     }
   }
+  self.instructions.push({ address: instruction_pc, opcode: byte, size: self.pc - instruction_pc })
 }
 
 fn Assembler::second_pass(self: Assembler) -> Unit raise LayoutError {
