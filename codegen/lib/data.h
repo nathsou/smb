@@ -4,6 +4,7 @@
 #include "stdint.h"
 #include "constants.h"
 
+#define PRG_ROM_BYTES 32972
 extern const uint8_t prg_rom[32972];
 
 #define VRAM_AddrTable_Low 0x8058
