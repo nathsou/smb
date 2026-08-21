@@ -123,11 +123,14 @@ fn Emitter::emit_data_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"stdint.h\"")
   self.emit("#include \"constants.h\"")
   self.emit("")
-  self.emit("extern const uint8_t data[\{low.table_offset}];")
+  self.emit("extern const uint8_t prg_rom[\{low.image.bytes.length()}];")
   self.emit("")
 
-  for label, table in low.tables_by_label {
-    self.emit("#define \{label} 0x\{hex(0x8000 + table.offset)}")
+  for label, _table in low.tables_by_label {
+    match low.image.symbols.get(label) {
+      Some(address) => self.emit("#define \{label} 0x\{hex(address)}")
+      None => ()
+    }
   }
 
   self.emit("")
@@ -138,28 +141,14 @@ fn Emitter::emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"data.h\"")
   self.emit("")
 
-  self.emit("const uint8_t data[] = {")
+  self.emit("const uint8_t prg_rom[] = {")
   self.indentation += 1
 
-  for table in low.tables {
-    self.emit("")
-    self.emit("// \{table.name}")
-
-    for line in table.lines {
-      match line {
-        Data(data~, comment~) => {
-          let data = data.map(show_expr).join(", ")
-
-          match comment.val {
-            "" => self.emit(data + ",")
-            _ => self.emit("\{data}, // \{comment.val}")
-          }
-        }
-        Comment(comment) => {
-          self.emit("// \{comment}")
-        }
-      }
+  for index, byte in low.image.bytes {
+    if index % 16 == 0 {
+      self.emit("")
     }
+    self.emit("0x\{hex(byte)},")
   }
 
   self.indentation -= 1

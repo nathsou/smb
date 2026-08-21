@@ -73,7 +73,7 @@ uint8_t read_byte(uint16_t addr) {
     }
 
     if (addr >= 0x8000) {
-        return data[addr - 0x8000];
+        return prg_rom[addr - 0x8000];
     }
 
     return 0;

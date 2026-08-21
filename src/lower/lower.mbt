@@ -1,6 +1,7 @@
 
 pub(all) struct AsmLowering {
   items: Array[@parse.SourceItem]
+  image: @layout.Image
   lowered: Array[AsmItem]
   defines: Map[String, TypedExpr]
   jump_target_labels: Set[String]
@@ -16,9 +17,10 @@ pub(all) struct AsmLowering {
 
 pub suberror LoweringError { LoweringError(String) } derive(Debug)
 
-pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
+pub fn AsmLowering::new(items: Array[@parse.SourceItem], image: @layout.Image) -> AsmLowering {
   {
     items,
+    image,
     lowered: [],
     defines: {},
     tables: [],
