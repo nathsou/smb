@@ -87,7 +87,7 @@ pub fn decode(image: @layout.Image, address: Int) -> DecodedInstruction raise De
   let size = instruction_size(opcode).unwrap_or_error(UnsupportedOpcode(opcode))
   let next = address + size
   let flow = match opcode {
-    0x20 => Call(target=word(image, address + 1), fallthrough=next)
+    0x20 => Flow::Call(target=word(image, address + 1), fallthrough=next)
     0x4c => Jump(word(image, address + 1))
     0x6c => IndirectJump(word(image, address + 1))
     0x60 | 0x40 => Return
