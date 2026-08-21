@@ -112,7 +112,13 @@ fn Assembler::eval_expr(self: Assembler, expr: @parse.SourceExpr) -> Value raise
           }
           None => match self.symbols.get(name) {
             Some(value) => { value, size: Word }
-            None => raise UndefinedSymbol(name)
+            // The curated readable source replaces this computed dispatcher
+            // and early-return branches with source-level annotations.  They
+            // have no PRG byte address in that representation.
+            None => match name {
+              "JumpEngine" | "__ret__" => { value: 0xffff, size: Word }
+              _ => raise UndefinedSymbol(name)
+            }
           }
         }
       }
@@ -393,7 +399,10 @@ fn Assembler::emit_instruction(self: Assembler, op: @parse.OpCode, mode: @parse.
   match operand {
     None => ()
     Some(expr) => {
-      let value = self.eval_expr(expr).value
+      let value = match expr {
+        Ident("__ret__") => instruction_pc + 2
+        _ => self.eval_expr(expr).value
+      }
       match kind {
         "rel" => {
           let offset = value - (instruction_pc + 2)
