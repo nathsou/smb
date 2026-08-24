@@ -1,541 +1,442 @@
 #include "instructions.h"
 
-// LDA - Load Accumulator
+// Generated code calls flag-free helpers without a suffix and uses a suffix
+// listing each flag that must be updated (for example, _fz or _fczn). Every
+// entry point shares the same inline semantic core, so each 6502 operation has
+// one implementation. Clang folds the constant flag mask at -O3.
 
-void lda_imm(uint8_t value) {
+typedef enum {
+    FLAGS_NONE = 0,
+    FLAG_CARRY = 1 << 0,
+    FLAG_ZERO = 1 << 1,
+    FLAG_NEGATIVE = 1 << 2,
+    FLAGS_NZ = FLAG_ZERO | FLAG_NEGATIVE,
+    FLAGS_CNZ = FLAG_CARRY | FLAGS_NZ,
+} FlagMask;
+
+static inline void update_nz_masked(uint8_t value, FlagMask mask) {
+    if (mask & FLAG_ZERO) {
+        zero_flag = value == 0;
+    }
+    if (mask & FLAG_NEGATIVE) {
+        neg_flag = (value & 0x80) != 0;
+    }
+}
+
+#define DEFINE_READ_VARIANTS_FLAGS_NZ(name, arg_type, read_expr, operation) \
+    void name(arg_type arg) { operation((read_expr), FLAGS_NONE); } \
+    void name##_fz(arg_type arg) { operation((read_expr), FLAG_ZERO); } \
+    void name##_fn(arg_type arg) { operation((read_expr), FLAG_NEGATIVE); } \
+    void name##_fzn(arg_type arg) { operation((read_expr), FLAGS_NZ); }
+
+#define DEFINE_READ_VARIANTS_FLAGS_CNZ(name, arg_type, read_expr, operation) \
+    DEFINE_READ_VARIANTS_FLAGS_NZ(name, arg_type, read_expr, operation) \
+    void name##_fc(arg_type arg) { operation((read_expr), FLAG_CARRY); } \
+    void name##_fcz(arg_type arg) { operation((read_expr), FLAG_CARRY | FLAG_ZERO); } \
+    void name##_fcn(arg_type arg) { operation((read_expr), FLAG_CARRY | FLAG_NEGATIVE); } \
+    void name##_fczn(arg_type arg) { operation((read_expr), FLAGS_CNZ); }
+
+#define DEFINE_IMPLIED_VARIANTS_FLAGS_NZ(name, operation) \
+    void name(void) { operation(FLAGS_NONE); } \
+    void name##_fz(void) { operation(FLAG_ZERO); } \
+    void name##_fn(void) { operation(FLAG_NEGATIVE); } \
+    void name##_fzn(void) { operation(FLAGS_NZ); }
+
+#define DEFINE_IMPLIED_VARIANTS_FLAGS_CNZ(name, operation) \
+    DEFINE_IMPLIED_VARIANTS_FLAGS_NZ(name, operation) \
+    void name##_fc(void) { operation(FLAG_CARRY); } \
+    void name##_fcz(void) { operation(FLAG_CARRY | FLAG_ZERO); } \
+    void name##_fcn(void) { operation(FLAG_CARRY | FLAG_NEGATIVE); } \
+    void name##_fczn(void) { operation(FLAGS_CNZ); }
+
+#define SELECT_READ_VARIANTS(flags) SELECT_READ_VARIANTS_(flags)
+#define SELECT_READ_VARIANTS_(flags) DEFINE_READ_VARIANTS_##flags
+#define DEFINE_READ_VARIANTS(name, arg_type, read_expr, operation, flags) \
+    SELECT_READ_VARIANTS(flags)(name, arg_type, read_expr, operation)
+
+#define SELECT_IMPLIED_VARIANTS(flags) SELECT_IMPLIED_VARIANTS_(flags)
+#define SELECT_IMPLIED_VARIANTS_(flags) DEFINE_IMPLIED_VARIANTS_##flags
+#define DEFINE_IMPLIED_VARIANTS(name, operation, flags) \
+    SELECT_IMPLIED_VARIANTS(flags)(name, operation)
+
+// Loads
+
+static inline void lda_value(uint8_t value, FlagMask mask) {
     a = value;
-    update_nz(a);
+    update_nz_masked(a, mask);
 }
 
-void lda_zp(uint8_t addr) {
-    lda_imm(zero_page(addr));
-}
+DEFINE_READ_VARIANTS(lda_imm, uint8_t, arg, lda_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(lda_zp, uint8_t, zero_page(arg), lda_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(lda_zpx, uint8_t, zero_page_x(arg), lda_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(lda_zpy, uint8_t, zero_page_y(arg), lda_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(lda_abs, uint16_t, absolute(arg), lda_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(lda_absx, uint16_t, absolute_x(arg), lda_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(lda_absy, uint16_t, absolute_y(arg), lda_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(lda_indy, uint8_t, indirect_y_val(arg), lda_value, FLAGS_NZ)
 
-void lda_zpx(uint8_t addr) {
-    lda_imm(zero_page_x(addr));
-}
-
-void lda_zpy(uint8_t addr) {
-    lda_imm(zero_page_y(addr));
-}
-
-void lda_abs(uint16_t addr) {
-    lda_imm(absolute(addr));
-}
-
-void lda_absx(uint16_t addr) {
-    lda_imm(absolute_x(addr));
-}
-
-void lda_absy(uint16_t addr) {
-    lda_imm(absolute_y(addr));
-}
-
-void lda_indy(uint8_t addr) {
-    lda_imm(indirect_y_val(addr));
-}
-
-// LDX - Load X Register
-
-void ldx_imm(uint8_t value) {
+static inline void ldx_value(uint8_t value, FlagMask mask) {
     x = value;
-    update_nz(x);
+    update_nz_masked(x, mask);
 }
 
-void ldx_zp(uint8_t addr) {
-    ldx_imm(zero_page(addr));
-}
+DEFINE_READ_VARIANTS(ldx_imm, uint8_t, arg, ldx_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(ldx_zp, uint8_t, zero_page(arg), ldx_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(ldx_zpy, uint8_t, zero_page_y(arg), ldx_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(ldx_abs, uint16_t, absolute(arg), ldx_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(ldx_absy, uint16_t, absolute_y(arg), ldx_value, FLAGS_NZ)
 
-void ldx_zpy(uint8_t addr) {
-    ldx_imm(zero_page_y(addr));
-}
-
-void ldx_abs(uint16_t addr) {
-    ldx_imm(absolute(addr));
-}
-
-void ldx_absy(uint16_t addr) {
-    ldx_imm(absolute_y(addr));
-}
-
-// LDY - Load Y Register
-
-void ldy_imm(uint8_t value) {
+static inline void ldy_value(uint8_t value, FlagMask mask) {
     y = value;
-    update_nz(y);
+    update_nz_masked(y, mask);
 }
 
-void ldy_zp(uint8_t addr) {
-    ldy_imm(zero_page(addr));
-}
+DEFINE_READ_VARIANTS(ldy_imm, uint8_t, arg, ldy_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(ldy_zp, uint8_t, zero_page(arg), ldy_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(ldy_zpx, uint8_t, zero_page_x(arg), ldy_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(ldy_abs, uint16_t, absolute(arg), ldy_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(ldy_absx, uint16_t, absolute_x(arg), ldy_value, FLAGS_NZ)
 
-void ldy_zpx(uint8_t addr) {
-    ldy_imm(zero_page_x(addr));
-}
+// Arithmetic and logic
 
-void ldy_abs(uint16_t addr) {
-    ldy_imm(absolute(addr));
-}
-
-void ldy_absx(uint16_t addr) {
-    ldy_imm(absolute_x(addr));
-}
-
-// ADC - Add with Carry
-
-void adc_imm(uint8_t value) {
+static inline void adc_value(uint8_t value, FlagMask mask) {
     uint16_t sum = (uint16_t)a + (uint16_t)value + (uint16_t)carry_flag;
-    carry_flag = sum & 0x100;
     a = (uint8_t)sum;
-    update_nz(a);
+    if (mask & FLAG_CARRY) {
+        carry_flag = (sum & 0x100) != 0;
+    }
+    update_nz_masked(a, mask);
 }
 
-void adc_zp(uint8_t addr) {
-    adc_imm(zero_page(addr));
-}
+DEFINE_READ_VARIANTS(adc_imm, uint8_t, arg, adc_value, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(adc_zp, uint8_t, zero_page(arg), adc_value, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(adc_zpx, uint8_t, zero_page_x(arg), adc_value, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(adc_zpy, uint8_t, zero_page_y(arg), adc_value, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(adc_abs, uint16_t, absolute(arg), adc_value, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(adc_absx, uint16_t, absolute_x(arg), adc_value, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(adc_absy, uint16_t, absolute_y(arg), adc_value, FLAGS_CNZ)
 
-void adc_zpx(uint8_t addr) {
-    adc_imm(zero_page_x(addr));
-}
-
-void adc_zpy(uint8_t addr) {
-    adc_imm(zero_page_y(addr));
-}
-
-void adc_abs(uint16_t addr) {
-    adc_imm(absolute(addr));
-}
-
-void adc_absx(uint16_t addr) {
-    adc_imm(absolute_x(addr));
-}
-
-void adc_absy(uint16_t addr) {
-    adc_imm(absolute_y(addr));
-}
-
-// SBC - Subtract with Carry
-
-void sbc_imm(uint8_t value) {
+static inline void sbc_value(uint8_t value, FlagMask mask) {
     uint16_t diff = a - value - (carry_flag ? 0 : 1);
-    carry_flag = diff <= 0xff;
-    a = diff & 0xff;
-    update_nz(a);
+    a = (uint8_t)diff;
+    if (mask & FLAG_CARRY) {
+        carry_flag = diff <= 0xff;
+    }
+    update_nz_masked(a, mask);
 }
 
-void sbc_zp(uint8_t addr) {
-    sbc_imm(zero_page(addr));
+DEFINE_READ_VARIANTS(sbc_imm, uint8_t, arg, sbc_value, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(sbc_zp, uint8_t, zero_page(arg), sbc_value, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(sbc_zpx, uint8_t, zero_page_x(arg), sbc_value, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(sbc_abs, uint16_t, absolute(arg), sbc_value, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(sbc_absx, uint16_t, absolute_x(arg), sbc_value, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(sbc_absy, uint16_t, absolute_y(arg), sbc_value, FLAGS_CNZ)
+
+static inline void and_value(uint8_t value, FlagMask mask) {
+    a &= value;
+    update_nz_masked(a, mask);
 }
 
-void sbc_zpx(uint8_t addr) {
-    sbc_imm(zero_page_x(addr));
+DEFINE_READ_VARIANTS(and_imm, uint8_t, arg, and_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(and_zp, uint8_t, zero_page(arg), and_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(and_abs, uint16_t, absolute(arg), and_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(and_absx, uint16_t, absolute_x(arg), and_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(and_absy, uint16_t, absolute_y(arg), and_value, FLAGS_NZ)
+
+static inline void ora_value(uint8_t value, FlagMask mask) {
+    a |= value;
+    update_nz_masked(a, mask);
 }
 
-void sbc_abs(uint16_t addr) {
-    sbc_imm(absolute(addr));
+DEFINE_READ_VARIANTS(ora_imm, uint8_t, arg, ora_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(ora_zp, uint8_t, zero_page(arg), ora_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(ora_zpx, uint8_t, zero_page_x(arg), ora_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(ora_zpy, uint8_t, zero_page_y(arg), ora_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(ora_abs, uint16_t, absolute(arg), ora_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(ora_absx, uint16_t, absolute_x(arg), ora_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(ora_absy, uint16_t, absolute_y(arg), ora_value, FLAGS_NZ)
+
+static inline void eor_value(uint8_t value, FlagMask mask) {
+    a ^= value;
+    update_nz_masked(a, mask);
 }
 
-void sbc_absx(uint16_t addr) {
-    sbc_imm(absolute_x(addr));
-}
+DEFINE_READ_VARIANTS(eor_imm, uint8_t, arg, eor_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(eor_zp, uint8_t, zero_page(arg), eor_value, FLAGS_NZ)
 
-void sbc_absy(uint16_t addr) {
-    sbc_imm(absolute_y(addr));
-}
+// Register transfers and increments
 
-// TAX - Transfer Accumulator to X
-
-void tax(void) {
+static inline void tax_value(FlagMask mask) {
     x = a;
-    update_nz(x);
+    update_nz_masked(x, mask);
 }
 
-// TAY - Transfer Accumulator to Y
-
-void tay(void) {
+static inline void tay_value(FlagMask mask) {
     y = a;
-    update_nz(y);
+    update_nz_masked(y, mask);
 }
 
-// TSX - Transfer Stack Pointer to X
-
-void tsx(void) {
+static inline void tsx_value(FlagMask mask) {
     x = sp;
-    update_nz(x);
+    update_nz_masked(x, mask);
 }
 
-// TXA - Transfer X to Accumulator
-
-void txa(void) {
+static inline void txa_value(FlagMask mask) {
     a = x;
-    update_nz(a);
+    update_nz_masked(a, mask);
 }
 
-// TXS - Transfer X to Stack Pointer
+static inline void tya_value(FlagMask mask) {
+    a = y;
+    update_nz_masked(a, mask);
+}
+
+DEFINE_IMPLIED_VARIANTS(tax, tax_value, FLAGS_NZ)
+DEFINE_IMPLIED_VARIANTS(tay, tay_value, FLAGS_NZ)
+DEFINE_IMPLIED_VARIANTS(tsx, tsx_value, FLAGS_NZ)
+DEFINE_IMPLIED_VARIANTS(txa, txa_value, FLAGS_NZ)
+DEFINE_IMPLIED_VARIANTS(tya, tya_value, FLAGS_NZ)
 
 void txs(void) {
     sp = x;
 }
 
-// TYA - Transfer Y to Accumulator
-
-void tya(void) {
-    a = y;
-    update_nz(a);
-}
-
-// AND - Logical AND
-
-void and_imm(uint8_t value) {
-    a &= value;
-    update_nz(a);
-}
-
-void and_zp(uint8_t addr) {
-    and_imm(zero_page(addr));
-}
-
-void and_abs(uint16_t addr) {
-    and_imm(absolute(addr));
-}
-
-void and_absx(uint16_t addr) {
-    and_imm(absolute_x(addr));
-}
-
-void and_absy(uint16_t addr) {
-    and_imm(absolute_y(addr));
-}
-
-// ORA - Logical Inclusive OR
-
-void ora_imm(uint8_t value) {
-    a |= value;
-    update_nz(a);
-}
-
-void ora_zp(uint8_t addr) {
-    ora_imm(zero_page(addr));
-}
-
-void ora_zpx(uint8_t addr) {
-    ora_imm(zero_page_x(addr));
-}
-
-void ora_zpy(uint8_t addr) {
-    ora_imm(zero_page_y(addr));
-}
-
-void ora_abs(uint16_t addr) {
-    ora_imm(absolute(addr));
-}
-
-void ora_absx(uint16_t addr) {
-    ora_imm(absolute_x(addr));
-}
-
-void ora_absy(uint16_t addr) {
-    ora_imm(absolute_y(addr));
-}
-
-// EOR - Exclusive OR
-
-void eor_imm(uint8_t value) {
-    a ^= value;
-    update_nz(a);
-}
-
-void eor_zp(uint8_t addr) {
-    eor_imm(zero_page(addr));
-}
-
-// ASL - Arithmetic Shift Left
-
-void asl_acc(void) {
-    carry_flag = a & 0x80;
-    a <<= 1;
-    update_nz(a);
-}
-
-void asl_abs(uint16_t addr) {
-    uint8_t val = read_byte(addr);
-    carry_flag = val & 0x80;
-    val <<= 1;
-    dynamic_ram_write(addr, val);
-    update_nz(val);
-}
-
-// LSR - Logical Shift Right
-
-void lsr_acc(void) {
-    carry_flag = a & 1;
-    a >>= 1;
-    update_nz(a);
-}
-
-void _lsr(uint16_t addr) {
-    uint8_t val = read_byte(addr);
-    carry_flag = val & 1;
-    val >>= 1;
-    dynamic_ram_write(addr, val);
-    update_nz(val);
-}
-
-void lsr_zp(uint8_t addr) {
-    _lsr(addr);
-}
-
-void lsr_abs(uint16_t addr) {
-    _lsr(addr);
-}
-
-// INC - Increment Memory
-
-void _inc(uint16_t addr) {
-    uint8_t val = read_byte(addr);
-    val++;
-    dynamic_ram_write(addr, val);
-    update_nz(val);
-}
-
-void inc_zp(uint8_t addr) {
-    _inc(addr);
-}
-
-void inc_zpx(uint8_t addr) {
-    _inc(addr + x);
-}
-
-void inc_abs(uint16_t addr) {
-    _inc(addr);
-}
-
-void inc_absx(uint16_t addr) {
-    _inc(addr + x);
-}
-
-// INX - Increment X Register
-
-void inx(void) {
+static inline void inx_value(FlagMask mask) {
     x++;
-    update_nz(x);
+    update_nz_masked(x, mask);
 }
 
-// INY - Increment Y Register
-
-void iny(void) {
+static inline void iny_value(FlagMask mask) {
     y++;
-    update_nz(y);
+    update_nz_masked(y, mask);
 }
 
-// DEC - Decrement Memory
-
-void _dec(uint16_t addr) {
-    uint8_t val = read_byte(addr);
-    val--;
-    dynamic_ram_write(addr, val);
-    update_nz(val);
-}
-
-void dec_zp(uint8_t addr) {
-    _dec(addr);
-}
-
-void dec_zpx(uint8_t addr) {
-    _dec(addr + x);
-}
-
-void dec_abs(uint16_t addr) {
-    _dec(addr);
-}
-
-void dec_absx(uint16_t addr) {
-    _dec(addr + x);
-}
-
-// DEX - Decrement X Register
-
-void dex(void) {
+static inline void dex_value(FlagMask mask) {
     x--;
-    update_nz(x);
+    update_nz_masked(x, mask);
 }
 
-// DEY - Decrement Y Register
-
-void dey(void) {
+static inline void dey_value(FlagMask mask) {
     y--;
-    update_nz(y);
+    update_nz_masked(y, mask);
 }
 
-// CLC - Clear Carry Flag
+DEFINE_IMPLIED_VARIANTS(inx, inx_value, FLAGS_NZ)
+DEFINE_IMPLIED_VARIANTS(iny, iny_value, FLAGS_NZ)
+DEFINE_IMPLIED_VARIANTS(dex, dex_value, FLAGS_NZ)
+DEFINE_IMPLIED_VARIANTS(dey, dey_value, FLAGS_NZ)
 
-void clc(void) {
-    carry_flag = false;
+// Shifts, rotates, and memory increments
+
+static inline void asl_acc_value(FlagMask mask) {
+    bool next_carry = (a & 0x80) != 0;
+    a <<= 1;
+    if (mask & FLAG_CARRY) {
+        carry_flag = next_carry;
+    }
+    update_nz_masked(a, mask);
 }
 
-// SEC - Set Carry Flag
-
-void sec(void) {
-    carry_flag = true;
+static inline void asl_memory(uint16_t addr, FlagMask mask) {
+    uint8_t value = read_byte(addr);
+    bool next_carry = (value & 0x80) != 0;
+    value <<= 1;
+    dynamic_ram_write(addr, value);
+    if (mask & FLAG_CARRY) {
+        carry_flag = next_carry;
+    }
+    update_nz_masked(value, mask);
 }
 
-// CLD - Clear Decimal Flag
+DEFINE_IMPLIED_VARIANTS(asl_acc, asl_acc_value, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(asl_abs, uint16_t, arg, asl_memory, FLAGS_CNZ)
 
-void cld(void) {}
-
-// SED - Set Decimal Flag
-
-void sed(void) {}
-
-// SEI - Set Interrupt Disable
-
-void sei(void) {}
-
-void cmp_vals(uint8_t lhs, uint8_t rhs) {
-    carry_flag = lhs >= rhs;
-    update_nz(lhs - rhs);
+static inline void lsr_acc_value(FlagMask mask) {
+    bool next_carry = (a & 1) != 0;
+    a >>= 1;
+    if (mask & FLAG_CARRY) {
+        carry_flag = next_carry;
+    }
+    update_nz_masked(a, mask);
 }
 
-// CMP - Compare
-
-void cmp_imm(uint8_t value) {
-    cmp_vals(a, value);
+static inline void lsr_memory(uint16_t addr, FlagMask mask) {
+    uint8_t value = read_byte(addr);
+    bool next_carry = (value & 1) != 0;
+    value >>= 1;
+    dynamic_ram_write(addr, value);
+    if (mask & FLAG_CARRY) {
+        carry_flag = next_carry;
+    }
+    update_nz_masked(value, mask);
 }
 
-void cmp_zp(uint8_t addr) {
-    cmp_vals(a, zero_page(addr));
+DEFINE_IMPLIED_VARIANTS(lsr_acc, lsr_acc_value, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(lsr_zp, uint8_t, (uint16_t)arg, lsr_memory, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(lsr_abs, uint16_t, arg, lsr_memory, FLAGS_CNZ)
+
+static inline void inc_memory(uint16_t addr, FlagMask mask) {
+    uint8_t value = read_byte(addr);
+    value++;
+    dynamic_ram_write(addr, value);
+    update_nz_masked(value, mask);
 }
 
-void cmp_zpx(uint8_t addr) {
-    cmp_vals(a, zero_page_x(addr));
+DEFINE_READ_VARIANTS(inc_zp, uint8_t, (uint16_t)arg, inc_memory, FLAGS_NZ)
+DEFINE_READ_VARIANTS(inc_zpx, uint8_t, (uint8_t)(arg + x), inc_memory, FLAGS_NZ)
+DEFINE_READ_VARIANTS(inc_abs, uint16_t, arg, inc_memory, FLAGS_NZ)
+DEFINE_READ_VARIANTS(inc_absx, uint16_t, arg + x, inc_memory, FLAGS_NZ)
+
+static inline void dec_memory(uint16_t addr, FlagMask mask) {
+    uint8_t value = read_byte(addr);
+    value--;
+    dynamic_ram_write(addr, value);
+    update_nz_masked(value, mask);
 }
 
-void cmp_zpy(uint8_t addr) {
-    cmp_vals(a, zero_page_y(addr));
+DEFINE_READ_VARIANTS(dec_zp, uint8_t, (uint16_t)arg, dec_memory, FLAGS_NZ)
+DEFINE_READ_VARIANTS(dec_zpx, uint8_t, (uint8_t)(arg + x), dec_memory, FLAGS_NZ)
+DEFINE_READ_VARIANTS(dec_abs, uint16_t, arg, dec_memory, FLAGS_NZ)
+DEFINE_READ_VARIANTS(dec_absx, uint16_t, arg + x, dec_memory, FLAGS_NZ)
+
+static inline void rol_acc_value(FlagMask mask) {
+    bool old_carry = carry_flag;
+    bool next_carry = (a & 0x80) != 0;
+    a = (uint8_t)(a << 1) | (uint8_t)old_carry;
+    if (mask & FLAG_CARRY) {
+        carry_flag = next_carry;
+    }
+    update_nz_masked(a, mask);
 }
 
-void cmp_abs(uint16_t addr) {
-    cmp_vals(a, absolute(addr));
+static inline void rol_memory(uint16_t addr, FlagMask mask) {
+    uint8_t value = read_byte(addr);
+    bool old_carry = carry_flag;
+    bool next_carry = (value & 0x80) != 0;
+    value = (uint8_t)(value << 1) | (uint8_t)old_carry;
+    dynamic_ram_write(addr, value);
+    if (mask & FLAG_CARRY) {
+        carry_flag = next_carry;
+    }
+    update_nz_masked(value, mask);
 }
 
-void cmp_absx(uint16_t addr) {
-    cmp_vals(a, absolute_x(addr));
+DEFINE_IMPLIED_VARIANTS(rol_acc, rol_acc_value, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(rol_zp, uint8_t, (uint16_t)arg, rol_memory, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(rol_abs, uint16_t, arg, rol_memory, FLAGS_CNZ)
+
+static inline void ror_acc_value(FlagMask mask) {
+    bool old_carry = carry_flag;
+    bool next_carry = (a & 1) != 0;
+    a >>= 1;
+    if (old_carry) {
+        a |= 0x80;
+    }
+    if (mask & FLAG_CARRY) {
+        carry_flag = next_carry;
+    }
+    update_nz_masked(a, mask);
 }
 
-void cmp_absy(uint16_t addr) {
-    cmp_vals(a, absolute_y(addr));
+static inline void ror_memory(uint16_t addr, FlagMask mask) {
+    uint8_t value = read_byte(addr);
+    bool old_carry = carry_flag;
+    bool next_carry = (value & 1) != 0;
+    value >>= 1;
+    if (old_carry) {
+        value |= 0x80;
+    }
+    dynamic_ram_write(addr, value);
+    if (mask & FLAG_CARRY) {
+        carry_flag = next_carry;
+    }
+    update_nz_masked(value, mask);
 }
 
-// CPX - Compare X Register
+DEFINE_IMPLIED_VARIANTS(ror_acc, ror_acc_value, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(ror_absx, uint16_t, absolute_x_addr(arg), ror_memory, FLAGS_CNZ)
 
-void cpx_imm(uint8_t value) {
-    cmp_vals(x, value);
+// Comparisons preserve memory reads even when their result flags are dead.
+
+static inline void cmp_values(uint8_t lhs, uint8_t rhs, FlagMask mask) {
+    if (mask & FLAG_CARRY) {
+        carry_flag = lhs >= rhs;
+    }
+    update_nz_masked((uint8_t)(lhs - rhs), mask);
 }
 
-void cpx_zp(uint8_t addr) {
-    cmp_vals(x, zero_page(addr));
-}
+#define DEFINE_COMPARE_VARIANTS(name, arg_type, lhs, rhs) \
+    void name(arg_type arg) { cmp_values((lhs), (rhs), FLAGS_NONE); } \
+    void name##_fc(arg_type arg) { cmp_values((lhs), (rhs), FLAG_CARRY); } \
+    void name##_fz(arg_type arg) { cmp_values((lhs), (rhs), FLAG_ZERO); } \
+    void name##_fn(arg_type arg) { cmp_values((lhs), (rhs), FLAG_NEGATIVE); } \
+    void name##_fcz(arg_type arg) { cmp_values((lhs), (rhs), FLAG_CARRY | FLAG_ZERO); } \
+    void name##_fcn(arg_type arg) { cmp_values((lhs), (rhs), FLAG_CARRY | FLAG_NEGATIVE); } \
+    void name##_fzn(arg_type arg) { cmp_values((lhs), (rhs), FLAGS_NZ); } \
+    void name##_fczn(arg_type arg) { cmp_values((lhs), (rhs), FLAGS_CNZ); }
 
-// CPY - Compare Y Register
+DEFINE_COMPARE_VARIANTS(cmp_imm, uint8_t, a, arg)
+DEFINE_COMPARE_VARIANTS(cmp_zp, uint8_t, a, zero_page(arg))
+DEFINE_COMPARE_VARIANTS(cmp_zpx, uint8_t, a, zero_page_x(arg))
+DEFINE_COMPARE_VARIANTS(cmp_zpy, uint8_t, a, zero_page_y(arg))
+DEFINE_COMPARE_VARIANTS(cmp_abs, uint16_t, a, absolute(arg))
+DEFINE_COMPARE_VARIANTS(cmp_absx, uint16_t, a, absolute_x(arg))
+DEFINE_COMPARE_VARIANTS(cmp_absy, uint16_t, a, absolute_y(arg))
+DEFINE_COMPARE_VARIANTS(cpx_imm, uint8_t, x, arg)
+DEFINE_COMPARE_VARIANTS(cpx_zp, uint8_t, x, zero_page(arg))
+DEFINE_COMPARE_VARIANTS(cpy_imm, uint8_t, y, arg)
+DEFINE_COMPARE_VARIANTS(cpy_zp, uint8_t, y, zero_page(arg))
+DEFINE_COMPARE_VARIANTS(cpy_abs, uint16_t, y, absolute(arg))
 
-void cpy_imm(uint8_t value) {
-    cmp_vals(y, value);
-}
-
-void cpy_zp(uint8_t addr) {
-    cmp_vals(y, zero_page(addr));
-}
-
-void cpy_abs(uint16_t addr) {
-    cmp_vals(y, absolute(addr));
-}
-
-// PHA - Push Accumulator
+// Stack and BIT
 
 void pha(void) {
     dynamic_ram_write(sp | 0x100, a);
     sp--;
 }
 
-// PLA - Pull Accumulator
-
-void pla(void) {
+static inline void pla_value(FlagMask mask) {
     sp++;
     a = read_byte(sp | 0x100);
-    update_nz(a);
+    update_nz_masked(a, mask);
 }
 
-// BIT - Bit Test
+DEFINE_IMPLIED_VARIANTS(pla, pla_value, FLAGS_NZ)
 
-void _bit(uint8_t val) {
-    zero_flag = (a & val) == 0;
-    neg_flag = val & 0x80;
-}
-
-void bit_zp(uint8_t addr) {
-    _bit(zero_page(addr));
-}
-
-void bit_abs(uint16_t addr) {
-    _bit(absolute(addr));
-}
-
-// ROL - Rotate Left
-
-void _rol(uint16_t addr) {
-    uint8_t val = read_byte(addr);
-    bool next_carry_flag = val & 0x80;
-    val <<= 1;
-    val |= carry_flag;
-    carry_flag = next_carry_flag;
-    dynamic_ram_write(addr, val);
-    update_nz(val);
-}
-
-void rol_acc(void) {
-    bool next_carry_flag = a & 0x80;
-    a <<= 1;
-    a |= carry_flag;
-    carry_flag = next_carry_flag;
-    update_nz(a);
-}
-
-void rol_zp(uint8_t addr) {
-    _rol(addr);
-}
-
-void rol_abs(uint16_t addr) {
-    _rol(addr);
-}
-
-// ROR - Rotate Right
-
-void _ror(uint16_t addr) {
-    uint8_t val = read_byte(addr);
-    bool old_carry = carry_flag;
-    carry_flag = val & 1;
-    val >>= 1;
-
-    if (old_carry) {
-        val |= 0x80;
+static inline void bit_value(uint8_t value, FlagMask mask) {
+    if (mask & FLAG_ZERO) {
+        zero_flag = (a & value) == 0;
     }
-
-    dynamic_ram_write(addr, val);
-    update_nz(val);
-}
-
-inline void ror_acc(void) {
-    bool old_carry = carry_flag;
-    carry_flag = a & 1;
-    a >>= 1;
-
-    if (old_carry) {
-        a |= 0x80;
+    if (mask & FLAG_NEGATIVE) {
+        neg_flag = (value & 0x80) != 0;
     }
-
-    update_nz(a);
 }
 
-inline void ror_absx(uint16_t addr) {
-    _ror(absolute_x_addr(addr));
+DEFINE_READ_VARIANTS(bit_zp, uint8_t, zero_page(arg), bit_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(bit_abs, uint16_t, absolute(arg), bit_value, FLAGS_NZ)
+
+// Flag and processor-control instructions
+
+void clc(void) {
+    carry_flag = false;
 }
+
+void sec(void) {
+    carry_flag = true;
+}
+
+void cld(void) {}
+void sed(void) {}
+void sei(void) {}
+
+#undef DEFINE_COMPARE_VARIANTS
+#undef DEFINE_IMPLIED_VARIANTS
+#undef SELECT_IMPLIED_VARIANTS_
+#undef SELECT_IMPLIED_VARIANTS
+#undef DEFINE_IMPLIED_VARIANTS_FLAGS_CNZ
+#undef DEFINE_IMPLIED_VARIANTS_FLAGS_NZ
+#undef DEFINE_READ_VARIANTS
+#undef SELECT_READ_VARIANTS_
+#undef SELECT_READ_VARIANTS
+#undef DEFINE_READ_VARIANTS_FLAGS_CNZ
+#undef DEFINE_READ_VARIANTS_FLAGS_NZ
