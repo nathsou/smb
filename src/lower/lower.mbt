@@ -560,6 +560,25 @@ fn BasicBlock::flag_usage(self: BasicBlock) -> FlagUsage {
   { uses, defs }
 }
 
+fn BasicBlock::flags_escape(self: BasicBlock) -> Bool {
+  if self.successors.is_empty() {
+    return true
+  }
+
+  match self.last_non_comment_item() {
+    Some({
+      item: Inst(
+        op=BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS,
+        mode=Relative(Ident(name="__ret__", ..)) |
+          Absolute(Ident(name="__ret__", ..)),
+        ..
+      ),
+      ..
+    }) => true
+    _ => false
+  }
+}
+
 fn AsmLowering::collect_flag_liveness(self: AsmLowering) -> Unit {
   let usages = self.basic_blocks.map(fn(bb) { bb.flag_usage() })
   let live_in = self.basic_blocks.map(fn(_) { FlagLiveness::none() })
@@ -573,12 +592,7 @@ fn AsmLowering::collect_flag_liveness(self: AsmLowering) -> Unit {
       let bb = self.basic_blocks[i]
       let mut live_out = FlagLiveness::none()
 
-      let has_return_edge = match bb.last_non_comment_item() {
-        Some({ item: Inst(op=BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS, mode=Relative(Ident(name="__ret__", ..)) | Absolute(Ident(name="__ret__", ..)), ..), .. }) => true
-        _ => false
-      }
-
-      if bb.successors.is_empty() || has_return_edge {
+      if bb.flags_escape() {
         // Flags are observable at a subroutine return. This conservative
         // boundary also keeps externally entered code correct.
         live_out = FlagLiveness::all()
@@ -601,13 +615,9 @@ fn AsmLowering::collect_flag_liveness(self: AsmLowering) -> Unit {
   }
 
   for bb in self.basic_blocks {
-    let has_return_edge = match bb.last_non_comment_item() {
-      Some({ item: Inst(op=BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS, mode=Relative(Ident(name="__ret__", ..)) | Absolute(Ident(name="__ret__", ..)), ..), .. }) => true
-      _ => false
-    }
     let mut live_after = FlagLiveness::none()
 
-    if bb.successors.is_empty() || has_return_edge {
+    if bb.flags_escape() {
       live_after = FlagLiveness::all()
     } else {
       for link in bb.successors {

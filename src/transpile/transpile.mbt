@@ -224,13 +224,28 @@ fn show_cond_opcode(op: @parse.OpCode) -> String {
 
 fn flag_helper_suffix(op: @parse.OpCode, id: Int, low: @lower.AsmLowering) -> String {
   let writes = @lower.flag_writes(op)
+  let live_writes = writes.intersect(low.flag_live_after(id))
 
   if writes.is_none() {
     ""
-  } else if writes.intersect(low.flag_live_after(id)).is_none() {
+  } else if live_writes.is_none() {
     "_nf"
-  } else {
+  } else if live_writes == writes {
     ""
+  } else {
+    let mut suffix = "_f"
+
+    if live_writes.carry {
+      suffix += "c"
+    }
+    if live_writes.zero {
+      suffix += "z"
+    }
+    if live_writes.negative {
+      suffix += "n"
+    }
+
+    suffix
   }
 }
 
