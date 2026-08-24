@@ -13,7 +13,7 @@ ifeq ($(UNAME_S),Linux)
     RAYLIB_FLAGS = -lGL -lm -lpthread -ldl -lrt -lX11
 else ifeq ($(UNAME_S),Darwin) # macOS
     GC_FLAGS = -Wl,-dead_strip
-    RAYLIB_FLAGS = -framework OpenGL -framework Cocoa -framework IOKit -framework CoreFoundation -lm -lpthread
+    RAYLIB_FLAGS = -framework OpenGL -framework Cocoa -framework IOKit -framework CoreFoundation -framework QuartzCore -lm -lpthread
 endif
 
 OBJECTS = raylib-quickstart/bin/Debug/libraylib.a
