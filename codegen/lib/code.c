@@ -9,11 +9,11 @@ void Start(void) {
   sp = x;
   
 VBlank1:
-  lda_abs(PPU_STATUS); // wait two frames
+  lda_abs_fn(PPU_STATUS); // wait two frames
   if (!neg_flag) { goto VBlank1; }
   
 VBlank2:
-  lda_abs(PPU_STATUS);
+  lda_abs_fn(PPU_STATUS);
   if (!neg_flag) { goto VBlank2; }
   ldy_imm_nf(ColdBootOffset); // load default cold boot pointer
   ldx_imm_nf(0x5); // this is where we check for a warm boot
@@ -23,7 +23,7 @@ WBootCheck:
   cmp_imm(10); // to see if we have a valid digit
   // if not, give up and proceed with cold boot
   if (!carry_flag) {
-    dex();
+    dex_fn();
     if (!neg_flag) { goto WBootCheck; }
     lda_abs_nf(WarmBootValidation); // second checkpoint, check to see if
     cmp_imm(0xa5); // another location has a specific value
@@ -62,7 +62,7 @@ void NonMaskableInterrupt(void) {
   ppu_ctrl = a; // (essentially $2000) but save other bits
   lda_abs_nf(Mirror_PPU_CTRL_REG2); // disable OAM and background display by default
   and_imm_nf(0b11100110);
-  ldy_abs(DisableScreenFlag); // get screen disable flag
+  ldy_abs_fz(DisableScreenFlag); // get screen disable flag
   if (!zero_flag) { goto ScreenOff; } // if set, used bits as-is
   lda_abs_nf(Mirror_PPU_CTRL_REG2); // otherwise reenable bits and save them
   ora_imm_nf(0b00011110);
@@ -85,7 +85,7 @@ ScreenOff:
   UpdateScreen(); // update screen with buffer contents
   ldy_imm_nf(0x0);
   ldx_abs_nf(VRAM_Buffer_AddrCtrl); // check for usage of $0341
-  cpx_imm(0x6);
+  cpx_imm_fcz(0x6);
   if (!zero_flag) { goto InitBuffer; }
   iny_nf(); // get offset based on usage
   
@@ -102,28 +102,28 @@ InitBuffer:
   PauseRoutine(); // handle pause
   UpdateTopScore();
   lda_abs_nf(GamePauseStatus); // check for pause status
-  lsr_acc();
+  lsr_acc_fc();
   if (carry_flag) { goto PauseSkip; }
-  lda_abs(TimerControl); // if master timer control not set, decrement
+  lda_abs_fz(TimerControl); // if master timer control not set, decrement
   if (zero_flag) { goto DecTimers; } // all frame and interval timers
-  dec_abs(TimerControl);
+  dec_abs_fz(TimerControl);
   if (!zero_flag) { goto NoDecTimers; }
   
 DecTimers:
   ldx_imm_nf(0x14); // load end offset for end of frame timers
-  dec_abs(IntervalTimerControl); // decrement interval timer control,
+  dec_abs_fn(IntervalTimerControl); // decrement interval timer control,
   if (!neg_flag) { goto DecTimersLoop; } // if not expired, only frame timers will decrement
   lda_imm_nf(0x14);
   ram[IntervalTimerControl] = a; // if control for interval timers expired,
   ldx_imm_nf(0x23); // interval timers will decrement along with frame timers
   
 DecTimersLoop:
-  lda_absx(Timers); // check current timer
+  lda_absx_fz(Timers); // check current timer
   if (zero_flag) { goto SkipExpTimer; } // if current timer expired, branch to skip,
   dec_absx_nf(Timers); // otherwise decrement the current timer
   
 SkipExpTimer:
-  dex(); // move onto next timer
+  dex_fn(); // move onto next timer
   if (!neg_flag) { goto DecTimersLoop; } // do this until all timers are dealt with
   
 NoDecTimers:
@@ -137,22 +137,22 @@ PauseSkip:
   ram[0x0] = a; // save here
   lda_abs_nf(PseudoRandomBitReg + 1); // get second memory location
   and_imm_nf(0b00000010); // mask out all but d1
-  eor_zp(0x0); // perform exclusive-OR on d1 from first and second bytes
+  eor_zp_fz(0x0); // perform exclusive-OR on d1 from first and second bytes
   carry_flag = false; // if neither or both are set, carry will be clear
   if (zero_flag) { goto RotPRandomBit; }
   carry_flag = true; // if one or the other is set, carry will be set
   
 RotPRandomBit:
-  ror_absx(PseudoRandomBitReg); // rotate carry into d7, and rotate last bit into carry
+  ror_absx_fc(PseudoRandomBitReg); // rotate carry into d7, and rotate last bit into carry
   inx_nf(); // increment to next byte
-  dey(); // decrement for loop
+  dey_fz(); // decrement for loop
   if (!zero_flag) { goto RotPRandomBit; }
-  lda_abs(Sprite0HitDetectFlag); // check for flag here
+  lda_abs_fz(Sprite0HitDetectFlag); // check for flag here
   if (zero_flag) { goto SkipSprite0; }
   
 Sprite0Clr:
   lda_abs_nf(PPU_STATUS); // wait for sprite 0 flag to clear, which will
-  and_imm(0b01000000); // not happen until vblank has ended
+  and_imm_fz(0b01000000); // not happen until vblank has ended
   if (!zero_flag) { goto Sprite0Clr; }
   lda_abs_nf(GamePauseStatus); // if in pause mode, do not bother with sprites at all
   lsr_acc();
@@ -162,12 +162,12 @@ Sprite0Clr:
   
 Sprite0Hit:
   lda_abs_nf(PPU_STATUS); // do sprite #0 hit detection
-  and_imm(0b01000000);
+  and_imm_fz(0b01000000);
   if (zero_flag) { goto Sprite0Hit; }
   ldy_imm_nf(0x14); // small delay, to wait until we hit horizontal blank time
   
 HBlankDelay:
-  dey();
+  dey_fz();
   if (!zero_flag) { goto HBlankDelay; }
   
 SkipSprite0:
@@ -194,7 +194,7 @@ SkipMainOper:
 
 void PauseRoutine(void) {
   lda_abs_nf(OperMode); // are we in victory mode?
-  cmp_imm(VictoryModeValue); // if so, go ahead
+  cmp_imm_fcz(VictoryModeValue); // if so, go ahead
   if (zero_flag) { goto ChkPauseTimer; }
   cmp_imm(GameModeValue); // are we in game mode?
   if (!zero_flag) { return; } // if not, leave
@@ -203,14 +203,14 @@ void PauseRoutine(void) {
   if (!zero_flag) { return; } // if not, leave
   
 ChkPauseTimer:
-  lda_abs(GamePauseTimer); // check if pause timer is still counting down
+  lda_abs_fz(GamePauseTimer); // check if pause timer is still counting down
   if (zero_flag) { goto ChkStart; }
   dec_abs(GamePauseTimer); // if so, decrement and leave
   return;
   
 ChkStart:
   lda_abs_nf(SavedJoypad1Bits); // check to see if start is pressed
-  and_imm(Start_Button); // on controller 1
+  and_imm_fz(Start_Button); // on controller 1
   if (zero_flag) { goto ClrPauseTimer; }
   lda_abs_nf(GamePauseStatus); // check to see if timer flag is set
   and_imm(0b10000000); // and if so, do not reset timer (residual,
@@ -243,12 +243,12 @@ void SpriteShuffler(void) {
   
 ShuffleLoop:
   lda_absx_nf(SprDataOffset); // check for offset value against
-  cmp_zp(0x0); // the preset value
+  cmp_zp_fc(0x0); // the preset value
   // if less, skip this part
   if (carry_flag) {
     ldy_abs_nf(SprShuffleAmtOffset); // get current offset to preset value we want to add
     carry_flag = false;
-    adc_absy(SprShuffleAmt); // get shuffle amount, add to current sprite offset
+    adc_absy_fc(SprShuffleAmt); // get shuffle amount, add to current sprite offset
     // if not exceeded $ff, skip second add
     if (carry_flag) {
       carry_flag = false;
@@ -258,11 +258,11 @@ ShuffleLoop:
     ram[SprDataOffset + x] = a; // store new offset here or old one if branched to here
   }
   // NextSprOffset:
-  dex(); // move backwards to next one
+  dex_fn(); // move backwards to next one
   if (!neg_flag) { goto ShuffleLoop; }
   ldx_abs_nf(SprShuffleAmtOffset); // load offset
   inx_nf();
-  cpx_imm(0x3); // check if offset + 1 goes to 3
+  cpx_imm_fz(0x3); // check if offset + 1 goes to 3
   // if offset + 1 not 3, store
   if (zero_flag) {
     ldx_imm_nf(0x0); // otherwise, init to 0
@@ -279,7 +279,7 @@ SetMiscOffset:
   adc_imm_nf(0x8); // more to the third one
   ram[Misc_SprDataOffset - 1 + x] = a; // note that due to the way X is set up,
   carry_flag = false; // this code loads into the misc sprite offsets
-  adc_imm(0x8);
+  adc_imm_fc(0x8);
   ram[Misc_SprDataOffset + x] = a;
   dex_nf();
   dex_nf();
@@ -313,16 +313,16 @@ void GameMenuRoutine(void) {
   ldy_imm_nf(0x0);
   lda_abs_nf(SavedJoypad1Bits); // check to see if either player pressed
   ora_abs_nf(SavedJoypad2Bits); // only the start button (either joypad)
-  cmp_imm(Start_Button);
+  cmp_imm_fcz(Start_Button);
   if (zero_flag) { goto StartGame; }
-  cmp_imm(A_Button + Start_Button); // check to see if A + start was pressed
+  cmp_imm_fcz(A_Button + Start_Button); // check to see if A + start was pressed
   if (!zero_flag) { goto ChkSelect; } // if not, branch to check select button
   
 StartGame:
   goto ChkContinue; // if either start or A + start, execute here
   
 ChkSelect:
-  cmp_imm(Select_Button); // check to see if the select button was pressed
+  cmp_imm_fcz(Select_Button); // check to see if the select button was pressed
   if (zero_flag) { goto SelectBLogic; } // if so, branch reset demo timer
   ldx_abs(DemoTimer); // otherwise check demo timer
   if (!zero_flag) { goto ChkWorldSel; } // if demo timer not expired, branch to check world selection
@@ -332,22 +332,22 @@ ChkSelect:
   goto RunDemo; // otherwise, run game engine for demo
   
 ChkWorldSel:
-  ldx_abs(WorldSelectEnableFlag); // check to see if world selection has been enabled
+  ldx_abs_fz(WorldSelectEnableFlag); // check to see if world selection has been enabled
   if (zero_flag) { goto NullJoypad; }
-  cmp_imm(B_Button); // if so, check to see if the B button was pressed
+  cmp_imm_fcz(B_Button); // if so, check to see if the B button was pressed
   if (!zero_flag) { goto NullJoypad; }
   iny_nf(); // if so, increment Y and execute same code as select
   
 SelectBLogic:
-  lda_abs(DemoTimer); // if select or B pressed, check demo timer one last time
+  lda_abs_fz(DemoTimer); // if select or B pressed, check demo timer one last time
   if (zero_flag) { goto ResetTitle; } // if demo timer expired, branch to reset title screen mode
   lda_imm_nf(0x18); // otherwise reset demo timer
   ram[DemoTimer] = a;
-  lda_abs(SelectTimer); // check select/B button timer
+  lda_abs_fz(SelectTimer); // check select/B button timer
   if (!zero_flag) { goto NullJoypad; } // if not expired, branch
   lda_imm_nf(0x10); // otherwise reset select button timer
   ram[SelectTimer] = a;
-  cpy_imm(0x1); // was the B button pressed earlier?  if so, branch
+  cpy_imm_fcz(0x1); // was the B button pressed earlier?  if so, branch
   if (zero_flag) { goto IncWorldSel; } // note this will not be run if world selection is disabled
   lda_abs_nf(NumberOfPlayers); // if no, must have been the select button, therefore
   eor_imm(0b00000001); // change number of players and draw icon accordingly
@@ -367,7 +367,7 @@ UpdateShroom:
   lda_absx_nf(WSelectBufferTemplate); // write template for world select in vram buffer
   ram[VRAM_Buffer1 - 1 + x] = a; // do this until all bytes are written
   inx_nf();
-  cpx_imm(0x6);
+  cpx_imm_fcn(0x6);
   if (neg_flag) { goto UpdateShroom; }
   ldy_abs_nf(WorldNumber); // get world number from variable and increment for
   iny_nf(); // proper display, and put in blank byte before
@@ -392,7 +392,7 @@ ResetTitle:
   return;
   
 ChkContinue:
-  ldy_abs(DemoTimer); // if timer for demo has expired, reset modes
+  ldy_abs_fz(DemoTimer); // if timer for demo has expired, reset modes
   if (zero_flag) { goto ResetTitle; }
   asl_acc(); // check to see if A button was also pushed
   if (!carry_flag) { goto StartWorld1; } // if not, don't load continue function's world number
@@ -504,7 +504,7 @@ void NextSubtask(void) {
 }
 
 void GetBackgroundColor(void) {
-  ldy_abs(BackgroundColorCtrl); // check background color control
+  ldy_abs_fz(BackgroundColorCtrl); // check background color control
   // if not set, increment task and fetch palette
   if (!zero_flag) {
     lda_absy_nf(BGColorCtrl_Addr - 4); // put appropriate palette into vram
@@ -518,13 +518,13 @@ void GetBackgroundColor(void) {
 void GetPlayerColors(void) {
   ldx_abs_nf(VRAM_Buffer1_Offset); // get current buffer offset
   ldy_imm_nf(0x0);
-  lda_abs(CurrentPlayer); // check which player is on the screen
+  lda_abs_fz(CurrentPlayer); // check which player is on the screen
   if (!zero_flag) {
     ldy_imm_nf(0x4); // load offset for luigi
   }
   // ChkFiery:
   lda_abs_nf(PlayerStatus); // check player status
-  cmp_imm(0x2);
+  cmp_imm_fz(0x2);
   // if fiery, load alternate offset for fiery player
   if (zero_flag) {
     ldy_imm_nf(0x8);
@@ -538,10 +538,10 @@ ClrGetLoop:
   ram[VRAM_Buffer1 + 3 + x] = a; // in the buffer
   iny_nf();
   inx_nf();
-  dec_zp(0x0);
+  dec_zp_fn(0x0);
   if (!neg_flag) { goto ClrGetLoop; }
   ldx_abs_nf(VRAM_Buffer1_Offset); // load original offset from before
-  ldy_abs(BackgroundColorCtrl); // if this value is four or greater, it will be set
+  ldy_abs_fz(BackgroundColorCtrl); // if this value is four or greater, it will be set
   // therefore use it as offset to background color
   if (zero_flag) {
     ldy_abs_nf(AreaType); // otherwise use area type bits from area offset as offset
@@ -626,7 +626,7 @@ void WriteBottomStatusLine(void) {
 }
 
 void DisplayTimeUp(void) {
-  lda_abs(GameTimerExpiredFlag); // if game timer not expired, increment task
+  lda_abs_fz(GameTimerExpiredFlag); // if game timer not expired, increment task
   // control 2 tasks forward, otherwise, stay here
   if (!zero_flag) {
     lda_imm_nf(0x0);
@@ -642,19 +642,19 @@ void DisplayTimeUp(void) {
 }
 
 void DisplayIntermediate(void) {
-  lda_abs(OperMode); // check primary mode of operation
+  lda_abs_fz(OperMode); // check primary mode of operation
   // if in title screen mode, skip this
   if (zero_flag) {
     NoInter();
     return;
   }
-  cmp_imm(GameOverModeValue); // are we in game over mode?
+  cmp_imm_fcz(GameOverModeValue); // are we in game over mode?
   // if so, proceed to display game over screen
   if (zero_flag) {
     GameOverInter();
     return;
   }
-  lda_abs(AltEntranceControl); // otherwise check for mode of alternate entry
+  lda_abs_fz(AltEntranceControl); // otherwise check for mode of alternate entry
   // and branch if found
   if (!zero_flag) {
     NoInter();
@@ -697,7 +697,7 @@ TaskLoop:
   AreaParserTaskHandler(); // render column set of current area
   lda_abs(AreaParserTaskNum); // check number of tasks
   if (!zero_flag) { goto TaskLoop; } // if tasks still not all done, do another one
-  dec_abs(ColumnSets); // do we need to render more column sets?
+  dec_abs_fn(ColumnSets); // do we need to render more column sets?
   if (neg_flag) {
     inc_abs_nf(ScreenRoutineTask); // if not, move on to the next task
   }
@@ -710,7 +710,7 @@ TaskLoop:
 }
 
 void DrawTitleScreen(void) {
-  lda_abs(OperMode); // are we in title screen mode?
+  lda_abs_fz(OperMode); // are we in title screen mode?
   // if not, exit
   if (!zero_flag) {
     IncModeTask_B();
@@ -729,16 +729,16 @@ void DrawTitleScreen(void) {
 OutputTScr:
   lda_abs_nf(PPU_DATA); // get title screen from chr-rom
   dynamic_ram_write(read_word(0x0) + y, a); // store 256 bytes into buffer
-  iny();
+  iny_fz();
   // if not past 256 bytes, do not increment
   if (zero_flag) {
     inc_zp_nf(0x1); // otherwise increment high byte of indirect
   }
   // ChkHiByte:
   lda_zp_nf(0x1); // check high byte?
-  cmp_imm(0x4); // at $0400?
+  cmp_imm_fz(0x4); // at $0400?
   if (!zero_flag) { goto OutputTScr; } // if not, loop back and do another
-  cpy_imm(0x3a); // check if offset points past end of data
+  cpy_imm_fc(0x3a); // check if offset points past end of data
   if (!carry_flag) { goto OutputTScr; } // if not, loop back and do another
   lda_imm(0x5); // set buffer transfer control to $0300,
   SetVRAMAddr_B(); // increment task and exit
@@ -746,7 +746,7 @@ OutputTScr:
 }
 
 void ClearBuffersDrawIcon(void) {
-  lda_abs(OperMode); // check game mode
+  lda_abs_fz(OperMode); // check game mode
   // if not title screen mode, leave
   if (!zero_flag) {
     IncModeTask_B();
@@ -794,7 +794,7 @@ void InitializeGame(void) {
   
 ClrSndLoop:
   ram[SoundMemory + y] = a; // clear out memory used
-  dey(); // by the sound engines
+  dey_fn(); // by the sound engines
   if (!neg_flag) { goto ClrSndLoop; }
   lda_imm(0x18); // set demo timer
   ram[DemoTimer] = a;
@@ -810,7 +810,7 @@ void InitializeArea(void) {
   
 ClrTimersLoop:
   ram[Timers + x] = a; // clear out memory between
-  dex(); // $0780 and $07a1
+  dex_fn(); // $0780 and $07a1
   if (!neg_flag) { goto ClrTimersLoop; }
   lda_abs_nf(HalfwayPage);
   ldy_abs(AltEntranceControl); // if AltEntranceControl not set, use halfway page, if any found
@@ -823,7 +823,7 @@ StartPage:
   ram[BackloadingFlag] = a; // set flag here if halfway page or saved entry page number found
   GetScreenPosition(); // get pixel coordinates for screen borders
   ldy_imm_nf(0x20); // if on odd numbered page, use $2480 as start of rendering
-  and_imm(0b00000001); // otherwise use $2080, this address used later as name table
+  and_imm_fz(0b00000001); // otherwise use $2080, this address used later as name table
   if (zero_flag) { goto SetInitNTHigh; } // address for rendering of game area
   ldy_imm_nf(0x24);
   
@@ -834,7 +834,7 @@ SetInitNTHigh:
   asl_acc_nf(); // store LSB of page number in high nybble
   asl_acc_nf(); // of block buffer column position
   asl_acc_nf();
-  asl_acc();
+  asl_acc_fc();
   ram[BlockBufferColumnPos] = a;
   dec_abs_nf(AreaObjectLength); // set area object lengths for all empty
   dec_abs_nf(AreaObjectLength + 1);
@@ -842,21 +842,21 @@ SetInitNTHigh:
   lda_imm(0xb); // set value for renderer to update 12 column sets
   ram[ColumnSets] = a; // 12 column sets = 24 metatile columns = 1 1/2 screens
   GetAreaDataAddrs(); // get enemy and level addresses and load header
-  lda_abs(PrimaryHardMode); // check to see if primary hard mode has been activated
+  lda_abs_fz(PrimaryHardMode); // check to see if primary hard mode has been activated
   if (!zero_flag) { goto SetSecHard; } // if so, activate the secondary no matter where we're at
   lda_abs_nf(WorldNumber); // otherwise check world number
-  cmp_imm(World5); // if less than 5, do not activate secondary
+  cmp_imm_fcz(World5); // if less than 5, do not activate secondary
   if (!carry_flag) { goto CheckHalfway; }
   if (!zero_flag) { goto SetSecHard; } // if not equal to, then world > 5, thus activate
   lda_abs_nf(LevelNumber); // otherwise, world 5, so check level number
-  cmp_imm(Level3); // if 1 or 2, do not set secondary hard mode flag
+  cmp_imm_fc(Level3); // if 1 or 2, do not set secondary hard mode flag
   if (!carry_flag) { goto CheckHalfway; }
   
 SetSecHard:
   inc_abs_nf(SecondaryHardMode); // set secondary hard mode flag for areas 5-3 and beyond
   
 CheckHalfway:
-  lda_abs(HalfwayPage);
+  lda_abs_fz(HalfwayPage);
   if (zero_flag) { goto DoneInitArea; }
   lda_imm_nf(0x2); // if halfway page set, overwrite start position from header
   ram[PlayerEntranceCtrl] = a;
@@ -887,7 +887,7 @@ void SecondaryGameSetup(void) {
   
 ClearVRLoop:
   ram[VRAM_Buffer1 - 1 + y] = a; // clear buffer at $0300-$03ff
-  iny();
+  iny_fz();
   if (!zero_flag) { goto ClearVRLoop; }
   ram[GameTimerExpiredFlag] = a; // clear game timer exp flag
   ram[DisableIntermediate] = a; // clear skip lives display flag
@@ -895,9 +895,9 @@ ClearVRLoop:
   lda_imm_nf(0xff);
   ram[BalPlatformAlignment] = a; // initialize balance platform assignment flag
   lda_abs_nf(ScreenLeft_PageLoc); // get left side page location
-  lsr_abs(Mirror_PPU_CTRL_REG1); // shift LSB of ppu register #1 mirror out
+  lsr_abs_fc(Mirror_PPU_CTRL_REG1); // shift LSB of ppu register #1 mirror out
   and_imm_nf(0x1); // mask out all but LSB of page location
-  ror_acc(); // rotate LSB of page location into carry then onto mirror
+  ror_acc_fc(); // rotate LSB of page location into carry then onto mirror
   rol_abs(Mirror_PPU_CTRL_REG1); // this is to set the proper PPU name table
   GetAreaMusic(); // load proper music into queue
   lda_imm_nf(0x38); // load sprite shuffle amounts to be used later
@@ -911,7 +911,7 @@ ClearVRLoop:
 ShufAmtLoop:
   lda_absx_nf(DefaultSprOffsets);
   ram[SprDataOffset + x] = a;
-  dex(); // do this until they're all set
+  dex_fn(); // do this until they're all set
   if (!neg_flag) { goto ShufAmtLoop; }
   ldy_imm_nf(0x3); // set up sprite #0
   
@@ -953,7 +953,7 @@ void RunGameOver(void) {
   lda_imm_nf(0x0); // reenable screen
   ram[DisableScreenFlag] = a;
   lda_abs_nf(SavedJoypad1Bits); // check controller for start pressed
-  and_imm(Start_Button);
+  and_imm_fz(Start_Button);
   if (!zero_flag) {
     TerminateGame();
     return;
@@ -1044,11 +1044,11 @@ ProcELoop:
   RunGameTimer(); // count down the game timer
   ColorRotation(); // cycle one of the background colors
   lda_zp_nf(Player_Y_HighPos);
-  cmp_imm(0x2); // if player is below the screen, don't bother with the music
+  cmp_imm_fcn(0x2); // if player is below the screen, don't bother with the music
   if (!neg_flag) { goto NoChgMus; }
   lda_abs(StarInvincibleTimer); // if star mario invincibility timer at zero,
   if (zero_flag) { goto ClrPlrPal; } // skip this part
-  cmp_imm(0x4);
+  cmp_imm_fcz(0x4);
   if (!zero_flag) { goto NoChgMus; } // if not yet at a certain point, continue
   lda_abs(IntervalTimerControl); // if interval timer not yet expired,
   if (!zero_flag) { goto NoChgMus; } // branch ahead, don't bother with the music
@@ -1057,7 +1057,7 @@ ProcELoop:
 NoChgMus:
   ldy_abs_nf(StarInvincibleTimer); // get invincibility timer
   lda_zp_nf(FrameCounter); // get frame counter
-  cpy_imm(0x8); // if timer still above certain point,
+  cpy_imm_fc(0x8); // if timer still above certain point,
   if (carry_flag) { goto CycleTwo; } // branch to cycle player's palette quickly
   lsr_acc_nf(); // otherwise, divide by 8 to cycle every eighth frame
   lsr_acc_nf();
@@ -1088,7 +1088,7 @@ void UpdScrollVar(void) {
   cmp_imm(0x20); // check to see if exceeded $21
   if (neg_flag) { return; } // branch to leave if not
   lda_abs_nf(ScrollThirtyTwo);
-  sbc_imm(0x20); // otherwise subtract $20 to set appropriately
+  sbc_imm_fc(0x20); // otherwise subtract $20 to set appropriately
   ram[ScrollThirtyTwo] = a; // and store
   lda_imm(0x0); // reset vram buffer offset used in conjunction with
   ram[VRAM_Buffer2_Offset] = a; // level graphics buffer at $0341-$035f
@@ -1099,7 +1099,7 @@ RunParser:
 }
 
 void PlayerGfxHandler(void) {
-  lda_abs(InjuryTimer); // if player's injured invincibility timer
+  lda_abs_fz(InjuryTimer); // if player's injured invincibility timer
   if (zero_flag) { goto CntPl; } // not set, skip checkpoint and continue code
   lda_zp_nf(FrameCounter);
   lsr_acc(); // otherwise check frame counter and branch
@@ -1107,7 +1107,7 @@ void PlayerGfxHandler(void) {
   
 CntPl:
   lda_zp_nf(GameEngineSubroutine); // if executing specific game engine routine,
-  cmp_imm(0xb); // branch ahead to some other part
+  cmp_imm_fcz(0xb); // branch ahead to some other part
   if (zero_flag) { PlayerKilled(); return; }
   lda_abs(PlayerChangeSizeFlag); // if grow/shrink flag set
   if (!zero_flag) { DoChangeSize(); return; } // then branch to some other code
@@ -1123,7 +1123,7 @@ CntPl:
   tax_nf(); // initialize X to zero
   ldy_abs_nf(Player_SprDataOffset); // get player sprite data offset
   lda_zp_nf(PlayerFacingDir); // get player's facing direction
-  lsr_acc();
+  lsr_acc_fc();
   if (carry_flag) { goto SwimKT; } // if player facing to the right, use current offset
   iny_nf();
   iny_nf(); // otherwise move to next OAM data
@@ -1131,7 +1131,7 @@ CntPl:
   iny_nf();
   
 SwimKT:
-  lda_abs(PlayerSize); // check player's size
+  lda_abs_fz(PlayerSize); // check player's size
   if (zero_flag) { goto BigKTS; } // if big, use first tile
   lda_absy_nf(Sprite_Tilenumber + 24); // check tile number of seventh/eighth sprite
   cmp_abs(SwimTileRepOffset); // against tile number in player graphics table
@@ -1164,12 +1164,12 @@ void PlayerGfxProcessing(void) {
   lda_imm(0x4);
   RenderPlayerSub(); // draw player based on offset loaded
   ChkForPlayerAttrib(); // set horizontal flip bits as necessary
-  lda_abs(FireballThrowingTimer);
+  lda_abs_fz(FireballThrowingTimer);
   // if fireball throw timer not set, skip to the end
   if (!zero_flag) {
     ldy_imm_nf(0x0); // set value to initialize by default
     lda_abs_nf(PlayerAnimTimer); // get animation frame timer
-    cmp_abs(FireballThrowingTimer); // compare to fireball throw timer
+    cmp_abs_fc(FireballThrowingTimer); // compare to fireball throw timer
     ram[FireballThrowingTimer] = y; // initialize fireball throw timer
     // if animation frame timer => fireball throw timer skip to end
     if (!carry_flag) {
@@ -1179,7 +1179,7 @@ void PlayerGfxProcessing(void) {
       ram[PlayerGfxOffset] = a; // store it for use later
       ldy_imm_nf(0x4); // set to update four sprite rows by default
       lda_zp_nf(Player_X_Speed);
-      ora_zp(Left_Right_Buttons); // check for horizontal speed or left/right button press
+      ora_zp_fz(Left_Right_Buttons); // check for horizontal speed or left/right button press
       // if no speed or button press, branch using set value in Y
       if (!zero_flag) {
         dey_nf(); // otherwise set to update only three sprite rows
@@ -1212,7 +1212,7 @@ PROfsLoop:
   // NPROffscr:
   tya_nf();
   carry_flag = true; // subtract eight bytes to do
-  sbc_imm(0x8); // next row up
+  sbc_imm_fc(0x8); // next row up
   tay_nf();
   dex(); // decrement row counter
   if (!neg_flag) { goto PROfsLoop; } // do this until all sprite rows are checked
@@ -1258,7 +1258,7 @@ void DrawMushroomIcon(void) {
 IconDataRead:
   lda_absy_nf(MushroomIconData); // note that the default position is set for a
   ram[VRAM_Buffer1 - 1 + y] = a; // 1-player game
-  dey();
+  dey_fn();
   if (!neg_flag) { goto IconDataRead; }
   lda_abs(NumberOfPlayers); // check number of players
   if (!zero_flag) {
@@ -1272,7 +1272,7 @@ IconDataRead:
 
 void DemoEngine(void) {
   ldx_abs_nf(DemoAction); // load current demo action
-  lda_abs(DemoActionTimer); // load current action timer
+  lda_abs_fz(DemoActionTimer); // load current action timer
   if (!zero_flag) { goto DoAction; } // if timer still counting down, skip
   inx_nf();
   inc_abs_nf(DemoAction); // if expired, increment action, X, and
@@ -1314,10 +1314,10 @@ void PlayerVictoryWalk(void) {
   ldy_imm_nf(0x0); // set value here to not walk player by default
   ram[VictoryWalkControl] = y;
   lda_zp_nf(Player_PageLoc); // get player's page location
-  cmp_zp(DestinationPageLoc); // compare with destination page location
+  cmp_zp_fcz(DestinationPageLoc); // compare with destination page location
   if (!zero_flag) { goto PerformWalk; } // if page locations don't match, branch
   lda_zp_nf(Player_X_Position); // otherwise get player's horizontal position
-  cmp_imm(0x60); // compare with preset horizontal position
+  cmp_imm_fc(0x60); // compare with preset horizontal position
   if (carry_flag) { goto DontWalk; } // if still on other page, branch ahead
   
 PerformWalk:
@@ -1328,14 +1328,14 @@ DontWalk:
   tya(); // put contents of Y in A and
   AutoControlPlayer(); // use A to move player to the right or not
   lda_abs_nf(ScreenLeft_PageLoc); // check page location of left side of screen
-  cmp_zp(DestinationPageLoc); // against set value here
+  cmp_zp_fcz(DestinationPageLoc); // against set value here
   if (zero_flag) { goto ExitVWalk; } // branch if equal to change modes if necessary
   lda_abs_nf(ScrollFractional);
   carry_flag = false; // do fixed point math on fractional part of scroll
-  adc_imm(0x80);
+  adc_imm_fc(0x80);
   ram[ScrollFractional] = a; // save fractional movement amount
   lda_imm_nf(0x1); // set 1 pixel per frame
-  adc_imm(0x0); // add carry from previous addition
+  adc_imm_fc(0x0); // add carry from previous addition
   tay(); // use as scroll amount
   ScrollScreen(); // do sub to scroll the screen
   UpdScrollVar(); // do another sub to update screen and scroll variables
@@ -1348,45 +1348,45 @@ ExitVWalk:
 }
 
 void PrintVictoryMessages(void) {
-  lda_abs(SecondaryMsgCounter); // load secondary message counter
+  lda_abs_fz(SecondaryMsgCounter); // load secondary message counter
   if (!zero_flag) { goto IncMsgCounter; } // if set, branch to increment message counters
-  lda_abs(PrimaryMsgCounter); // otherwise load primary message counter
+  lda_abs_fz(PrimaryMsgCounter); // otherwise load primary message counter
   if (zero_flag) { goto ThankPlayer; } // if set to zero, branch to print first message
-  cmp_imm(0x9); // if at 9 or above, branch elsewhere (this comparison
+  cmp_imm_fc(0x9); // if at 9 or above, branch elsewhere (this comparison
   if (carry_flag) { goto IncMsgCounter; } // is residual code, counter never reaches 9)
   ldy_abs_nf(WorldNumber); // check world number
-  cpy_imm(World8);
+  cpy_imm_fz(World8);
   if (!zero_flag) { goto MRetainerMsg; } // if not at world 8, skip to next part
-  cmp_imm(0x3); // check primary message counter again
+  cmp_imm_fc(0x3); // check primary message counter again
   if (!carry_flag) { goto IncMsgCounter; } // if not at 3 yet (world 8 only), branch to increment
   sbc_imm_nf(0x1); // otherwise subtract one
   goto ThankPlayer; // and skip to next part
   
 MRetainerMsg:
-  cmp_imm(0x2); // check primary message counter
+  cmp_imm_fc(0x2); // check primary message counter
   if (!carry_flag) { goto IncMsgCounter; } // if not at 2 yet (world 1-7 only), branch
   
 ThankPlayer:
-  tay(); // put primary message counter into Y
+  tay_fz(); // put primary message counter into Y
   if (!zero_flag) { goto SecondPartMsg; } // if counter nonzero, skip this part, do not print first message
-  lda_abs(CurrentPlayer); // otherwise get player currently on the screen
+  lda_abs_fz(CurrentPlayer); // otherwise get player currently on the screen
   if (zero_flag) { goto EvalForMusic; } // if mario, branch
-  iny(); // otherwise increment Y once for luigi and
+  iny_fz(); // otherwise increment Y once for luigi and
   if (!zero_flag) { goto EvalForMusic; } // do an unconditional branch to the same place
   
 SecondPartMsg:
   iny_nf(); // increment Y to do world 8's message
   lda_abs_nf(WorldNumber);
-  cmp_imm(World8); // check world number
+  cmp_imm_fz(World8); // check world number
   if (zero_flag) { goto EvalForMusic; } // if at world 8, branch to next part
   dey_nf(); // otherwise decrement Y for world 1-7's message
   cpy_imm(0x4); // if counter at 4 (world 1-7 only)
   if (carry_flag) { goto SetEndTimer; } // branch to set victory end timer
-  cpy_imm(0x3); // if counter at 3 (world 1-7 only)
+  cpy_imm_fc(0x3); // if counter at 3 (world 1-7 only)
   if (carry_flag) { goto IncMsgCounter; } // branch to keep counting
   
 EvalForMusic:
-  cpy_imm(0x3); // if counter not yet at 3 (world 8 only), branch
+  cpy_imm_fz(0x3); // if counter not yet at 3 (world 8 only), branch
   if (!zero_flag) { goto PrintMsg; } // to print message only (note world 1-7 will only
   lda_imm_nf(VictoryMusic); // reach this code if counter = 0, and will always branch)
   ram[EventMusicQueue] = a; // otherwise load victory music first (world 8 only)
@@ -1400,7 +1400,7 @@ PrintMsg:
 IncMsgCounter:
   lda_abs_nf(SecondaryMsgCounter);
   carry_flag = false;
-  adc_imm(0x4); // add four to secondary message counter
+  adc_imm_fc(0x4); // add four to secondary message counter
   ram[SecondaryMsgCounter] = a;
   lda_abs_nf(PrimaryMsgCounter);
   adc_imm_nf(0x0); // add carry to primary message counter
@@ -1423,7 +1423,7 @@ void PlayerEndWorld(void) {
   lda_abs(WorldEndTimer); // check to see if world end timer expired
   if (!zero_flag) { goto EndExitOne; } // branch to leave if not
   ldy_abs_nf(WorldNumber); // check world number
-  cpy_imm(World8); // if on world 8, player is done with game,
+  cpy_imm_fc(World8); // if on world 8, player is done with game,
   if (carry_flag) { goto EndChkBButton; } // thus branch to read controller
   lda_imm_nf(0x0);
   ram[AreaNumber] = a; // otherwise initialize area number used as offset
@@ -1456,16 +1456,16 @@ EndChkBButton:
 void BridgeCollapse(void) {
   ldx_abs_nf(BowserFront_Offset); // get enemy offset for bowser
   lda_zpx_nf(Enemy_ID); // check enemy object identifier for bowser
-  cmp_imm(Bowser); // if not found, branch ahead,
+  cmp_imm_fcz(Bowser); // if not found, branch ahead,
   // metatile removal not necessary
   if (zero_flag) {
     ram[ObjectOffset] = x; // store as enemy offset here
-    lda_zpx(Enemy_State); // if bowser in normal state, skip all of this
+    lda_zpx_fz(Enemy_State); // if bowser in normal state, skip all of this
     if (zero_flag) {
       RemoveBridge();
       return;
     }
-    and_imm(0b01000000); // if bowser's state has d6 clear, skip to silence music
+    and_imm_fz(0b01000000); // if bowser's state has d6 clear, skip to silence music
     if (!zero_flag) {
       lda_zpx_nf(Enemy_Y_Position); // check bowser's vertical coordinate
       cmp_imm(0xe0); // if bowser not yet low enough, skip this part ahead
@@ -1531,7 +1531,7 @@ void RemoveBridge(void) {
 void FloateyNumbersRoutine(void) {
   lda_absx(FloateyNum_Control); // load control for floatey number
   if (zero_flag) { return; } // if zero, branch to leave
-  cmp_imm(0xb); // if less than $0b, branch
+  cmp_imm_fc(0xb); // if less than $0b, branch
   if (!carry_flag) { goto ChkNumTimer; }
   lda_imm_nf(0xb); // otherwise set to $0b, thus keeping
   ram[FloateyNum_Control + x] = a; // it in range
@@ -1545,9 +1545,9 @@ ChkNumTimer:
   
 DecNumTimer:
   dec_absx_nf(FloateyNum_Timer); // decrement value here
-  cmp_imm(0x2b); // if not reached a certain point, branch
+  cmp_imm_fz(0x2b); // if not reached a certain point, branch
   if (!zero_flag) { goto ChkTallEnemy; }
-  cpy_imm(0xb); // check offset for $0b
+  cpy_imm_fz(0xb); // check offset for $0b
   if (!zero_flag) { goto LoadNumTiles; } // branch ahead if not found
   inc_abs_nf(NumberofLives); // give player one extra life (1-up)
   lda_imm_nf(Sfx_ExtraLife);
@@ -1558,7 +1558,7 @@ LoadNumTiles:
   lsr_acc_nf(); // move high nybble to low
   lsr_acc_nf();
   lsr_acc_nf();
-  lsr_acc();
+  lsr_acc_fc();
   tax_nf(); // use as X offset, essentially the digit
   lda_absy_nf(ScoreUpdateData); // load again and this time
   and_imm(0b00001111); // mask out the high nybble
@@ -1568,20 +1568,20 @@ LoadNumTiles:
 ChkTallEnemy:
   ldy_absx_nf(Enemy_SprDataOffset); // get OAM data offset for enemy object
   lda_zpx_nf(Enemy_ID); // get enemy object identifier
-  cmp_imm(Spiny);
+  cmp_imm_fz(Spiny);
   if (zero_flag) { goto FloateyPart; } // branch if spiny
-  cmp_imm(PiranhaPlant);
+  cmp_imm_fz(PiranhaPlant);
   if (zero_flag) { goto FloateyPart; } // branch if piranha plant
-  cmp_imm(HammerBro);
+  cmp_imm_fz(HammerBro);
   if (zero_flag) { goto GetAltOffset; } // branch elsewhere if hammer bro
-  cmp_imm(GreyCheepCheep);
+  cmp_imm_fz(GreyCheepCheep);
   if (zero_flag) { goto FloateyPart; } // branch if cheep-cheep of either color
-  cmp_imm(RedCheepCheep);
+  cmp_imm_fz(RedCheepCheep);
   if (zero_flag) { goto FloateyPart; }
-  cmp_imm(TallEnemy);
+  cmp_imm_fc(TallEnemy);
   if (carry_flag) { goto GetAltOffset; } // branch elsewhere if enemy object => $09
   lda_zpx_nf(Enemy_State);
-  cmp_imm(0x2); // if enemy state defeated or otherwise
+  cmp_imm_fc(0x2); // if enemy state defeated or otherwise
   if (carry_flag) { goto FloateyPart; } // $02 or greater, branch beyond this part
   
 GetAltOffset:
@@ -1591,9 +1591,9 @@ GetAltOffset:
   
 FloateyPart:
   lda_absx_nf(FloateyNum_Y_Pos); // get vertical coordinate for
-  cmp_imm(0x18); // floatey number, if coordinate in the
+  cmp_imm_fc(0x18); // floatey number, if coordinate in the
   if (!carry_flag) { goto SetupNumSpr; } // status bar, branch
-  sbc_imm(0x1);
+  sbc_imm_fc(0x1);
   ram[FloateyNum_Y_Pos + x] = a; // otherwise subtract one and store as new
   
 SetupNumSpr:
@@ -1609,7 +1609,7 @@ SetupNumSpr:
   ram[Sprite_Attributes + y] = a; // set palette control in attribute bytes
   ram[Sprite_Attributes + 4 + y] = a; // of left and right sprites
   lda_absx_nf(FloateyNum_Control);
-  asl_acc(); // multiply our floatey number control by 2
+  asl_acc_fc(); // multiply our floatey number control by 2
   tax_nf(); // and use as offset for look-up table
   lda_absx_nf(FloateyNumTileData);
   ram[Sprite_Tilenumber + y] = a; // display first half of number of points
@@ -1630,16 +1630,16 @@ void WriteGameText(void) {
   pha(); // save text number to stack
   asl_acc_nf();
   tay_nf(); // multiply by 2 and use as offset
-  cpy_imm(0x4); // if set to do top status bar or world/lives display,
+  cpy_imm_fc(0x4); // if set to do top status bar or world/lives display,
   // branch to use current offset as-is
   if (carry_flag) {
-    cpy_imm(0x8); // if set to do time-up or game over,
+    cpy_imm_fc(0x8); // if set to do time-up or game over,
     // branch to check players
     if (carry_flag) {
       ldy_imm_nf(0x8); // otherwise warp zone, therefore set offset
     }
     // Chk2Players:
-    lda_abs(NumberOfPlayers); // check for number of players
+    lda_abs_fz(NumberOfPlayers); // check for number of players
     // if there are two, use current offset to also print name
     if (zero_flag) {
       iny_nf(); // otherwise increment offset by one to not print name
@@ -1651,12 +1651,12 @@ void WriteGameText(void) {
   
 GameTextLoop:
   lda_absx_nf(GameText); // load message data
-  cmp_imm(0xff); // check for terminator
+  cmp_imm_fz(0xff); // check for terminator
   // branch to end text if found
   if (!zero_flag) {
     ram[VRAM_Buffer1 + y] = a; // otherwise write data to buffer
     inx_nf(); // and increment increment
-    iny();
+    iny_fz();
     if (!zero_flag) { goto GameTextLoop; } // do this for 256 bytes if no terminator found
   }
   // EndGameText:
@@ -1664,17 +1664,17 @@ GameTextLoop:
   ram[VRAM_Buffer1 + y] = a;
   pla_nf(); // pull original text number from stack
   tax_nf();
-  cmp_imm(0x4); // are we printing warp zone?
+  cmp_imm_fc(0x4); // are we printing warp zone?
   if (!carry_flag) {
-    dex(); // are we printing the world/lives display?
+    dex_fz(); // are we printing the world/lives display?
     // if not, branch to check player's name
     if (zero_flag) {
       lda_abs_nf(NumberofLives); // otherwise, check number of lives
       carry_flag = false; // and increment by one for display
       adc_imm_nf(0x1);
-      cmp_imm(10); // more than 9 lives?
+      cmp_imm_fc(10); // more than 9 lives?
       if (carry_flag) {
-        sbc_imm(10); // if so, subtract 10 and put a crown tile
+        sbc_imm_fc(10); // if so, subtract 10 and put a crown tile
         ldy_imm_nf(0x9f); // next to the difference...strange things happen if
         ram[VRAM_Buffer1 + 7] = y; // the number of lives exceeds 19
       }
@@ -1693,10 +1693,10 @@ GameTextLoop:
     // if only 1 player, leave
     if (!zero_flag) {
       lda_abs_nf(CurrentPlayer); // load current player
-      dex(); // check to see if current message number is for time up
+      dex_fz(); // check to see if current message number is for time up
       if (zero_flag) {
         ldy_abs_nf(OperMode); // check for game over mode
-        cpy_imm(GameOverModeValue);
+        cpy_imm_fz(GameOverModeValue);
         if (!zero_flag) {
           eor_imm_nf(0b00000001); // if not, must be time up, invert d0 to do other player
         }
@@ -1732,7 +1732,7 @@ WarpNumLoop:
   iny_nf();
   iny_nf();
   iny_nf();
-  cpy_imm(0xc);
+  cpy_imm_fc(0xc);
   if (!carry_flag) { goto WarpNumLoop; }
   lda_imm(0x2c); // load new buffer pointer at end of message
   SetVRAMOffset();
@@ -1775,8 +1775,8 @@ DrawMTLoop:
   lda_absx_nf(MetatileBuffer); // get first metatile number, and mask out all but 2 MSB
   and_imm_nf(0b11000000);
   ram[0x3] = a; // store attribute table bits here
-  asl_acc(); // note that metatile format is:
-  rol_acc(); // %xx000000 - attribute table bits,
+  asl_acc_fc(); // note that metatile format is:
+  rol_acc_fc(); // %xx000000 - attribute table bits,
   rol_acc_nf(); // %00xxxxxx - metatile number
   tay_nf(); // rotate bits to d1-d0 and use as offset here
   lda_absy_nf(MetatileGraphics_Low); // get address to graphics table from here
@@ -1790,7 +1790,7 @@ DrawMTLoop:
   lda_abs_nf(AreaParserTaskNum); // get current task number for level processing and
   and_imm_nf(0b00000001); // mask out all but LSB, then invert LSB, multiply by 2
   eor_imm_nf(0b00000001); // to get the correct column position in the metatile,
-  asl_acc(); // then add to the tile offset so we can draw either side
+  asl_acc_fc(); // then add to the tile offset so we can draw either side
   adc_zp_nf(0x2); // of the metatiles
   tay_nf();
   ldx_zp_nf(0x0); // use vram buffer offset from before as X
@@ -1800,19 +1800,19 @@ DrawMTLoop:
   lda_indy_nf(0x6); // now get the second (bottom left or bottom right) and store
   ram[VRAM_Buffer2 + 4 + x] = a;
   ldy_zp_nf(0x4); // get current attribute row
-  lda_zp(0x5); // get LSB of current column where we're at, and
+  lda_zp_fz(0x5); // get LSB of current column where we're at, and
   if (!zero_flag) { goto RightCheck; } // branch if set (clear = left attrib, set = right)
   lda_zp_nf(0x1); // get current row we're rendering
-  lsr_acc(); // branch if LSB set (clear = top left, set = bottom left)
+  lsr_acc_fc(); // branch if LSB set (clear = top left, set = bottom left)
   if (carry_flag) { goto LLeft; }
-  rol_zp(0x3); // rotate attribute bits 3 to the left
-  rol_zp(0x3); // thus in d1-d0, for upper left square
+  rol_zp_fc(0x3); // rotate attribute bits 3 to the left
+  rol_zp_fc(0x3); // thus in d1-d0, for upper left square
   rol_zp_nf(0x3);
   goto SetAttrib;
   
 RightCheck:
   lda_zp_nf(0x1); // get LSB of current row we're rendering
-  lsr_acc(); // branch if set (clear = top right, set = bottom right)
+  lsr_acc_fc(); // branch if set (clear = top right, set = bottom right)
   if (carry_flag) { goto NextMTRow; }
   lsr_zp_nf(0x3); // shift attribute bits 4 to the right
   lsr_zp_nf(0x3); // thus in d3-d2, for upper right square
@@ -1835,7 +1835,7 @@ SetAttrib:
   inc_zp_nf(0x0);
   ldx_zp_nf(0x1); // get current gfx buffer row, and check for
   inx_nf(); // the bottom of the screen
-  cpx_imm(0xd);
+  cpx_imm_fc(0xd);
   if (!carry_flag) { goto DrawMTLoop; } // if not there yet, loop back
   ldy_zp_nf(0x0); // get current vram buffer offset, increment by 3
   iny_nf(); // (for name table address and length bytes)
@@ -1865,7 +1865,7 @@ void RenderAttributeTables(void) {
   lda_abs_nf(CurrentNTAddr_Low); // get low byte of next name table address
   and_imm_nf(0b00011111); // to be written to, mask out all but 5 LSB,
   carry_flag = true; // subtract four
-  sbc_imm(0x4);
+  sbc_imm_fc(0x4);
   and_imm_nf(0b00011111); // mask out bits again and store
   ram[0x1] = a;
   lda_abs_nf(CurrentNTAddr_High); // get high byte and branch if borrow not set
@@ -1878,7 +1878,7 @@ void RenderAttributeTables(void) {
   ram[0x0] = a;
   lda_zp_nf(0x1); // get low byte - 4, divide by 4, add offset for
   lsr_acc_nf(); // attribute table and store
-  lsr_acc();
+  lsr_acc_fc();
   adc_imm_nf(0xc0); // we should now have the appropriate block of
   ram[0x1] = a; // attribute table in our temp address
   ldx_imm_nf(0x0);
@@ -1903,7 +1903,7 @@ AttribLoop:
   iny_nf();
   iny_nf();
   inx_nf(); // increment attribute offset and check to see
-  cpx_imm(0x7); // if we're at the end yet
+  cpx_imm_fc(0x7); // if we're at the end yet
   if (!carry_flag) { goto AttribLoop; }
   ram[VRAM_Buffer2 + y] = a; // put null terminator at the end
   ram[VRAM_Buffer2_Offset] = y; // store offset in case we want to do any more
@@ -1931,7 +1931,7 @@ GetBlankPal:
   ram[VRAM_Buffer1 + x] = a; // store it in the vram buffer
   inx_nf(); // increment offsets
   iny_nf();
-  cpy_imm(0x8);
+  cpy_imm_fc(0x8);
   if (!carry_flag) { goto GetBlankPal; } // do this until all bytes are copied
   ldx_abs_nf(VRAM_Buffer1_Offset); // get current vram buffer offset
   lda_imm_nf(0x3);
@@ -1946,7 +1946,7 @@ GetAreaPal:
   ram[VRAM_Buffer1 + 3 + x] = a; // store it to overwrite blank palette in vram buffer
   iny_nf();
   inx_nf();
-  dec_zp(0x0); // decrement counter
+  dec_zp_fn(0x0); // decrement counter
   if (!neg_flag) { goto GetAreaPal; } // do this until the palette is all copied
   ldx_abs_nf(VRAM_Buffer1_Offset); // get current vram buffer offset
   ldy_abs_nf(ColorRotateOffset); // get color cycling offset
@@ -1998,21 +1998,21 @@ void DestroyBlockMetatile(void) {
 
 void WriteBlockMetatile(void) {
   ldy_imm_nf(0x3); // load offset for blank metatile
-  cmp_imm(0x0); // check contents of A for blank metatile
+  cmp_imm_fcz(0x0); // check contents of A for blank metatile
   // branch if found (unconditional if branched from 8a6b)
   if (!zero_flag) {
     ldy_imm_nf(0x0); // load offset for brick metatile w/ line
-    cmp_imm(0x58);
+    cmp_imm_fcz(0x58);
     // use offset if metatile is brick with coins (w/ line)
     if (!zero_flag) {
-      cmp_imm(0x51);
+      cmp_imm_fcz(0x51);
       // use offset if metatile is breakable brick w/ line
       if (!zero_flag) {
         iny_nf(); // increment offset for brick metatile w/o line
-        cmp_imm(0x5d);
+        cmp_imm_fcz(0x5d);
         // use offset if metatile is brick with coins (w/o line)
         if (!zero_flag) {
-          cmp_imm(0x52);
+          cmp_imm_fcz(0x52);
           // use offset if metatile is breakable brick w/o line
           if (!zero_flag) {
             iny_nf(); // if any other metatile, increment offset for empty block
@@ -2045,7 +2045,7 @@ void PutBlockMetatile(void) {
   tax_nf();
   ldy_imm_nf(0x20); // load high byte for name table 0
   lda_zp_nf(0x6); // get low byte of block buffer pointer
-  cmp_imm(0xd0); // check to see if we're on odd-page block buffer
+  cmp_imm_fc(0xd0); // check to see if we're on odd-page block buffer
   // if not, use current high byte
   if (carry_flag) {
     ldy_imm_nf(0x24); // otherwise load high byte for name table 1
@@ -2060,11 +2060,11 @@ void PutBlockMetatile(void) {
   lda_zp_nf(0x2); // get vertical high nybble offset used in block buffer routine
   carry_flag = false;
   adc_imm_nf(0x20); // add 32 pixels for the status bar
-  asl_acc();
+  asl_acc_fc();
   rol_zp_nf(0x5); // shift and rotate d7 onto d0 and d6 into carry
-  asl_acc();
-  rol_zp(0x5); // shift and rotate d6 onto d0 and d5 into carry
-  adc_zp(0x4); // add low byte of name table and carry to vertical high nybble
+  asl_acc_fc();
+  rol_zp_fc(0x5); // shift and rotate d6 onto d0 and d5 into carry
+  adc_zp_fc(0x4); // add low byte of name table and carry to vertical high nybble
   ram[0x4] = a; // and store here
   lda_zp_nf(0x5); // get whatever was in d7 and d6 of vertical high nybble
   adc_imm_nf(0x0); // add carry
@@ -2087,7 +2087,7 @@ void RemBridge(void) {
   lda_zp_nf(0x4);
   ram[VRAM_Buffer1 + y] = a; // write low byte of name table
   carry_flag = false; // into first slot as read
-  adc_imm(0x20); // add 32 bytes to value
+  adc_imm_fc(0x20); // add 32 bytes to value
   ram[VRAM_Buffer1 + 5 + y] = a; // write low byte of name table
   lda_zp_nf(0x5); // plus 32 bytes into second slot
   ram[VRAM_Buffer1 - 1 + y] = a; // write high byte of name
@@ -2124,9 +2124,9 @@ void WriteNTAddr(void) {
   
 InitNTLoop:
   ppu_write_data(a); // count out exactly 768 tiles
-  dey();
+  dey_fz();
   if (!zero_flag) { goto InitNTLoop; }
-  dex();
+  dex_fz();
   if (!zero_flag) { goto InitNTLoop; }
   ldy_imm_nf(64); // now to clear the attribute table (with zero this time)
   txa_nf();
@@ -2147,7 +2147,7 @@ InitATLoop:
 void ReadJoypads(void) {
   lda_imm_nf(0x1); // reset and clear strobe of joypad ports
   write_joypad1(a);
-  lsr_acc();
+  lsr_acc_fc();
   tax(); // start with joypad 1's port
   write_joypad1(a);
   ReadPortBits();
@@ -2164,15 +2164,15 @@ PortLoop:
   ram[0x0] = a; // check d1 and d0 of port output
   lsr_acc_nf(); // this is necessary on the old
   ora_zp_nf(0x0); // famicom systems in japan
-  lsr_acc();
+  lsr_acc_fc();
   pla_nf(); // read bits from stack
-  rol_acc(); // rotate bit from carry flag
-  dey();
+  rol_acc_fc(); // rotate bit from carry flag
+  dey_fz();
   if (!zero_flag) { goto PortLoop; } // count down bits left
   ram[SavedJoypadBits + x] = a; // save controller status here always
   pha();
   and_imm_nf(0b00110000); // check for select or start
-  and_absx(JoypadBitMask); // if neither saved state nor current state
+  and_absx_fz(JoypadBitMask); // if neither saved state nor current state
   // have any of these two set, branch
   if (!zero_flag) {
     pla_nf();
@@ -2195,7 +2195,7 @@ void WriteBufferToScreen(void) {
   ppu_write_address(a); // store low byte of vram address
   iny_nf();
   lda_indy_nf(0x0); // load next byte (third)
-  asl_acc(); // shift to left and save in stack
+  asl_acc_fc(); // shift to left and save in stack
   pha();
   lda_abs_nf(Mirror_PPU_CTRL_REG1); // load mirror of $2000,
   ora_imm(0b00000100); // set ppu to increment by 32 by default
@@ -2206,7 +2206,7 @@ void WriteBufferToScreen(void) {
   // SetupWrites:
   WritePPUReg1(); // write to register
   pla_nf(); // pull from stack and shift to left again
-  asl_acc();
+  asl_acc_fc();
   // if d6 of third byte was clear, do not repeat byte
   if (carry_flag) {
     ora_imm_nf(0b00000010); // otherwise set d1 and increment Y
@@ -2214,7 +2214,7 @@ void WriteBufferToScreen(void) {
   }
   // GetLength:
   lsr_acc_nf(); // shift back to the right to get proper length
-  lsr_acc(); // note that d1 will now be in carry
+  lsr_acc_fc(); // note that d1 will now be in carry
   tax_nf();
   
 OutputToVRAM:
@@ -2225,14 +2225,14 @@ OutputToVRAM:
   // RepeatByte:
   lda_indy_nf(0x0); // load more data from buffer and write to vram
   ppu_write_data(a);
-  dex(); // done writing?
+  dex_fz(); // done writing?
   if (!zero_flag) { goto OutputToVRAM; }
   carry_flag = true;
   tya_nf();
-  adc_zp(0x0); // add end length plus one to the indirect at $00
+  adc_zp_fc(0x0); // add end length plus one to the indirect at $00
   ram[0x0] = a; // to allow this routine to read another set of updates
   lda_imm_nf(0x0);
-  adc_zp(0x1);
+  adc_zp_fc(0x1);
   ram[0x1] = a;
   lda_imm_nf(0x3f); // sets vram address to $3f00
   ppu_write_address(a);
@@ -2293,7 +2293,7 @@ void OutputNumbers(void) {
     tay_nf();
     ldx_abs_nf(VRAM_Buffer1_Offset); // get current buffer pointer
     lda_imm_nf(0x20); // put at top of screen by default
-    cpy_imm(0x0); // are we writing top score on title screen?
+    cpy_imm_fz(0x0); // are we writing top score on title screen?
     if (zero_flag) {
       lda_imm_nf(0x22); // if so, put further down on the screen
     }
@@ -2309,7 +2309,7 @@ void OutputNumbers(void) {
     tax_nf();
     lda_absx_nf(StatusBarOffset); // load offset to value we want to write
     carry_flag = true;
-    sbc_absy(StatusBarData + 1); // subtract from length byte we read before
+    sbc_absy_fc(StatusBarData + 1); // subtract from length byte we read before
     tay_nf(); // use value as offset to display digits
     ldx_zp_nf(0x2);
     
@@ -2318,7 +2318,7 @@ DigitPLoop:
     ram[VRAM_Buffer1 + 3 + x] = a;
     inx_nf();
     iny_nf();
-    dec_zp(0x3); // do this until all the digits are written
+    dec_zp_fz(0x3); // do this until all the digits are written
     if (!zero_flag) { goto DigitPLoop; }
     lda_imm_nf(0x0); // put null terminator at end
     ram[VRAM_Buffer1 + 3 + x] = a;
@@ -2332,22 +2332,22 @@ DigitPLoop:
 
 void DigitsMathRoutine(void) {
   lda_abs_nf(OperMode); // check mode of operation
-  cmp_imm(TitleScreenModeValue);
+  cmp_imm_fcz(TitleScreenModeValue);
   if (zero_flag) { goto EraseDMods; } // if in title screen mode, branch to lock score
   ldx_imm_nf(0x5);
   
 AddModLoop:
   lda_absx_nf(DigitModifier); // load digit amount to increment
   carry_flag = false;
-  adc_absy(DisplayDigits); // add to current digit
+  adc_absy_fcn(DisplayDigits); // add to current digit
   if (neg_flag) { goto BorrowOne; } // if result is a negative number, branch to subtract
-  cmp_imm(10);
+  cmp_imm_fc(10);
   if (carry_flag) { goto CarryOne; } // if digit greater than $09, branch to add
   
 StoreNewD:
   ram[DisplayDigits + y] = a; // store as new score or game timer digit
   dey_nf(); // move onto next digits in score or game timer
-  dex(); // and digit amounts to increment
+  dex_fn(); // and digit amounts to increment
   if (!neg_flag) { goto AddModLoop; } // loop back if we're not done yet
   
 EraseDMods:
@@ -2362,12 +2362,12 @@ EraseMLoop:
   
 BorrowOne:
   dec_absx_nf(DigitModifier - 1); // decrement the previous digit, then put $09 in
-  lda_imm(0x9); // the game timer digit we're currently on to "borrow
+  lda_imm_fz(0x9); // the game timer digit we're currently on to "borrow
   if (!zero_flag) { goto StoreNewD; } // the one", then do an unconditional branch back
   
 CarryOne:
   carry_flag = true; // subtract ten from our digit to make it a
-  sbc_imm(10); // proper BCD number, then increment the digit
+  sbc_imm_fc(10); // proper BCD number, then increment the digit
   inc_absx_nf(DigitModifier - 1); // preceding current digit to "carry the one" properly
   goto StoreNewD; // go back to just after we branched here
   // -------------------------------------------------------------------------------------
@@ -2386,7 +2386,7 @@ void TopScoreCheck(void) {
   
 GetScoreDiff:
   lda_absx_nf(PlayerScoreDisplay); // subtract each player digit from each high score digit
-  sbc_absy(TopScoreDisplay); // from lowest to highest, if any top score digit exceeds
+  sbc_absy_fc(TopScoreDisplay); // from lowest to highest, if any top score digit exceeds
   dex_nf(); // any player digit, borrow will be set until a subsequent
   dey(); // subtraction clears it (player digit is higher than top)
   if (!neg_flag) { goto GetScoreDiff; }
@@ -2414,9 +2414,9 @@ InitPageLoop:
   ram[0x7] = x;
   
 InitByteLoop:
-  cpx_imm(0x1); // check to see if we're on the stack ($0100-$01ff)
+  cpx_imm_fz(0x1); // check to see if we're on the stack ($0100-$01ff)
   if (!zero_flag) { goto InitByte; } // if not, go ahead anyway
-  cpy_imm(0x60); // otherwise, check to see if we're at $0160-$01ff
+  cpy_imm_fc(0x60); // otherwise, check to see if we're at $0160-$01ff
   if (carry_flag) { goto SkipByte; } // if so, skip write
   
 InitByte:
@@ -2424,7 +2424,7 @@ InitByte:
   
 SkipByte:
   dey_nf();
-  cpy_imm(0xff); // do this until all bytes in page have been erased
+  cpy_imm_fcz(0xff); // do this until all bytes in page have been erased
   if (!zero_flag) { goto InitByteLoop; }
   dex(); // go onto the next page
   if (!neg_flag) { goto InitPageLoop; } // do this until all pages of memory have been erased
@@ -2435,18 +2435,18 @@ void GetAreaMusic(void) {
   lda_abs(OperMode); // if in title screen mode, leave
   if (zero_flag) { return; }
   lda_abs_nf(AltEntranceControl); // check for specific alternate mode of entry
-  cmp_imm(0x2); // if found, branch without checking starting position
+  cmp_imm_fcz(0x2); // if found, branch without checking starting position
   if (zero_flag) { goto ChkAreaType; } // from area object data header
   ldy_imm_nf(0x5); // select music for pipe intro scene by default
   lda_abs_nf(PlayerEntranceCtrl); // check value from level header for certain values
-  cmp_imm(0x6);
+  cmp_imm_fcz(0x6);
   if (zero_flag) { goto StoreMusic; } // load music for pipe intro scene if header
-  cmp_imm(0x7); // start position either value $06 or $07
+  cmp_imm_fcz(0x7); // start position either value $06 or $07
   if (zero_flag) { goto StoreMusic; }
   
 ChkAreaType:
   ldy_abs_nf(AreaType); // load area type as offset for music bit
-  lda_abs(CloudTypeOverride);
+  lda_abs_fz(CloudTypeOverride);
   if (zero_flag) { goto StoreMusic; } // check for cloud type override
   ldy_imm_nf(0x4); // select music for cloud type level if found
   
@@ -2469,7 +2469,7 @@ void Entrance_GameTimerSetup(void) {
   dec_abs_nf(Player_CollisionBits); // initialize player's collision bits
   ldy_imm_nf(0x0); // initialize halfway page
   ram[HalfwayPage] = y;
-  lda_abs(AreaType); // check area type
+  lda_abs_fz(AreaType); // check area type
   // if water type, set swimming flag, otherwise do not set
   if (zero_flag) {
     iny_nf();
@@ -2477,9 +2477,9 @@ void Entrance_GameTimerSetup(void) {
   // ChkStPos:
   ram[SwimmingFlag] = y;
   ldx_abs_nf(PlayerEntranceCtrl); // get starting position loaded from header
-  ldy_abs(AltEntranceControl); // check alternate mode of entry flag for 0 or 1
+  ldy_abs_fz(AltEntranceControl); // check alternate mode of entry flag for 0 or 1
   if (!zero_flag) {
-    cpy_imm(0x1);
+    cpy_imm_fcz(0x1);
     if (!zero_flag) {
       ldx_absy_nf(AltYPosOffset - 2); // if not 0 or 1, override $0710 with new offset in X
     }
@@ -2492,24 +2492,24 @@ void Entrance_GameTimerSetup(void) {
   lda_absx(PlayerBGPriorityData);
   ram[Player_SprAttrib] = a; // set player sprite attributes using offset in X
   GetPlayerColors(); // get appropriate player palette
-  ldy_abs(GameTimerSetting); // get timer control value from header
+  ldy_abs_fz(GameTimerSetting); // get timer control value from header
   // if set to zero, branch (do not use dummy byte for this)
   if (!zero_flag) {
-    lda_abs(FetchNewGameTimerFlag); // do we need to set the game timer? if not, use
+    lda_abs_fz(FetchNewGameTimerFlag); // do we need to set the game timer? if not, use
     // old game timer setting
     if (!zero_flag) {
       lda_absy_nf(GameTimerData); // if game timer is set and game timer flag is also set,
       ram[GameTimerDisplay] = a; // use value of game timer control for first digit of game timer
       lda_imm_nf(0x1);
       ram[GameTimerDisplay + 2] = a; // set last digit of game timer to 1
-      lsr_acc();
+      lsr_acc_fc();
       ram[GameTimerDisplay + 1] = a; // set second digit of game timer
       ram[FetchNewGameTimerFlag] = a; // clear flag for game timer reset
       ram[StarInvincibleTimer] = a; // clear star mario timer
     }
   }
   // ChkOverR:
-  ldy_abs(JoypadOverride); // if controller bits not set, branch to skip this part
+  ldy_abs_fz(JoypadOverride); // if controller bits not set, branch to skip this part
   if (!zero_flag) {
     lda_imm_nf(0x3); // set player state to climbing
     ram[Player_State] = a;
@@ -2540,7 +2540,7 @@ void PlayerLoseLife(void) {
   ram[Sprite0HitDetectFlag] = a;
   lda_imm_nf(Silence); // silence music
   ram[EventMusicQueue] = a;
-  dec_abs(NumberofLives); // take one life from player
+  dec_abs_fn(NumberofLives); // take one life from player
   // if player still has lives, branch
   if (neg_flag) {
     lda_imm_nf(0x0);
@@ -2554,7 +2554,7 @@ void PlayerLoseLife(void) {
   asl_acc_nf(); // as offset
   tax_nf();
   lda_abs_nf(LevelNumber); // if in area -3 or -4, increment
-  and_imm(0x2); // offset by one byte, otherwise
+  and_imm_fz(0x2); // offset by one byte, otherwise
   // leave offset alone
   if (!zero_flag) {
     inx_nf();
@@ -2562,7 +2562,7 @@ void PlayerLoseLife(void) {
   // GetHalfway:
   ldy_absx_nf(HalfwayPageNybbles); // get halfway page number with offset
   lda_abs_nf(LevelNumber); // check area number's LSB
-  lsr_acc();
+  lsr_acc_fc();
   tya_nf(); // if in area -2 or -4, use lower nybble
   if (!carry_flag) {
     lsr_acc_nf(); // move higher nybble to lower if area
@@ -2622,7 +2622,7 @@ void DoNothing2(void) {
 }
 
 void AreaParserTaskHandler(void) {
-  ldy_abs(AreaParserTaskNum); // check number of tasks here
+  ldy_abs_fz(AreaParserTaskNum); // check number of tasks here
   // if already set, go ahead
   if (zero_flag) {
     ldy_imm_nf(0x8);
@@ -2654,7 +2654,7 @@ void AreaParserTasks(void) {
 void IncrementColumnPos(void) {
   inc_abs_nf(CurrentColumnPos); // increment column where we're at
   lda_abs_nf(CurrentColumnPos);
-  and_imm(0b00001111); // mask out higher nybble
+  and_imm_fz(0b00001111); // mask out higher nybble
   if (zero_flag) {
     ram[CurrentColumnPos] = a; // if no bits left set, wrap back to zero (0-f)
     inc_abs_nf(CurrentPageLoc); // and increment page number where we're at
@@ -2683,30 +2683,30 @@ void AreaParserCore(void) {
   
 ClrMTBuf:
   ram[MetatileBuffer + x] = a; // clear out metatile buffer
-  dex();
+  dex_fn();
   if (!neg_flag) { goto ClrMTBuf; }
-  ldy_abs(BackgroundScenery); // do we need to render the background scenery?
+  ldy_abs_fz(BackgroundScenery); // do we need to render the background scenery?
   // if not, skip to check the foreground
   if (!zero_flag) {
     lda_abs_nf(CurrentPageLoc); // otherwise check for every third page
     
 ThirdP:
-    cmp_imm(0x3);
+    cmp_imm_fn(0x3);
     // if less than three we're there
     if (!neg_flag) {
       carry_flag = true;
-      sbc_imm(0x3); // if 3 or more, subtract 3 and
+      sbc_imm_fn(0x3); // if 3 or more, subtract 3 and
       if (!neg_flag) { goto ThirdP; } // do an unconditional branch
     }
     // RendBack:
     asl_acc_nf(); // move results to higher nybble
     asl_acc_nf();
     asl_acc_nf();
-    asl_acc();
-    adc_absy(BSceneDataOffsets - 1); // add to it offset loaded from here
+    asl_acc_fc();
+    adc_absy_fc(BSceneDataOffsets - 1); // add to it offset loaded from here
     adc_abs_nf(CurrentColumnPos); // add to the result our current column position
     tax_nf();
-    lda_absx(BackSceneryData); // load data from sum of offsets
+    lda_absx_fz(BackSceneryData); // load data from sum of offsets
     // if zero, no scenery for that part
     if (!zero_flag) {
       pha();
@@ -2714,7 +2714,7 @@ ThirdP:
       carry_flag = true;
       sbc_imm_nf(0x1); // subtract one (because low nybble is $01-$0c)
       ram[0x0] = a; // save low nybble
-      asl_acc(); // multiply by three (shift to left and add result to old one)
+      asl_acc_fc(); // multiply by three (shift to left and add result to old one)
       adc_zp_nf(0x0); // note that since d7 was nulled, the carry flag is always clear
       tax_nf(); // save as offset for background scenery metatile data
       pla_nf(); // get high nybble from stack, move low
@@ -2731,22 +2731,22 @@ SceLoop1:
       ram[MetatileBuffer + y] = a; // store into buffer from offset of (msb / 16)
       inx_nf();
       iny_nf();
-      cpy_imm(0xb); // if at this location, leave loop
+      cpy_imm_fz(0xb); // if at this location, leave loop
       if (!zero_flag) {
-        dec_zp(0x0); // decrement until counter expires, barring exception
+        dec_zp_fz(0x0); // decrement until counter expires, barring exception
         if (!zero_flag) { goto SceLoop1; }
       }
     }
   }
   // RendFore:
-  ldx_abs(ForegroundScenery); // check for foreground data needed or not
+  ldx_abs_fz(ForegroundScenery); // check for foreground data needed or not
   // if not, skip this part
   if (!zero_flag) {
     ldy_absx_nf(FSceneDataOffsets - 1); // load offset from location offset by header value, then
     ldx_imm_nf(0x0); // reinit X
     
 SceLoop2:
-    lda_absy(ForeSceneryData); // load data until counter expires
+    lda_absy_fz(ForeSceneryData); // load data until counter expires
     // do not store if zero found
     if (!zero_flag) {
       ram[MetatileBuffer + x] = a;
@@ -2754,15 +2754,15 @@ SceLoop2:
     // NoFore:
     iny_nf();
     inx_nf();
-    cpx_imm(0xd); // store up to end of metatile buffer
+    cpx_imm_fz(0xd); // store up to end of metatile buffer
     if (!zero_flag) { goto SceLoop2; }
   }
   // RendTerr:
-  ldy_abs(AreaType); // check world type for water level
+  ldy_abs_fz(AreaType); // check world type for water level
   // if not water level, skip this part
   if (zero_flag) {
     lda_abs_nf(WorldNumber); // check world number, if not world number eight
-    cmp_imm(World8); // then skip this part
+    cmp_imm_fz(World8); // then skip this part
     if (zero_flag) {
       lda_imm_nf(0x62); // if set as water level and world number eight,
       goto StoreMT; // use castle wall metatile as terrain type
@@ -2770,7 +2770,7 @@ SceLoop2:
   }
   // TerMTile:
   lda_absy_nf(TerrainMetatiles); // otherwise get appropriate metatile for area type
-  ldy_abs(CloudTypeOverride); // check for cloud type override
+  ldy_abs_fz(CloudTypeOverride); // check for cloud type override
   // if not set, keep value otherwise
   if (!zero_flag) {
     lda_imm_nf(0x88); // use cloud block terrain
@@ -2788,9 +2788,9 @@ TerrLoop:
   ram[0x0] = a;
   iny_nf(); // increment Y and use as offset next time around
   ram[0x1] = y;
-  lda_abs(CloudTypeOverride); // skip if value here is zero
+  lda_abs_fz(CloudTypeOverride); // skip if value here is zero
   if (!zero_flag) {
-    cpx_imm(0x0); // otherwise, check if we're doing the ceiling byte
+    cpx_imm_fz(0x0); // otherwise, check if we're doing the ceiling byte
     if (!zero_flag) {
       lda_zp_nf(0x0); // if not, mask out all but d3
       and_imm_nf(0b00001000);
@@ -2802,7 +2802,7 @@ TerrLoop:
   
 TerrBChk:
   lda_absy_nf(Bitmasks); // load bitmask, then perform AND on contents of first byte
-  bit_zp(0x0);
+  bit_zp_fz(0x0);
   // if not set, skip this part (do not write terrain to buffer)
   if (!zero_flag) {
     lda_zp_nf(0x7);
@@ -2814,10 +2814,10 @@ TerrBChk:
   // if we're at the end, break out of this loop
   if (!zero_flag) {
     lda_abs_nf(AreaType); // check world type for underground area
-    cmp_imm(0x2);
+    cmp_imm_fz(0x2);
     // if not underground, skip this part
     if (zero_flag) {
-      cpx_imm(0xb);
+      cpx_imm_fz(0xb);
       // if we're at the bottom of the screen, override
       if (zero_flag) {
         lda_imm_nf(0x54); // old terrain type with ground level terrain type
@@ -2826,7 +2826,7 @@ TerrBChk:
     }
     // EndUChk:
     iny_nf(); // increment bitmasks offset in Y
-    cpy_imm(0x8);
+    cpy_imm_fcz(0x8);
     if (!zero_flag) { goto TerrBChk; } // if not all bits checked, loop back
     ldy_zp(0x1);
     if (!zero_flag) { goto TerrLoop; } // unconditional branch, use Y to load next byte
@@ -2842,12 +2842,12 @@ ChkMTLow:
   ram[0x0] = y;
   lda_absx_nf(MetatileBuffer); // load stored metatile number
   and_imm_nf(0b11000000); // mask out all but 2 MSB
-  asl_acc();
-  rol_acc(); // make %xx000000 into %000000xx
+  asl_acc_fc();
+  rol_acc_fc(); // make %xx000000 into %000000xx
   rol_acc_nf();
   tay_nf(); // use as offset in Y
   lda_absx_nf(MetatileBuffer); // reload original unmasked value here
-  cmp_absy(BlockBuffLowBounds); // check for certain values depending on bits set
+  cmp_absy_fc(BlockBuffLowBounds); // check for certain values depending on bits set
   // if equal or greater, branch
   if (!carry_flag) {
     lda_imm_nf(0x0); // if less, init value before storing
@@ -2881,9 +2881,9 @@ ProcADLoop:
   if (!neg_flag) { goto RdyDecode; } // if buffer not negative, branch, otherwise
   iny_nf();
   lda_indy_nf(AreaData); // get second byte of area object
-  asl_acc(); // check for page select bit (d7), branch if not set
+  asl_acc_fc(); // check for page select bit (d7), branch if not set
   if (!carry_flag) { goto Chk1Row13; }
-  lda_abs(AreaObjectPageSel); // check page select
+  lda_abs_fz(AreaObjectPageSel); // check page select
   if (!zero_flag) { goto Chk1Row13; }
   inc_abs_nf(AreaObjectPageSel); // if not already set, set it now
   inc_abs_nf(AreaObjectPageLoc); // and increment page location
@@ -2892,14 +2892,14 @@ Chk1Row13:
   dey_nf();
   lda_indy_nf(AreaData); // reread first byte of level object
   and_imm_nf(0xf); // mask out high nybble
-  cmp_imm(0xd); // row 13?
+  cmp_imm_fcz(0xd); // row 13?
   if (!zero_flag) { goto Chk1Row14; }
   iny_nf(); // if so, reread second byte of level object
   lda_indy_nf(AreaData);
   dey_nf(); // decrement to get ready to read first byte
-  and_imm(0b01000000); // check for d6 set (if not, object is page control)
+  and_imm_fz(0b01000000); // check for d6 set (if not, object is page control)
   if (!zero_flag) { goto CheckRear; }
-  lda_abs(AreaObjectPageSel); // if page select is set, do not reread
+  lda_abs_fz(AreaObjectPageSel); // if page select is set, do not reread
   if (!zero_flag) { goto CheckRear; }
   iny_nf(); // if d6 not set, reread second byte
   lda_indy_nf(AreaData);
@@ -2909,7 +2909,7 @@ Chk1Row13:
   goto NextAObj;
   
 Chk1Row14:
-  cmp_imm(0xe); // row 14?
+  cmp_imm_fcz(0xe); // row 14?
   if (!zero_flag) { goto CheckRear; }
   lda_abs(BackloadingFlag); // check flag for saved page number and branch if set
   if (!zero_flag) { goto RdyDecode; } // to render the object (otherwise bg might not look right)
@@ -2931,14 +2931,14 @@ NextAObj:
   
 ChkLength:
   ldx_zp_nf(ObjectOffset); // get buffer offset
-  lda_absx(AreaObjectLength); // check object length for anything stored here
+  lda_absx_fn(AreaObjectLength); // check object length for anything stored here
   if (neg_flag) { goto ProcLoopb; } // if not, branch to handle loopback
   dec_absx_nf(AreaObjectLength); // otherwise decrement length or get rid of it
   
 ProcLoopb:
-  dex(); // decrement buffer offset
+  dex_fn(); // decrement buffer offset
   if (!neg_flag) { goto ProcADLoop; } // and loopback unless exceeded buffer
-  lda_abs(BehindAreaParserFlag); // check for flag set if objects were behind renderer
+  lda_abs_fz(BehindAreaParserFlag); // check for flag set if objects were behind renderer
   if (!zero_flag) { ProcessAreaData(); return; } // branch if true to load more level data, otherwise
   lda_abs(BackloadingFlag); // check for flag set if starting right of page $00
   if (!zero_flag) { ProcessAreaData(); return; } // branch if true to load more level data, otherwise leave
@@ -2952,7 +2952,7 @@ void IncAreaObjOffset(void) {
 }
 
 void DecodeAreaData(void) {
-  lda_absx(AreaObjectLength); // check current buffer flag
+  lda_absx_fn(AreaObjectLength); // check current buffer flag
   if (neg_flag) { goto Chk1stB; }
   ldy_absx_nf(AreaObjOffsetBuffer); // if not, get offset from buffer
   
@@ -2962,25 +2962,25 @@ Chk1stB:
   cmp_imm(0xfd);
   if (zero_flag) { goto LeavePar; } // if end of level, leave this routine
   and_imm_nf(0xf); // otherwise, mask out low nybble
-  cmp_imm(0xf); // row 15?
+  cmp_imm_fz(0xf); // row 15?
   if (zero_flag) { goto ChkRow14; } // if so, keep the offset of 16
   ldx_imm_nf(0x8); // otherwise load offset of 8 for special row 12
-  cmp_imm(0xc); // row 12?
+  cmp_imm_fz(0xc); // row 12?
   if (zero_flag) { goto ChkRow14; } // if so, keep the offset value of 8
   ldx_imm_nf(0x0); // otherwise nullify value by default
   
 ChkRow14:
   ram[0x7] = x; // store whatever value we just loaded here
   ldx_zp_nf(ObjectOffset); // get object offset again
-  cmp_imm(0xe); // row 14?
+  cmp_imm_fz(0xe); // row 14?
   if (!zero_flag) { goto ChkRow13; }
   lda_imm_nf(0x0); // if so, load offset with $00
   ram[0x7] = a;
-  lda_imm(0x2e); // and load A with another value
+  lda_imm_fz(0x2e); // and load A with another value
   if (!zero_flag) { goto NormObj; } // unconditional branch
   
 ChkRow13:
-  cmp_imm(0xd); // row 13?
+  cmp_imm_fcz(0xd); // row 13?
   if (!zero_flag) { goto ChkSRows; }
   lda_imm_nf(0x22); // if so, load offset with 34
   ram[0x7] = a;
@@ -2990,7 +2990,7 @@ ChkRow13:
   if (zero_flag) { goto LeavePar; } // if d6 clear, branch to leave (we handled this earlier)
   lda_indy_nf(AreaData); // otherwise, get byte again
   and_imm_nf(0b01111111); // mask out d7
-  cmp_imm(0x4b); // check for loop command in low nybble
+  cmp_imm_fz(0x4b); // check for loop command in low nybble
   if (!zero_flag) { goto Mask2MSB; } // (plus d6 set for object other than page control)
   inc_abs_nf(LoopCommand); // if loop command, set loop command flag
   
@@ -2999,11 +2999,11 @@ Mask2MSB:
   goto NormObj; // and jump
   
 ChkSRows:
-  cmp_imm(0xc); // row 12-15?
+  cmp_imm_fc(0xc); // row 12-15?
   if (carry_flag) { goto SpecObj; }
   iny_nf(); // if not, get second byte of level object
   lda_indy_nf(AreaData);
-  and_imm(0b01110000); // mask out all but d6-d4
+  and_imm_fz(0b01110000); // mask out all but d6-d4
   if (!zero_flag) { goto LrgObj; } // if any bits set, branch to handle large object
   lda_imm_nf(0x16);
   ram[0x7] = a; // otherwise set offset of 24 for small object
@@ -3013,10 +3013,10 @@ ChkSRows:
   
 LrgObj:
   ram[0x0] = a; // store value here (branch for large objects)
-  cmp_imm(0x70); // check for vertical pipe object
+  cmp_imm_fz(0x70); // check for vertical pipe object
   if (!zero_flag) { goto NotWPipe; }
   lda_indy_nf(AreaData); // if not, reload second byte
-  and_imm(0b00001000); // mask out all but d3 (usage control bit)
+  and_imm_fz(0b00001000); // mask out all but d3 (usage control bit)
   if (zero_flag) { goto NotWPipe; } // if d3 clear, branch to get original value
   lda_imm_nf(0x0); // otherwise, nullify value for warp pipe
   ram[0x0] = a;
@@ -3038,10 +3038,10 @@ MoveAOId:
   
 NormObj:
   ram[0x0] = a; // store value here (branch for small objects and rows 13 and 14)
-  lda_absx(AreaObjectLength); // is there something stored here already?
+  lda_absx_fn(AreaObjectLength); // is there something stored here already?
   if (!neg_flag) { RunAObj(); return; } // if so, branch to do its particular sub
   lda_abs_nf(AreaObjectPageLoc); // otherwise check to see if the object we've loaded is on the
-  cmp_abs(CurrentPageLoc); // same page as the renderer, and if so, branch
+  cmp_abs_fcz(CurrentPageLoc); // same page as the renderer, and if so, branch
   if (zero_flag) { goto InitRear; }
   ldy_abs_nf(AreaDataOffset); // if not, get old offset of level pointer
   lda_indy_nf(AreaData); // and reload first byte
@@ -3055,7 +3055,7 @@ LeavePar:
   return;
   
 InitRear:
-  lda_abs(BackloadingFlag); // check backloading flag to see if it's been initialized
+  lda_abs_fz(BackloadingFlag); // check backloading flag to see if it's been initialized
   if (zero_flag) { BackColC(); return; } // branch to column-wise check
   lda_imm(0x0); // if not, initialize both backloading and
   ram[BackloadingFlag] = a; // behind-renderer flags and leave
@@ -3148,7 +3148,7 @@ void AlterAreaAttributes(void) {
   iny_nf(); // load second byte
   lda_indy_nf(AreaData);
   pha(); // save in stack for now
-  and_imm(0b01000000);
+  and_imm_fz(0b01000000);
   // branch if d6 is set
   if (zero_flag) {
     pla_nf();
@@ -3180,11 +3180,11 @@ void AlterAreaAttributes(void) {
 
 void ScrollLockObject_Warp(void) {
   ldx_imm_nf(0x4); // load value of 4 for game text routine as default
-  lda_abs(WorldNumber); // warp zone (4-3-2), then check world number
+  lda_abs_fz(WorldNumber); // warp zone (4-3-2), then check world number
   if (!zero_flag) {
     inx_nf(); // if world number > 1, increment for next warp zone (5)
     ldy_abs_nf(AreaType); // check area type
-    dey();
+    dey_fz();
     // if ground area type, increment for last warp zone
     if (zero_flag) {
       inx_nf(); // (8-7-6) and move on
@@ -3216,7 +3216,7 @@ FreCompLoop:
   dey(); // check regular slots of enemy object buffer
   // if all slots checked and enemy object not found, branch to store
   if (!neg_flag) {
-    cmp_zpy(Enemy_ID); // check for enemy object in buffer versus frenzy object
+    cmp_zpy_fcz(Enemy_ID); // check for enemy object in buffer versus frenzy object
     if (!zero_flag) { goto FreCompLoop; }
     lda_imm(0x0); // if enemy object already present, nullify queue and leave
   }
@@ -3243,7 +3243,7 @@ void TreeLedge(void) {
       tya_nf();
       ram[AreaObjectLength + x] = a; // store lower nybble into buffer flag as length of ledge
       lda_abs_nf(CurrentPageLoc);
-      ora_abs(CurrentColumnPos); // are we at the start of the level?
+      ora_abs_fz(CurrentColumnPos); // are we at the start of the level?
       if (!zero_flag) {
         lda_imm(0x16); // render start of tree ledge
         NoUnder();
@@ -3268,7 +3268,7 @@ void MushroomLedge(void) {
   ram[0x6] = y; // store length here for now
   if (carry_flag) {
     lda_absx_nf(AreaObjectLength); // divide length by 2 and store elsewhere
-    lsr_acc();
+    lsr_acc_fc();
     ram[MushroomLedgeHalfLen + x] = a;
     lda_imm(0x19); // render start of mushroom
     NoUnder();
@@ -3276,7 +3276,7 @@ void MushroomLedge(void) {
   }
   // EndMushL:
   lda_imm_nf(0x1b); // if at the end, render end of mushroom
-  ldy_absx(AreaObjectLength);
+  ldy_absx_fz(AreaObjectLength);
   if (zero_flag) {
     NoUnder();
     return;
@@ -3316,7 +3316,7 @@ void PulleyRopeObject(void) {
   // if starting, render left pulley
   if (!carry_flag) {
     iny_nf();
-    lda_absx(AreaObjectLength); // if not at the end, render rope
+    lda_absx_fz(AreaObjectLength); // if not at the end, render rope
     if (zero_flag) {
       iny_nf(); // otherwise render right pulley
     }
@@ -3344,7 +3344,7 @@ CRendLoop:
   lda_absy_nf(CastleMetatiles); // load current byte using offset
   ram[MetatileBuffer + x] = a;
   inx_nf(); // store in buffer and increment buffer offset
-  lda_zp(0x6);
+  lda_zp_fz(0x6);
   if (zero_flag) { goto ChkCFloor; } // have we reached upper limit yet?
   iny_nf(); // if not, increment column-wise
   iny_nf(); // to byte in next row
@@ -3354,18 +3354,18 @@ CRendLoop:
   dec_zp_nf(0x6); // move closer to upper limit
   
 ChkCFloor:
-  cpx_imm(0xb); // have we reached the row just before floor?
+  cpx_imm_fcz(0xb); // have we reached the row just before floor?
   if (!zero_flag) { goto CRendLoop; } // if not, go back and do another row
   pla_nf();
   tax_nf(); // get obj buffer offset from before
   lda_abs(CurrentPageLoc);
   if (zero_flag) { return; } // if we're at page 0, we do not need to do anything else
   lda_absx_nf(AreaObjectLength); // check length
-  cmp_imm(0x1); // if length almost about to expire, put brick at floor
+  cmp_imm_fcz(0x1); // if length almost about to expire, put brick at floor
   if (zero_flag) { goto PlayerStop; }
-  ldy_zp(0x7); // check starting row for tall castle ($00)
+  ldy_zp_fz(0x7); // check starting row for tall castle ($00)
   if (!zero_flag) { goto NotTall; }
-  cmp_imm(0x3); // if found, then check to see if we're at the second column
+  cmp_imm_fcz(0x3); // if found, then check to see if we're at the second column
   if (zero_flag) { goto PlayerStop; }
   
 NotTall:
@@ -3418,7 +3418,7 @@ void IntroPipe(void) {
 VPipeSectLoop:
     lda_imm_nf(0x0); // all the way to the top of the screen
     ram[MetatileBuffer + x] = a; // because otherwise it will look like exit pipe
-    dex();
+    dex_fn();
     if (!neg_flag) { goto VPipeSectLoop; }
     lda_absy(VerticalPipeData); // draw the end of the vertical pipe part
     ram[MetatileBuffer + 7] = a;
@@ -3441,7 +3441,7 @@ void RenderSidewaysPipe(void) {
   ldx_zp_nf(0x5); // get vertical length plus one, use as buffer offset
   inx_nf();
   lda_absy_nf(SidePipeShaftData); // check for value $00 based on horizontal offset
-  cmp_imm(0x0);
+  cmp_imm_fcz(0x0);
   // if found, do not draw the vertical pipe shaft
   if (!zero_flag) {
     ldx_imm_nf(0x0);
@@ -3459,7 +3459,7 @@ void RenderSidewaysPipe(void) {
 
 void VerticalPipe(void) {
   GetPipeHeight();
-  lda_zp(0x0); // check to see if value was nullified earlier
+  lda_zp_fz(0x0); // check to see if value was nullified earlier
   // (if d3, the usage control bit of second byte, was set)
   if (!zero_flag) {
     iny_nf();
@@ -3471,7 +3471,7 @@ void VerticalPipe(void) {
   tya_nf(); // save value in stack
   pha();
   lda_abs_nf(AreaNumber);
-  ora_abs(WorldNumber); // if at world 1-1, do not add piranha plant ever
+  ora_abs_fz(WorldNumber); // if at world 1-1, do not add piranha plant ever
   if (!zero_flag) {
     ldy_absx(AreaObjectLength); // if on second column of pipe, branch
     // (because we only need to do this once)
@@ -3481,10 +3481,10 @@ void VerticalPipe(void) {
       if (!carry_flag) {
         GetAreaObjXPosition(); // get horizontal pixel coordinate
         carry_flag = false;
-        adc_imm(0x8); // add eight to put the piranha plant in the center
+        adc_imm_fc(0x8); // add eight to put the piranha plant in the center
         ram[Enemy_X_Position + x] = a; // store as enemy's horizontal coordinate
         lda_abs_nf(CurrentPageLoc); // add carry to current page number
-        adc_imm(0x0);
+        adc_imm_fc(0x0);
         ram[Enemy_PageLoc + x] = a; // store as enemy's page coordinate
         lda_imm(0x1);
         ram[Enemy_Y_HighPos + x] = a;
@@ -3589,10 +3589,10 @@ void FlagpoleObject(void) {
   ram[MetatileBuffer + 10] = a;
   GetAreaObjXPosition();
   carry_flag = true; // get pixel coordinate of where the flagpole is,
-  sbc_imm(0x8); // subtract eight pixels and use as horizontal
+  sbc_imm_fc(0x8); // subtract eight pixels and use as horizontal
   ram[Enemy_X_Position + 5] = a; // coordinate for the flag
   lda_abs_nf(CurrentPageLoc);
-  sbc_imm(0x0); // subtract borrow from page location and use as
+  sbc_imm_fc(0x0); // subtract borrow from page location and use as
   ram[Enemy_PageLoc + 5] = a; // page location for the flag
   lda_imm_nf(0x30);
   ram[Enemy_Y_Position + 5] = a; // set vertical coordinate for flag
@@ -3671,7 +3671,7 @@ void ColObj(void) {
 
 void RowOfBricks(void) {
   ldy_abs_nf(AreaType); // load area type obtained from area offset pointer
-  lda_abs(CloudTypeOverride); // check for cloud type override
+  lda_abs_fz(CloudTypeOverride); // check for cloud type override
   if (!zero_flag) {
     ldy_imm_nf(0x4); // if cloud type, override area type
   }
@@ -3726,12 +3726,12 @@ void BulletBillCannon(void) {
   lda_imm_nf(0x64); // render bullet bill cannon
   ram[MetatileBuffer + x] = a;
   inx_nf();
-  dey(); // done yet?
+  dey_fn(); // done yet?
   if (!neg_flag) {
     lda_imm_nf(0x65); // if not, render middle part
     ram[MetatileBuffer + x] = a;
     inx_nf();
-    dey(); // done yet?
+    dey_fn(); // done yet?
     if (!neg_flag) {
       lda_imm(0x66); // if not, render bottom until length expires
       RenderUnderPart();
@@ -3823,14 +3823,14 @@ void BrickWithItem(void) {
   ram[0x7] = y;
   lda_imm_nf(0x0); // load default adder for bricks with lines
   ldy_abs_nf(AreaType); // check level type for ground level
-  dey();
+  dey_fz();
   // if ground type, do not start with 5
   if (!zero_flag) {
     lda_imm_nf(0x5); // otherwise use adder for bricks without lines
   }
   // BWithL:
   carry_flag = false; // add object ID to adder
-  adc_zp(0x7);
+  adc_zp_fc(0x7);
   tay_nf(); // use as offset for metatile
   DrawQBlk(); // <fallthrough>
 }
@@ -3846,13 +3846,13 @@ void Hole_Empty(void) {
   ChkLrgObjLength(); // get lower nybble and save as length
   // skip this part if length already loaded
   if (carry_flag) {
-    lda_abs(AreaType); // check for water type level
+    lda_abs_fz(AreaType); // check for water type level
     // if not water type, skip this part
     if (zero_flag) {
       ldx_abs(Whirlpool_Offset); // get offset for data used by cannons and whirlpools
       GetAreaObjXPosition(); // get proper vertical coordinate of where we're at
       carry_flag = true;
-      sbc_imm(0x10); // subtract 16 pixels
+      sbc_imm_fc(0x10); // subtract 16 pixels
       ram[Whirlpool_LeftExtent + x] = a; // store as left extent of whirlpool
       lda_abs_nf(CurrentPageLoc); // get page location of where we're at
       sbc_imm_nf(0x0); // subtract borrow
@@ -3866,7 +3866,7 @@ void Hole_Empty(void) {
       asl_acc_nf(); // and extend one block beyond each edge
       ram[Whirlpool_Length + x] = a; // save size of whirlpool here
       inx_nf();
-      cpx_imm(0x5); // increment and check offset
+      cpx_imm_fc(0x5); // increment and check offset
       // if not yet reached fifth whirlpool, branch to save offset
       if (carry_flag) {
         ldx_imm_nf(0x0); // otherwise initialize it
@@ -3886,19 +3886,19 @@ void Hole_Empty(void) {
 
 void RenderUnderPart(void) {
   ram[AreaObjectHeight] = y; // store vertical length to render
-  ldy_absx(MetatileBuffer); // check current spot to see if there's something
+  ldy_absx_fz(MetatileBuffer); // check current spot to see if there's something
   if (zero_flag) { goto DrawThisRow; } // we need to keep, if nothing, go ahead
-  cpy_imm(0x17);
+  cpy_imm_fz(0x17);
   if (zero_flag) { goto WaitOneRow; } // if middle part (tree ledge), wait until next row
-  cpy_imm(0x1a);
+  cpy_imm_fz(0x1a);
   if (zero_flag) { goto WaitOneRow; } // if middle part (mushroom ledge), wait until next row
-  cpy_imm(0xc0);
+  cpy_imm_fz(0xc0);
   if (zero_flag) { goto DrawThisRow; } // if question block w/ coin, overwrite
-  cpy_imm(0xc0);
+  cpy_imm_fc(0xc0);
   if (carry_flag) { goto WaitOneRow; } // if any other metatile with palette 3, wait until next row
-  cpy_imm(0x54);
+  cpy_imm_fz(0x54);
   if (!zero_flag) { goto DrawThisRow; } // if cracked rock terrain, overwrite
-  cmp_imm(0x50);
+  cmp_imm_fz(0x50);
   if (zero_flag) { goto WaitOneRow; } // if stem top of mushroom, wait until next row
   
 DrawThisRow:
@@ -3921,7 +3921,7 @@ void KillEnemies(void) {
   
 KillELoop:
   ldy_zpx_nf(Enemy_ID);
-  cpy_zp(0x0); // if not found, branch
+  cpy_zp_fcz(0x0); // if not found, branch
   if (zero_flag) {
     ram[Enemy_Flag + x] = a; // if found, deactivate enemy object flag
   }
@@ -3958,7 +3958,7 @@ EmptyChkLoop:
 void GetAreaObjectID(void) {
   lda_zp_nf(0x0); // get value saved from area parser routine
   carry_flag = true;
-  sbc_imm(0x0); // possibly residual code
+  sbc_imm_fc(0x0); // possibly residual code
   tay(); // save to Y
   // --------------------------------
 }
@@ -4039,9 +4039,9 @@ void LoadAreaPointer(void) {
 
 void GetAreaType(void) {
   and_imm_nf(0b01100000); // mask out all but d6 and d5
-  asl_acc();
-  rol_acc();
-  rol_acc();
+  asl_acc_fc();
+  rol_acc_fc();
+  rol_acc_fc();
   rol_acc(); // make %0xx00000 into %000000xx
   ram[AreaType] = a; // save 2 MSB as area type
 }
@@ -4050,7 +4050,7 @@ void FindAreaPointer(void) {
   ldy_abs_nf(WorldNumber); // load offset from world variable
   lda_absy_nf(WorldAddrOffsets);
   carry_flag = false; // add area number used to find data
-  adc_abs(AreaNumber);
+  adc_abs_fc(AreaNumber);
   tay_nf();
   lda_absy(AreaAddrOffsets); // from there we have our area pointer
 }
@@ -4083,7 +4083,7 @@ void GetAreaDataAddrs(void) {
   lda_indy_nf(AreaData);
   pha(); // save it to the stack for now
   and_imm_nf(0b00000111); // save 3 LSB for foreground scenery or bg color control
-  cmp_imm(0x4);
+  cmp_imm_fc(0x4);
   if (carry_flag) {
     ram[BackgroundColorCtrl] = a; // if 4 or greater, save value here as bg color control
     lda_imm_nf(0x0);
@@ -4100,8 +4100,8 @@ void GetAreaDataAddrs(void) {
   pla_nf(); // pull byte again but do not push it back
   and_imm_nf(0b11000000); // save 2 MSB for game timer setting
   carry_flag = false;
-  rol_acc(); // rotate bits over to LSBs
-  rol_acc();
+  rol_acc_fc(); // rotate bits over to LSBs
+  rol_acc_fc();
   rol_acc_nf();
   ram[GameTimerSetting] = a; // save value here as game timer setting
   iny_nf();
@@ -4120,10 +4120,10 @@ void GetAreaDataAddrs(void) {
   pla_nf();
   and_imm_nf(0b11000000);
   carry_flag = false;
-  rol_acc(); // rotate bits over to LSBs
-  rol_acc();
+  rol_acc_fc(); // rotate bits over to LSBs
+  rol_acc_fc();
   rol_acc_nf();
-  cmp_imm(0b00000011); // if set to 3, store here
+  cmp_imm_fz(0b00000011); // if set to 3, store here
   // and nullify other value
   if (zero_flag) {
     ram[CloudTypeOverride] = a; // otherwise store value in other place
@@ -4133,7 +4133,7 @@ void GetAreaDataAddrs(void) {
   ram[AreaStyle] = a;
   lda_zp_nf(AreaDataLow); // increment area data address by 2 bytes
   carry_flag = false;
-  adc_imm(0x2);
+  adc_imm_fc(0x2);
   ram[AreaDataLow] = a;
   lda_zp_nf(AreaDataHigh);
   adc_imm(0x0);
@@ -4145,42 +4145,42 @@ void GetAreaDataAddrs(void) {
 void ScrollHandler(void) {
   lda_abs_nf(Player_X_Scroll); // load value saved here
   carry_flag = false;
-  adc_abs(Platform_X_Scroll); // add value used by left/right platforms
+  adc_abs_fc(Platform_X_Scroll); // add value used by left/right platforms
   ram[Player_X_Scroll] = a; // save as new value here to impose force on scroll
-  lda_abs(ScrollLock); // check scroll lock flag
+  lda_abs_fz(ScrollLock); // check scroll lock flag
   // skip a bunch of code here if set
   if (!zero_flag) {
     InitScrlAmt();
     return;
   }
   lda_abs_nf(Player_Pos_ForScroll);
-  cmp_imm(0x50); // check player's horizontal screen position
+  cmp_imm_fc(0x50); // check player's horizontal screen position
   // if less than 80 pixels to the right, branch
   if (!carry_flag) {
     InitScrlAmt();
     return;
   }
-  lda_abs(SideCollisionTimer); // if timer related to player's side collision
+  lda_abs_fz(SideCollisionTimer); // if timer related to player's side collision
   // not expired, branch
   if (!zero_flag) {
     InitScrlAmt();
     return;
   }
   ldy_abs_nf(Player_X_Scroll); // get value and decrement by one
-  dey(); // if value originally set to zero or otherwise
+  dey_fn(); // if value originally set to zero or otherwise
   // negative for left movement, branch
   if (neg_flag) {
     InitScrlAmt();
     return;
   }
   iny_nf();
-  cpy_imm(0x2); // if value $01, branch and do not decrement
+  cpy_imm_fc(0x2); // if value $01, branch and do not decrement
   if (carry_flag) {
     dey_nf(); // otherwise decrement by one
   }
   // ChkNearMid:
   lda_abs_nf(Player_Pos_ForScroll);
-  cmp_imm(0x70); // check player's horizontal screen position
+  cmp_imm_fc(0x70); // check player's horizontal screen position
   // if less than 112 pixels to the right, branch
   if (!carry_flag) {
     ScrollScreen();
@@ -4198,11 +4198,11 @@ void ScrollScreen(void) {
   ram[ScrollThirtyTwo] = a; // save as new value here
   tya_nf();
   carry_flag = false;
-  adc_abs(ScreenLeft_X_Pos); // add to left side coordinate
+  adc_abs_fc(ScreenLeft_X_Pos); // add to left side coordinate
   ram[ScreenLeft_X_Pos] = a; // save as new left side coordinate
   ram[HorizontalScroll] = a; // save here also
   lda_abs_nf(ScreenLeft_PageLoc);
-  adc_imm(0x0); // add carry to page location for left
+  adc_imm_fc(0x0); // add carry to page location for left
   ram[ScreenLeft_PageLoc] = a; // side of the screen
   and_imm_nf(0x1); // get LSB of page location
   ram[0x0] = a; // save as temp variable for PPU register 1 mirror
@@ -4227,23 +4227,23 @@ void ChkPOffscr(void) {
   GetXOffscreenBits(); // get horizontal offscreen bits for player
   ram[0x0] = a; // save them here
   ldy_imm_nf(0x0); // load default offset (left side)
-  asl_acc(); // if d7 of offscreen bits are set,
+  asl_acc_fc(); // if d7 of offscreen bits are set,
   if (carry_flag) { goto KeepOnscr; } // branch with default offset
   iny_nf(); // otherwise use different offset (right side)
   lda_zp_nf(0x0);
-  and_imm(0b00100000); // check offscreen bits for d5 set
+  and_imm_fz(0b00100000); // check offscreen bits for d5 set
   if (zero_flag) { goto InitPlatScrl; } // if not set, branch ahead of this part
   
 KeepOnscr:
   lda_absy_nf(ScreenEdge_X_Pos); // get left or right side coordinate based on offset
   carry_flag = true;
-  sbc_absy(X_SubtracterData); // subtract amount based on offset
+  sbc_absy_fc(X_SubtracterData); // subtract amount based on offset
   ram[Player_X_Position] = a; // store as player position to prevent movement further
   lda_absy_nf(ScreenEdge_PageLoc); // get left or right page location based on offset
   sbc_imm_nf(0x0); // subtract borrow
   ram[Player_PageLoc] = a; // save as player's page location
   lda_zp_nf(Left_Right_Buttons); // check saved controller bits
-  cmp_absy(OffscrJoypadBitsData); // against bits based on offset
+  cmp_absy_fcz(OffscrJoypadBitsData); // against bits based on offset
   if (zero_flag) { goto InitPlatScrl; } // if not equal, branch
   lda_imm_nf(0x0);
   ram[Player_X_Speed] = a; // otherwise nullify horizontal speed of player
@@ -4256,7 +4256,7 @@ InitPlatScrl:
 void GetScreenPosition(void) {
   lda_abs_nf(ScreenLeft_X_Pos); // get coordinate of screen's left boundary
   carry_flag = false;
-  adc_imm(0xff); // add 255 pixels
+  adc_imm_fc(0xff); // add 255 pixels
   ram[ScreenRight_X_Pos] = a; // store as coordinate of screen's right boundary
   lda_abs_nf(ScreenLeft_PageLoc); // get page number where left boundary is
   adc_imm(0x0); // add carry from before
@@ -4285,16 +4285,16 @@ void GameRoutines(void) {
 
 void PlayerEntrance(void) {
   lda_abs_nf(AltEntranceControl); // check for mode of alternate entry
-  cmp_imm(0x2);
+  cmp_imm_fcz(0x2);
   if (zero_flag) { goto EntrMode2; } // if found, branch to enter from pipe or with vine
   lda_imm_nf(0x0);
   ldy_zp_nf(Player_Y_Position); // if vertical position above a certain
-  cpy_imm(0x30); // point, nullify controller bits and continue
+  cpy_imm_fc(0x30); // point, nullify controller bits and continue
   if (!carry_flag) { AutoControlPlayer(); return; } // with player movement code, do not return
   lda_abs_nf(PlayerEntranceCtrl); // check player entry bits from header
-  cmp_imm(0x6);
+  cmp_imm_fcz(0x6);
   if (zero_flag) { goto ChkBehPipe; } // if set to 6 or 7, execute pipe intro code
-  cmp_imm(0x7); // otherwise branch to normal entry
+  cmp_imm_fcz(0x7); // otherwise branch to normal entry
   if (!zero_flag) { goto PlayerRdy; }
   
 ChkBehPipe:
@@ -4312,7 +4312,7 @@ IntroEntr:
   return;
   
 EntrMode2:
-  lda_abs(JoypadOverride); // if controller override bits set here,
+  lda_abs_fz(JoypadOverride); // if controller override bits set here,
   if (!zero_flag) { goto VineEntr; } // branch to enter with vine
   lda_imm(0xff); // otherwise, set value here then execute sub
   MovePlayerYAxis(); // to move player upwards (note $ff = -1)
@@ -4326,7 +4326,7 @@ VineEntr:
   cmp_imm(0x60); // check vine height
   if (!zero_flag) { return; } // if vine not yet reached maximum height, branch to leave
   lda_zp_nf(Player_Y_Position); // get player's vertical coordinate
-  cmp_imm(0x99); // check player's vertical coordinate against preset value
+  cmp_imm_fc(0x99); // check player's vertical coordinate against preset value
   ldy_imm_nf(0x0); // load default values to be written to
   lda_imm(0x1); // this value moves player to the right off the vine
   if (!carry_flag) { goto OffVine; } // if vertical coordinate < preset value, use defaults
@@ -4365,13 +4365,13 @@ void PlayerCtrlRoutine(void) {
   lda_zp_nf(GameEngineSubroutine); // check task here
   cmp_imm(0xb); // if certain value is set, branch to skip controller bit loading
   if (zero_flag) { goto SizeChk; }
-  lda_abs(AreaType); // are we in a water type area?
+  lda_abs_fz(AreaType); // are we in a water type area?
   if (!zero_flag) { goto SaveJoyp; } // if not, branch
   ldy_zp_nf(Player_Y_HighPos);
-  dey(); // if not in vertical area between
+  dey_fz(); // if not in vertical area between
   if (!zero_flag) { goto DisJoyp; } // status bar and bottom, branch
   lda_zp_nf(Player_Y_Position);
-  cmp_imm(0xd0); // if nearing the bottom of the screen or
+  cmp_imm_fc(0xd0); // if nearing the bottom of the screen or
   if (!carry_flag) { goto SaveJoyp; } // not in the vertical area between status bar or bottom,
   
 DisJoyp:
@@ -4401,10 +4401,10 @@ SaveJoyp:
 SizeChk:
   PlayerMovementSubs(); // run movement subroutines
   ldy_imm_nf(0x1); // is player small?
-  lda_abs(PlayerSize);
+  lda_abs_fz(PlayerSize);
   if (!zero_flag) { goto ChkMoveDir; }
   ldy_imm_nf(0x0); // check for if crouching
-  lda_abs(CrouchingFlag);
+  lda_abs_fz(CrouchingFlag);
   if (zero_flag) { goto ChkMoveDir; } // if not, branch ahead
   ldy_imm_nf(0x2); // if big and crouching, load y with 2
   
@@ -4427,14 +4427,14 @@ PlayerSubs:
   BoundingBoxCore(); // get player's bounding box coordinates
   PlayerBGCollision(); // do collision detection and process
   lda_zp_nf(Player_Y_Position);
-  cmp_imm(0x40); // check to see if player is higher than 64th pixel
+  cmp_imm_fc(0x40); // check to see if player is higher than 64th pixel
   if (!carry_flag) { goto PlayerHole; } // if so, branch ahead
   lda_zp_nf(GameEngineSubroutine);
-  cmp_imm(0x5); // if running end-of-level routine, branch ahead
+  cmp_imm_fz(0x5); // if running end-of-level routine, branch ahead
   if (zero_flag) { goto PlayerHole; }
-  cmp_imm(0x7); // if running player entrance routine, branch ahead
+  cmp_imm_fz(0x7); // if running player entrance routine, branch ahead
   if (zero_flag) { goto PlayerHole; }
-  cmp_imm(0x4); // if running routines $00-$03, branch ahead
+  cmp_imm_fc(0x4); // if running routines $00-$03, branch ahead
   if (!carry_flag) { goto PlayerHole; }
   lda_abs_nf(Player_SprAttrib);
   and_imm_nf(0b11011111); // otherwise nullify player's
@@ -4449,17 +4449,17 @@ PlayerHole:
   ldy_imm_nf(0x4);
   ram[0x7] = y; // set value here
   ldx_imm_nf(0x0); // use X as flag, and clear for cloud level
-  ldy_abs(GameTimerExpiredFlag); // check game timer expiration flag
+  ldy_abs_fz(GameTimerExpiredFlag); // check game timer expiration flag
   if (!zero_flag) { goto HoleDie; } // if set, branch
-  ldy_abs(CloudTypeOverride); // check for cloud type override
+  ldy_abs_fz(CloudTypeOverride); // check for cloud type override
   if (!zero_flag) { goto ChkHoleX; } // skip to last part if found
   
 HoleDie:
   inx_nf(); // set flag in X for player death
   ldy_zp_nf(GameEngineSubroutine);
-  cpy_imm(0xb); // check for some other routine running
+  cpy_imm_fz(0xb); // check for some other routine running
   if (zero_flag) { goto ChkHoleX; } // if so, branch ahead
-  ldy_abs(DeathMusicLoaded); // check value here
+  ldy_abs_fz(DeathMusicLoaded); // check value here
   if (!zero_flag) { goto HoleBottom; } // if already set, branch to next part
   iny_nf();
   ram[EventMusicQueue] = y; // otherwise play death music
@@ -4472,7 +4472,7 @@ HoleBottom:
 ChkHoleX:
   cmp_zp(0x7); // compare vertical high byte with value set here
   if (neg_flag) { goto ExitCtrl; } // if less, branch to leave
-  dex(); // otherwise decrement flag in X
+  dex_fn(); // otherwise decrement flag in X
   if (neg_flag) { goto CloudExit; } // if flag was clear, branch to set modes and other values
   ldy_abs(EventMusicBuffer); // check to see if music is still playing
   if (!zero_flag) { goto ExitCtrl; } // branch to leave if so
@@ -4491,11 +4491,11 @@ CloudExit:
 }
 
 void Vine_AutoClimb(void) {
-  lda_zp(Player_Y_HighPos); // check to see whether player reached position
+  lda_zp_fz(Player_Y_HighPos); // check to see whether player reached position
   // above the status bar yet and if so, set modes
   if (zero_flag) {
     lda_zp_nf(Player_Y_Position);
-    cmp_imm(0xe4);
+    cmp_imm_fc(0xe4);
     if (!carry_flag) {
       SetEntr();
       return;
@@ -4521,7 +4521,7 @@ void VerticalPipeEntry(void) {
   MovePlayerYAxis(); // do sub to move player downwards
   ScrollHandler(); // do sub to scroll screen with saved force if necessary
   ldy_imm_nf(0x0); // load default mode of entry
-  lda_abs(WarpZoneControl); // check warp zone control variable/flag
+  lda_abs_fz(WarpZoneControl); // check warp zone control variable/flag
   // if set, branch to use mode 0
   if (!zero_flag) {
     ChgAreaPipe();
@@ -4529,7 +4529,7 @@ void VerticalPipeEntry(void) {
   }
   iny_nf();
   lda_abs_nf(AreaType); // check for castle level type
-  cmp_imm(0x3);
+  cmp_imm_fcz(0x3);
   // if not castle type level, use mode 1
   if (!zero_flag) {
     ChgAreaPipe();
@@ -4581,7 +4581,7 @@ void PlayerInjuryBlink(void) {
   cmp_imm(0xf0); // for specific moment in time
   // branch if before that point
   if (!carry_flag) {
-    cmp_imm(0xc8); // check again for another specific point
+    cmp_imm_fcz(0xc8); // check again for another specific point
     // branch if at that point, and not before or after
     if (zero_flag) {
       DonePlayerTask();
@@ -4633,7 +4633,7 @@ void PlayerFireFlower(void) {
   }
   lda_zp_nf(FrameCounter); // get frame counter
   lsr_acc_nf();
-  lsr_acc(); // divide by four to change every four frames
+  lsr_acc_fc(); // divide by four to change every four frames
   CyclePlayerPalette(); // <fallthrough>
 }
 
@@ -4660,7 +4660,7 @@ void ResetPalStar(void) {
 
 void FlagpoleSlide(void) {
   lda_zp_nf(Enemy_ID + 5); // check special use enemy slot
-  cmp_imm(FlagpoleFlagObject); // for flagpole flag object
+  cmp_imm_fcz(FlagpoleFlagObject); // for flagpole flag object
   // if not found, branch to something residual
   if (zero_flag) {
     lda_abs_nf(FlagpoleSoundQueue); // load flagpole sound
@@ -4668,7 +4668,7 @@ void FlagpoleSlide(void) {
     lda_imm_nf(0x0);
     ram[FlagpoleSoundQueue] = a; // init flagpole sound queue
     ldy_zp_nf(Player_Y_Position);
-    cpy_imm(0x9e); // check to see if player has slid down
+    cpy_imm_fc(0x9e); // check to see if player has slid down
     // far enough, and if so, branch with no controller bits set
     if (!carry_flag) {
       lda_imm_nf(0x4); // otherwise force player to climb down (to slide)
@@ -4685,10 +4685,10 @@ void PlayerEndLevel(void) {
   lda_imm(0x1); // force player to walk to the right
   AutoControlPlayer();
   lda_zp_nf(Player_Y_Position); // check player's vertical position
-  cmp_imm(0xae);
+  cmp_imm_fc(0xae);
   // if player is not yet off the flagpole, skip this part
   if (carry_flag) {
-    lda_abs(ScrollLock); // if scroll lock not set, branch ahead to next part
+    lda_abs_fz(ScrollLock); // if scroll lock not set, branch ahead to next part
     // because we only need to do this part once
     if (!zero_flag) {
       lda_imm_nf(EndOfLevelMusic);
@@ -4699,10 +4699,10 @@ void PlayerEndLevel(void) {
   }
   // ChkStop:
   lda_abs_nf(Player_CollisionBits); // get player collision bits
-  lsr_acc(); // check for d0 set
+  lsr_acc_fc(); // check for d0 set
   // if d0 set, skip to next part
   if (!carry_flag) {
-    lda_abs(StarFlagTaskControl); // if star flag task control already set,
+    lda_abs_fz(StarFlagTaskControl); // if star flag task control already set,
     // go ahead with the rest of the code
     if (zero_flag) {
       inc_abs_nf(StarFlagTaskControl); // otherwise set task control now (this gets ball rolling!)
@@ -4717,7 +4717,7 @@ void PlayerEndLevel(void) {
   if (zero_flag) {
     inc_abs_nf(LevelNumber); // increment level number used for game logic
     lda_abs_nf(LevelNumber);
-    cmp_imm(0x3); // check to see if we have yet reached level -4
+    cmp_imm_fcz(0x3); // check to see if we have yet reached level -4
     // and skip this last part here if not
     if (!zero_flag) {
       NextArea();
@@ -4725,7 +4725,7 @@ void PlayerEndLevel(void) {
     }
     ldy_abs_nf(WorldNumber); // get world number as offset
     lda_abs_nf(CoinTallyFor1Ups); // check third area coin tally for bonus 1-ups
-    cmp_absy(Hidden1UpCoinAmts); // against minimum value, if player has not collected
+    cmp_absy_fc(Hidden1UpCoinAmts); // against minimum value, if player has not collected
     // at least this number of coins, leave flag clear
     if (!carry_flag) {
       NextArea();
@@ -4759,7 +4759,7 @@ void EnterSidePipe(void) {
   ram[Player_X_Speed] = a;
   ldy_imm_nf(0x1); // set controller right button by default
   lda_zp_nf(Player_X_Position); // mask out higher nybble of player's
-  and_imm(0b00001111); // horizontal position
+  and_imm_fz(0b00001111); // horizontal position
   if (zero_flag) {
     ram[Player_X_Speed] = a; // if lower nybble = 0, set as horizontal speed
     tay_nf(); // and nullify controller bit override here
@@ -4823,16 +4823,16 @@ void FallingSub(void) {
 }
 
 void JumpSwimSub(void) {
-  ldy_zp(Player_Y_Speed); // if player's vertical speed zero
+  ldy_zp_fn(Player_Y_Speed); // if player's vertical speed zero
   if (!neg_flag) { goto DumpFall; } // or moving downwards, branch to falling
   lda_zp_nf(A_B_Buttons);
   and_imm_nf(A_Button); // check to see if A button is being pressed
-  and_zp(PreviousA_B_Buttons); // and was pressed in previous frame
+  and_zp_fz(PreviousA_B_Buttons); // and was pressed in previous frame
   if (!zero_flag) { goto ProcSwim; } // if so, branch elsewhere
   lda_abs_nf(JumpOrigin_Y_Position); // get vertical position player jumped from
   carry_flag = true;
   sbc_zp_nf(Player_Y_Position); // subtract current from original vertical coordinate
-  cmp_abs(DiffToHaltJump); // compare to value set here to see if player is in mid-jump
+  cmp_abs_fc(DiffToHaltJump); // compare to value set here to see if player is in mid-jump
   if (!carry_flag) { goto ProcSwim; } // or just starting to jump, if just starting, skip ahead
   
 DumpFall:
@@ -4844,13 +4844,13 @@ ProcSwim:
   if (zero_flag) { LRAir(); return; } // branch ahead to last part
   GetPlayerAnimSpeed(); // do a sub to get animation frame timing
   lda_zp_nf(Player_Y_Position);
-  cmp_imm(0x14); // check vertical position against preset value
+  cmp_imm_fc(0x14); // check vertical position against preset value
   if (carry_flag) { goto LRWater; } // if not yet reached a certain position, branch ahead
   lda_imm_nf(0x18);
   ram[VerticalForce] = a; // otherwise set fractional
   
 LRWater:
-  lda_zp(Left_Right_Buttons); // check left/right controller bits (check for swimming)
+  lda_zp_fz(Left_Right_Buttons); // check left/right controller bits (check for swimming)
   if (zero_flag) { LRAir(); return; } // if not pressing any, skip
   ram[PlayerFacingDir] = a; // otherwise set facing direction accordingly
   LRAir(); // <fallthrough>
@@ -4880,20 +4880,20 @@ void LRAir(void) {
 void ClimbingSub(void) {
   lda_abs_nf(Player_YMF_Dummy);
   carry_flag = false; // add movement force to dummy variable
-  adc_abs(Player_Y_MoveForce); // save with carry
+  adc_abs_fc(Player_Y_MoveForce); // save with carry
   ram[Player_YMF_Dummy] = a;
   ldy_imm_nf(0x0); // set default adder here
-  lda_zp(Player_Y_Speed); // get player's vertical speed
+  lda_zp_fn(Player_Y_Speed); // get player's vertical speed
   // if not moving upwards, branch
   if (neg_flag) {
     dey_nf(); // otherwise set adder to $ff
   }
   // MoveOnVine:
   ram[0x0] = y; // store adder here
-  adc_zp(Player_Y_Position); // add carry to player's vertical position
+  adc_zp_fc(Player_Y_Position); // add carry to player's vertical position
   ram[Player_Y_Position] = a; // and store to move player up or down
   lda_zp_nf(Player_Y_HighPos);
-  adc_zp(0x0); // add carry to player's page location
+  adc_zp_fc(0x0); // add carry to player's page location
   ram[Player_Y_HighPos] = a; // and store
   lda_zp_nf(Left_Right_Buttons); // compare left/right controller bits
   and_abs(Player_CollisionBits); // to collision flag
@@ -4906,14 +4906,14 @@ void ClimbingSub(void) {
       ram[ClimbSideTimer] = y; // otherwise set timer now
       ldx_imm_nf(0x0); // set default offset here
       ldy_zp_nf(PlayerFacingDir); // get facing direction
-      lsr_acc(); // move right button controller bit to carry
+      lsr_acc_fc(); // move right button controller bit to carry
       // if controller right pressed, branch ahead
       if (!carry_flag) {
         inx_nf();
         inx_nf(); // otherwise increment offset by 2 bytes
       }
       // ClimbFD:
-      dey(); // check to see if facing right
+      dey_fz(); // check to see if facing right
       // if so, branch, do not increment
       if (!zero_flag) {
         inx_nf(); // otherwise increment by 1 byte
@@ -4921,10 +4921,10 @@ void ClimbingSub(void) {
       // CSetFDir:
       lda_zp_nf(Player_X_Position);
       carry_flag = false; // add or subtract from player's horizontal position
-      adc_absx(ClimbAdderLow); // using value here as adder and X as offset
+      adc_absx_fc(ClimbAdderLow); // using value here as adder and X as offset
       ram[Player_X_Position] = a;
       lda_zp_nf(Player_PageLoc); // add or subtract carry or borrow using value here
-      adc_absx(ClimbAdderHigh); // from the player's page location
+      adc_absx_fc(ClimbAdderHigh); // from the player's page location
       ram[Player_PageLoc] = a;
       lda_zp_nf(Left_Right_Buttons); // get left/right controller bits again
       eor_imm(0b00000011); // invert them and store them while player
@@ -4941,14 +4941,14 @@ void ClimbingSub(void) {
 
 void PlayerPhysicsSub(void) {
   lda_zp_nf(Player_State); // check player state
-  cmp_imm(0x3);
+  cmp_imm_fcz(0x3);
   if (!zero_flag) { goto CheckForJumping; } // if not climbing, branch
   ldy_imm_nf(0x0);
   lda_zp_nf(Up_Down_Buttons); // get controller bits for up/down
-  and_abs(Player_CollisionBits); // check against player's collision detection bits
+  and_abs_fz(Player_CollisionBits); // check against player's collision detection bits
   if (zero_flag) { goto ProcClimb; } // if not pressing up or down, branch
   iny_nf();
-  and_imm(0b00001000); // check for pressing up
+  and_imm_fz(0b00001000); // check for pressing up
   if (!zero_flag) { goto ProcClimb; }
   iny_nf();
   
@@ -4966,25 +4966,25 @@ SetCAnim:
   return;
   
 CheckForJumping:
-  lda_abs(JumpspringAnimCtrl); // if jumpspring animating,
+  lda_abs_fz(JumpspringAnimCtrl); // if jumpspring animating,
   if (!zero_flag) { goto NoJump; } // skip ahead to something else
   lda_zp_nf(A_B_Buttons); // check for A button press
-  and_imm(A_Button);
+  and_imm_fz(A_Button);
   if (zero_flag) { goto NoJump; } // if not, branch to something else
-  and_zp(PreviousA_B_Buttons); // if button not pressed in previous frame, branch
+  and_zp_fz(PreviousA_B_Buttons); // if button not pressed in previous frame, branch
   if (zero_flag) { goto ProcJumping; }
   
 NoJump:
   goto X_Physics; // otherwise, jump to something else
   
 ProcJumping:
-  lda_zp(Player_State); // check player state
+  lda_zp_fz(Player_State); // check player state
   if (zero_flag) { goto InitJS; } // if on the ground, branch
-  lda_abs(SwimmingFlag); // if swimming flag not set, jump to do something else
+  lda_abs_fz(SwimmingFlag); // if swimming flag not set, jump to do something else
   if (zero_flag) { goto NoJump; } // to prevent midair jumping, otherwise continue
-  lda_abs(JumpSwimTimer); // if jump/swim timer nonzero, branch
+  lda_abs_fz(JumpSwimTimer); // if jump/swim timer nonzero, branch
   if (!zero_flag) { goto InitJS; }
-  lda_zp(Player_Y_Speed); // check player's vertical speed
+  lda_zp_fn(Player_Y_Speed); // check player's vertical speed
   if (!neg_flag) { goto InitJS; } // if player's vertical speed motionless or down, branch
   goto X_Physics; // if timer at zero and player still rising, do not swim
   
@@ -5001,26 +5001,26 @@ InitJS:
   lda_imm_nf(0x1); // set player state to jumping/swimming
   ram[Player_State] = a;
   lda_abs_nf(Player_XSpeedAbsolute); // check value related to walking/running speed
-  cmp_imm(0x9);
+  cmp_imm_fc(0x9);
   if (!carry_flag) { goto ChkWtr; } // branch if below certain values, increment Y
   iny_nf(); // for each amount equal or exceeded
-  cmp_imm(0x10);
+  cmp_imm_fc(0x10);
   if (!carry_flag) { goto ChkWtr; }
   iny_nf();
-  cmp_imm(0x19);
+  cmp_imm_fc(0x19);
   if (!carry_flag) { goto ChkWtr; }
   iny_nf();
-  cmp_imm(0x1c);
+  cmp_imm_fc(0x1c);
   if (!carry_flag) { goto ChkWtr; } // note that for jumping, range is 0-4 for Y
   iny_nf();
   
 ChkWtr:
   lda_imm_nf(0x1); // set value here (apparently always set to 1)
   ram[DiffToHaltJump] = a;
-  lda_abs(SwimmingFlag); // if swimming flag disabled, branch
+  lda_abs_fz(SwimmingFlag); // if swimming flag disabled, branch
   if (zero_flag) { goto GetYPhy; }
   ldy_imm_nf(0x5); // otherwise set Y to 5, range is 5-6
-  lda_abs(Whirlpool_Flag); // if whirlpool flag not set, branch
+  lda_abs_fz(Whirlpool_Flag); // if whirlpool flag not set, branch
   if (zero_flag) { goto GetYPhy; }
   iny_nf(); // otherwise increment to 6
   
@@ -5033,12 +5033,12 @@ GetYPhy:
   ram[Player_Y_MoveForce] = a;
   lda_absy_nf(PlayerYSpdData);
   ram[Player_Y_Speed] = a;
-  lda_abs(SwimmingFlag); // if swimming flag disabled, branch
+  lda_abs_fz(SwimmingFlag); // if swimming flag disabled, branch
   if (zero_flag) { goto PJumpSnd; }
   lda_imm_nf(Sfx_EnemyStomp); // load swim/goomba stomp sound into
   ram[Square1SoundQueue] = a; // square 1's sfx queue
   lda_zp_nf(Player_Y_Position);
-  cmp_imm(0x14); // check vertical low byte of player position
+  cmp_imm_fc(0x14); // check vertical low byte of player position
   if (carry_flag) { goto X_Physics; } // if below a certain point, branch
   lda_imm_nf(0x0); // otherwise reset player's vertical speed
   ram[Player_Y_Speed] = a; // and jump to something else to keep player
@@ -5046,7 +5046,7 @@ GetYPhy:
   
 PJumpSnd:
   lda_imm_nf(Sfx_BigJump); // load big mario's jump sound by default
-  ldy_abs(PlayerSize); // is mario big?
+  ldy_abs_fz(PlayerSize); // is mario big?
   if (zero_flag) { goto SJumpSnd; }
   lda_imm_nf(Sfx_SmallJump); // if not, load small mario's jump sound
   
@@ -5056,34 +5056,34 @@ SJumpSnd:
 X_Physics:
   ldy_imm_nf(0x0);
   ram[0x0] = y; // init value here
-  lda_zp(Player_State); // if mario is on the ground, branch
+  lda_zp_fz(Player_State); // if mario is on the ground, branch
   if (zero_flag) { goto ProcPRun; }
   lda_abs_nf(Player_XSpeedAbsolute); // check something that seems to be related
-  cmp_imm(0x19); // to mario's speed
+  cmp_imm_fc(0x19); // to mario's speed
   if (carry_flag) { goto GetXPhy; } // if =>$19 branch here
   if (!carry_flag) { goto ChkRFast; } // if not branch elsewhere
   
 ProcPRun:
   iny_nf(); // if mario on the ground, increment Y
-  lda_abs(AreaType); // check area type
+  lda_abs_fz(AreaType); // check area type
   if (zero_flag) { goto ChkRFast; } // if water type, branch
   dey_nf(); // decrement Y by default for non-water type area
   lda_zp_nf(Left_Right_Buttons); // get left/right controller bits
-  cmp_zp(Player_MovingDir); // check against moving direction
+  cmp_zp_fz(Player_MovingDir); // check against moving direction
   if (!zero_flag) { goto ChkRFast; } // if controller bits <> moving direction, skip this part
   lda_zp_nf(A_B_Buttons); // check for b button pressed
-  and_imm(B_Button);
+  and_imm_fz(B_Button);
   if (!zero_flag) { goto SetRTmr; } // if pressed, skip ahead to set timer
-  lda_abs(RunningTimer); // check for running timer set
+  lda_abs_fz(RunningTimer); // check for running timer set
   if (!zero_flag) { goto GetXPhy; } // if set, branch
   
 ChkRFast:
   iny_nf(); // if running timer not set or level type is water,
   inc_zp_nf(0x0); // increment Y again and temp variable in memory
-  lda_abs(RunningSpeed);
+  lda_abs_fz(RunningSpeed);
   if (!zero_flag) { goto FastXSp; } // if running speed set here, branch
   lda_abs_nf(Player_XSpeedAbsolute);
-  cmp_imm(0x21); // otherwise check player's walking/running speed
+  cmp_imm_fc(0x21); // otherwise check player's walking/running speed
   if (!carry_flag) { goto GetXPhy; } // if less than a certain amount, branch ahead
   
 FastXSp:
@@ -5098,7 +5098,7 @@ GetXPhy:
   lda_absy_nf(MaxLeftXSpdData); // get maximum speed to the left
   ram[MaximumLeftSpeed] = a;
   lda_zp_nf(GameEngineSubroutine); // check for specific routine running
-  cmp_imm(0x7); // (player entrance)
+  cmp_imm_fz(0x7); // (player entrance)
   if (!zero_flag) { goto GetXPhy2; } // if not running, skip and use old value of Y
   ldy_imm_nf(0x3); // otherwise set Y to 3
   
@@ -5113,7 +5113,7 @@ GetXPhy2:
   lda_zp_nf(PlayerFacingDir);
   cmp_zp(Player_MovingDir); // check facing direction against moving direction
   if (zero_flag) { return; } // if the same, branch to leave
-  asl_abs(FrictionAdderLow); // otherwise shift d7 of friction adder low into carry
+  asl_abs_fc(FrictionAdderLow); // otherwise shift d7 of friction adder low into carry
   rol_abs(FrictionAdderHigh); // then rotate carry onto d0 of friction adder high
   // -------------------------------------------------------------------------------------
 }
@@ -5121,19 +5121,19 @@ GetXPhy2:
 void GetPlayerAnimSpeed(void) {
   ldy_imm_nf(0x0); // initialize offset in Y
   lda_abs_nf(Player_XSpeedAbsolute); // check player's walking/running speed
-  cmp_imm(0x1c); // against preset amount
+  cmp_imm_fc(0x1c); // against preset amount
   if (carry_flag) { goto SetRunSpd; } // if greater than a certain amount, branch ahead
   iny_nf(); // otherwise increment Y
-  cmp_imm(0xe); // compare against lower amount
+  cmp_imm_fc(0xe); // compare against lower amount
   if (carry_flag) { goto ChkSkid; } // if greater than this but not greater than first, skip increment
   iny_nf(); // otherwise increment Y again
   
 ChkSkid:
   lda_abs_nf(SavedJoypadBits); // get controller bits
-  and_imm(0b01111111); // mask out A button
+  and_imm_fz(0b01111111); // mask out A button
   if (zero_flag) { goto SetAnimSpd; } // if no other buttons pressed, branch ahead of all this
   and_imm_nf(0x3); // mask out all others except left and right
-  cmp_zp(Player_MovingDir); // check against moving direction
+  cmp_zp_fcz(Player_MovingDir); // check against moving direction
   if (!zero_flag) { goto ProcSkid; } // if left/right controller bits <> moving direction, branch
   lda_imm_nf(0x0); // otherwise set zero value here
   
@@ -5143,7 +5143,7 @@ SetRunSpd:
   
 ProcSkid:
   lda_abs_nf(Player_XSpeedAbsolute); // check player's walking/running speed
-  cmp_imm(0xb); // against one last amount
+  cmp_imm_fc(0xb); // against one last amount
   if (carry_flag) { goto SetAnimSpd; } // if greater than this amount, branch
   lda_zp_nf(PlayerFacingDir);
   ram[Player_MovingDir] = a; // otherwise use facing direction to set moving direction
@@ -5159,7 +5159,7 @@ SetAnimSpd:
 
 void ImposeFriction(void) {
   and_abs_nf(Player_CollisionBits); // perform AND between left/right controller bits and collision flag
-  cmp_imm(0x0); // then compare to zero (this instruction is redundant)
+  cmp_imm_fcz(0x0); // then compare to zero (this instruction is redundant)
   if (!zero_flag) { goto JoypFrict; } // if any bits set, branch to next part
   lda_zp(Player_X_Speed);
   if (zero_flag) { goto SetAbsSpd; } // if player has no horizontal speed, branch ahead to last part
@@ -5167,18 +5167,18 @@ void ImposeFriction(void) {
   if (neg_flag) { goto LeftFrict; } // otherwise logic dictates player moving left, branch to slow
   
 JoypFrict:
-  lsr_acc(); // put right controller bit into carry
+  lsr_acc_fc(); // put right controller bit into carry
   if (!carry_flag) { goto RghtFrict; } // if left button pressed, carry = 0, thus branch
   
 LeftFrict:
   lda_abs_nf(Player_X_MoveForce); // load value set here
   carry_flag = false;
-  adc_abs(FrictionAdderLow); // add to it another value set here
+  adc_abs_fc(FrictionAdderLow); // add to it another value set here
   ram[Player_X_MoveForce] = a; // store here
   lda_zp_nf(Player_X_Speed);
   adc_abs_nf(FrictionAdderHigh); // add value plus carry to horizontal speed
   ram[Player_X_Speed] = a; // set as new horizontal speed
-  cmp_abs(MaximumRightSpeed); // compare against maximum value for right movement
+  cmp_abs_fcn(MaximumRightSpeed); // compare against maximum value for right movement
   if (neg_flag) { goto XSpdSign; } // if horizontal speed greater negatively, branch
   lda_abs(MaximumRightSpeed); // otherwise set preset value as horizontal speed
   ram[Player_X_Speed] = a; // thus slowing the player's left movement down
@@ -5187,12 +5187,12 @@ LeftFrict:
 RghtFrict:
   lda_abs_nf(Player_X_MoveForce); // load value set here
   carry_flag = true;
-  sbc_abs(FrictionAdderLow); // subtract from it another value set here
+  sbc_abs_fc(FrictionAdderLow); // subtract from it another value set here
   ram[Player_X_MoveForce] = a; // store here
   lda_zp_nf(Player_X_Speed);
   sbc_abs_nf(FrictionAdderHigh); // subtract value plus borrow from horizontal speed
   ram[Player_X_Speed] = a; // set as new horizontal speed
-  cmp_abs(MaximumLeftSpeed); // compare against maximum value for left movement
+  cmp_abs_fn(MaximumLeftSpeed); // compare against maximum value for left movement
   if (!neg_flag) { goto XSpdSign; } // if horizontal speed greater positively, branch
   lda_abs_nf(MaximumLeftSpeed); // otherwise set preset value as horizontal speed
   ram[Player_X_Speed] = a; // thus slowing the player's right movement down
@@ -5214,29 +5214,29 @@ SetAbsSpd:
 
 void ProcFireball_Bubble(void) {
   lda_abs_nf(PlayerStatus); // check player's status
-  cmp_imm(0x2);
+  cmp_imm_fc(0x2);
   // if not fiery, branch
   if (carry_flag) {
     lda_zp_nf(A_B_Buttons);
-    and_imm(B_Button); // check for b button pressed
+    and_imm_fz(B_Button); // check for b button pressed
     // branch if not pressed
     if (!zero_flag) {
-      and_zp(PreviousA_B_Buttons);
+      and_zp_fz(PreviousA_B_Buttons);
       // if button pressed in previous frame, branch
       if (zero_flag) {
         lda_abs_nf(FireballCounter); // load fireball counter
         and_imm_nf(0b00000001); // get LSB and use as offset for buffer
         tax_nf();
-        lda_zpx(Fireball_State); // load fireball state
+        lda_zpx_fz(Fireball_State); // load fireball state
         // if not inactive, branch
         if (zero_flag) {
           ldy_zp_nf(Player_Y_HighPos); // if player too high or too low, branch
-          dey();
+          dey_fz();
           if (zero_flag) {
-            lda_abs(CrouchingFlag); // if player crouching, branch
+            lda_abs_fz(CrouchingFlag); // if player crouching, branch
             if (zero_flag) {
               lda_zp_nf(Player_State); // if player's state = climbing, branch
-              cmp_imm(0x3);
+              cmp_imm_fcz(0x3);
               if (!zero_flag) {
                 lda_imm_nf(Sfx_Fireball); // play fireball sound effect
                 ram[Square1SoundQueue] = a;
@@ -5283,10 +5283,10 @@ void FireballObjCore(void) {
   if (!carry_flag) {
     ldy_zpx(Fireball_State); // if fireball inactive, branch to leave
     if (!zero_flag) {
-      dey(); // if fireball state set to 1, skip this part and just run it
+      dey_fz(); // if fireball state set to 1, skip this part and just run it
       if (!zero_flag) {
         lda_zp_nf(Player_X_Position); // get player's horizontal position
-        adc_imm(0x4); // add four pixels and store as fireball's horizontal position
+        adc_imm_fc(0x4); // add four pixels and store as fireball's horizontal position
         ram[Fireball_X_Position + x] = a;
         lda_zp_nf(Player_PageLoc); // get player's page location
         adc_imm_nf(0x0); // add carry and store as fireball's page location
@@ -5308,7 +5308,7 @@ void FireballObjCore(void) {
       // RunFB:
       txa_nf(); // add 7 to offset to use
       carry_flag = false; // as fireball offset for next routines
-      adc_imm(0x7);
+      adc_imm_fc(0x7);
       tax_nf();
       lda_imm_nf(0x50); // set downward movement force here
       ram[0x0] = a;
@@ -5347,7 +5347,7 @@ void BubbleCheck(void) {
   and_imm_nf(0x1);
   ram[0x7] = a; // store pseudorandom bit here
   lda_zpx_nf(Bubble_Y_Position); // get vertical coordinate for air bubble
-  cmp_imm(0xf8); // if offscreen coordinate not set,
+  cmp_imm_fcz(0xf8); // if offscreen coordinate not set,
   // branch to move air bubble
   if (!zero_flag) {
     MoveBubl();
@@ -5362,14 +5362,14 @@ void BubbleCheck(void) {
 void SetupBubble(void) {
   ldy_imm_nf(0x0); // load default value here
   lda_zp_nf(PlayerFacingDir); // get player's facing direction
-  lsr_acc(); // move d0 to carry
+  lsr_acc_fc(); // move d0 to carry
   // branch to use default value if facing left
   if (carry_flag) {
     ldy_imm_nf(0x8); // otherwise load alternate value here
   }
   // PosBubl:
   tya_nf(); // use value loaded as adder
-  adc_zp(Player_X_Position); // add to player's horizontal position
+  adc_zp_fc(Player_X_Position); // add to player's horizontal position
   ram[Bubble_X_Position + x] = a; // save as horizontal position for airbubble
   lda_zp_nf(Player_PageLoc);
   adc_imm_nf(0x0); // add carry to player's page location
@@ -5390,7 +5390,7 @@ void MoveBubl(void) {
   ldy_zp_nf(0x7); // get pseudorandom bit again, use as offset
   lda_absx_nf(Bubble_YMF_Dummy);
   carry_flag = true; // subtract pseudorandom amount from dummy variable
-  sbc_absy(Bubble_MForceData);
+  sbc_absy_fc(Bubble_MForceData);
   ram[Bubble_YMF_Dummy + x] = a; // save dummy variable
   lda_zpx_nf(Bubble_Y_Position);
   sbc_imm_nf(0x0); // subtract borrow from airbubble's vertical coordinate
@@ -5421,10 +5421,10 @@ void RunGameTimer(void) {
   ora_abs(GameTimerDisplay + 2);
   if (zero_flag) { goto TimeUpOn; } // if game timer digits at 000, branch to time-up code
   ldy_abs_nf(GameTimerDisplay); // otherwise check first digit
-  dey(); // if first digit not on 1,
+  dey_fz(); // if first digit not on 1,
   if (!zero_flag) { goto ResGTCtrl; } // branch to reset game timer control
   lda_abs_nf(GameTimerDisplay + 1); // otherwise check second and third digits
-  ora_abs(GameTimerDisplay + 2);
+  ora_abs_fz(GameTimerDisplay + 2);
   if (!zero_flag) { goto ResGTCtrl; } // if timer not at 100, branch to reset game timer control
   lda_imm_nf(TimeRunningOutMusic);
   ram[EventMusicQueue] = a; // otherwise load time running out music
@@ -5475,23 +5475,23 @@ void ProcessWhirlpools(void) {
 WhLoop:
   lda_absy_nf(Whirlpool_LeftExtent); // get left extent of whirlpool
   carry_flag = false;
-  adc_absy(Whirlpool_Length); // add length of whirlpool
+  adc_absy_fc(Whirlpool_Length); // add length of whirlpool
   ram[0x2] = a; // store result as right extent here
-  lda_absy(Whirlpool_PageLoc); // get page location
+  lda_absy_fz(Whirlpool_PageLoc); // get page location
   if (zero_flag) { goto NextWh; } // if none or page 0, branch to get next data
   adc_imm_nf(0x0); // add carry
   ram[0x1] = a; // store result as page location of right extent here
   lda_zp_nf(Player_X_Position); // get player's horizontal position
   carry_flag = true;
-  sbc_absy(Whirlpool_LeftExtent); // subtract left extent
+  sbc_absy_fc(Whirlpool_LeftExtent); // subtract left extent
   lda_zp_nf(Player_PageLoc); // get player's page location
-  sbc_absy(Whirlpool_PageLoc); // subtract borrow
+  sbc_absy_fcn(Whirlpool_PageLoc); // subtract borrow
   if (neg_flag) { goto NextWh; } // if player too far left, branch to get next data
   lda_zp_nf(0x2); // otherwise get right extent
   carry_flag = true;
-  sbc_zp(Player_X_Position); // subtract player's horizontal coordinate
+  sbc_zp_fc(Player_X_Position); // subtract player's horizontal coordinate
   lda_zp_nf(0x1); // get right extent's page location
-  sbc_zp(Player_PageLoc); // subtract borrow
+  sbc_zp_fcn(Player_PageLoc); // subtract borrow
   if (!neg_flag) { goto WhirlpoolActivate; } // if player within right extent, branch to whirlpool code
   
 NextWh:
@@ -5505,23 +5505,23 @@ WhirlpoolActivate:
   ram[0x0] = a; // save here
   lda_absy_nf(Whirlpool_LeftExtent); // get left extent of whirlpool
   carry_flag = false;
-  adc_zp(0x0); // add length divided by 2
+  adc_zp_fc(0x0); // add length divided by 2
   ram[0x1] = a; // save as center of whirlpool
   lda_absy_nf(Whirlpool_PageLoc); // get page location
   adc_imm_nf(0x0); // add carry
   ram[0x0] = a; // save as page location of whirlpool center
   lda_zp_nf(FrameCounter); // get frame counter
-  lsr_acc(); // shift d0 into carry (to run on every other frame)
+  lsr_acc_fc(); // shift d0 into carry (to run on every other frame)
   if (!carry_flag) { goto WhPull; } // if d0 not set, branch to last part of code
   lda_zp_nf(0x1); // get center
   carry_flag = true;
-  sbc_zp(Player_X_Position); // subtract player's horizontal coordinate
+  sbc_zp_fc(Player_X_Position); // subtract player's horizontal coordinate
   lda_zp_nf(0x0); // get page location of center
-  sbc_zp(Player_PageLoc); // subtract borrow
+  sbc_zp_fn(Player_PageLoc); // subtract borrow
   if (!neg_flag) { goto LeftWh; } // if player to the left of center, branch
   lda_zp_nf(Player_X_Position); // otherwise slowly pull player left, towards the center
   carry_flag = true;
-  sbc_imm(0x1); // subtract one pixel
+  sbc_imm_fc(0x1); // subtract one pixel
   ram[Player_X_Position] = a; // set player's new horizontal coordinate
   lda_zp_nf(Player_PageLoc);
   sbc_imm_nf(0x0); // subtract borrow
@@ -5529,11 +5529,11 @@ WhirlpoolActivate:
   
 LeftWh:
   lda_abs_nf(Player_CollisionBits); // get player's collision bits
-  lsr_acc(); // shift d0 into carry
+  lsr_acc_fc(); // shift d0 into carry
   if (!carry_flag) { goto WhPull; } // if d0 not set, branch
   lda_zp_nf(Player_X_Position); // otherwise slowly pull player right, towards the center
   carry_flag = false;
-  adc_imm(0x1); // add one pixel
+  adc_imm_fc(0x1); // add one pixel
   ram[Player_X_Position] = a; // set player's new horizontal coordinate
   lda_zp_nf(Player_PageLoc);
   adc_imm_nf(0x0); // add carry
@@ -5557,31 +5557,31 @@ void ImposeGravity(void) {
   pha(); // push value to stack
   lda_absx_nf(SprObject_YMF_Dummy);
   carry_flag = false; // add value in movement force to contents of dummy variable
-  adc_absx(SprObject_Y_MoveForce);
+  adc_absx_fc(SprObject_Y_MoveForce);
   ram[SprObject_YMF_Dummy + x] = a;
   ldy_imm_nf(0x0); // set Y to zero by default
-  lda_zpx(SprObject_Y_Speed); // get current vertical speed
+  lda_zpx_fn(SprObject_Y_Speed); // get current vertical speed
   if (!neg_flag) { goto AlterYP; } // if currently moving downwards, do not decrement Y
   dey_nf(); // otherwise decrement Y
   
 AlterYP:
   ram[0x7] = y; // store Y here
-  adc_zpx(SprObject_Y_Position); // add vertical position to vertical speed plus carry
+  adc_zpx_fc(SprObject_Y_Position); // add vertical position to vertical speed plus carry
   ram[SprObject_Y_Position + x] = a; // store as new vertical position
   lda_zpx_nf(SprObject_Y_HighPos);
   adc_zp_nf(0x7); // add carry plus contents of $07 to vertical high byte
   ram[SprObject_Y_HighPos + x] = a; // store as new vertical high byte
   lda_absx_nf(SprObject_Y_MoveForce);
   carry_flag = false;
-  adc_zp(0x0); // add downward movement amount to contents of $0433
+  adc_zp_fc(0x0); // add downward movement amount to contents of $0433
   ram[SprObject_Y_MoveForce + x] = a;
   lda_zpx_nf(SprObject_Y_Speed); // add carry to vertical speed and store
   adc_imm_nf(0x0);
   ram[SprObject_Y_Speed + x] = a;
-  cmp_zp(0x2); // compare to maximum speed
+  cmp_zp_fcn(0x2); // compare to maximum speed
   if (neg_flag) { goto ChkUpM; } // if less than preset value, skip this part
   lda_absx_nf(SprObject_Y_MoveForce);
-  cmp_imm(0x80); // if less positively than preset maximum, skip this part
+  cmp_imm_fc(0x80); // if less positively than preset maximum, skip this part
   if (!carry_flag) { goto ChkUpM; }
   lda_zp_nf(0x2);
   ram[SprObject_Y_Speed + x] = a; // keep vertical speed within maximum value
@@ -5598,7 +5598,7 @@ ChkUpM:
   ram[0x7] = y; // store two's compliment here
   lda_absx_nf(SprObject_Y_MoveForce);
   carry_flag = true; // subtract upward movement amount from contents
-  sbc_zp(0x1); // of movement force, note that $01 is twice as large as $00,
+  sbc_zp_fc(0x1); // of movement force, note that $01 is twice as large as $00,
   ram[SprObject_Y_MoveForce + x] = a; // thus it effectively undoes add we did earlier
   lda_zpx_nf(SprObject_Y_Speed);
   sbc_imm_nf(0x0); // subtract borrow from vertical speed and store
@@ -5628,20 +5628,20 @@ void FlagpoleRoutine(void) {
   cmp_imm(0x3); // if player state not climbing,
   if (!zero_flag) { goto SkipScore; } // branch to near the end of code
   lda_zpx_nf(Enemy_Y_Position); // check flagpole flag's vertical coordinate
-  cmp_imm(0xaa); // if flagpole flag down to a certain point,
+  cmp_imm_fc(0xaa); // if flagpole flag down to a certain point,
   if (carry_flag) { goto GiveFPScr; } // branch to end the level
   lda_zp_nf(Player_Y_Position); // check player's vertical coordinate
-  cmp_imm(0xa2); // if player down to a certain point,
+  cmp_imm_fc(0xa2); // if player down to a certain point,
   if (carry_flag) { goto GiveFPScr; } // branch to end the level
   lda_absx_nf(Enemy_YMF_Dummy);
-  adc_imm(0xff); // add movement amount to dummy variable
+  adc_imm_fc(0xff); // add movement amount to dummy variable
   ram[Enemy_YMF_Dummy + x] = a; // save dummy variable
   lda_zpx_nf(Enemy_Y_Position); // get flag's vertical coordinate
   adc_imm_nf(0x1); // add 1 plus carry to move flag, and
   ram[Enemy_Y_Position + x] = a; // store vertical coordinate
   lda_abs_nf(FlagpoleFNum_YMFDummy);
   carry_flag = true; // subtract movement amount from dummy variable
-  sbc_imm(0xff);
+  sbc_imm_fc(0xff);
   ram[FlagpoleFNum_YMFDummy] = a; // save dummy variable
   lda_abs_nf(FlagpoleFNum_Y_Pos);
   sbc_imm(0x1); // subtract one plus borrow to move floatey number,
@@ -5675,7 +5675,7 @@ void JumpspringHandler(void) {
   tay_nf();
   dey_nf(); // subtract one from frame control,
   tya_nf(); // the only way a poor nmos 6502 can
-  and_imm(0b00000010); // mask out all but d1, original value still in Y
+  and_imm_fz(0b00000010); // mask out all but d1, original value still in Y
   if (!zero_flag) { goto DownJSpr; } // if set, branch to move player up
   inc_zp_nf(Player_Y_Position);
   inc_zp_nf(Player_Y_Position); // move player's vertical position down two pixels
@@ -5690,12 +5690,12 @@ PosJSpr:
   carry_flag = false;
   adc_absy_nf(Jumpspring_Y_PosData); // add value using frame control as offset
   ram[Enemy_Y_Position + x] = a; // store as new vertical position
-  cpy_imm(0x1); // check frame control offset (second frame is $00)
+  cpy_imm_fc(0x1); // check frame control offset (second frame is $00)
   if (!carry_flag) { goto BounceJS; } // if offset not yet at third frame ($01), skip to next part
   lda_zp_nf(A_B_Buttons);
-  and_imm(A_Button); // check saved controller bits for A button press
+  and_imm_fz(A_Button); // check saved controller bits for A button press
   if (zero_flag) { goto BounceJS; } // skip to next part if A not pressed
-  and_zp(PreviousA_B_Buttons); // check for A button pressed in previous frame
+  and_zp_fz(PreviousA_B_Buttons); // check for A button pressed in previous frame
   if (!zero_flag) { goto BounceJS; } // skip to next part if so
   lda_imm_nf(0xf4);
   ram[JumpspringForce] = a; // otherwise write new jumpspring force here
@@ -5733,7 +5733,7 @@ void Setup_Vine(void) {
   ram[Enemy_X_Position + x] = a; // copy horizontal coordinate from previous object
   lda_zpy_nf(Block_Y_Position);
   ram[Enemy_Y_Position + x] = a; // copy vertical coordinate from previous object
-  ldy_abs(VineFlagOffset); // load vine flag/offset to next available vine slot
+  ldy_abs_fz(VineFlagOffset); // load vine flag/offset to next available vine slot
   // if set at all, don't bother to store vertical
   if (zero_flag) {
     ram[VineStart_Y_Position] = a; // otherwise store vertical coordinate here
@@ -5750,18 +5750,18 @@ void Setup_Vine(void) {
 }
 
 void VineObjectHandler(void) {
-  cpx_imm(0x5); // check enemy offset for special use slot
+  cpx_imm_fcz(0x5); // check enemy offset for special use slot
   // if not in last slot, branch to leave
   if (zero_flag) {
     ldy_abs_nf(VineFlagOffset);
     dey_nf(); // decrement vine flag in Y, use as offset
     lda_abs_nf(VineHeight);
-    cmp_absy(VineHeightData); // if vine has reached certain height,
+    cmp_absy_fz(VineHeightData); // if vine has reached certain height,
     // branch ahead to skip this part
     if (!zero_flag) {
       lda_zp_nf(FrameCounter); // get frame counter
       lsr_acc_nf(); // shift d1 into carry
-      lsr_acc();
+      lsr_acc_fc();
       // if d1 not set (2 frames every 4) skip this part
       if (carry_flag) {
         lda_zp_nf(Enemy_Y_Position + 5);
@@ -5784,7 +5784,7 @@ VDrawLoop:
       cpy_abs(VineFlagOffset); // if offset in Y and offset here
       if (!zero_flag) { goto VDrawLoop; } // do not yet match, loop back to draw more vine
       lda_abs_nf(Enemy_OffscreenBits);
-      and_imm(0b00001100); // mask offscreen bits
+      and_imm_fz(0b00001100); // mask offscreen bits
       // if none of the saved offscreen bits set, skip ahead
       if (!zero_flag) {
         dey_nf(); // otherwise decrement Y to get proper offset again
@@ -5792,14 +5792,14 @@ VDrawLoop:
 KillVine:
         ldx_absy(VineObjOffset); // get enemy object offset for this vine object
         EraseEnemyObject(); // kill this vine object
-        dey(); // decrement Y
+        dey_fn(); // decrement Y
         if (!neg_flag) { goto KillVine; } // if any vine objects left, loop back to kill it
         ram[VineFlagOffset] = a; // initialize vine flag/offset
         ram[VineHeight] = a; // initialize vine height
       }
       // WrCMTile:
       lda_abs_nf(VineHeight); // check vine height
-      cmp_imm(0x20); // if vine small (less than 32 pixels tall)
+      cmp_imm_fc(0x20); // if vine small (less than 32 pixels tall)
       // then branch ahead to leave
       if (carry_flag) {
         ldx_imm_nf(0x6); // set offset in X to last enemy slot
@@ -5807,10 +5807,10 @@ KillVine:
         ldy_imm(0x1b); // set Y to offset to get block at ($04, $10) of coordinates
         BlockBufferCollision(); // do a sub to get block buffer address set, return contents
         ldy_zp_nf(0x2);
-        cpy_imm(0xd0); // if vertical high nybble offset beyond extent of
+        cpy_imm_fc(0xd0); // if vertical high nybble offset beyond extent of
         // current block buffer, branch to leave, do not write
         if (!carry_flag) {
-          lda_indy(0x6); // otherwise check contents of block buffer at
+          lda_indy_fz(0x6); // otherwise check contents of block buffer at
           // current offset, if not empty, branch to leave
           if (zero_flag) {
             lda_imm_nf(0x26);
@@ -5832,20 +5832,20 @@ void ProcessCannons(void) {
     
 ThreeSChk:
     ram[ObjectOffset] = x; // start at third enemy slot
-    lda_zpx(Enemy_Flag); // check enemy buffer flag
+    lda_zpx_fz(Enemy_Flag); // check enemy buffer flag
     // if set, branch to check enemy
     if (zero_flag) {
       lda_absx_nf(PseudoRandomBitReg + 1); // otherwise get part of LSFR
       ldy_abs_nf(SecondaryHardMode); // get secondary hard mode flag, use as offset
       and_absy_nf(CannonBitmasks); // mask out bits of LSFR as decided by flag
-      cmp_imm(0x6); // check to see if lower nybble is above certain value
+      cmp_imm_fc(0x6); // check to see if lower nybble is above certain value
       // if so, branch to check enemy
       if (!carry_flag) {
         tay_nf(); // transfer masked contents of LSFR to Y as pseudorandom offset
-        lda_absy(Cannon_PageLoc); // get page location
+        lda_absy_fz(Cannon_PageLoc); // get page location
         // if not set or on page 0, branch to check enemy
         if (!zero_flag) {
-          lda_absy(Cannon_Timer); // get cannon timer
+          lda_absy_fz(Cannon_Timer); // get cannon timer
           // if expired, branch to fire cannon
           if (!zero_flag) {
             sbc_imm_nf(0x0); // otherwise subtract borrow (note carry will always be clear here)
@@ -5853,7 +5853,7 @@ ThreeSChk:
             goto Chk_BB; // then jump ahead to check enemy
           }
           // FireCannon:
-          lda_abs(TimerControl); // if master timer control set,
+          lda_abs_fz(TimerControl); // if master timer control set,
           // branch to check enemy
           if (zero_flag) {
             lda_imm_nf(0xe); // otherwise we start creating one
@@ -5869,7 +5869,7 @@ ThreeSChk:
             lda_imm_nf(0x1);
             ram[Enemy_Y_HighPos + x] = a; // set vertical high byte of bullet bill
             ram[Enemy_Flag + x] = a; // set buffer flag
-            lsr_acc(); // shift right once to init A
+            lsr_acc_fc(); // shift right once to init A
             ram[Enemy_State + x] = a; // then initialize enemy's state
             lda_imm_nf(0x9);
             ram[Enemy_BoundBoxCtrl + x] = a; // set bounding box size control for bullet bill
@@ -5905,7 +5905,7 @@ Next3Slt:
 void BulletBillHandler(void) {
   lda_abs(TimerControl); // if master timer control set,
   if (!zero_flag) { goto RunBBSubs; } // branch to run subroutines except movement sub
-  lda_zpx(Enemy_State);
+  lda_zpx_fz(Enemy_State);
   if (!zero_flag) { goto ChkDSte; } // if bullet bill's state set, branch to check defeated state
   lda_abs_nf(Enemy_OffscreenBits); // otherwise load offscreen bits
   and_imm_nf(0b00001100); // mask out bits
@@ -5967,9 +5967,9 @@ void EnemyGfxHandler(void) {
   lda_absx_nf(Enemy_SprAttrib);
   ram[0x4] = a; // get enemy object sprite attributes
   lda_zpx_nf(Enemy_ID);
-  cmp_imm(PiranhaPlant); // is enemy object piranha plant?
+  cmp_imm_fcz(PiranhaPlant); // is enemy object piranha plant?
   if (!zero_flag) { goto CheckForRetainerObj; } // if not, branch
-  ldy_zpx(PiranhaPlant_Y_Speed);
+  ldy_zpx_fn(PiranhaPlant_Y_Speed);
   if (neg_flag) { goto CheckForRetainerObj; } // if piranha plant moving upwards, branch
   ldy_absx(EnemyFrameTimer);
   if (zero_flag) { goto CheckForRetainerObj; } // if timer for movement expired, branch
@@ -5981,7 +5981,7 @@ CheckForRetainerObj:
   and_imm_nf(0b00011111); // nullify all but 5 LSB and use as Y
   tay_nf();
   lda_zpx_nf(Enemy_ID); // check for mushroom retainer/princess object
-  cmp_imm(RetainerObject);
+  cmp_imm_fz(RetainerObject);
   if (!zero_flag) { goto CheckForBulletBillCV; } // if not found, branch
   ldy_imm_nf(0x0); // if found, nullify saved state in Y
   lda_imm_nf(0x1); // set value that will not be used
@@ -5989,11 +5989,11 @@ CheckForRetainerObj:
   lda_imm_nf(0x15); // set value $15 as code for mushroom retainer/princess object
   
 CheckForBulletBillCV:
-  cmp_imm(BulletBill_CannonVar); // otherwise check for bullet bill object
+  cmp_imm_fz(BulletBill_CannonVar); // otherwise check for bullet bill object
   if (!zero_flag) { goto CheckForJumpspring; } // if not found, branch again
   dec_zp_nf(0x2); // decrement saved vertical position
   lda_imm_nf(0x3);
-  ldy_absx(EnemyFrameTimer); // get timer for enemy object
+  ldy_absx_fz(EnemyFrameTimer); // get timer for enemy object
   if (zero_flag) { goto SBBAt; } // if expired, do not set priority bit
   ora_imm_nf(0b00100000); // otherwise do so
   
@@ -6004,7 +6004,7 @@ SBBAt:
   lda_imm_nf(0x8); // set specific value to unconditionally branch once
   
 CheckForJumpspring:
-  cmp_imm(JumpspringObject); // check for jumpspring object
+  cmp_imm_fz(JumpspringObject); // check for jumpspring object
   if (!zero_flag) { goto CheckForPodoboo; }
   ldy_imm_nf(0x3); // set enemy state -2 MSB here for jumpspring object
   ldx_abs_nf(JumpspringAnimCtrl); // get current frame number for jumpspring object
@@ -6014,17 +6014,17 @@ CheckForPodoboo:
   ram[0xef] = a; // store saved enemy object value here
   ram[0xec] = y; // and Y here (enemy state -2 MSB if not changed)
   ldx_zp_nf(ObjectOffset); // get enemy object offset
-  cmp_imm(0xc); // check for podoboo object
+  cmp_imm_fz(0xc); // check for podoboo object
   if (!zero_flag) { goto CheckBowserGfxFlag; } // branch if not found
-  lda_zpx(Enemy_Y_Speed); // if moving upwards, branch
+  lda_zpx_fn(Enemy_Y_Speed); // if moving upwards, branch
   if (neg_flag) { goto CheckBowserGfxFlag; }
   inc_abs_nf(VerticalFlipFlag); // otherwise, set flag for vertical flip
   
 CheckBowserGfxFlag:
-  lda_abs(BowserGfxFlag); // if not drawing bowser at all, skip to something else
+  lda_abs_fz(BowserGfxFlag); // if not drawing bowser at all, skip to something else
   if (zero_flag) { goto CheckForGoomba; }
   ldy_imm_nf(0x16); // if set to 1, draw bowser's front
-  cmp_imm(0x1);
+  cmp_imm_fz(0x1);
   if (zero_flag) { goto SBwsrGfxOfs; }
   iny_nf(); // otherwise draw bowser's rear
   
@@ -6033,20 +6033,20 @@ SBwsrGfxOfs:
   
 CheckForGoomba:
   ldy_zp_nf(0xef); // check value for goomba object
-  cpy_imm(Goomba);
+  cpy_imm_fz(Goomba);
   if (!zero_flag) { goto CheckBowserFront; } // branch if not found
   lda_zpx_nf(Enemy_State);
-  cmp_imm(0x2); // check for defeated state
+  cmp_imm_fc(0x2); // check for defeated state
   if (!carry_flag) { goto GmbaAnim; } // if not defeated, go ahead and animate
   ldx_imm_nf(0x4); // if defeated, write new value here
   ram[0xec] = x;
   
 GmbaAnim:
   and_imm_nf(0b00100000); // check for d5 set in enemy object state
-  ora_abs(TimerControl); // or timer disable flag set
+  ora_abs_fz(TimerControl); // or timer disable flag set
   if (!zero_flag) { goto CheckBowserFront; } // if either condition true, do not animate goomba
   lda_zp_nf(FrameCounter);
-  and_imm(0b00001000); // check for every eighth frame
+  and_imm_fz(0b00001000); // check for every eighth frame
   if (!zero_flag) { goto CheckBowserFront; }
   lda_zp_nf(0x3);
   eor_imm_nf(0b00000011); // invert bits to flip horizontally every eight frames
@@ -6059,17 +6059,17 @@ CheckBowserFront:
   lda_absy_nf(EnemyGfxTableOffsets); // load value based on enemy object as offset
   tax_nf(); // save as X
   ldy_zp_nf(0xec); // get previously saved value
-  lda_abs(BowserGfxFlag);
+  lda_abs_fz(BowserGfxFlag);
   if (zero_flag) { goto CheckForSpiny; } // if not drawing bowser object at all, skip all of this
-  cmp_imm(0x1);
+  cmp_imm_fcz(0x1);
   if (!zero_flag) { goto CheckBowserRear; } // if not drawing front part, branch to draw the rear part
-  lda_abs(BowserBodyControls); // check bowser's body control bits
+  lda_abs_fn(BowserBodyControls); // check bowser's body control bits
   if (!neg_flag) { goto ChkFrontSte; } // branch if d7 not set (control's bowser's mouth)
   ldx_imm_nf(0xde); // otherwise load offset for second frame
   
 ChkFrontSte:
   lda_zp_nf(0xed); // check saved enemy state
-  and_imm(0b00100000); // if bowser not defeated, do not set flag
+  and_imm_fz(0b00100000); // if bowser not defeated, do not set flag
   if (zero_flag) { goto DrawBowser; }
   
 FlipBowserOver:
@@ -6080,24 +6080,24 @@ DrawBowser:
   
 CheckBowserRear:
   lda_abs_nf(BowserBodyControls); // check bowser's body control bits
-  and_imm(0x1);
+  and_imm_fz(0x1);
   if (zero_flag) { goto ChkRearSte; } // branch if d0 not set (control's bowser's feet)
   ldx_imm_nf(0xe4); // otherwise load offset for second frame
   
 ChkRearSte:
   lda_zp_nf(0xed); // check saved enemy state
-  and_imm(0b00100000); // if bowser not defeated, do not set flag
+  and_imm_fz(0b00100000); // if bowser not defeated, do not set flag
   if (zero_flag) { goto DrawBowser; }
   lda_zp_nf(0x2); // subtract 16 pixels from
   carry_flag = true; // saved vertical coordinate
-  sbc_imm(0x10);
+  sbc_imm_fc(0x10);
   ram[0x2] = a;
   goto FlipBowserOver; // jump to set vertical flip flag
   
 CheckForSpiny:
-  cpx_imm(0x24); // check if value loaded is for spiny
+  cpx_imm_fz(0x24); // check if value loaded is for spiny
   if (!zero_flag) { goto CheckForLakitu; } // if not found, branch
-  cpy_imm(0x5); // if enemy state set to $05, do this,
+  cpy_imm_fz(0x5); // if enemy state set to $05, do this,
   if (!zero_flag) { goto NotEgg; } // otherwise branch
   ldx_imm_nf(0x30); // set to spiny egg offset
   lda_imm_nf(0x2);
@@ -6109,13 +6109,13 @@ NotEgg:
   goto CheckForHammerBro; // skip a big chunk of this if we found spiny but not in egg
   
 CheckForLakitu:
-  cpx_imm(0x90); // check value for lakitu's offset loaded
+  cpx_imm_fcz(0x90); // check value for lakitu's offset loaded
   if (!zero_flag) { goto CheckUpsideDownShell; } // branch if not loaded
   lda_zp_nf(0xed);
-  and_imm(0b00100000); // check for d5 set in enemy state
+  and_imm_fz(0b00100000); // check for d5 set in enemy state
   if (!zero_flag) { goto NoLAFr; } // branch if set
   lda_abs_nf(FrenzyEnemyTimer);
-  cmp_imm(0x10); // check timer to see if we've reached a certain range
+  cmp_imm_fc(0x10); // check timer to see if we've reached a certain range
   if (carry_flag) { goto NoLAFr; } // branch if not
   ldx_imm_nf(0x96); // if d6 not set and timer in range, load alt frame for lakitu
   
@@ -6124,35 +6124,35 @@ NoLAFr:
   
 CheckUpsideDownShell:
   lda_zp_nf(0xef); // check for enemy object => $04
-  cmp_imm(0x4);
+  cmp_imm_fc(0x4);
   if (carry_flag) { goto CheckRightSideUpShell; } // branch if true
-  cpy_imm(0x2);
+  cpy_imm_fc(0x2);
   if (!carry_flag) { goto CheckRightSideUpShell; } // branch if enemy state < $02
   ldx_imm_nf(0x5a); // set for upside-down koopa shell by default
   ldy_zp_nf(0xef);
-  cpy_imm(BuzzyBeetle); // check for buzzy beetle object
+  cpy_imm_fz(BuzzyBeetle); // check for buzzy beetle object
   if (!zero_flag) { goto CheckRightSideUpShell; }
   ldx_imm_nf(0x7e); // set for upside-down buzzy beetle shell if found
   inc_zp_nf(0x2); // increment vertical position by one pixel
   
 CheckRightSideUpShell:
   lda_zp_nf(0xec); // check for value set here
-  cmp_imm(0x4); // if enemy state < $02, do not change to shell, if
+  cmp_imm_fz(0x4); // if enemy state < $02, do not change to shell, if
   if (!zero_flag) { goto CheckForHammerBro; } // enemy state => $02 but not = $04, leave shell upside-down
   ldx_imm_nf(0x72); // set right-side up buzzy beetle shell by default
   inc_zp_nf(0x2); // increment saved vertical position by one pixel
   ldy_zp_nf(0xef);
-  cpy_imm(BuzzyBeetle); // check for buzzy beetle object
+  cpy_imm_fz(BuzzyBeetle); // check for buzzy beetle object
   if (zero_flag) { goto CheckForDefdGoomba; } // branch if found
   ldx_imm_nf(0x66); // change to right-side up koopa shell if not found
   inc_zp_nf(0x2); // and increment saved vertical position again
   
 CheckForDefdGoomba:
-  cpy_imm(Goomba); // check for goomba object (necessary if previously
+  cpy_imm_fz(Goomba); // check for goomba object (necessary if previously
   if (!zero_flag) { goto CheckForHammerBro; } // failed buzzy beetle object test)
   ldx_imm_nf(0x54); // load for regular goomba
   lda_zp_nf(0xed); // note that this only gets performed if enemy state => $02
-  and_imm(0b00100000); // check saved enemy state for d5 set
+  and_imm_fz(0b00100000); // check saved enemy state for d5 set
   if (!zero_flag) { goto CheckForHammerBro; } // branch if set
   ldx_imm_nf(0x8a); // load offset for defeated goomba
   dec_zp_nf(0x2); // set different value and decrement saved vertical position
@@ -6160,24 +6160,24 @@ CheckForDefdGoomba:
 CheckForHammerBro:
   ldy_zp_nf(ObjectOffset);
   lda_zp_nf(0xef); // check for hammer bro object
-  cmp_imm(HammerBro);
+  cmp_imm_fcz(HammerBro);
   if (!zero_flag) { goto CheckForBloober; } // branch if not found
-  lda_zp(0xed);
+  lda_zp_fz(0xed);
   if (zero_flag) { goto CheckToAnimateEnemy; } // branch if not in normal enemy state
-  and_imm(0b00001000);
+  and_imm_fz(0b00001000);
   if (zero_flag) { goto CheckDefeatedState; } // if d3 not set, branch further away
-  ldx_imm(0xb4); // otherwise load offset for different frame
+  ldx_imm_fz(0xb4); // otherwise load offset for different frame
   if (!zero_flag) { goto CheckToAnimateEnemy; } // unconditional branch
   
 CheckForBloober:
-  cpx_imm(0x48); // check for cheep-cheep offset loaded
+  cpx_imm_fz(0x48); // check for cheep-cheep offset loaded
   if (zero_flag) { goto CheckToAnimateEnemy; } // branch if found
   lda_absy_nf(EnemyIntervalTimer);
-  cmp_imm(0x5);
+  cmp_imm_fc(0x5);
   if (carry_flag) { goto CheckDefeatedState; } // branch if some timer is above a certain point
-  cpx_imm(0x3c); // check for bloober offset loaded
+  cpx_imm_fz(0x3c); // check for bloober offset loaded
   if (!zero_flag) { goto CheckToAnimateEnemy; } // branch if not found this time
-  cmp_imm(0x1);
+  cmp_imm_fcz(0x1);
   if (zero_flag) { goto CheckDefeatedState; } // branch if timer is set to certain point
   inc_zp_nf(0x2); // increment saved vertical coordinate three pixels
   inc_zp_nf(0x2);
@@ -6186,47 +6186,47 @@ CheckForBloober:
   
 CheckToAnimateEnemy:
   lda_zp_nf(0xef); // check for specific enemy objects
-  cmp_imm(Goomba);
+  cmp_imm_fcz(Goomba);
   if (zero_flag) { goto CheckDefeatedState; } // branch if goomba
-  cmp_imm(0x8);
+  cmp_imm_fcz(0x8);
   if (zero_flag) { goto CheckDefeatedState; } // branch if bullet bill (note both variants use $08 here)
-  cmp_imm(Podoboo);
+  cmp_imm_fcz(Podoboo);
   if (zero_flag) { goto CheckDefeatedState; } // branch if podoboo
-  cmp_imm(0x18); // branch if => $18
+  cmp_imm_fc(0x18); // branch if => $18
   if (carry_flag) { goto CheckDefeatedState; }
   ldy_imm_nf(0x0);
-  cmp_imm(0x15); // check for mushroom retainer/princess object
+  cmp_imm_fcz(0x15); // check for mushroom retainer/princess object
   if (!zero_flag) { goto CheckForSecondFrame; } // which uses different code here, branch if not found
   iny_nf(); // residual instruction
   lda_abs_nf(WorldNumber); // are we on world 8?
-  cmp_imm(World8);
+  cmp_imm_fc(World8);
   if (carry_flag) { goto CheckDefeatedState; } // if so, leave the offset alone (use princess)
   ldx_imm_nf(0xa2); // otherwise, set for mushroom retainer object instead
-  lda_imm(0x3); // set alternate state here
+  lda_imm_fz(0x3); // set alternate state here
   ram[0xec] = a;
   if (!zero_flag) { goto CheckDefeatedState; } // unconditional branch
   
 CheckForSecondFrame:
   lda_zp_nf(FrameCounter); // load frame counter
-  and_absy(EnemyAnimTimingBMask); // mask it (partly residual, one byte not ever used)
+  and_absy_fz(EnemyAnimTimingBMask); // mask it (partly residual, one byte not ever used)
   if (!zero_flag) { goto CheckDefeatedState; } // branch if timing is off
   
 CheckAnimationStop:
   lda_zp_nf(0xed); // check saved enemy state
   and_imm_nf(0b10100000); // for d7 or d5, or check for timers stopped
-  ora_abs(TimerControl);
+  ora_abs_fz(TimerControl);
   if (!zero_flag) { goto CheckDefeatedState; } // if either condition true, branch
   txa_nf();
   carry_flag = false;
-  adc_imm(0x6); // add $06 to current enemy offset
+  adc_imm_fc(0x6); // add $06 to current enemy offset
   tax_nf(); // to animate various enemy objects
   
 CheckDefeatedState:
   lda_zp_nf(0xed); // check saved enemy state
-  and_imm(0b00100000); // for d5 set
+  and_imm_fz(0b00100000); // for d5 set
   if (zero_flag) { goto DrawEnemyObject; } // branch if not set
   lda_zp_nf(0xef);
-  cmp_imm(0x4); // check for saved enemy object => $04
+  cmp_imm_fc(0x4); // check for saved enemy object => $04
   if (!carry_flag) { goto DrawEnemyObject; } // branch if less
   ldy_imm_nf(0x1);
   ram[VerticalFlipFlag] = y; // set vertical flip flag
@@ -6249,7 +6249,7 @@ SkipToOffScrChk:
   return;
   
 CheckForVerticalFlip:
-  lda_abs(VerticalFlipFlag); // check if vertical flip flag is set here
+  lda_abs_fz(VerticalFlipFlag); // check if vertical flip flag is set here
   if (zero_flag) { goto CheckForESymmetry; } // branch if not
   lda_absy_nf(Sprite_Attributes); // get attributes of first sprite we dealt with
   ora_imm_nf(0b10000000); // set bit for vertical flip
@@ -6261,15 +6261,15 @@ CheckForVerticalFlip:
   tya_nf();
   tax_nf(); // give offset to X
   lda_zp_nf(0xef);
-  cmp_imm(HammerBro); // check saved enemy object for hammer bro
+  cmp_imm_fcz(HammerBro); // check saved enemy object for hammer bro
   if (zero_flag) { goto FlipEnemyVertically; }
-  cmp_imm(Lakitu); // check saved enemy object for lakitu
+  cmp_imm_fcz(Lakitu); // check saved enemy object for lakitu
   if (zero_flag) { goto FlipEnemyVertically; } // branch for hammer bro or lakitu
-  cmp_imm(0x15);
+  cmp_imm_fc(0x15);
   if (carry_flag) { goto FlipEnemyVertically; } // also branch if enemy object => $15
   txa_nf();
   carry_flag = false;
-  adc_imm(0x8); // if not selected objects or => $15, set
+  adc_imm_fc(0x8); // if not selected objects or => $15, set
   tax_nf(); // offset in X for next row
   
 FlipEnemyVertically:
@@ -6297,29 +6297,29 @@ CheckForESymmetry:
   return;
   
 ContES:
-  cmp_imm(Bloober); // check for bloober object
+  cmp_imm_fz(Bloober); // check for bloober object
   if (zero_flag) { goto MirrorEnemyGfx; }
-  cmp_imm(PiranhaPlant); // check for piranha plant object
+  cmp_imm_fz(PiranhaPlant); // check for piranha plant object
   if (zero_flag) { goto MirrorEnemyGfx; }
-  cmp_imm(Podoboo); // check for podoboo object
+  cmp_imm_fz(Podoboo); // check for podoboo object
   if (zero_flag) { goto MirrorEnemyGfx; } // branch if either of three are found
-  cmp_imm(Spiny); // check for spiny object
+  cmp_imm_fz(Spiny); // check for spiny object
   if (!zero_flag) { goto ESRtnr; } // branch closer if not found
-  cpx_imm(0x5); // check spiny's state
+  cpx_imm_fz(0x5); // check spiny's state
   if (!zero_flag) { goto CheckToMirrorLakitu; } // branch if not an egg, otherwise
   
 ESRtnr:
-  cmp_imm(0x15); // check for princess/mushroom retainer object
+  cmp_imm_fz(0x15); // check for princess/mushroom retainer object
   if (!zero_flag) { goto SpnySC; }
   lda_imm_nf(0x42); // set horizontal flip on bottom right sprite
   ram[Sprite_Attributes + 20 + y] = a; // note that palette bits were already set earlier
   
 SpnySC:
-  cpx_imm(0x2); // if alternate enemy state set to 1 or 0, branch
+  cpx_imm_fc(0x2); // if alternate enemy state set to 1 or 0, branch
   if (!carry_flag) { goto CheckToMirrorLakitu; }
   
 MirrorEnemyGfx:
-  lda_abs(BowserGfxFlag); // if enemy object is bowser, skip all of this
+  lda_abs_fz(BowserGfxFlag); // if enemy object is bowser, skip all of this
   if (!zero_flag) { goto CheckToMirrorLakitu; }
   lda_absy_nf(Sprite_Attributes); // load attribute bits of first sprite
   and_imm_nf(0b10100011);
@@ -6327,7 +6327,7 @@ MirrorEnemyGfx:
   ram[Sprite_Attributes + 8 + y] = a; // in left sprite column of enemy object OAM data
   ram[Sprite_Attributes + 16 + y] = a;
   ora_imm_nf(0b01000000); // set horizontal flip
-  cpx_imm(0x5); // check for state used by spiny's egg
+  cpx_imm_fz(0x5); // check for state used by spiny's egg
   if (!zero_flag) { goto EggExc; } // if alternate state not set to $05, branch
   ora_imm_nf(0b10000000); // otherwise set vertical flip
   
@@ -6335,7 +6335,7 @@ EggExc:
   ram[Sprite_Attributes + 4 + y] = a; // set bits of right sprite column
   ram[Sprite_Attributes + 12 + y] = a; // of enemy object sprite data
   ram[Sprite_Attributes + 20 + y] = a;
-  cpx_imm(0x4); // check alternate enemy state
+  cpx_imm_fz(0x4); // check alternate enemy state
   if (!zero_flag) { goto CheckToMirrorLakitu; } // branch if not $04
   lda_absy_nf(Sprite_Attributes + 8); // get second row left sprite attributes
   ora_imm_nf(0b10000000);
@@ -6347,9 +6347,9 @@ EggExc:
   
 CheckToMirrorLakitu:
   lda_zp_nf(0xef); // check for lakitu enemy object
-  cmp_imm(Lakitu);
+  cmp_imm_fz(Lakitu);
   if (!zero_flag) { goto CheckToMirrorJSpring; } // branch if not found
-  lda_abs(VerticalFlipFlag);
+  lda_abs_fz(VerticalFlipFlag);
   if (!zero_flag) { goto NVFLak; } // branch if vertical flip flag not set
   lda_absy_nf(Sprite_Attributes + 16); // save vertical flip and palette bits
   and_imm_nf(0b10000001); // in third row left sprite
@@ -6358,7 +6358,7 @@ CheckToMirrorLakitu:
   ora_imm_nf(0b01000001); // in third row right sprite
   ram[Sprite_Attributes + 20 + y] = a;
   ldx_abs_nf(FrenzyEnemyTimer); // check timer
-  cpx_imm(0x10);
+  cpx_imm_fc(0x10);
   if (carry_flag) { SprObjectOffscrChk(); return; } // branch if timer has not reached a certain range
   ram[Sprite_Attributes + 12 + y] = a; // otherwise set same for second row right sprite
   and_imm_nf(0b10000001);
@@ -6375,7 +6375,7 @@ NVFLak:
   
 CheckToMirrorJSpring:
   lda_zp_nf(0xef); // check for jumpspring object (any frame)
-  cmp_imm(0x18);
+  cmp_imm_fc(0x18);
   if (!carry_flag) { SprObjectOffscrChk(); return; } // branch if not jumpspring object at all
   lda_imm_nf(0x82);
   ram[Sprite_Attributes + 8 + y] = a; // set vertical flip and palette bits of
@@ -6391,7 +6391,7 @@ void SprObjectOffscrChk(void) {
   lda_abs_nf(Enemy_OffscreenBits); // check offscreen information
   lsr_acc_nf();
   lsr_acc_nf(); // shift three times to the right
-  lsr_acc(); // which puts d2 into carry
+  lsr_acc_fc(); // which puts d2 into carry
   pha(); // save to stack
   if (!carry_flag) { goto LcChk; } // branch if not set
   lda_imm(0x4); // set for right column sprites
@@ -6399,7 +6399,7 @@ void SprObjectOffscrChk(void) {
   
 LcChk:
   pla_nf(); // get from stack
-  lsr_acc(); // move d3 to carry
+  lsr_acc_fc(); // move d3 to carry
   pha(); // save to stack
   if (!carry_flag) { goto Row3C; } // branch if not set
   lda_imm(0x0); // set for left column sprites,
@@ -6408,7 +6408,7 @@ LcChk:
 Row3C:
   pla_nf(); // get from stack again
   lsr_acc_nf(); // move d5 to carry this time
-  lsr_acc();
+  lsr_acc_fc();
   pha(); // save to stack again
   if (!carry_flag) { goto Row23C; } // branch if carry not set
   lda_imm(0x10); // set for third row of sprites
@@ -6416,7 +6416,7 @@ Row3C:
   
 Row23C:
   pla_nf(); // get from stack
-  lsr_acc(); // move d6 into carry
+  lsr_acc_fc(); // move d6 into carry
   pha(); // save to stack
   if (!carry_flag) { goto AllRowC; }
   lda_imm(0x8); // set for second and third rows
@@ -6438,7 +6438,7 @@ AllRowC:
 
 void SpawnHammerObj(void) {
   lda_abs_nf(PseudoRandomBitReg + 1); // get pseudorandom bits from
-  and_imm(0b00000111); // second part of LSFR
+  and_imm_fz(0b00000111); // second part of LSFR
   // if any bits are set, branch and use as offset
   if (zero_flag) {
     lda_abs_nf(PseudoRandomBitReg + 1);
@@ -6446,11 +6446,11 @@ void SpawnHammerObj(void) {
   }
   // SetMOfs:
   tay_nf(); // use either d3 or d2-d0 for offset here
-  lda_zpy(Misc_State); // if any values loaded in
+  lda_zpy_fz(Misc_State); // if any values loaded in
   // $2a-$32 where offset is then leave with carry clear
   if (zero_flag) {
     ldx_absy_nf(HammerEnemyOfsData); // get offset of enemy slot to check using Y as offset
-    lda_zpx(Enemy_Flag); // check enemy buffer flag at offset
+    lda_zpx_fz(Enemy_Flag); // check enemy buffer flag at offset
     // if buffer flag set, branch to leave with carry clear
     if (zero_flag) {
       ldx_zp_nf(ObjectOffset); // get original enemy object offset
@@ -6479,12 +6479,12 @@ void ProcHammerObj(void) {
   lda_zpx_nf(Misc_State); // otherwise get hammer's state
   and_imm_nf(0b01111111); // mask out d7
   ldy_absx_nf(HammerEnemyOffset); // get enemy object offset that spawned this hammer
-  cmp_imm(0x2); // check hammer's state
+  cmp_imm_fcz(0x2); // check hammer's state
   if (zero_flag) { goto SetHSpd; } // if currently at 2, branch
   if (carry_flag) { goto SetHPos; } // if greater than 2, branch elsewhere
   txa_nf();
   carry_flag = false; // add 13 bytes to use
-  adc_imm(0xd); // proper misc object
+  adc_imm_fc(0xd); // proper misc object
   tax_nf(); // return offset to X
   lda_imm_nf(0x10);
   ram[0x0] = a; // set downward movement force
@@ -6514,14 +6514,14 @@ SetHPos:
   dec_zpx_nf(Misc_State); // decrement hammer's state
   lda_zpy_nf(Enemy_X_Position); // get enemy's horizontal position
   carry_flag = false;
-  adc_imm(0x2); // set position 2 pixels to the right
+  adc_imm_fc(0x2); // set position 2 pixels to the right
   ram[Misc_X_Position + x] = a; // store as hammer's horizontal position
   lda_zpy_nf(Enemy_PageLoc); // get enemy's page location
   adc_imm_nf(0x0); // add carry
   ram[Misc_PageLoc + x] = a; // store as hammer's page location
   lda_zpy_nf(Enemy_Y_Position); // get enemy's vertical position
   carry_flag = true;
-  sbc_imm(0xa); // move position 10 pixels upward
+  sbc_imm_fc(0xa); // move position 10 pixels upward
   ram[Misc_Y_Position + x] = a; // store as hammer's vertical position
   lda_imm(0x1);
   ram[Misc_Y_HighPos + x] = a; // set hammer's vertical high byte
@@ -6561,11 +6561,11 @@ void SetupJumpCoin(void) {
   asl_acc_nf();
   asl_acc_nf(); // multiply by 16 to use lower nybble
   asl_acc_nf();
-  asl_acc();
+  asl_acc_fc();
   ora_imm_nf(0x5); // add five pixels
   ram[Misc_X_Position + y] = a; // save as horizontal coordinate for misc object
   lda_zp_nf(0x2); // get vertical high nybble offset from earlier
-  adc_imm(0x20); // add 32 pixels for the status bar
+  adc_imm_fc(0x20); // add 32 pixels for the status bar
   ram[Misc_Y_Position + y] = a; // store as vertical coordinate
   JCoinC(); // <fallthrough>
 }
@@ -6590,7 +6590,7 @@ FMiscLoop:
   // branch if none found to use current offset
   if (!zero_flag) {
     dey_nf(); // decrement offset
-    cpy_imm(0x5); // do this for three slots
+    cpy_imm_fcz(0x5); // do this for three slots
     if (!zero_flag) { goto FMiscLoop; } // do this until all slots are checked
     ldy_imm(0x8); // if no empty slots found, use last slot
   }
@@ -6604,7 +6604,7 @@ void MiscObjectsCore(void) {
   
 MiscLoop:
   ram[ObjectOffset] = x; // store misc object offset here
-  lda_zpx(Misc_State); // check misc object state
+  lda_zpx_fz(Misc_State); // check misc object state
   if (zero_flag) { goto MiscLoopBack; } // branch to check next slot
   asl_acc(); // otherwise shift d7 into carry
   if (!carry_flag) { goto ProcJumpCoin; } // if d7 not set, jumping coin, thus skip to rest of code here
@@ -6617,12 +6617,12 @@ MiscLoop:
   
 ProcJumpCoin:
   ldy_zpx_nf(Misc_State); // check misc object state
-  dey(); // decrement to see if it's set to 1
+  dey_fz(); // decrement to see if it's set to 1
   if (zero_flag) { goto JCoinRun; } // if so, branch to handle jumping coin
   inc_zpx_nf(Misc_State); // otherwise increment state to either start off or as timer
   lda_zpx_nf(Misc_X_Position); // get horizontal coordinate for misc object
   carry_flag = false; // whether its jumping coin (state 0 only) or floatey number
-  adc_abs(ScrollAmount); // add current scroll speed
+  adc_abs_fc(ScrollAmount); // add current scroll speed
   ram[Misc_X_Position + x] = a; // store as new horizontal coordinate
   lda_zpx_nf(Misc_PageLoc); // get page location
   adc_imm_nf(0x0); // add carry
@@ -6643,7 +6643,7 @@ JCoinRun:
   ram[0x0] = a;
   lda_imm_nf(0x6); // set maximum vertical speed
   ram[0x2] = a;
-  lsr_acc(); // divide by 2 and set
+  lsr_acc_fc(); // divide by 2 and set
   ram[0x1] = a; // as upward movement amount (apparently residual)
   lda_imm(0x0); // set A to impose gravity on jumping coin
   ImposeGravity(); // do sub to move coin vertically and impose gravity on it
@@ -6673,7 +6673,7 @@ void GiveOneCoin(void) {
   DigitsMathRoutine(); // update the coin tally
   inc_abs_nf(CoinTally); // increment onscreen player's coin amount
   lda_abs_nf(CoinTally);
-  cmp_imm(100); // does player have 100 coins yet?
+  cmp_imm_fcz(100); // does player have 100 coins yet?
   // if not, skip all of this
   if (zero_flag) {
     lda_imm_nf(0x0);
@@ -6704,7 +6704,7 @@ void GetSBNybbles(void) {
 void UpdateNumber(void) {
   PrintStatusBarNumbers(); // print status bar numbers based on nybbles, whatever they be
   ldy_abs_nf(VRAM_Buffer1_Offset);
-  lda_absy(VRAM_Buffer1 - 6); // check highest digit of score
+  lda_absy_fz(VRAM_Buffer1 - 6); // check highest digit of score
   // if zero, overwrite with space tile for zero suppression
   if (zero_flag) {
     lda_imm_nf(0x24);
@@ -6738,14 +6738,14 @@ void PwrUpJmp(void) {
   lda_imm_nf(0x3);
   ram[Enemy_BoundBoxCtrl + 5] = a; // set bounding box size control for power-up object
   lda_zp_nf(PowerUpType);
-  cmp_imm(0x2); // check currently loaded power-up type
+  cmp_imm_fc(0x2); // check currently loaded power-up type
   // if star or 1-up, branch ahead
   if (!carry_flag) {
     lda_abs_nf(PlayerStatus); // otherwise check player's current status
-    cmp_imm(0x2);
+    cmp_imm_fc(0x2);
     // if player not fiery, use status as power-up type
     if (carry_flag) {
-      lsr_acc(); // otherwise shift right to force fire flower type
+      lsr_acc_fc(); // otherwise shift right to force fire flower type
     }
     // StrType:
     ram[PowerUpType] = a; // store type here
@@ -6763,7 +6763,7 @@ void PowerUpObjHandler(void) {
   ram[ObjectOffset] = x;
   lda_zp(Enemy_State + 5); // check power-up object's state
   if (zero_flag) { return; } // if not set, branch to leave
-  asl_acc(); // shift to check if d7 was set in object state
+  asl_acc_fc(); // shift to check if d7 was set in object state
   if (!carry_flag) { goto GrowThePowerUp; } // if not set, branch ahead to skip this part
   lda_abs(TimerControl); // if master timer control set,
   if (!zero_flag) { goto RunPUSubs; } // branch ahead to enemy object routines
@@ -6784,18 +6784,18 @@ ShroomM:
   
 GrowThePowerUp:
   lda_zp_nf(FrameCounter); // get frame counter
-  and_imm(0x3); // mask out all but 2 LSB
+  and_imm_fz(0x3); // mask out all but 2 LSB
   if (!zero_flag) { goto ChkPUSte; } // if any bits set here, branch
   dec_zp_nf(Enemy_Y_Position + 5); // otherwise decrement vertical coordinate slowly
   lda_zp_nf(Enemy_State + 5); // load power-up object state
   inc_zp_nf(Enemy_State + 5); // increment state for next frame (to make power-up rise)
-  cmp_imm(0x11); // if power-up object state not yet past 16th pixel,
+  cmp_imm_fc(0x11); // if power-up object state not yet past 16th pixel,
   if (!carry_flag) { goto ChkPUSte; } // branch ahead to last part here
   lda_imm_nf(0x10);
   ram[Enemy_X_Speed + x] = a; // otherwise set horizontal speed
   lda_imm_nf(0b10000000);
   ram[Enemy_State + 5] = a; // and then set d7 in power-up object's state
-  asl_acc(); // shift once to init A
+  asl_acc_fc(); // shift once to init A
   ram[Enemy_SprAttrib + 5] = a; // initialize background priority bit set here
   rol_acc_nf(); // rotate A to set right moving direction
   ram[Enemy_MovingDir + x] = a; // set moving direction
@@ -6850,20 +6850,20 @@ ChkBrick:
   ram[Block_State + x] = y; // note this applies to both player sizes
   lda_imm_nf(0xc4); // load empty block metatile into A for now
   ldy_zp_nf(0x0); // get metatile from before
-  cpy_imm(0x58); // is it brick with coins (with line)?
+  cpy_imm_fcz(0x58); // is it brick with coins (with line)?
   if (zero_flag) { goto StartBTmr; } // if so, branch
   cpy_imm(0x5d); // is it brick with coins (without line)?
   if (!zero_flag) { goto PutMTileB; } // if not, branch ahead to store empty block metatile
   
 StartBTmr:
-  lda_abs(BrickCoinTimerFlag); // check brick coin timer flag
+  lda_abs_fz(BrickCoinTimerFlag); // check brick coin timer flag
   if (!zero_flag) { goto ContBTmr; } // if set, timer expired or counting down, thus branch
   lda_imm_nf(0xb);
   ram[BrickCoinTimer] = a; // if not set, set brick coin timer
   inc_abs_nf(BrickCoinTimerFlag); // and set flag linked to it
   
 ContBTmr:
-  lda_abs(BrickCoinTimer); // check brick coin timer
+  lda_abs_fz(BrickCoinTimer); // check brick coin timer
   if (!zero_flag) { goto PutOldMT; } // if not yet expired, branch to use current metatile
   ldy_imm_nf(0xc4); // otherwise use empty block metatile
   
@@ -6881,9 +6881,9 @@ PutMTileB:
   pla_nf(); // pull original metatile from stack
   ram[0x5] = a; // and save here
   ldy_imm_nf(0x0); // set default offset
-  lda_abs(CrouchingFlag); // is player crouching?
+  lda_abs_fz(CrouchingFlag); // is player crouching?
   if (!zero_flag) { goto SmallBP; } // if so, branch to increment offset
-  lda_abs(PlayerSize); // is player big?
+  lda_abs_fz(PlayerSize); // is player big?
   if (zero_flag) { goto BigBP; } // if so, branch to use default offset
   
 SmallBP:
@@ -6914,11 +6914,11 @@ InvOBit:
 void InitBlock_XY_Pos(void) {
   lda_zp_nf(Player_X_Position); // get player's horizontal coordinate
   carry_flag = false;
-  adc_imm(0x8); // add eight pixels
+  adc_imm_fc(0x8); // add eight pixels
   and_imm_nf(0xf0); // mask out low nybble to give 16-pixel correspondence
   ram[Block_X_Position + x] = a; // save as horizontal coordinate for block object
   lda_zp_nf(Player_PageLoc);
-  adc_imm(0x0); // add carry to page location of player
+  adc_imm_fc(0x0); // add carry to page location of player
   ram[Block_PageLoc + x] = a; // save as page location of block object
   ram[Block_PageLoc2 + x] = a; // save elsewhere to be used later
   lda_zp(Player_Y_HighPos);
@@ -7054,7 +7054,7 @@ void SpawnBrickChunks(void) {
   ram[Block_X_Position + 2 + x] = a; // copy horizontal coordinate
   lda_zpx_nf(Block_Y_Position);
   carry_flag = false; // add 8 pixels to vertical coordinate
-  adc_imm(0x8); // and save as vertical coordinate for one of them
+  adc_imm_fc(0x8); // and save as vertical coordinate for one of them
   ram[Block_Y_Position + 2 + x] = a;
   lda_imm(0xfa);
   ram[Block_Y_Speed + x] = a; // set vertical speed...again??? (redundant)
@@ -7069,7 +7069,7 @@ void BlockObjectsCore(void) {
   tay_nf(); // put in Y for now
   txa_nf();
   carry_flag = false;
-  adc_imm(0x9); // add 9 bytes to offset (note two block objects are created
+  adc_imm_fc(0x9); // add 9 bytes to offset (note two block objects are created
   tax_nf(); // when using brick chunks, but only one offset for both)
   dey(); // decrement Y to check for solid block state
   if (zero_flag) { goto BouncingBlockHandler; } // branch if found, otherwise continue for brick chunks
@@ -7077,7 +7077,7 @@ void BlockObjectsCore(void) {
   MoveObjectHorizontally(); // do another sub to move horizontally
   txa_nf();
   carry_flag = false; // move onto next block object
-  adc_imm(0x2);
+  adc_imm_fc(0x2);
   tax();
   ImposeGravityBlock(); // do sub to impose gravity on other block object
   MoveObjectHorizontally(); // do another sub to move horizontally
@@ -7090,13 +7090,13 @@ void BlockObjectsCore(void) {
   if (zero_flag) { goto UpdSte; } // if above the screen, branch to kill it
   pha(); // otherwise save state back into stack
   lda_imm_nf(0xf0);
-  cmp_zpx(Block_Y_Position + 2); // check to see if bottom block object went
+  cmp_zpx_fc(Block_Y_Position + 2); // check to see if bottom block object went
   if (carry_flag) { goto ChkTop; } // to the bottom of the screen, and branch if not
   ram[Block_Y_Position + 2 + x] = a; // otherwise set offscreen coordinate
   
 ChkTop:
   lda_zpx_nf(Block_Y_Position); // get top block object's vertical coordinate
-  cmp_imm(0xf0); // see if it went to the bottom of the screen
+  cmp_imm_fc(0xf0); // see if it went to the bottom of the screen
   pla(); // pull block object state from stack
   if (!carry_flag) { goto UpdSte; } // if not, branch to save state
   if (carry_flag) { goto KillBlock; } // otherwise do unconditional branch to kill it
@@ -7109,7 +7109,7 @@ BouncingBlockHandler:
   DrawBlock(); // draw the block
   lda_zpx_nf(Block_Y_Position); // get vertical coordinate
   and_imm_nf(0xf); // mask out high nybble
-  cmp_imm(0x5); // check to see if low nybble wrapped around
+  cmp_imm_fc(0x5); // check to see if low nybble wrapped around
   pla(); // pull state from stack
   if (carry_flag) { goto UpdSte; } // if still above amount, not time to kill block yet, thus branch
   lda_imm_nf(0x1);
@@ -7130,10 +7130,10 @@ void BlockObjMT_Updater(void) {
   
 UpdateLoop:
   ram[ObjectOffset] = x; // set offset here
-  lda_abs(VRAM_Buffer1); // if vram buffer already being used here,
+  lda_abs_fz(VRAM_Buffer1); // if vram buffer already being used here,
   // branch to move onto next block object
   if (zero_flag) {
-    lda_absx(Block_RepFlag); // if flag for block object already clear,
+    lda_absx_fz(Block_RepFlag); // if flag for block object already clear,
     // branch to move onto next block object
     if (!zero_flag) {
       lda_absx_nf(Block_BBuf_Low); // get low byte of block buffer
@@ -7185,14 +7185,14 @@ void MoveObjectHorizontally(void) {
   lsr_acc_nf();
   lsr_acc_nf();
   lsr_acc_nf();
-  cmp_imm(0x8); // if < 8, branch, do not change
+  cmp_imm_fc(0x8); // if < 8, branch, do not change
   if (carry_flag) {
     ora_imm_nf(0b11110000); // otherwise alter high nybble
   }
   // SaveXSpd:
   ram[0x0] = a; // save result here
   ldy_imm_nf(0x0); // load default Y value here
-  cmp_imm(0x0); // if result positive, leave Y alone
+  cmp_imm_fn(0x0); // if result positive, leave Y alone
   if (neg_flag) {
     dey_nf(); // otherwise decrement Y
   }
@@ -7200,14 +7200,14 @@ void MoveObjectHorizontally(void) {
   ram[0x2] = y; // save Y here
   lda_absx_nf(SprObject_X_MoveForce); // get whatever number's here
   carry_flag = false;
-  adc_zp(0x1); // add low nybble moved to high
+  adc_zp_fc(0x1); // add low nybble moved to high
   ram[SprObject_X_MoveForce + x] = a; // store result here
   lda_imm_nf(0x0); // init A
-  rol_acc(); // rotate carry into d0
+  rol_acc_fc(); // rotate carry into d0
   pha(); // push onto stack
-  ror_acc(); // rotate d0 back onto carry
+  ror_acc_fc(); // rotate d0 back onto carry
   lda_zpx_nf(SprObject_X_Position);
-  adc_zp(0x0); // add carry plus saved value (high nybble moved to low
+  adc_zp_fc(0x0); // add carry plus saved value (high nybble moved to low
   ram[SprObject_X_Position + x] = a; // plus $f0 if necessary) to object's horizontal position
   lda_zpx_nf(SprObject_PageLoc);
   adc_zp_nf(0x2); // add carry plus other saved value to the
@@ -7223,7 +7223,7 @@ void MoveObjectHorizontally(void) {
 
 void MovePlayerVertically(void) {
   ldx_imm_nf(0x0); // set X for player offset
-  lda_abs(TimerControl);
+  lda_abs_fz(TimerControl);
   if (!zero_flag) { goto NoJSChk; } // if master timer control set, branch ahead
   lda_abs(JumpspringAnimCtrl); // otherwise check to see if jumpspring is animating
   if (!zero_flag) { return; } // branch to leave if so
@@ -7282,7 +7282,7 @@ void MoveRedPTroopa(void) {
 }
 
 void MoveDropPlatform(void) {
-  ldy_imm(0x7f); // set movement amount for drop platform
+  ldy_imm_fz(0x7f); // set movement amount for drop platform
   // skip ahead of other value set here
   if (!zero_flag) {
     SetMdMax();
@@ -7350,7 +7350,7 @@ void MovePlatformUpSkip(void) {
   ldy_zpx_nf(Enemy_ID); // get enemy object identifier
   inx_nf(); // increment offset for enemy object
   lda_imm_nf(0x5); // load default value here
-  cpy_imm(0x29); // residual comparison, object #29 never executes
+  cpy_imm_fcz(0x29); // residual comparison, object #29 never executes
   // this code, thus unconditional branch here
   if (zero_flag) {
     lda_imm_nf(0x9); // residual code
@@ -7378,7 +7378,7 @@ void RedPTroopaGrav(void) {
 void EnemiesAndLoopsCore(void) {
   lda_zpx_nf(Enemy_Flag); // check data here for MSB set
   pha(); // save in stack
-  asl_acc();
+  asl_acc_fc();
   if (carry_flag) { goto ChkBowserF; } // if MSB set in enemy flag, branch ahead of jumps
   pla(); // get from stack
   if (zero_flag) { goto ChkAreaTsk; } // if data zero, branch
@@ -7423,7 +7423,7 @@ void ExecGameLoopback(void) {
   ram[ScreenRight_PageLoc] = a;
   lda_abs_nf(AreaObjectPageLoc); // subtract four from page control
   carry_flag = true; // for area objects
-  sbc_imm(0x4);
+  sbc_imm_fc(0x4);
   ram[AreaObjectPageLoc] = a;
   lda_imm_nf(0x0); // initialize page select for both
   ram[EnemyObjectPageSel] = a; // area and enemy objects
@@ -7435,36 +7435,36 @@ void ExecGameLoopback(void) {
 }
 
 void ProcLoopCommand(void) {
-  lda_abs(LoopCommand); // check if loop command was found
+  lda_abs_fz(LoopCommand); // check if loop command was found
   if (zero_flag) { goto ChkEnemyFrenzy; }
-  lda_abs(CurrentColumnPos); // check to see if we're still on the first page
+  lda_abs_fz(CurrentColumnPos); // check to see if we're still on the first page
   if (!zero_flag) { goto ChkEnemyFrenzy; } // if not, do not loop yet
   ldy_imm_nf(0xb); // start at the end of each set of loop data
   
 FindLoop:
-  dey();
+  dey_fn();
   if (neg_flag) { goto ChkEnemyFrenzy; } // if all data is checked and not match, do not loop
   lda_abs_nf(WorldNumber); // check to see if one of the world numbers
-  cmp_absy(LoopCmdWorldNumber); // matches our current world number
+  cmp_absy_fcz(LoopCmdWorldNumber); // matches our current world number
   if (!zero_flag) { goto FindLoop; }
   lda_abs_nf(CurrentPageLoc); // check to see if one of the page numbers
-  cmp_absy(LoopCmdPageNumber); // matches the page we're currently on
+  cmp_absy_fcz(LoopCmdPageNumber); // matches the page we're currently on
   if (!zero_flag) { goto FindLoop; }
   lda_zp_nf(Player_Y_Position); // check to see if the player is at the correct position
-  cmp_absy(LoopCmdYPosition); // if not, branch to check for world 7
+  cmp_absy_fz(LoopCmdYPosition); // if not, branch to check for world 7
   if (!zero_flag) { goto WrongChk; }
   lda_zp_nf(Player_State); // check to see if the player is
-  cmp_imm(0x0); // on solid ground (i.e. not jumping or falling)
+  cmp_imm_fz(0x0); // on solid ground (i.e. not jumping or falling)
   if (!zero_flag) { goto WrongChk; } // if not, player fails to pass loop, and loopback
   lda_abs_nf(WorldNumber); // are we in world 7? (check performed on correct
-  cmp_imm(World7); // vertical position and on solid ground)
+  cmp_imm_fcz(World7); // vertical position and on solid ground)
   if (!zero_flag) { goto InitMLp; } // if not, initialize flags used there, otherwise
   inc_abs_nf(MultiLoopCorrectCntr); // increment counter for correct progression
   
 IncMLoop:
   inc_abs_nf(MultiLoopPassCntr); // increment master multi-part counter
   lda_abs_nf(MultiLoopPassCntr); // have we done all three parts?
-  cmp_imm(0x3);
+  cmp_imm_fcz(0x3);
   if (!zero_flag) { goto InitLCmd; } // if not, skip this part
   lda_abs_nf(MultiLoopCorrectCntr); // if so, have we done them all correctly?
   cmp_imm(0x3);
@@ -7491,7 +7491,7 @@ InitLCmd:
   // --------------------------------
   
 ChkEnemyFrenzy:
-  lda_abs(EnemyFrenzyQueue); // check for enemy object in frenzy queue
+  lda_abs_fz(EnemyFrenzyQueue); // check for enemy object in frenzy queue
   if (zero_flag) { goto ProcessEnemyData; } // if not, skip this part
   ram[Enemy_ID + x] = a; // store as enemy object identifier here
   lda_imm_nf(0x1);
@@ -7507,15 +7507,15 @@ ChkEnemyFrenzy:
 ProcessEnemyData:
   ldy_abs_nf(EnemyDataOffset); // get offset of enemy object data
   lda_indy_nf(EnemyData); // load first byte
-  cmp_imm(0xff); // check for EOD terminator
+  cmp_imm_fcz(0xff); // check for EOD terminator
   if (!zero_flag) { goto CheckEndofBuffer; }
   goto CheckFrenzyBuffer; // if found, jump to check frenzy buffer, otherwise
   
 CheckEndofBuffer:
   and_imm_nf(0b00001111); // check for special row $0e
-  cmp_imm(0xe);
+  cmp_imm_fz(0xe);
   if (zero_flag) { goto CheckRightBounds; } // if found, branch, otherwise
-  cpx_imm(0x5); // check for end of buffer
+  cpx_imm_fc(0x5); // check for end of buffer
   if (!carry_flag) { goto CheckRightBounds; } // if not at end of buffer, branch
   iny_nf();
   lda_indy_nf(EnemyData); // check for specific value here
@@ -7527,7 +7527,7 @@ CheckEndofBuffer:
 CheckRightBounds:
   lda_abs_nf(ScreenRight_X_Pos); // add 48 to pixel coordinate of right boundary
   carry_flag = false;
-  adc_imm(0x30);
+  adc_imm_fc(0x30);
   and_imm_nf(0b11110000); // store high nybble
   ram[0x7] = a;
   lda_abs_nf(ScreenRight_PageLoc); // add carry to page location of right boundary
@@ -7536,9 +7536,9 @@ CheckRightBounds:
   ldy_abs_nf(EnemyDataOffset);
   iny_nf();
   lda_indy_nf(EnemyData); // if MSB of enemy object is clear, branch to check for row $0f
-  asl_acc();
+  asl_acc_fc();
   if (!carry_flag) { goto CheckPageCtrlRow; }
-  lda_abs(EnemyObjectPageSel); // if page select already set, do not set again
+  lda_abs_fz(EnemyObjectPageSel); // if page select already set, do not set again
   if (!zero_flag) { goto CheckPageCtrlRow; }
   inc_abs_nf(EnemyObjectPageSel); // otherwise, if MSB is set, set page select
   inc_abs_nf(EnemyObjectPageLoc); // and increment page control
@@ -7547,9 +7547,9 @@ CheckPageCtrlRow:
   dey_nf();
   lda_indy_nf(EnemyData); // reread first byte
   and_imm_nf(0xf);
-  cmp_imm(0xf); // check for special row $0f
+  cmp_imm_fcz(0xf); // check for special row $0f
   if (!zero_flag) { goto PositionEnemyObj; } // if not found, branch to position enemy object
-  lda_abs(EnemyObjectPageSel); // if page select set,
+  lda_abs_fz(EnemyObjectPageSel); // if page select set,
   if (!zero_flag) { goto PositionEnemyObj; } // branch without reading second byte
   iny_nf();
   lda_indy_nf(EnemyData); // otherwise, get second byte, mask out 2 MSB
@@ -7567,9 +7567,9 @@ PositionEnemyObj:
   lda_indy_nf(EnemyData); // get first byte of enemy object
   and_imm_nf(0b11110000);
   ram[Enemy_X_Position + x] = a; // store column position
-  cmp_abs(ScreenRight_X_Pos); // check column position against right boundary
+  cmp_abs_fc(ScreenRight_X_Pos); // check column position against right boundary
   lda_zpx_nf(Enemy_PageLoc); // without subtracting, then subtract borrow
-  sbc_abs(ScreenRight_PageLoc); // from page location
+  sbc_abs_fc(ScreenRight_PageLoc); // from page location
   if (carry_flag) { goto CheckRightExtBounds; } // if enemy object beyond or at boundary, branch
   lda_indy_nf(EnemyData);
   and_imm_nf(0b00001111); // check for special row $0e
@@ -7580,9 +7580,9 @@ PositionEnemyObj:
   
 CheckRightExtBounds:
   lda_zp_nf(0x7); // check right boundary + 48 against
-  cmp_zpx(Enemy_X_Position); // column position without subtracting,
+  cmp_zpx_fc(Enemy_X_Position); // column position without subtracting,
   lda_zp_nf(0x6); // then subtract borrow from page control temp
-  sbc_zpx(Enemy_PageLoc); // plus carry
+  sbc_zpx_fc(Enemy_PageLoc); // plus carry
   if (!carry_flag) { goto CheckFrenzyBuffer; } // if enemy object beyond extended boundary, branch
   lda_imm_nf(0x1); // store value in vertical high byte
   ram[Enemy_Y_HighPos + x] = a;
@@ -7592,27 +7592,27 @@ CheckRightExtBounds:
   asl_acc_nf();
   asl_acc_nf();
   ram[Enemy_Y_Position + x] = a;
-  cmp_imm(0xe0); // do one last check for special row $0e
+  cmp_imm_fcz(0xe0); // do one last check for special row $0e
   if (zero_flag) { ParseRow0e(); return; } // (necessary if branched to $c1cb)
   iny_nf();
   lda_indy_nf(EnemyData); // get second byte of object
-  and_imm(0b01000000); // check to see if hard mode bit is set
+  and_imm_fz(0b01000000); // check to see if hard mode bit is set
   if (zero_flag) { goto CheckForEnemyGroup; } // if not, branch to check for group enemy objects
-  lda_abs(SecondaryHardMode); // if set, check to see if secondary hard mode flag
+  lda_abs_fz(SecondaryHardMode); // if set, check to see if secondary hard mode flag
   if (zero_flag) { Inc2B(); return; } // is on, and if not, branch to skip this object completely
   
 CheckForEnemyGroup:
   lda_indy_nf(EnemyData); // get second byte and mask out 2 MSB
   and_imm_nf(0b00111111);
-  cmp_imm(0x37); // check for value below $37
+  cmp_imm_fc(0x37); // check for value below $37
   if (!carry_flag) { goto BuzzyBeetleMutate; }
   cmp_imm(0x3f); // if $37 or greater, check for value
   if (!carry_flag) { DoGroup(); return; } // below $3f, branch if below $3f
   
 BuzzyBeetleMutate:
-  cmp_imm(Goomba); // if below $37, check for goomba
+  cmp_imm_fcz(Goomba); // if below $37, check for goomba
   if (!zero_flag) { goto StrID; } // value ($3f or more always fails)
-  ldy_abs(PrimaryHardMode); // check if primary hard mode flag is set
+  ldy_abs_fz(PrimaryHardMode); // check if primary hard mode flag is set
   if (zero_flag) { goto StrID; } // and if so, change goomba to buzzy beetle
   lda_imm_nf(BuzzyBeetle);
   
@@ -7626,7 +7626,7 @@ StrID:
   return;
   
 CheckFrenzyBuffer:
-  lda_abs(EnemyFrenzyBuffer); // if enemy object stored in frenzy buffer
+  lda_abs_fz(EnemyFrenzyBuffer); // if enemy object stored in frenzy buffer
   if (!zero_flag) { goto StrFre; } // then branch ahead to store in enemy object buffer
   lda_abs_nf(VineFlagOffset); // otherwise check vine flag offset
   cmp_imm(0x1);
@@ -7684,7 +7684,7 @@ void CheckThreeBytes(void) {
   ldy_abs_nf(EnemyDataOffset); // load current offset for enemy object data
   lda_indy_nf(EnemyData); // get first byte
   and_imm_nf(0b00001111); // check for special row $0e
-  cmp_imm(0xe);
+  cmp_imm_fcz(0xe);
   if (!zero_flag) {
     Inc2B();
     return;
@@ -7704,7 +7704,7 @@ void CheckpointEnemyID(void) {
   if (!carry_flag) {
     tay_nf(); // save identifier in Y register for now
     lda_zpx_nf(Enemy_Y_Position);
-    adc_imm(0x8); // add eight pixels to what will eventually be the
+    adc_imm_fc(0x8); // add eight pixels to what will eventually be the
     ram[Enemy_Y_Position + x] = a; // enemy object's vertical coordinate ($00-$14 only)
     lda_imm_nf(0x1);
     ram[EnemyOffscrBitsMasked + x] = a; // set offscreen masked bit
@@ -7786,7 +7786,7 @@ void InitPodoboo(void) {
   ram[Enemy_Y_Position + x] = a;
   lsr_acc_nf();
   ram[EnemyIntervalTimer + x] = a; // set timer for enemy
-  lsr_acc();
+  lsr_acc_fc();
   ram[Enemy_State + x] = a; // initialize enemy state, then jump to use
   SmallBBox(); return; // $09 as bounding box size and set other things
   // --------------------------------
@@ -7800,7 +7800,7 @@ void InitRetainerObj(void) {
 
 void InitNormalEnemy(void) {
   ldy_imm_nf(0x1); // load offset of 1 by default
-  lda_abs(PrimaryHardMode); // check for primary hard mode flag set
+  lda_abs_fz(PrimaryHardMode); // check for primary hard mode flag set
   if (zero_flag) {
     dey_nf(); // if not set, decrement offset
   }
@@ -7847,7 +7847,7 @@ void InitBloober(void) {
 }
 
 void SmallBBox(void) {
-  lda_imm(0x9); // set specific bounding box size control
+  lda_imm_fz(0x9); // set specific bounding box size control
   // unconditional branch
   if (!zero_flag) {
     SetBBox();
@@ -7859,7 +7859,7 @@ void SmallBBox(void) {
 
 void InitRedPTroopa(void) {
   ldy_imm_nf(0x30); // load central position adder for 48 pixels down
-  lda_zpx(Enemy_Y_Position); // set vertical coordinate into location to
+  lda_zpx_fn(Enemy_Y_Position); // set vertical coordinate into location to
   ram[RedPTroopaOrigXPos + x] = a; // be used as original vertical coordinate
   // if vertical coordinate < $80
   if (neg_flag) {
@@ -7867,7 +7867,7 @@ void InitRedPTroopa(void) {
   }
   // GetCent:
   tya_nf(); // send central position adder to A
-  adc_zpx(Enemy_Y_Position); // add to current vertical coordinate
+  adc_zpx_fc(Enemy_Y_Position); // add to current vertical coordinate
   ram[RedPTroopaCenterYPos + x] = a; // store as central vertical coordinate
   TallBBox(); // <fallthrough>
 }
@@ -7943,9 +7943,9 @@ void LakituAndSpinyHandler(void) {
   
 ChkLak:
   lda_zpy_nf(Enemy_ID); // check all enemy slots to see
-  cmp_imm(Lakitu); // if lakitu is on one of them
+  cmp_imm_fz(Lakitu); // if lakitu is on one of them
   if (zero_flag) { goto CreateSpiny; } // if so, branch out of this loop
-  dey(); // otherwise check another slot
+  dey_fn(); // otherwise check another slot
   if (!neg_flag) { goto ChkLak; } // loop until all slots are checked
   inc_abs_nf(LakituReappearTimer); // increment reappearance timer
   lda_abs_nf(LakituReappearTimer);
@@ -7954,9 +7954,9 @@ ChkLak:
   ldx_imm_nf(0x4); // start with the last enemy slot again
   
 ChkNoEn:
-  lda_zpx(Enemy_Flag); // check enemy buffer flag for non-active enemy slot
+  lda_zpx_fz(Enemy_Flag); // check enemy buffer flag for non-active enemy slot
   if (zero_flag) { goto CreateL; } // branch out of loop if found
-  dex(); // otherwise check next slot
+  dex_fn(); // otherwise check next slot
   if (!neg_flag) { goto ChkNoEn; } // branch until all slots are checked
   if (neg_flag) { goto RetEOfs; } // if no empty slots were found, branch to leave
   
@@ -7990,7 +7990,7 @@ CreateSpiny:
   ram[Enemy_Y_HighPos + x] = a;
   lda_zpy_nf(Enemy_Y_Position); // put spiny eight pixels above where lakitu is
   carry_flag = true;
-  sbc_imm(0x8);
+  sbc_imm_fc(0x8);
   ram[Enemy_Y_Position + x] = a;
   lda_absx_nf(PseudoRandomBitReg); // get 2 LSB of LSFR and save to Y
   and_imm_nf(0b00000011);
@@ -8004,7 +8004,7 @@ DifLoop:
   iny_nf(); // increment Y four bytes for each value
   iny_nf();
   iny_nf();
-  dex(); // decrement X for each one
+  dex_fn(); // decrement X for each one
   if (!neg_flag) { goto DifLoop; } // loop until all three are written
   ldx_zp(ObjectOffset); // get enemy object buffer offset
   PlayerLakituDiff(); // move enemy, change direction, get value - difference
@@ -8013,7 +8013,7 @@ DifLoop:
   if (carry_flag) { goto SetSpSpd; } // if moving faster than a certain amount, branch elsewhere
   tay_nf(); // otherwise save value in A to Y for now
   lda_absx_nf(PseudoRandomBitReg + 1);
-  and_imm(0b00000011); // get one of the LSFR parts and save the 2 LSB
+  and_imm_fz(0b00000011); // get one of the LSFR parts and save the 2 LSB
   if (zero_flag) { goto UsePosv; } // branch if neither bits are set
   tya_nf();
   eor_imm_nf(0b11111111); // otherwise get two's compliment of Y
@@ -8027,7 +8027,7 @@ SetSpSpd:
   SmallBBox(); // set bounding box control, init attributes, lose contents of A
   ldy_imm_nf(0x2);
   ram[Enemy_X_Speed + x] = a; // set horizontal speed to zero because previous contents
-  cmp_imm(0x0); // of A were lost...branch here will never be taken for
+  cmp_imm_fcn(0x0); // of A were lost...branch here will never be taken for
   if (neg_flag) { goto SpinyRte; } // the same reason
   dey_nf();
   
@@ -8064,7 +8064,7 @@ void InitShortFirebar(void) {
   ram[Enemy_Y_Position + x] = a;
   lda_zpx_nf(Enemy_X_Position);
   carry_flag = false; // add four pixels to horizontal coordinate
-  adc_imm(0x4);
+  adc_imm_fc(0x4);
   ram[Enemy_X_Position + x] = a;
   lda_zpx_nf(Enemy_PageLoc);
   adc_imm(0x0); // add carry to page location
@@ -8084,7 +8084,7 @@ void InitFlyingCheepCheep(void) {
   lda_absy_nf(FlyCCTimerData); // load timer with pseudorandom offset
   ram[FrenzyEnemyTimer] = a;
   ldy_imm_nf(0x3); // load Y with default value
-  lda_abs(SecondaryHardMode);
+  lda_abs_fz(SecondaryHardMode);
   if (zero_flag) { goto MaxCC; } // if secondary hard mode flag not set, do not increment Y
   iny_nf(); // otherwise, increment Y to allow as many as four onscreen
   
@@ -8099,10 +8099,10 @@ MaxCC:
   lda_imm_nf(0xfb); // set vertical speed for cheep-cheep
   ram[Enemy_Y_Speed + x] = a;
   lda_imm_nf(0x0); // load default value
-  ldy_zp(Player_X_Speed); // check player's horizontal speed
+  ldy_zp_fz(Player_X_Speed); // check player's horizontal speed
   if (zero_flag) { goto GSeed; } // if player not moving left or right, skip this part
   lda_imm_nf(0x4);
-  cpy_imm(0x19); // if moving to the right but not very quickly,
+  cpy_imm_fc(0x19); // if moving to the right but not very quickly,
   if (!carry_flag) { goto GSeed; } // do not change A
   asl_acc_nf(); // otherwise, multiply A by 2
   
@@ -8112,7 +8112,7 @@ GSeed:
   adc_zp_nf(0x0); // add to last two bits of LSFR we saved earlier
   ram[0x0] = a; // save it there
   lda_absx_nf(PseudoRandomBitReg + 1);
-  and_imm(0b00000011); // if neither of the last two bits of second LSFR set,
+  and_imm_fz(0b00000011); // if neither of the last two bits of second LSFR set,
   if (zero_flag) { goto RSeed; } // skip this part and save contents of $00
   lda_absx_nf(PseudoRandomBitReg + 2);
   and_imm_nf(0b00001111); // otherwise overwrite with lower nybble of
@@ -8127,11 +8127,11 @@ RSeed:
   ram[Enemy_X_Speed + x] = a;
   lda_imm_nf(0x1); // set to move towards the right
   ram[Enemy_MovingDir + x] = a;
-  lda_zp(Player_X_Speed); // if player moving left or right, branch ahead of this part
+  lda_zp_fz(Player_X_Speed); // if player moving left or right, branch ahead of this part
   if (!zero_flag) { goto D2XPos1; }
   ldy_zp_nf(0x0); // get first LSFR or third LSFR lower nybble
   tya_nf(); // and check for d1 set
-  and_imm(0b00000010);
+  and_imm_fz(0b00000010);
   if (zero_flag) { goto D2XPos1; } // if d1 not set, branch
   lda_zpx_nf(Enemy_X_Speed);
   eor_imm_nf(0xff); // if d1 set, change horizontal speed
@@ -8142,23 +8142,23 @@ RSeed:
   
 D2XPos1:
   tya_nf(); // get first LSFR or third LSFR lower nybble again
-  and_imm(0b00000010);
+  and_imm_fz(0b00000010);
   if (zero_flag) { goto D2XPos2; } // check for d1 set again, branch again if not set
   lda_zp_nf(Player_X_Position); // get player's horizontal position
   carry_flag = false;
-  adc_absy(FlyCCXPositionData); // if d1 set, add value obtained from pseudorandom offset
+  adc_absy_fc(FlyCCXPositionData); // if d1 set, add value obtained from pseudorandom offset
   ram[Enemy_X_Position + x] = a; // and save as enemy's horizontal position
   lda_zp_nf(Player_PageLoc); // get player's page location
-  adc_imm(0x0); // add carry and jump past this part
+  adc_imm_fc(0x0); // add carry and jump past this part
   goto FinCCSt;
   
 D2XPos2:
   lda_zp_nf(Player_X_Position); // get player's horizontal position
   carry_flag = true;
-  sbc_absy(FlyCCXPositionData); // if d1 not set, subtract value obtained from pseudorandom
+  sbc_absy_fc(FlyCCXPositionData); // if d1 not set, subtract value obtained from pseudorandom
   ram[Enemy_X_Position + x] = a; // offset and save as enemy's horizontal position
   lda_zp_nf(Player_PageLoc); // get player's page location
-  sbc_imm(0x0); // subtract borrow
+  sbc_imm_fc(0x0); // subtract borrow
   
 FinCCSt:
   ram[Enemy_PageLoc + x] = a; // save as enemy's page location
@@ -8209,7 +8209,7 @@ void InitBowserFlame(void) {
     SetFlameTimer(); // get timer data based on flame counter
     carry_flag = false;
     adc_imm_nf(0x20); // add 32 frames by default
-    ldy_abs(SecondaryHardMode);
+    ldy_abs_fz(SecondaryHardMode);
     // if secondary mode flag not set, use as timer setting
     if (!zero_flag) {
       carry_flag = true;
@@ -8230,7 +8230,7 @@ void PutAtRightExtent(void) {
   ram[Enemy_Y_Position + x] = a; // set vertical position
   lda_abs_nf(ScreenRight_X_Pos);
   carry_flag = false;
-  adc_imm(0x20); // place enemy 32 pixels beyond right side of screen
+  adc_imm_fc(0x20); // place enemy 32 pixels beyond right side of screen
   ram[Enemy_X_Position + x] = a;
   lda_abs_nf(ScreenRight_PageLoc);
   adc_imm(0x0); // add carry
@@ -8255,7 +8255,7 @@ void SpawnFromMouth(void) {
   tay_nf(); // use as offset
   lda_absy_nf(FlameYPosData); // get value here using bits as offset
   ldy_imm_nf(0x0); // load default offset
-  cmp_zpx(Enemy_Y_Position); // compare value to flame's current vertical position
+  cmp_zpx_fc(Enemy_Y_Position); // compare value to flame's current vertical position
   // if less, do not increment offset
   if (carry_flag) {
     iny_nf(); // otherwise increment now
@@ -8291,11 +8291,11 @@ void InitFireworks(void) {
 StarFChk:
     dey_nf();
     lda_zpy_nf(Enemy_ID); // check for presence of star flag object
-    cmp_imm(StarFlagObject); // if there isn't a star flag object,
+    cmp_imm_fz(StarFlagObject); // if there isn't a star flag object,
     if (!zero_flag) { goto StarFChk; } // routine goes into infinite loop = crash
     lda_zpy_nf(Enemy_X_Position);
     carry_flag = true; // get horizontal coordinate of star flag object, then
-    sbc_imm(0x30); // subtract 48 pixels from it and save to
+    sbc_imm_fc(0x30); // subtract 48 pixels from it and save to
     pha(); // the stack
     lda_zpy_nf(Enemy_PageLoc);
     sbc_imm_nf(0x0); // subtract the carry from the page location
@@ -8306,7 +8306,7 @@ StarFChk:
     tay_nf(); // use as offset
     pla_nf(); // get saved horizontal coordinate of star flag - 48 pixels
     carry_flag = false;
-    adc_absy(FireworksXPosData); // add number based on offset of fireworks counter
+    adc_absy_fc(FireworksXPosData); // add number based on offset of fireworks counter
     ram[Enemy_X_Position + x] = a; // store as the fireworks object horizontal coordinate
     lda_zp_nf(0x0);
     adc_imm_nf(0x0); // add carry and store as page location for
@@ -8316,7 +8316,7 @@ StarFChk:
     lda_imm_nf(0x1);
     ram[Enemy_Y_HighPos + x] = a; // store in vertical high byte
     ram[Enemy_Flag + x] = a; // and activate enemy buffer flag
-    lsr_acc();
+    lsr_acc_fc();
     ram[ExplosionGfxCounter + x] = a; // initialize explosion counter
     lda_imm(0x8);
     ram[ExplosionTimerCounter + x] = a; // set explosion timing counter
@@ -8327,19 +8327,19 @@ StarFChk:
 void BulletBillCheepCheep(void) {
   lda_abs(FrenzyEnemyTimer); // if timer not expired yet, branch to leave
   if (!zero_flag) { goto ExF17; }
-  lda_abs(AreaType); // are we in a water-type level?
+  lda_abs_fz(AreaType); // are we in a water-type level?
   if (!zero_flag) { goto DoBulletBills; } // if not, branch elsewhere
   cpx_imm(0x3); // are we past third enemy slot?
   if (carry_flag) { goto ExF17; } // if so, branch to leave
   ldy_imm_nf(0x0); // load default offset
   lda_absx_nf(PseudoRandomBitReg);
-  cmp_imm(0xaa); // check first part of LSFR against preset value
+  cmp_imm_fc(0xaa); // check first part of LSFR against preset value
   if (!carry_flag) { goto ChkW2; } // if less than preset, do not increment offset
   iny_nf(); // otherwise increment
   
 ChkW2:
   lda_abs_nf(WorldNumber); // check world number
-  cmp_imm(World2);
+  cmp_imm_fz(World2);
   if (zero_flag) { goto Get17ID; } // if we're on world 2, do not increment offset
   iny_nf(); // otherwise increment
   
@@ -8352,7 +8352,7 @@ Get17ID:
 Set17ID:
   ram[Enemy_ID + x] = a; // store whatever's in A as enemy identifier
   lda_abs_nf(BitMFilter);
-  cmp_imm(0xff); // if not all bits set, skip init part and compare bits
+  cmp_imm_fcz(0xff); // if not all bits set, skip init part and compare bits
   if (!zero_flag) { goto GetRBit; }
   lda_imm_nf(0x0); // initialize vertical position filter
   ram[BitMFilter] = a;
@@ -8364,7 +8364,7 @@ GetRBit:
 ChkRBit:
   tay_nf(); // use as offset
   lda_absy_nf(Bitmasks); // load bitmask
-  bit_abs(BitMFilter); // perform AND on filter without changing it
+  bit_abs_fz(BitMFilter); // perform AND on filter without changing it
   if (zero_flag) { goto AddFBit; }
   iny_nf(); // increment offset
   tya_nf();
@@ -8386,9 +8386,9 @@ DoBulletBills:
   
 BB_SLoop:
   iny_nf(); // move onto the next slot
-  cpy_imm(0x5); // branch to play sound if we've done all slots
+  cpy_imm_fc(0x5); // branch to play sound if we've done all slots
   if (carry_flag) { goto FireBulletBill; }
-  lda_zpy(Enemy_Flag); // if enemy buffer flag not set,
+  lda_zpy_fz(Enemy_Flag); // if enemy buffer flag not set,
   if (zero_flag) { goto BB_SLoop; } // loop back and check another slot
   lda_zpy_nf(Enemy_ID);
   cmp_imm(BulletBill_FrenzyVar); // check enemy identifier for
@@ -8401,7 +8401,7 @@ FireBulletBill:
   lda_zp_nf(Square2SoundQueue);
   ora_imm_nf(Sfx_Blast); // play fireworks/gunfire sound
   ram[Square2SoundQueue] = a;
-  lda_imm(BulletBill_FrenzyVar); // load identifier for bullet bill object
+  lda_imm_fz(BulletBill_FrenzyVar); // load identifier for bullet bill object
   if (!zero_flag) { goto Set17ID; } // unconditional branch
   // --------------------------------
   // $00 - used to store Y position of group enemies
@@ -8416,12 +8416,12 @@ void HandleGroupEnemies(void) {
   carry_flag = true;
   sbc_imm_nf(0x37); // subtract $37 from second byte read
   pha(); // save result in stack for now
-  cmp_imm(0x4); // was byte in $3b-$3e range?
+  cmp_imm_fc(0x4); // was byte in $3b-$3e range?
   // if so, branch
   if (!carry_flag) {
     pha(); // save another copy to stack
     ldy_imm_nf(Goomba); // load value for goomba enemy
-    lda_abs(PrimaryHardMode); // if primary hard mode flag not set,
+    lda_abs_fz(PrimaryHardMode); // if primary hard mode flag not set,
     // branch, otherwise change to value
     if (!zero_flag) {
       ldy_imm_nf(BuzzyBeetle); // for buzzy beetle
@@ -8432,7 +8432,7 @@ void HandleGroupEnemies(void) {
   // SnglID:
   ram[0x1] = y; // save enemy id here
   ldy_imm_nf(0xb0); // load default y coordinate
-  and_imm(0x2); // check to see if d1 was set
+  and_imm_fz(0x2); // check to see if d1 was set
   // if so, move y coordinate up,
   if (!zero_flag) {
     ldy_imm_nf(0x70); // otherwise branch and use default
@@ -8445,7 +8445,7 @@ void HandleGroupEnemies(void) {
   ram[0x3] = a; // save here
   ldy_imm_nf(0x2); // load two enemies by default
   pla_nf(); // get first copy from stack
-  lsr_acc(); // check to see if d0 was set
+  lsr_acc_fc(); // check to see if d0 was set
   // if not, use default value
   if (carry_flag) {
     iny_nf(); // otherwise increment to three enemies
@@ -8460,7 +8460,7 @@ GSltLp:
   inx_nf(); // increment and branch if past
   cpx_imm(0x5); // end of buffers
   if (!carry_flag) {
-    lda_zpx(Enemy_Flag); // check to see if enemy is already
+    lda_zpx_fz(Enemy_Flag); // check to see if enemy is already
     if (!zero_flag) { goto GSltLp; } // stored in buffer, and branch if so
     lda_zp_nf(0x1);
     ram[Enemy_ID + x] = a; // store enemy object identifier
@@ -8469,10 +8469,10 @@ GSltLp:
     lda_zp_nf(0x3);
     ram[Enemy_X_Position + x] = a; // store x coordinate for enemy object
     carry_flag = false;
-    adc_imm(0x18); // add 24 pixels for next enemy
+    adc_imm_fc(0x18); // add 24 pixels for next enemy
     ram[0x3] = a;
     lda_zp_nf(0x2); // add carry to page location for
-    adc_imm(0x0); // next enemy
+    adc_imm_fc(0x0); // next enemy
     ram[0x2] = a;
     lda_zp_nf(0x0); // store y coordinate for enemy object
     ram[Enemy_Y_Position + x] = a;
@@ -8497,7 +8497,7 @@ void InitPiranhaPlant(void) {
   lda_zpx_nf(Enemy_Y_Position);
   ram[PiranhaPlantDownYPos + x] = a; // save original vertical coordinate here
   carry_flag = true;
-  sbc_imm(0x18);
+  sbc_imm_fc(0x18);
   ram[PiranhaPlantUpYPos + x] = a; // save original vertical coordinate - 24 pixels here
   lda_imm(0x9);
   SetBBox2(); // set specific value for bounding box control
@@ -8528,13 +8528,13 @@ void EndFrenzy(void) {
   
 LakituChk:
   lda_zpy_nf(Enemy_ID); // check enemy identifiers
-  cmp_imm(Lakitu); // for lakitu
+  cmp_imm_fcz(Lakitu); // for lakitu
   if (zero_flag) {
     lda_imm_nf(0x1); // if found, set state
     ram[Enemy_State + y] = a;
   }
   // NextFSlot:
-  dey(); // move onto the next slot
+  dey_fn(); // move onto the next slot
   if (!neg_flag) { goto LakituChk; } // do this until all slots are checked
   lda_imm(0x0);
   ram[EnemyFrenzyBuffer] = a; // empty enemy frenzy buffer
@@ -8563,7 +8563,7 @@ void SetBBox2(void) {
 void InitBalPlatform(void) {
   dec_zpx_nf(Enemy_Y_Position); // raise vertical position by two pixels
   dec_zpx_nf(Enemy_Y_Position);
-  ldy_abs(SecondaryHardMode); // if secondary hard mode flag not set,
+  ldy_abs_fz(SecondaryHardMode); // if secondary hard mode flag not set,
   // branch ahead
   if (zero_flag) {
     ldy_imm(0x2); // otherwise set value here
@@ -8571,7 +8571,7 @@ void InitBalPlatform(void) {
   }
   // AlignP:
   ldy_imm_nf(0xff); // set default value here for now
-  lda_abs(BalPlatformAlignment); // get current balance platform alignment
+  lda_abs_fn(BalPlatformAlignment); // get current balance platform alignment
   ram[Enemy_State + x] = a; // set platform alignment to object state here
   // if old alignment $ff, put $ff as alignment for negative
   if (neg_flag) {
@@ -8604,7 +8604,7 @@ void InitHoriPlatform(void) {
 
 void InitVertPlatform(void) {
   ldy_imm_nf(0x40); // set default value here
-  lda_zpx(Enemy_Y_Position); // check vertical position
+  lda_zpx_fn(Enemy_Y_Position); // check vertical position
   // if above a certain point, skip this part
   if (neg_flag) {
     eor_imm_nf(0xff);
@@ -8694,7 +8694,7 @@ void DuplicateEnemyObj(void) {
   
 FSLoop:
   iny_nf(); // increment one slot
-  lda_zpy(Enemy_Flag); // check enemy buffer flag for empty slot
+  lda_zpy_fz(Enemy_Flag); // check enemy buffer flag for empty slot
   if (!zero_flag) { goto FSLoop; } // if set, branch and keep checking
   ram[DuplicateObj_Offset] = y; // otherwise set offset here
   txa_nf(); // transfer original enemy buffer offset
@@ -8715,7 +8715,7 @@ FSLoop:
 void PosPlatform(void) {
   lda_zpx_nf(Enemy_X_Position); // get horizontal coordinate
   carry_flag = false;
-  adc_absy(PlatPosDataLow); // add or subtract pixels depending on offset
+  adc_absy_fc(PlatPosDataLow); // add or subtract pixels depending on offset
   ram[Enemy_X_Position + x] = a; // store as new horizontal coordinate
   lda_zpx_nf(Enemy_PageLoc);
   adc_absy(PlatPosDataHigh); // add or subtract page location depending on offset
@@ -8847,7 +8847,7 @@ void RunLargePlatform(void) {
 
 void RunBowser(void) {
   lda_zpx_nf(Enemy_State); // if d5 in enemy state is not set
-  and_imm(0b00100000); // then branch elsewhere to run bowser
+  and_imm_fz(0b00100000); // then branch elsewhere to run bowser
   if (zero_flag) {
     BowserControl();
     return;
@@ -8876,17 +8876,17 @@ KillLoop:
 void BowserControl(void) {
   lda_imm_nf(0x0);
   ram[EnemyFrenzyBuffer] = a; // empty frenzy buffer
-  lda_abs(TimerControl); // if master timer control not set,
+  lda_abs_fz(TimerControl); // if master timer control not set,
   if (zero_flag) { goto ChkMouth; } // skip jump and execute code here
   goto SkipToFB; // otherwise, jump over a bunch of code
   
 ChkMouth:
-  lda_abs(BowserBodyControls); // check bowser's mouth
+  lda_abs_fn(BowserBodyControls); // check bowser's mouth
   if (!neg_flag) { goto FeetTmr; } // if bit clear, go ahead with code here
   goto HammerChk; // otherwise skip a whole section starting here
   
 FeetTmr:
-  dec_abs(BowserFeetCounter); // decrement timer to control bowser's feet
+  dec_abs_fz(BowserFeetCounter); // decrement timer to control bowser's feet
   if (!zero_flag) { goto ResetMDr; } // if not expired, skip this part
   lda_imm_nf(0x20); // otherwise, reset timer
   ram[BowserFeetCounter] = a;
@@ -8896,7 +8896,7 @@ FeetTmr:
   
 ResetMDr:
   lda_zp_nf(FrameCounter); // check frame counter
-  and_imm(0b00001111); // if not on every sixteenth frame, skip
+  and_imm_fz(0b00001111); // if not on every sixteenth frame, skip
   if (!zero_flag) { goto B_FaceP; } // ahead to continue code
   lda_imm_nf(0x2); // otherwise reset moving/facing direction every
   ram[Enemy_MovingDir + x] = a; // sixteen frames
@@ -8914,15 +8914,15 @@ B_FaceP:
   ram[EnemyFrameTimer + x] = a; // set timer here
   ram[BowserFireBreathTimer] = a; // set timer used for bowser's flame
   lda_zpx_nf(Enemy_X_Position);
-  cmp_imm(0xc8); // if bowser to the right past a certain point,
+  cmp_imm_fc(0xc8); // if bowser to the right past a certain point,
   if (carry_flag) { goto HammerChk; } // skip ahead to some other section
   
 GetPRCmp:
   lda_zp_nf(FrameCounter); // get frame counter
-  and_imm(0b00000011);
+  and_imm_fz(0b00000011);
   if (!zero_flag) { goto HammerChk; } // execute this code every fourth frame, otherwise branch
   lda_zpx_nf(Enemy_X_Position);
-  cmp_abs(BowserOrigXPos); // if bowser not at original horizontal position,
+  cmp_abs_fz(BowserOrigXPos); // if bowser not at original horizontal position,
   if (!zero_flag) { goto GetDToO; } // branch to skip this part
   lda_absx_nf(PseudoRandomBitReg);
   and_imm_nf(0b00000011); // get pseudorandom offset
@@ -8936,11 +8936,11 @@ GetDToO:
   adc_abs_nf(BowserMovementSpeed); // coordinate and save as new horizontal position
   ram[Enemy_X_Position + x] = a;
   ldy_zpx_nf(Enemy_MovingDir);
-  cpy_imm(0x1); // if bowser moving and facing to the right, skip ahead
+  cpy_imm_fcz(0x1); // if bowser moving and facing to the right, skip ahead
   if (zero_flag) { goto HammerChk; }
   ldy_imm_nf(0xff); // set default movement speed here (move left)
   carry_flag = true; // get difference of current vs. original
-  sbc_abs(BowserOrigXPos); // horizontal position
+  sbc_abs_fn(BowserOrigXPos); // horizontal position
   if (!neg_flag) { goto CompDToO; } // if current position to the right of original, skip ahead
   eor_imm_nf(0xff);
   carry_flag = false; // get two's compliment
@@ -8948,7 +8948,7 @@ GetDToO:
   ldy_imm_nf(0x1); // set alternate movement speed here (move right)
   
 CompDToO:
-  cmp_abs(MaxRangeFromOrigin); // compare difference with pseudorandom value
+  cmp_abs_fc(MaxRangeFromOrigin); // compare difference with pseudorandom value
   if (!carry_flag) { goto HammerChk; } // if difference < pseudorandom value, leave speed alone
   ram[BowserMovementSpeed] = y; // otherwise change bowser's movement speed
   
@@ -8957,7 +8957,7 @@ HammerChk:
   if (!zero_flag) { goto MakeBJump; } // some other section of code
   MoveEnemySlowVert(); // otherwise start by moving bowser downwards
   lda_abs_nf(WorldNumber); // check world number
-  cmp_imm(World6);
+  cmp_imm_fc(World6);
   if (!carry_flag) { goto SetHmrTmr; } // if world 1-5, skip this part (not time to throw hammers yet)
   lda_zp_nf(FrameCounter);
   and_imm(0b00000011); // check to see if it's time to execute sub
@@ -8966,7 +8966,7 @@ HammerChk:
   
 SetHmrTmr:
   lda_zpx_nf(Enemy_Y_Position); // get current vertical position
-  cmp_imm(0x80); // if still above a certain point
+  cmp_imm_fc(0x80); // if still above a certain point
   if (!carry_flag) { goto ChkFireB; } // then skip to world number check for flames
   lda_absx_nf(PseudoRandomBitReg);
   and_imm_nf(0b00000011); // get pseudorandom offset
@@ -8978,7 +8978,7 @@ SkipToFB:
   goto ChkFireB; // jump to execute flames code
   
 MakeBJump:
-  cmp_imm(0x1); // if timer not yet about to expire,
+  cmp_imm_fcz(0x1); // if timer not yet about to expire,
   if (!zero_flag) { goto ChkFireB; } // skip ahead to next part
   dec_zpx(Enemy_Y_Position); // otherwise decrement vertical coordinate
   InitVStf(); // initialize movement amount
@@ -8987,7 +8987,7 @@ MakeBJump:
   
 ChkFireB:
   lda_abs_nf(WorldNumber); // check world number here
-  cmp_imm(World8); // world 8?
+  cmp_imm_fcz(World8); // world 8?
   if (zero_flag) { goto SpawnFBr; } // if so, execute this part here
   cmp_imm(World6); // world 6-7?
   if (carry_flag) { BowserGfxHandler(); return; } // if so, skip this part here
@@ -9002,10 +9002,10 @@ SpawnFBr:
   ram[BowserBodyControls] = a; // and close bowser's mouth
   if (neg_flag) { goto ChkFireB; } // if bowser's mouth open, loop back
   SetFlameTimer(); // get timing for bowser's flame
-  ldy_abs(SecondaryHardMode);
+  ldy_abs_fz(SecondaryHardMode);
   if (zero_flag) { goto SetFBTmr; } // if secondary hard mode flag not set, skip this
   carry_flag = true;
-  sbc_imm(0x10); // otherwise subtract from value in A
+  sbc_imm_fc(0x10); // otherwise subtract from value in A
   
 SetFBTmr:
   ram[BowserFireBreathTimer] = a; // set value as timer here
@@ -9019,7 +9019,7 @@ void BowserGfxHandler(void) {
   ProcessBowserHalf(); // do a sub here to process bowser's front
   ldy_imm_nf(0x10); // load default value here to position bowser's rear
   lda_zpx_nf(Enemy_MovingDir); // check moving direction
-  lsr_acc();
+  lsr_acc_fc();
   // if moving left, use default
   if (carry_flag) {
     ldy_imm_nf(0xf0); // otherwise load alternate positioning value here
@@ -9032,7 +9032,7 @@ void BowserGfxHandler(void) {
   ram[Enemy_X_Position + y] = a; // store A as bowser's rear horizontal coordinate
   lda_zpx_nf(Enemy_Y_Position);
   carry_flag = false; // add eight pixels to bowser's front object
-  adc_imm(0x8); // vertical coordinate and store as vertical coordinate
+  adc_imm_fc(0x8); // vertical coordinate and store as vertical coordinate
   ram[Enemy_Y_Position + y] = a; // for bowser's rear
   lda_zpx_nf(Enemy_State);
   ram[Enemy_State + y] = a; // copy enemy state directly from front to rear
@@ -9105,15 +9105,15 @@ void RunStarFlagObj(void) {
 void GameTimerFireworks(void) {
   ldy_imm_nf(0x5); // set default state for star flag object
   lda_abs_nf(GameTimerDisplay + 2); // get game timer's last digit
-  cmp_imm(0x1);
+  cmp_imm_fcz(0x1);
   // if last digit of game timer set to 1, skip ahead
   if (!zero_flag) {
     ldy_imm_nf(0x3); // otherwise load new value for state
-    cmp_imm(0x3);
+    cmp_imm_fcz(0x3);
     // if last digit of game timer set to 3, skip ahead
     if (!zero_flag) {
       ldy_imm_nf(0x0); // otherwise load one more potential value for state
-      cmp_imm(0x6);
+      cmp_imm_fcz(0x6);
       // if last digit of game timer set to 6, skip ahead
       if (!zero_flag) {
         lda_imm_nf(0xff); // otherwise set value for no fireworks
@@ -9137,14 +9137,14 @@ void StarFlagExit(void) {
 void AwardGameTimerPoints(void) {
   lda_abs_nf(GameTimerDisplay); // check all game timer digits for any intervals left
   ora_abs_nf(GameTimerDisplay + 1);
-  ora_abs(GameTimerDisplay + 2);
+  ora_abs_fz(GameTimerDisplay + 2);
   // if no time left on game timer at all, branch to next task
   if (zero_flag) {
     IncrementSFTask1();
     return;
   }
   lda_zp_nf(FrameCounter);
-  and_imm(0b00000100); // check frame counter for d2 set (skip ahead
+  and_imm_fz(0b00000100); // check frame counter for d2 set (skip ahead
   // for four frames every four frames) branch if not set
   if (!zero_flag) {
     lda_imm_nf(Sfx_TimerTick);
@@ -9173,14 +9173,14 @@ void EndAreaPoints(void) {
   asl_acc_nf(); // fireworks explosion if branched here from there)
   asl_acc_nf(); // shift to high nybble
   asl_acc_nf();
-  asl_acc();
+  asl_acc_fc();
   ora_imm(0b00000100); // add four to set nybble for game timer
   UpdateNumber(); return; // jump to print the new score and game timer
 }
 
 void RaiseFlagSetoffFWorks(void) {
   lda_zpx_nf(Enemy_Y_Position); // check star flag's vertical position
-  cmp_imm(0x72); // against preset value
+  cmp_imm_fc(0x72); // against preset value
   // if star flag higher vertically, branch to other code
   if (carry_flag) {
     dec_zpx(Enemy_Y_Position); // otherwise, raise star flag by one pixel
@@ -9219,13 +9219,13 @@ DSFLoop:
   ram[Sprite_Attributes + y] = a; // store as attributes
   lda_abs_nf(Enemy_Rel_XPos); // get relative horizontal coordinate
   carry_flag = false;
-  adc_absx(StarFlagXPosAdder); // add X coordinate adder data
+  adc_absx_fc(StarFlagXPosAdder); // add X coordinate adder data
   ram[Sprite_X_Position + y] = a; // store as X coordinate
   iny_nf();
   iny_nf(); // increment OAM data offset four bytes
   iny_nf(); // for next sprite
   iny_nf();
-  dex(); // move onto next sprite
+  dex_fn(); // move onto next sprite
   if (!neg_flag) { goto DSFLoop; } // do this until all sprites are done
   ldx_zp(ObjectOffset); // get enemy object offset and leave
 }
@@ -9262,33 +9262,33 @@ void OffscreenBoundsCheck(void) {
   if (zero_flag) { return; }
   lda_abs_nf(ScreenLeft_X_Pos); // get horizontal coordinate for left side of screen
   ldy_zpx_nf(Enemy_ID);
-  cpy_imm(HammerBro); // check for hammer bro object
+  cpy_imm_fcz(HammerBro); // check for hammer bro object
   if (zero_flag) { goto LimitB; }
-  cpy_imm(PiranhaPlant); // check for piranha plant object
+  cpy_imm_fcz(PiranhaPlant); // check for piranha plant object
   if (!zero_flag) { goto ExtendLB; } // these two will be erased sooner than others if too far left
   
 LimitB:
-  adc_imm(0x38); // add 56 pixels to coordinate if hammer bro or piranha plant
+  adc_imm_fc(0x38); // add 56 pixels to coordinate if hammer bro or piranha plant
   
 ExtendLB:
-  sbc_imm(0x48); // subtract 72 pixels regardless of enemy object
+  sbc_imm_fc(0x48); // subtract 72 pixels regardless of enemy object
   ram[0x1] = a; // store result here
   lda_abs_nf(ScreenLeft_PageLoc);
-  sbc_imm(0x0); // subtract borrow from page location of left side
+  sbc_imm_fc(0x0); // subtract borrow from page location of left side
   ram[0x0] = a; // store result here
   lda_abs_nf(ScreenRight_X_Pos); // add 72 pixels to the right side horizontal coordinate
-  adc_imm(0x48);
+  adc_imm_fc(0x48);
   ram[0x3] = a; // store result here
   lda_abs_nf(ScreenRight_PageLoc);
   adc_imm_nf(0x0); // then add the carry to the page location
   ram[0x2] = a; // and store result here
   lda_zpx_nf(Enemy_X_Position); // compare horizontal coordinate of the enemy object
-  cmp_zp(0x1); // to modified horizontal left edge coordinate to get carry
+  cmp_zp_fc(0x1); // to modified horizontal left edge coordinate to get carry
   lda_zpx_nf(Enemy_PageLoc);
   sbc_zp(0x0); // then subtract it from the page coordinate of the enemy object
   if (neg_flag) { goto TooFar; } // if enemy object is too far left, branch to erase it
   lda_zpx_nf(Enemy_X_Position); // compare horizontal coordinate of the enemy object
-  cmp_zp(0x3); // to modified horizontal right edge coordinate to get carry
+  cmp_zp_fc(0x3); // to modified horizontal right edge coordinate to get carry
   lda_zpx_nf(Enemy_PageLoc);
   sbc_zp(0x2); // then subtract it from the page coordinate of the enemy object
   if (neg_flag) { return; } // if enemy object is on the screen, leave, do not erase enemy
@@ -9373,18 +9373,18 @@ void ProcHammerBro(void) {
     return;
   }
   // ChkJH:
-  lda_zpx(HammerBroJumpTimer); // check jump timer
+  lda_zpx_fz(HammerBroJumpTimer); // check jump timer
   // if expired, branch to jump
   if (!zero_flag) {
     dec_zpx_nf(HammerBroJumpTimer); // otherwise decrement jump timer
     lda_abs_nf(Enemy_OffscreenBits);
-    and_imm(0b00001100); // check offscreen bits
+    and_imm_fz(0b00001100); // check offscreen bits
     // if hammer bro a little offscreen, skip to movement code
     if (!zero_flag) {
       MoveHammerBroXDir();
       return;
     }
-    lda_absx(HammerThrowingTimer); // check hammer throwing timer
+    lda_absx_fz(HammerThrowingTimer); // check hammer throwing timer
     // if not expired, skip ahead, do not throw hammer
     if (zero_flag) {
       ldy_abs_nf(SecondaryHardMode); // otherwise get secondary hard mode flag
@@ -9408,7 +9408,7 @@ void ProcHammerBro(void) {
   // HammerBroJumpCode:
   lda_zpx_nf(Enemy_State); // get hammer bro's enemy state
   and_imm_nf(0b00000111); // mask out all but 3 LSB
-  cmp_imm(0x1); // check for d0 set (for jumping)
+  cmp_imm_fcz(0x1); // check for d0 set (for jumping)
   // if set, branch ahead to moving code
   if (zero_flag) {
     MoveHammerBroXDir();
@@ -9417,14 +9417,14 @@ void ProcHammerBro(void) {
   lda_imm_nf(0x0); // load default value here
   ram[0x0] = a; // save into temp variable for now
   ldy_imm_nf(0xfa); // set default vertical speed
-  lda_zpx(Enemy_Y_Position); // check hammer bro's vertical coordinate
+  lda_zpx_fn(Enemy_Y_Position); // check hammer bro's vertical coordinate
   // if on the bottom half of the screen, use current speed
   if (neg_flag) {
     SetHJ();
     return;
   }
   ldy_imm_nf(0xfd); // otherwise set alternate vertical speed
-  cmp_imm(0x70); // check to see if hammer bro is above the middle of screen
+  cmp_imm_fc(0x70); // check to see if hammer bro is above the middle of screen
   inc_zp_nf(0x0); // increment preset value to $01
   // if above the middle of the screen, use current speed and $01
   if (!carry_flag) {
@@ -9433,7 +9433,7 @@ void ProcHammerBro(void) {
   }
   dec_zp_nf(0x0); // otherwise return value to $00
   lda_absx_nf(PseudoRandomBitReg + 1); // get part of LSFR, mask out all but LSB
-  and_imm(0x1);
+  and_imm_fz(0x1);
   // if d0 of LSFR set, branch and use current speed and $00
   if (!zero_flag) {
     SetHJ();
@@ -9451,7 +9451,7 @@ void SetHJ(void) {
   lda_zp_nf(0x0); // load preset value here to use as bitmask
   and_absx_nf(PseudoRandomBitReg + 2); // and do bit-wise comparison with part of LSFR
   tay_nf(); // then use as offset
-  lda_abs(SecondaryHardMode); // check secondary hard mode flag
+  lda_abs_fz(SecondaryHardMode); // check secondary hard mode flag
   if (zero_flag) {
     tay_nf(); // if secondary hard mode flag clear, set offset to 0
   }
@@ -9467,7 +9467,7 @@ void SetHJ(void) {
 void MoveHammerBroXDir(void) {
   ldy_imm_nf(0xfc); // move hammer bro a little to the left
   lda_zp_nf(FrameCounter);
-  and_imm(0b01000000); // change hammer bro's direction every 64 frames
+  and_imm_fz(0b01000000); // change hammer bro's direction every 64 frames
   if (zero_flag) {
     ldy_imm_nf(0x4); // if d6 set in counter, move him a little to the right
   }
@@ -9478,7 +9478,7 @@ void MoveHammerBroXDir(void) {
   // if enemy to the left of player, skip this part
   if (!neg_flag) {
     iny_nf(); // set to face left
-    lda_absx(EnemyIntervalTimer); // check walking timer
+    lda_absx_fz(EnemyIntervalTimer); // check walking timer
     // if not yet expired, skip to set moving direction
     if (zero_flag) {
       lda_imm_nf(0xf8);
@@ -9496,13 +9496,13 @@ void MoveNormalEnemy(void) {
   and_imm(0b01000000); // check enemy state for d6 set, if set skip
   if (!zero_flag) { goto FallE; } // to move enemy vertically, then horizontally if necessary
   lda_zpx_nf(Enemy_State);
-  asl_acc(); // check enemy state for d7 set
+  asl_acc_fc(); // check enemy state for d7 set
   if (carry_flag) { goto SteadM; } // if set, branch to move enemy horizontally
   lda_zpx_nf(Enemy_State);
   and_imm(0b00100000); // check enemy state for d5 set
   if (!zero_flag) { MoveDefeatedEnemy(); return; } // if set, branch to move defeated enemy object
   lda_zpx_nf(Enemy_State);
-  and_imm(0b00000111); // check d2-d0 of enemy state for any set bits
+  and_imm_fz(0b00000111); // check d2-d0 of enemy state for any set bits
   if (zero_flag) { goto SteadM; } // if enemy in normal state, branch to move enemy horizontally
   cmp_imm(0x5);
   if (zero_flag) { goto FallE; } // if enemy in state used by spiny's egg, go ahead here
@@ -9515,7 +9515,7 @@ FallE:
   lda_zpx_nf(Enemy_State); // check for enemy state $02
   cmp_imm(0x2);
   if (zero_flag) { goto MEHor; } // if found, branch to move enemy horizontally
-  and_imm(0b01000000); // check for d6 set
+  and_imm_fz(0b01000000); // check for d6 set
   if (zero_flag) { goto SteadM; } // if not set, branch to something else
   lda_zpx_nf(Enemy_ID);
   cmp_imm(PowerUpObject); // check for power-up object
@@ -9530,7 +9530,7 @@ SlowM:
   ldy_imm_nf(0x1); // if branched here, increment Y to slow horizontal movement
   
 SteadM:
-  lda_zpx(Enemy_X_Speed); // get current horizontal speed
+  lda_zpx_fn(Enemy_X_Speed); // get current horizontal speed
   pha(); // save to stack
   if (!neg_flag) { goto AddHS; } // if not moving or moving right, skip, leave Y alone
   iny_nf();
@@ -9546,7 +9546,7 @@ AddHS:
   return; // original memory location, then leave
   
 ReviveStunned:
-  lda_absx(EnemyIntervalTimer); // if enemy timer not expired yet,
+  lda_absx_fz(EnemyIntervalTimer); // if enemy timer not expired yet,
   if (!zero_flag) { ChkKillGoomba(); return; } // skip ahead to something else
   ram[Enemy_State + x] = a; // otherwise initialize enemy state to normal
   lda_zp_nf(FrameCounter);
@@ -9555,7 +9555,7 @@ ReviveStunned:
   iny_nf();
   ram[Enemy_MovingDir + x] = y; // store as pseudorandom movement direction
   dey_nf(); // decrement for use as pointer
-  lda_abs(PrimaryHardMode); // check primary hard mode flag
+  lda_abs_fz(PrimaryHardMode); // check primary hard mode flag
   if (zero_flag) { goto SetRSpd; } // if not set, use pointer as-is
   iny_nf();
   iny_nf(); // otherwise increment 2 bytes to next data
@@ -9588,11 +9588,11 @@ void MoveJumpingEnemy(void) {
 
 void ProcMoveRedPTroopa(void) {
   lda_zpx_nf(Enemy_Y_Speed);
-  ora_absx(Enemy_Y_MoveForce); // check for any vertical force or speed
+  ora_absx_fz(Enemy_Y_MoveForce); // check for any vertical force or speed
   if (!zero_flag) { goto MoveRedPTUpOrDown; } // branch if any found
   ram[Enemy_YMF_Dummy + x] = a; // initialize something here
   lda_zpx_nf(Enemy_Y_Position); // check current vs. original vertical coordinate
-  cmp_absx(RedPTroopaOrigXPos);
+  cmp_absx_fc(RedPTroopaOrigXPos);
   if (carry_flag) { goto MoveRedPTUpOrDown; } // if current => original, skip ahead to more code
   lda_zp_nf(FrameCounter); // get frame counter
   and_imm(0b00000111); // mask out all but 3 LSB
@@ -9622,7 +9622,7 @@ void MoveFlyGreenPTroopa(void) {
   and_imm(0b00000011); // check frame counter 2 LSB for any bits set
   if (zero_flag) {
     lda_zp_nf(FrameCounter);
-    and_imm(0b01000000); // check frame counter for d6 set
+    and_imm_fz(0b01000000); // check frame counter for d6 set
     // branch to move green paratroopa down if set
     if (zero_flag) {
       ldy_imm_nf(0xff); // otherwise set Y to move green paratroopa up
@@ -9638,14 +9638,14 @@ void MoveFlyGreenPTroopa(void) {
 
 void MoveBloober(void) {
   lda_zpx_nf(Enemy_State);
-  and_imm(0b00100000); // check enemy state for d5 set
+  and_imm_fz(0b00100000); // check enemy state for d5 set
   if (!zero_flag) { goto MoveDefeatedBloober; } // branch if set to move defeated bloober
   ldy_abs_nf(SecondaryHardMode); // use secondary hard mode flag as offset
   lda_absx_nf(PseudoRandomBitReg + 1); // get LSFR
   and_absy(BlooberBitmasks); // mask out bits in LSFR using bitmask loaded with offset
   if (!zero_flag) { goto BlooberSwim; } // if any bits set, skip ahead to make swim
   txa_nf();
-  lsr_acc(); // check to see if on second or fourth slot (1 or 3)
+  lsr_acc_fc(); // check to see if on second or fourth slot (1 or 3)
   if (!carry_flag) { goto FBLeft; } // if not, branch to figure out moving direction
   ldy_zp(Player_MovingDir); // otherwise, load player's moving direction and
   if (carry_flag) { goto SBMDir; } // do an unconditional branch to set
@@ -9664,17 +9664,17 @@ BlooberSwim:
   lda_zpx_nf(Enemy_Y_Position); // get vertical coordinate
   carry_flag = true;
   sbc_absx_nf(Enemy_Y_MoveForce); // subtract movement force
-  cmp_imm(0x20); // check to see if position is above edge of status bar
+  cmp_imm_fc(0x20); // check to see if position is above edge of status bar
   if (!carry_flag) { goto SwimX; } // if so, don't do it
   ram[Enemy_Y_Position + x] = a; // otherwise, set new vertical position, make bloober swim
   
 SwimX:
   ldy_zpx_nf(Enemy_MovingDir); // check moving direction
-  dey();
+  dey_fz();
   if (!zero_flag) { goto LeftSwim; } // if moving to the left, branch to second part
   lda_zpx_nf(Enemy_X_Position);
   carry_flag = false; // add movement speed to horizontal coordinate
-  adc_zpx(BlooperMoveSpeed);
+  adc_zpx_fc(BlooperMoveSpeed);
   ram[Enemy_X_Position + x] = a; // store result as new horizontal coordinate
   lda_zpx_nf(Enemy_PageLoc);
   adc_imm(0x0); // add carry to page location
@@ -9684,7 +9684,7 @@ SwimX:
 LeftSwim:
   lda_zpx_nf(Enemy_X_Position);
   carry_flag = true; // subtract movement speed from horizontal coordinate
-  sbc_zpx(BlooperMoveSpeed);
+  sbc_zpx_fc(BlooperMoveSpeed);
   ram[Enemy_X_Position + x] = a; // store result as new horizontal coordinate
   lda_zpx_nf(Enemy_PageLoc);
   sbc_imm(0x0); // subtract borrow from page location
@@ -9714,7 +9714,7 @@ void MoveBulletBill(void) {
 
 void MoveSwimmingCheepCheep(void) {
   lda_zpx_nf(Enemy_State); // check cheep-cheep's enemy object state
-  and_imm(0b00100000); // for d5 set
+  and_imm_fz(0b00100000); // for d5 set
   if (zero_flag) { goto CCSwim; } // if not set, continue with movement code
   MoveEnemySlowVert(); return; // otherwise jump to move defeated cheep-cheep downwards
   
@@ -9728,10 +9728,10 @@ CCSwim:
   ram[0x2] = a;
   lda_absx_nf(Enemy_X_MoveForce); // load horizontal force
   carry_flag = true;
-  sbc_zp(0x2); // subtract preset value from horizontal force
+  sbc_zp_fc(0x2); // subtract preset value from horizontal force
   ram[Enemy_X_MoveForce + x] = a; // store as new horizontal force
   lda_zpx_nf(Enemy_X_Position); // get horizontal coordinate
-  sbc_imm(0x0); // subtract borrow (thus moving it slowly)
+  sbc_imm_fc(0x0); // subtract borrow (thus moving it slowly)
   ram[Enemy_X_Position + x] = a; // and save as new horizontal coordinate
   lda_zpx_nf(Enemy_PageLoc);
   sbc_imm_nf(0x0); // subtract borrow again, this time from the
@@ -9741,14 +9741,14 @@ CCSwim:
   cpx_imm(0x2); // check enemy object offset
   if (!carry_flag) { return; } // if in first or second slot, branch to leave
   lda_zpx_nf(CheepCheepMoveMFlag); // check movement flag
-  cmp_imm(0x10); // if movement speed set to $00,
+  cmp_imm_fc(0x10); // if movement speed set to $00,
   if (!carry_flag) { goto CCSwimUpwards; } // branch to move upwards
   lda_absx_nf(Enemy_YMF_Dummy);
   carry_flag = false;
-  adc_zp(0x2); // add preset value to dummy variable to get carry
+  adc_zp_fc(0x2); // add preset value to dummy variable to get carry
   ram[Enemy_YMF_Dummy + x] = a; // and save dummy
   lda_zpx_nf(Enemy_Y_Position); // get vertical coordinate
-  adc_zp(0x3); // add carry to it plus enemy state to slowly move it downwards
+  adc_zp_fc(0x3); // add carry to it plus enemy state to slowly move it downwards
   ram[Enemy_Y_Position + x] = a; // save as new vertical coordinate
   lda_zpx_nf(Enemy_Y_HighPos);
   adc_imm_nf(0x0); // add carry to page location and
@@ -9757,10 +9757,10 @@ CCSwim:
 CCSwimUpwards:
   lda_absx_nf(Enemy_YMF_Dummy);
   carry_flag = true;
-  sbc_zp(0x2); // subtract preset value to dummy variable to get borrow
+  sbc_zp_fc(0x2); // subtract preset value to dummy variable to get borrow
   ram[Enemy_YMF_Dummy + x] = a; // and save dummy
   lda_zpx_nf(Enemy_Y_Position); // get vertical coordinate
-  sbc_zp(0x3); // subtract borrow to it plus enemy state to slowly move it upwards
+  sbc_zp_fc(0x3); // subtract borrow to it plus enemy state to slowly move it upwards
   ram[Enemy_Y_Position + x] = a; // save as new vertical coordinate
   lda_zpx_nf(Enemy_Y_HighPos);
   sbc_imm_nf(0x0); // subtract borrow from page location
@@ -9770,7 +9770,7 @@ ChkSwimYPos:
   ldy_imm_nf(0x0); // load movement speed to upwards by default
   lda_zpx_nf(Enemy_Y_Position); // get vertical coordinate
   carry_flag = true;
-  sbc_absx(CheepCheepOrigYPos); // subtract original coordinate from current
+  sbc_absx_fn(CheepCheepOrigYPos); // subtract original coordinate from current
   if (!neg_flag) { goto YPDiff; } // if result positive, skip to next part
   ldy_imm_nf(0x10); // otherwise load movement speed to downwards
   eor_imm_nf(0xff);
@@ -9821,7 +9821,7 @@ void MoveFlyingCheepCheep(void) {
   tay_nf(); // save as offset (note this tends to go into reach of code)
   lda_zpx_nf(Enemy_Y_Position); // get vertical position
   carry_flag = true; // subtract pseudorandom value based on offset from position
-  sbc_absy(PRandomSubtracter);
+  sbc_absy_fn(PRandomSubtracter);
   // if result within top half of screen, skip this part
   if (neg_flag) {
     eor_imm_nf(0xff);
@@ -9829,7 +9829,7 @@ void MoveFlyingCheepCheep(void) {
     adc_imm_nf(0x1);
   }
   // AddCCF:
-  cmp_imm(0x8); // if result or two's compliment greater than eight,
+  cmp_imm_fc(0x8); // if result or two's compliment greater than eight,
   // skip to the end without changing movement force
   if (!carry_flag) {
     lda_absx_nf(Enemy_Y_MoveForce);
@@ -9839,7 +9839,7 @@ void MoveFlyingCheepCheep(void) {
     lsr_acc_nf(); // move high nybble to low again
     lsr_acc_nf();
     lsr_acc_nf();
-    lsr_acc();
+    lsr_acc_fc();
     tay_nf();
   }
   // BPGet:
@@ -9852,17 +9852,17 @@ void MoveFlyingCheepCheep(void) {
 
 void MoveLakitu(void) {
   lda_zpx_nf(Enemy_State); // check lakitu's enemy state
-  and_imm(0b00100000); // for d5 set
+  and_imm_fz(0b00100000); // for d5 set
   if (zero_flag) { goto ChkLS; } // if not set, continue with code
   MoveD_EnemyVertically(); return; // otherwise jump to move defeated lakitu downwards
   
 ChkLS:
-  lda_zpx(Enemy_State); // if lakitu's enemy state not set at all,
+  lda_zpx_fz(Enemy_State); // if lakitu's enemy state not set at all,
   if (zero_flag) { goto Fr12S; } // go ahead and continue with code
   lda_imm_nf(0x0);
   ram[LakituMoveDirection + x] = a; // otherwise initialize moving direction to move to left
   ram[EnemyFrenzyBuffer] = a; // initialize frenzy buffer
-  lda_imm(0x10);
+  lda_imm_fz(0x10);
   if (!zero_flag) { goto SetLSpd; } // load horizontal speed and do unconditional branch
   
 Fr12S:
@@ -9886,7 +9886,7 @@ SetLSpd:
   lda_zpx_nf(LakituMoveSpeed);
   eor_imm_nf(0xff); // get two's compliment of moving speed
   carry_flag = false;
-  adc_imm(0x1);
+  adc_imm_fc(0x1);
   ram[LakituMoveSpeed + x] = a; // store as new moving speed
   iny(); // increment moving direction to left
   
@@ -9896,11 +9896,11 @@ SetLMov:
 }
 
 void MovePiranhaPlant(void) {
-  lda_zpx(Enemy_State); // check enemy state
+  lda_zpx_fz(Enemy_State); // check enemy state
   if (!zero_flag) { goto PutinPipe; } // if set at all, branch to leave
-  lda_absx(EnemyFrameTimer); // check enemy's timer here
+  lda_absx_fz(EnemyFrameTimer); // check enemy's timer here
   if (!zero_flag) { goto PutinPipe; } // branch to end if not yet expired
-  lda_zpx(PiranhaPlant_MoveFlag); // check movement flag
+  lda_zpx_fz(PiranhaPlant_MoveFlag); // check movement flag
   if (!zero_flag) { goto SetupToMovePPlant; } // if moving, skip to part ahead
   lda_zpx(PiranhaPlant_Y_Speed); // if currently rising, branch
   if (neg_flag) { goto ReversePlantSpeed; } // to move enemy upwards out of pipe
@@ -9914,7 +9914,7 @@ void MovePiranhaPlant(void) {
   
 ChkPlayerNearPipe:
   lda_zp_nf(0x0); // get saved horizontal difference
-  cmp_imm(0x21);
+  cmp_imm_fc(0x21);
   if (!carry_flag) { goto PutinPipe; } // if player within a certain distance, branch to leave
   
 ReversePlantSpeed:
@@ -9927,22 +9927,22 @@ ReversePlantSpeed:
   
 SetupToMovePPlant:
   lda_absx_nf(PiranhaPlantDownYPos); // get original vertical coordinate (lowest point)
-  ldy_zpx(PiranhaPlant_Y_Speed); // get vertical speed
+  ldy_zpx_fn(PiranhaPlant_Y_Speed); // get vertical speed
   if (!neg_flag) { goto RiseFallPiranhaPlant; } // branch if moving downwards
   lda_absx_nf(PiranhaPlantUpYPos); // otherwise get other vertical coordinate (highest point)
   
 RiseFallPiranhaPlant:
   ram[0x0] = a; // save vertical coordinate here
   lda_zp_nf(FrameCounter); // get frame counter
-  lsr_acc();
+  lsr_acc_fc();
   if (!carry_flag) { goto PutinPipe; } // branch to leave if d0 set (execute code every other frame)
-  lda_abs(TimerControl); // get master timer control
+  lda_abs_fz(TimerControl); // get master timer control
   if (!zero_flag) { goto PutinPipe; } // branch to leave if set (likely not necessary)
   lda_zpx_nf(Enemy_Y_Position); // get current vertical coordinate
   carry_flag = false;
   adc_zpx_nf(PiranhaPlant_Y_Speed); // add vertical speed to move up or down
   ram[Enemy_Y_Position + x] = a; // save as new vertical coordinate
-  cmp_zp(0x0); // compare against low or high coordinate
+  cmp_zp_fcz(0x0); // compare against low or high coordinate
   if (!zero_flag) { goto PutinPipe; } // branch to leave if not yet reached
   lda_imm_nf(0x0);
   ram[PiranhaPlant_MoveFlag + x] = a; // otherwise clear movement flag
@@ -9994,7 +9994,7 @@ CheckBalPlatform:
   
 ChkForFall:
   lda_imm_nf(0x2d); // check if platform is above a certain point
-  cmp_zpx(Enemy_Y_Position);
+  cmp_zpx_fc(Enemy_Y_Position);
   if (!carry_flag) { goto ChkOtherForFall; } // if not, branch elsewhere
   cpy_zp(0x0); // if collision flag is set to same value as
   if (zero_flag) { goto MakePlatformFall; } // enemy state, branch to make platforms fall
@@ -10008,7 +10008,7 @@ MakePlatformFall:
   return;
   
 ChkOtherForFall:
-  cmp_zpy(Enemy_Y_Position); // check if other platform is above a certain point
+  cmp_zpy_fc(Enemy_Y_Position); // check if other platform is above a certain point
   if (!carry_flag) { goto ChkToMoveBalPlat; } // if not, branch elsewhere
   cpx_zp(0x0); // if collision flag is set to same value as
   if (zero_flag) { goto MakePlatformFall; } // enemy state, branch to make platforms fall
@@ -10020,11 +10020,11 @@ ChkOtherForFall:
 ChkToMoveBalPlat:
   lda_zpx_nf(Enemy_Y_Position); // save vertical position to stack
   pha();
-  lda_absx(PlatformCollisionFlag); // get collision flag
+  lda_absx_fn(PlatformCollisionFlag); // get collision flag
   if (!neg_flag) { goto ColFlg; } // branch if collision
   lda_absx_nf(Enemy_Y_MoveForce);
   carry_flag = false; // add $05 to contents of moveforce, whatever they be
-  adc_imm(0x5);
+  adc_imm_fc(0x5);
   ram[0x0] = a; // store here
   lda_zpx_nf(Enemy_Y_Speed);
   adc_imm(0x0); // add carry to vertical speed
@@ -10056,9 +10056,9 @@ DoOtherPlatform:
   carry_flag = true;
   sbc_zpx_nf(Enemy_Y_Position); // get difference of old vs. new coordinate
   carry_flag = false;
-  adc_zpy(Enemy_Y_Position); // add difference to vertical coordinate of other
+  adc_zpy_fc(Enemy_Y_Position); // add difference to vertical coordinate of other
   ram[Enemy_Y_Position + y] = a; // platform to move it in the opposite direction
-  lda_absx(PlatformCollisionFlag); // if no collision, skip this part here
+  lda_absx_fn(PlatformCollisionFlag); // if no collision, skip this part here
   if (neg_flag) { goto DrawEraseRope; }
   tax(); // put offset which collision occurred here
   PositionPlayerOnVPlat(); // and use it to position player accordingly
@@ -10066,10 +10066,10 @@ DoOtherPlatform:
 DrawEraseRope:
   ldy_zp_nf(ObjectOffset); // get enemy object offset
   lda_zpy_nf(Enemy_Y_Speed); // check to see if current platform is
-  ora_absy(Enemy_Y_MoveForce); // moving at all
+  ora_absy_fz(Enemy_Y_MoveForce); // moving at all
   if (zero_flag) { goto ExitRp; } // if not, skip all of this and branch to leave
   ldx_abs_nf(VRAM_Buffer1_Offset); // get vram buffer offset
-  cpx_imm(0x20); // if offset beyond a certain point, go ahead
+  cpx_imm_fc(0x20); // if offset beyond a certain point, go ahead
   if (carry_flag) { goto ExitRp; } // and skip this, branch to leave
   lda_zpy(Enemy_Y_Speed);
   pha(); // save two copies of vertical speed to stack
@@ -10081,7 +10081,7 @@ DrawEraseRope:
   ram[VRAM_Buffer1 + 1 + x] = a;
   lda_imm_nf(0x2); // set length for 2 bytes
   ram[VRAM_Buffer1 + 2 + x] = a;
-  lda_zpy(Enemy_Y_Speed); // if platform moving upwards, branch
+  lda_zpy_fn(Enemy_Y_Speed); // if platform moving upwards, branch
   if (neg_flag) { goto EraseR1; } // to do something else
   lda_imm_nf(0xa2);
   ram[VRAM_Buffer1 + 3 + x] = a; // otherwise put tile numbers for left
@@ -10106,7 +10106,7 @@ OtherRope:
   ram[VRAM_Buffer1 + 6 + x] = a;
   lda_imm_nf(0x2);
   ram[VRAM_Buffer1 + 7 + x] = a; // set length again for 2 bytes
-  pla(); // pull first copy of vertical speed from stack
+  pla_fn(); // pull first copy of vertical speed from stack
   if (!neg_flag) { goto EraseR2; } // if moving upwards (note inversion earlier), skip this
   lda_imm_nf(0xa2);
   ram[VRAM_Buffer1 + 8 + x] = a; // otherwise put tile numbers for left
@@ -10124,7 +10124,7 @@ EndRp:
   ram[VRAM_Buffer1 + 10 + x] = a;
   lda_abs_nf(VRAM_Buffer1_Offset); // add ten bytes to the vram buffer offset
   carry_flag = false; // and store
-  adc_imm(10);
+  adc_imm_fc(10);
   ram[VRAM_Buffer1_Offset] = a;
   
 ExitRp:
@@ -10139,11 +10139,11 @@ void StopPlatforms(void) {
 
 void YMovingPlatform(void) {
   lda_zpx_nf(Enemy_Y_Speed); // if platform moving up or down, skip ahead to
-  ora_absx(Enemy_Y_MoveForce); // check on other position
+  ora_absx_fz(Enemy_Y_MoveForce); // check on other position
   if (zero_flag) {
     ram[Enemy_YMF_Dummy + x] = a; // initialize dummy variable
     lda_zpx_nf(Enemy_Y_Position);
-    cmp_absx(YPlatformTopYPos); // if current vertical position => top position, branch
+    cmp_absx_fc(YPlatformTopYPos); // if current vertical position => top position, branch
     // ahead of all this
     if (!carry_flag) {
       lda_zp_nf(FrameCounter);
@@ -10191,10 +10191,10 @@ void XMovingPlatform(void) {
 void PositionPlayerOnHPlat(void) {
   lda_zp_nf(Player_X_Position);
   carry_flag = false; // add saved value from second subroutine to
-  adc_zp(0x0); // current player's position to position
+  adc_zp_fc(0x0); // current player's position to position
   ram[Player_X_Position] = a; // player accordingly in horizontal position
   lda_zp_nf(Player_PageLoc); // get player's page location
-  ldy_zp(0x0); // check to see if saved value here is positive or negative
+  ldy_zp_fn(0x0); // check to see if saved value here is positive or negative
   // if negative, branch to subtract
   if (!neg_flag) {
     adc_imm(0x0); // otherwise add carry to page location
@@ -10262,9 +10262,9 @@ void XMoveCntr_Platform(void) {
   if (!zero_flag) { goto NoIncXM; } // every fourth frame
   ldy_zpx_nf(XMoveSecondaryCounter); // get secondary counter
   lda_zpx_nf(XMovePrimaryCounter); // get primary counter
-  lsr_acc();
+  lsr_acc_fc();
   if (carry_flag) { goto DecSeXM; } // if d0 of primary counter set, branch elsewhere
-  cpy_zp(0x1); // compare secondary counter to preset maximum value
+  cpy_zp_fcz(0x1); // compare secondary counter to preset maximum value
   if (zero_flag) { goto IncPXM; } // if equal, branch ahead of this part
   inc_zpx(XMoveSecondaryCounter); // increment secondary counter and leave
   
@@ -10276,7 +10276,7 @@ IncPXM:
   return;
   
 DecSeXM:
-  tya(); // put secondary counter in A
+  tya_fz(); // put secondary counter in A
   if (zero_flag) { goto IncPXM; } // if secondary counter at zero, branch back
   dec_zpx(XMoveSecondaryCounter); // otherwise decrement secondary counter and leave
 }
@@ -10292,7 +10292,7 @@ void MoveWithXMCntrs(void) {
     lda_zpx_nf(XMoveSecondaryCounter);
     eor_imm_nf(0xff); // otherwise change secondary
     carry_flag = false; // counter to two's compliment
-    adc_imm(0x1);
+    adc_imm_fc(0x1);
     ram[XMoveSecondaryCounter + x] = a;
     ldy_imm(0x2); // load alternate value here
   }
@@ -10307,14 +10307,14 @@ void MoveWithXMCntrs(void) {
 
 void ProcSwimmingB(void) {
   lda_zpx_nf(BlooperMoveCounter); // get enemy's movement counter
-  and_imm(0b00000010); // check for d1 set
+  and_imm_fz(0b00000010); // check for d1 set
   // branch if set
   if (zero_flag) {
     lda_zp_nf(FrameCounter);
     and_imm_nf(0b00000111); // get 3 LSB of frame counter
     pha(); // and save it to the stack
     lda_zpx_nf(BlooperMoveCounter); // get enemy's movement counter
-    lsr_acc(); // check for d0 set
+    lsr_acc_fc(); // check for d0 set
     // branch if set
     if (!carry_flag) {
       pla(); // pull 3 LSB of frame counter from the stack
@@ -10354,7 +10354,7 @@ void ProcSwimmingB(void) {
     return; // leave
   }
   // ChkForFloatdown:
-  lda_absx(EnemyIntervalTimer); // get enemy timer
+  lda_absx_fz(EnemyIntervalTimer); // get enemy timer
   // branch if expired
   if (!zero_flag) {
     
@@ -10371,7 +10371,7 @@ Floatdown:
   // ChkNearPlayer:
   lda_zpx_nf(Enemy_Y_Position); // get vertical coordinate
   adc_imm_nf(0x10); // add sixteen pixels
-  cmp_zp(Player_Y_Position); // compare result with player's vertical coordinate
+  cmp_zp_fc(Player_Y_Position); // compare result with player's vertical coordinate
   if (!carry_flag) { goto Floatdown; } // if modified vertical less than player's, branch
   lda_imm(0x0);
   ram[BlooperMoveCounter + x] = a; // otherwise nullify movement counter
@@ -10383,7 +10383,7 @@ void ProcFirebar(void) {
   lda_abs_nf(Enemy_OffscreenBits); // check for d3 set
   and_imm(0b00001000); // if so, branch to leave
   if (!zero_flag) { return; }
-  lda_abs(TimerControl); // if master timer control set, branch
+  lda_abs_fz(TimerControl); // if master timer control set, branch
   if (!zero_flag) { goto SusFbar; } // ahead of this part
   lda_absx(FirebarSpinSpeed); // load spinning speed of firebar
   FirebarSpin(); // modify current spinstate
@@ -10395,7 +10395,7 @@ SusFbar:
   ldy_zpx_nf(Enemy_ID); // check enemy identifier
   cpy_imm(0x1f);
   if (!carry_flag) { goto SetupGFB; } // if < $1f (long firebar), branch
-  cmp_imm(0x8); // check high byte of spinstate
+  cmp_imm_fz(0x8); // check high byte of spinstate
   if (zero_flag) { goto SkpFSte; } // if eight, branch to change
   cmp_imm(0x18);
   if (!zero_flag) { goto SetupGFB; } // if not at twenty-four branch to not change
@@ -10421,7 +10421,7 @@ SetupGFB:
   FirebarCollision(); // draw fireball part and do collision detection
   ldy_imm_nf(0x5); // load value for short firebars by default
   lda_zpx_nf(Enemy_ID);
-  cmp_imm(0x1f); // are we doing a long firebar?
+  cmp_imm_fc(0x1f); // are we doing a long firebar?
   if (!carry_flag) { goto SetMFbar; } // no, branch then
   ldy_imm_nf(0xb); // otherwise load value for long firebars
   
@@ -10435,7 +10435,7 @@ DrawFbar:
   GetFirebarPosition(); // get fireball position data depending on firebar part
   DrawFirebar_Collision(); // position it properly, draw it and do collision detection
   lda_zp_nf(0x0); // check which firebar part
-  cmp_imm(0x4);
+  cmp_imm_fz(0x4);
   if (!zero_flag) { goto NextFbar; }
   ldy_abs_nf(DuplicateObj_Offset); // if we arrive at fifth firebar part,
   lda_absy_nf(Enemy_SprDataOffset); // get offset from long firebar and load OAM data offset
@@ -10453,7 +10453,7 @@ void DrawFirebar_Collision(void) {
   ram[0x5] = a;
   ldy_zp_nf(0x6); // load OAM data offset for firebar
   lda_zp_nf(0x1); // load horizontal adder we got from position loader
-  lsr_zp(0x5); // shift LSB of mirror data
+  lsr_zp_fc(0x5); // shift LSB of mirror data
   if (carry_flag) { goto AddHA; } // if carry was set, skip this part
   eor_imm_nf(0xff);
   adc_imm_nf(0x1); // otherwise get two's compliment of horizontal adder
@@ -10463,7 +10463,7 @@ AddHA:
   adc_abs_nf(Enemy_Rel_XPos); // horizontal adder, modified or otherwise
   ram[Sprite_X_Position + y] = a; // store as X coordinate here
   ram[0x6] = a; // store here for now, note offset is saved in Y still
-  cmp_abs(Enemy_Rel_XPos); // compare X coordinate of sprite to original X of firebar
+  cmp_abs_fc(Enemy_Rel_XPos); // compare X coordinate of sprite to original X of firebar
   if (carry_flag) { goto SubtR1; } // if sprite coordinate => original coordinate, branch
   lda_abs_nf(Enemy_Rel_XPos);
   carry_flag = true; // otherwise subtract sprite X from the
@@ -10475,7 +10475,7 @@ SubtR1:
   sbc_abs_nf(Enemy_Rel_XPos); // current sprite X
   
 ChkFOfs:
-  cmp_imm(0x59); // if difference of coordinates within a certain range,
+  cmp_imm_fc(0x59); // if difference of coordinates within a certain range,
   if (!carry_flag) { goto VAHandl; } // continue by handling vertical adder
   lda_imm(0xf8); // otherwise, load offscreen Y coordinate
   if (!zero_flag) { goto SetVFbr; } // and unconditionally branch to move sprite offscreen
@@ -10485,7 +10485,7 @@ VAHandl:
   cmp_imm(0xf8); // skip ahead of this part and write into sprite Y coordinate
   if (zero_flag) { goto SetVFbr; }
   lda_zp_nf(0x2); // load vertical adder we got from position loader
-  lsr_zp(0x5); // shift LSB of mirror data one more time
+  lsr_zp_fc(0x5); // shift LSB of mirror data one more time
   if (carry_flag) { goto AddVA; } // if carry was set, skip this part
   eor_imm_nf(0xff);
   adc_imm_nf(0x1); // otherwise get two's compliment of second part
@@ -10505,16 +10505,16 @@ void FirebarCollision(void) {
   tya_nf(); // return OAM data offset and save
   pha(); // to the stack for now
   lda_abs_nf(StarInvincibleTimer); // if star mario invincibility timer
-  ora_abs(TimerControl); // or master timer controls set
+  ora_abs_fz(TimerControl); // or master timer controls set
   if (!zero_flag) { goto NoColFB; } // then skip all of this
   ram[0x5] = a; // otherwise initialize counter
   ldy_zp_nf(Player_Y_HighPos);
-  dey(); // if player's vertical high byte offscreen,
+  dey_fz(); // if player's vertical high byte offscreen,
   if (!zero_flag) { goto NoColFB; } // skip all of this
   ldy_zp_nf(Player_Y_Position); // get player's vertical position
-  lda_abs(PlayerSize); // get player's size
+  lda_abs_fz(PlayerSize); // get player's size
   if (!zero_flag) { goto AdjSm; } // if player small, branch to alter variables
-  lda_abs(CrouchingFlag);
+  lda_abs_fz(CrouchingFlag);
   if (zero_flag) { goto BigJp; } // if player big and not crouching, jump ahead
   
 AdjSm:
@@ -10530,36 +10530,36 @@ BigJp:
   
 FBCLoop:
   carry_flag = true; // subtract vertical position of firebar
-  sbc_zp(0x7); // from the vertical coordinate of the player
+  sbc_zp_fn(0x7); // from the vertical coordinate of the player
   if (!neg_flag) { goto ChkVFBD; } // if player lower on the screen than firebar,
   eor_imm_nf(0xff); // skip two's compliment part
   carry_flag = false; // otherwise get two's compliment
   adc_imm_nf(0x1);
   
 ChkVFBD:
-  cmp_imm(0x8); // if difference => 8 pixels, skip ahead of this part
+  cmp_imm_fc(0x8); // if difference => 8 pixels, skip ahead of this part
   if (carry_flag) { goto Chk2Ofs; }
   lda_zp_nf(0x6); // if firebar on far right on the screen, skip this,
-  cmp_imm(0xf0); // because, really, what's the point?
+  cmp_imm_fc(0xf0); // because, really, what's the point?
   if (carry_flag) { goto Chk2Ofs; }
   lda_abs_nf(Sprite_X_Position + 4); // get OAM X coordinate for sprite #1
   carry_flag = false;
   adc_imm_nf(0x4); // add four pixels
   ram[0x4] = a; // store here
   carry_flag = true; // subtract horizontal coordinate of firebar
-  sbc_zp(0x6); // from the X coordinate of player's sprite 1
+  sbc_zp_fn(0x6); // from the X coordinate of player's sprite 1
   if (!neg_flag) { goto ChkFBCl; } // if modded X coordinate to the right of firebar
   eor_imm_nf(0xff); // skip two's compliment part
   carry_flag = false; // otherwise get two's compliment
   adc_imm_nf(0x1);
   
 ChkFBCl:
-  cmp_imm(0x8); // if difference < 8 pixels, collision, thus branch
+  cmp_imm_fc(0x8); // if difference < 8 pixels, collision, thus branch
   if (!carry_flag) { goto ChgSDir; } // to process
   
 Chk2Ofs:
   lda_zp_nf(0x5); // if value of $02 was set earlier for whatever reason,
-  cmp_imm(0x2); // branch to increment OAM offset and leave, no collision
+  cmp_imm_fz(0x2); // branch to increment OAM offset and leave, no collision
   if (zero_flag) { goto NoColFB; }
   ldy_zp_nf(0x5); // otherwise get temp here and use as offset
   lda_zp_nf(Player_Y_Position);
@@ -10571,7 +10571,7 @@ Chk2Ofs:
 ChgSDir:
   ldx_imm_nf(0x1); // set movement direction by default
   lda_zp_nf(0x4); // if OAM X coordinate of player's sprite 1
-  cmp_zp(0x6); // is greater than horizontal coordinate of firebar
+  cmp_zp_fc(0x6); // is greater than horizontal coordinate of firebar
   if (carry_flag) { goto SetSDir; } // then do not alter movement direction
   inx_nf(); // otherwise increment it
   
@@ -10587,7 +10587,7 @@ SetSDir:
 NoColFB:
   pla_nf(); // get OAM data offset
   carry_flag = false; // add four to it and save
-  adc_imm(0x4);
+  adc_imm_fc(0x4);
   ram[0x6] = a;
   ldx_zp(ObjectOffset); // get enemy object buffer offset and leave
 }
@@ -10595,7 +10595,7 @@ NoColFB:
 void GetFirebarPosition(void) {
   pha(); // save high byte of spinstate to the stack
   and_imm_nf(0b00001111); // mask out low nybble
-  cmp_imm(0x9);
+  cmp_imm_fc(0x9);
   // if lower than $09, branch ahead
   if (carry_flag) {
     eor_imm_nf(0b00001111); // otherwise get two's compliment to oscillate
@@ -10616,7 +10616,7 @@ void GetFirebarPosition(void) {
   carry_flag = false;
   adc_imm_nf(0x8); // add eight this time, to get vertical adder
   and_imm_nf(0b00001111); // mask out high nybble
-  cmp_imm(0x9); // if lower than $09, branch ahead
+  cmp_imm_fc(0x9); // if lower than $09, branch ahead
   if (carry_flag) {
     eor_imm_nf(0b00001111); // otherwise get two's compliment
     carry_flag = false;
@@ -10634,7 +10634,7 @@ void GetFirebarPosition(void) {
   pla_nf(); // pull out whatever was in A one last time
   lsr_acc_nf(); // divide by eight or shift three to the right
   lsr_acc_nf();
-  lsr_acc();
+  lsr_acc_fc();
   tay_nf(); // use as offset
   lda_absy(FirebarMirrorData); // load mirroring data here
   ram[0x3] = a; // store
@@ -10654,17 +10654,17 @@ void PlayerLakituDiff(void) {
   
 ChkLakDif:
   lda_zp_nf(0x0); // get low byte of horizontal difference
-  cmp_imm(0x3c); // if within a certain distance of player, branch
+  cmp_imm_fc(0x3c); // if within a certain distance of player, branch
   if (!carry_flag) { goto ChkPSpeed; }
   lda_imm_nf(0x3c); // otherwise set maximum distance
   ram[0x0] = a;
   lda_zpx_nf(Enemy_ID); // check if lakitu is in our current enemy slot
-  cmp_imm(Lakitu);
+  cmp_imm_fz(Lakitu);
   if (!zero_flag) { goto ChkPSpeed; } // if not, branch elsewhere
   tya_nf(); // compare contents of Y, now in A
-  cmp_zpx(LakituMoveDirection); // to what is being used as horizontal movement direction
+  cmp_zpx_fcz(LakituMoveDirection); // to what is being used as horizontal movement direction
   if (zero_flag) { goto ChkPSpeed; } // if moving toward the player, branch, do not alter
-  lda_zpx(LakituMoveDirection); // if moving to the left beyond maximum distance,
+  lda_zpx_fz(LakituMoveDirection); // if moving to the left beyond maximum distance,
   if (zero_flag) { goto SetLMovD; } // branch and alter without delay
   dec_zpx_nf(LakituMoveSpeed); // decrement horizontal speed
   lda_zpx(LakituMoveSpeed); // if horizontal speed not yet at zero, branch to leave
@@ -10681,28 +10681,28 @@ ChkPSpeed:
   lsr_acc_nf();
   ram[0x0] = a; // store as new value
   ldy_imm_nf(0x0); // init offset
-  lda_zp(Player_X_Speed);
+  lda_zp_fz(Player_X_Speed);
   if (zero_flag) { goto SubDifAdj; } // if player not moving horizontally, branch
-  lda_abs(ScrollAmount);
+  lda_abs_fz(ScrollAmount);
   if (zero_flag) { goto SubDifAdj; } // if scroll speed not set, branch to same place
   iny_nf(); // otherwise increment offset
   lda_zp_nf(Player_X_Speed);
-  cmp_imm(0x19); // if player not running, branch
+  cmp_imm_fc(0x19); // if player not running, branch
   if (!carry_flag) { goto ChkSpinyO; }
   lda_abs_nf(ScrollAmount);
-  cmp_imm(0x2); // if scroll speed below a certain amount, branch
+  cmp_imm_fc(0x2); // if scroll speed below a certain amount, branch
   if (!carry_flag) { goto ChkSpinyO; } // to same place
   iny_nf(); // otherwise increment once more
   
 ChkSpinyO:
   lda_zpx_nf(Enemy_ID); // check for spiny object
-  cmp_imm(Spiny);
+  cmp_imm_fz(Spiny);
   if (!zero_flag) { goto ChkEmySpd; } // branch if not found
-  lda_zp(Player_X_Speed); // if player not moving, skip this part
+  lda_zp_fz(Player_X_Speed); // if player not moving, skip this part
   if (!zero_flag) { goto SubDifAdj; }
   
 ChkEmySpd:
-  lda_zpx(Enemy_Y_Speed); // check vertical speed
+  lda_zpx_fz(Enemy_Y_Speed); // check vertical speed
   if (!zero_flag) { goto SubDifAdj; } // branch if nonzero
   ldy_imm_nf(0x0); // otherwise reinit offset
   
@@ -10712,7 +10712,7 @@ SubDifAdj:
   
 SPixelLak:
   carry_flag = true; // subtract one for each pixel of horizontal difference
-  sbc_imm(0x1); // from one of three saved values
+  sbc_imm_fc(0x1); // from one of three saved values
   dey();
   if (!neg_flag) { goto SPixelLak; } // branch until all pixels are subtracted, to adjust difference
   // -------------------------------------------------------------------------------------
@@ -10747,7 +10747,7 @@ void ProcBowserFlame(void) {
   lda_abs(TimerControl); // if master timer control flag set,
   if (!zero_flag) { goto SetGfxF; } // skip all of this
   lda_imm_nf(0x40); // load default movement force
-  ldy_abs(SecondaryHardMode);
+  ldy_abs_fz(SecondaryHardMode);
   if (zero_flag) { goto SFlmX; } // if secondary hard mode flag not set, use default
   lda_imm_nf(0x60); // otherwise load alternate movement force to go faster
   
@@ -10755,10 +10755,10 @@ SFlmX:
   ram[0x0] = a; // store value here
   lda_absx_nf(Enemy_X_MoveForce);
   carry_flag = true; // subtract value from movement force
-  sbc_zp(0x0);
+  sbc_zp_fc(0x0);
   ram[Enemy_X_MoveForce + x] = a; // save new value
   lda_zpx_nf(Enemy_X_Position);
-  sbc_imm(0x1); // subtract one from horizontal position to move
+  sbc_imm_fc(0x1); // subtract one from horizontal position to move
   ram[Enemy_X_Position + x] = a; // to the left
   lda_zpx_nf(Enemy_PageLoc);
   sbc_imm_nf(0x0); // subtract borrow from page location
@@ -10779,7 +10779,7 @@ SetGfxF:
   ram[0x0] = a; // write first tile number
   ldy_imm_nf(0x2); // load attributes without vertical flip by default
   lda_zp_nf(FrameCounter);
-  and_imm(0b00000010); // invert vertical flip bit every 2 frames
+  and_imm_fz(0b00000010); // invert vertical flip bit every 2 frames
   if (zero_flag) { goto FlmeAt; } // if d1 not set, write default value
   ldy_imm_nf(0x82); // otherwise write value with vertical flip bit set
   
@@ -10806,13 +10806,13 @@ DrawFlameLoop:
   iny_nf();
   iny_nf(); // increment Y four times to move onto the next OAM
   inx_nf(); // move onto the next OAM, and branch if three
-  cpx_imm(0x3); // have not yet been done
+  cpx_imm_fc(0x3); // have not yet been done
   if (!carry_flag) { goto DrawFlameLoop; }
   ldx_zp(ObjectOffset); // reload original enemy offset
   GetEnemyOffscreenBits(); // get offscreen information
   ldy_absx_nf(Enemy_SprDataOffset); // get OAM data offset
   lda_abs_nf(Enemy_OffscreenBits); // get enemy object offscreen bits
-  lsr_acc(); // move d0 to carry and result to stack
+  lsr_acc_fc(); // move d0 to carry and result to stack
   pha();
   if (!carry_flag) { goto M3FOfs; } // branch if carry not set
   lda_imm_nf(0xf8); // otherwise move sprite offscreen, this part likely
@@ -10820,7 +10820,7 @@ DrawFlameLoop:
   
 M3FOfs:
   pla_nf(); // get bits from stack
-  lsr_acc(); // move d1 to carry and move bits back to stack
+  lsr_acc_fc(); // move d1 to carry and move bits back to stack
   pha();
   if (!carry_flag) { goto M2FOfs; } // branch if carry not set again
   lda_imm_nf(0xf8); // otherwise move third sprite offscreen
@@ -10828,7 +10828,7 @@ M3FOfs:
   
 M2FOfs:
   pla_nf(); // get bits from stack again
-  lsr_acc(); // move d2 to carry and move bits back to stack again
+  lsr_acc_fc(); // move d2 to carry and move bits back to stack again
   pha();
   if (!carry_flag) { goto M1FOfs; } // branch if carry not set yet again
   lda_imm_nf(0xf8); // otherwise move second sprite offscreen
@@ -10845,13 +10845,13 @@ M1FOfs:
 
 void FirebarSpin(void) {
   ram[0x7] = a; // save spinning speed here
-  lda_zpx(FirebarSpinDirection); // check spinning direction
+  lda_zpx_fz(FirebarSpinDirection); // check spinning direction
   // if moving counter-clockwise, branch to other part
   if (zero_flag) {
     ldy_imm_nf(0x18); // possibly residual ldy
     lda_zpx_nf(FirebarSpinState_Low);
     carry_flag = false; // add spinning speed to what would normally be
-    adc_zp(0x7); // the horizontal speed
+    adc_zp_fc(0x7); // the horizontal speed
     ram[FirebarSpinState_Low + x] = a;
     lda_zpx_nf(FirebarSpinState_High); // add carry to what would normally be the vertical speed
     adc_imm(0x0);
@@ -10861,7 +10861,7 @@ void FirebarSpin(void) {
   ldy_imm_nf(0x8); // possibly residual ldy
   lda_zpx_nf(FirebarSpinState_Low);
   carry_flag = true; // subtract spinning speed to what would normally be
-  sbc_zp(0x7); // the horizontal speed
+  sbc_zp_fc(0x7); // the horizontal speed
   ram[FirebarSpinState_Low + x] = a;
   lda_zpx_nf(FirebarSpinState_High); // add carry to what would normally be the vertical speed
   sbc_imm(0x0);
@@ -10875,12 +10875,12 @@ void SetupPlatformRope(void) {
   pha(); // save second/third copy to stack
   lda_zpy_nf(Enemy_X_Position); // get horizontal coordinate
   carry_flag = false;
-  adc_imm(0x8); // add eight pixels
-  ldx_abs(SecondaryHardMode); // if secondary hard mode flag set,
+  adc_imm_fc(0x8); // add eight pixels
+  ldx_abs_fz(SecondaryHardMode); // if secondary hard mode flag set,
   // use coordinate as-is
   if (zero_flag) {
     carry_flag = false;
-    adc_imm(0x10); // otherwise add sixteen more pixels
+    adc_imm_fc(0x10); // otherwise add sixteen more pixels
   }
   // GetLRp:
   pha(); // save modified horizontal coordinate to stack
@@ -10894,7 +10894,7 @@ void SetupPlatformRope(void) {
   lsr_acc_nf();
   ram[0x0] = a; // store result here as part of name table low byte
   ldx_zpy_nf(Enemy_Y_Position); // get vertical coordinate
-  pla(); // get second/third copy of vertical speed from stack
+  pla_fn(); // get second/third copy of vertical speed from stack
   // skip this part if moving downwards or not at all
   if (neg_flag) {
     txa_nf();
@@ -10905,8 +10905,8 @@ void SetupPlatformRope(void) {
   // GetHRp:
   txa_nf(); // move vertical coordinate to A
   ldx_abs_nf(VRAM_Buffer1_Offset); // get vram buffer offset
-  asl_acc();
-  rol_acc(); // rotate d7 to d0 and d6 into carry
+  asl_acc_fc();
+  rol_acc_fc(); // rotate d7 to d0 and d6 into carry
   pha(); // save modified vertical coordinate to stack
   rol_acc_nf(); // rotate carry to d0, thus d7 and d6 are at 2 LSB
   and_imm_nf(0b00000011); // mask out all bits but d7 and d6, then set
@@ -10955,7 +10955,7 @@ void PlatformFall(void) {
   tax(); // pull offset from stack and save to X
   MoveFallingPlatform(); // make other platform fall
   ldx_zp_nf(ObjectOffset);
-  lda_absx(PlatformCollisionFlag); // if player not standing on either platform,
+  lda_absx_fn(PlatformCollisionFlag); // if player not standing on either platform,
   // skip this part
   if (!neg_flag) {
     tax(); // transfer collision flag offset as offset to X
@@ -10976,7 +10976,7 @@ void MoveLiftPlatforms(void) {
   if (zero_flag) {
     lda_absx_nf(Enemy_YMF_Dummy);
     carry_flag = false; // add contents of movement amount to whatever's here
-    adc_absx(Enemy_Y_MoveForce);
+    adc_absx_fc(Enemy_Y_MoveForce);
     ram[Enemy_YMF_Dummy + x] = a;
     lda_zpx_nf(Enemy_Y_Position); // add whatever vertical speed is set to current
     adc_zpx(Enemy_Y_Speed); // vertical position plus carry to move up or down
@@ -10997,18 +10997,18 @@ void ChkSmallPlatCollision(void) {
 }
 
 void FireballEnemyCollision(void) {
-  lda_zpx(Fireball_State); // check to see if fireball state is set at all
+  lda_zpx_fz(Fireball_State); // check to see if fireball state is set at all
   if (zero_flag) { goto ExitFBallEnemy; } // branch to leave if not
-  asl_acc();
+  asl_acc_fc();
   if (carry_flag) { goto ExitFBallEnemy; } // branch to leave also if d7 in state is set
   lda_zp_nf(FrameCounter);
-  lsr_acc(); // get LSB of frame counter
+  lsr_acc_fc(); // get LSB of frame counter
   if (carry_flag) { goto ExitFBallEnemy; } // branch to leave if set (do routine every other frame)
   txa_nf();
   asl_acc_nf(); // multiply fireball offset by four
   asl_acc_nf();
   carry_flag = false;
-  adc_imm(0x1c); // then add $1c or 28 bytes to it
+  adc_imm_fc(0x1c); // then add $1c or 28 bytes to it
   tay_nf(); // to use fireball's bounding box coordinates
   ldx_imm_nf(0x4);
   
@@ -11017,31 +11017,31 @@ FireballEnemyCDLoop:
   tya_nf();
   pha(); // push fireball offset to the stack
   lda_zpx_nf(Enemy_State);
-  and_imm(0b00100000); // check to see if d5 is set in enemy state
+  and_imm_fz(0b00100000); // check to see if d5 is set in enemy state
   if (!zero_flag) { goto NoFToECol; } // if so, skip to next enemy slot
-  lda_zpx(Enemy_Flag); // check to see if buffer flag is set
+  lda_zpx_fz(Enemy_Flag); // check to see if buffer flag is set
   if (zero_flag) { goto NoFToECol; } // if not, skip to next enemy slot
   lda_zpx_nf(Enemy_ID); // check enemy identifier
-  cmp_imm(0x24);
+  cmp_imm_fc(0x24);
   if (!carry_flag) { goto GoombaDie; } // if < $24, branch to check further
-  cmp_imm(0x2b);
+  cmp_imm_fc(0x2b);
   if (!carry_flag) { goto NoFToECol; } // if in range $24-$2a, skip to next enemy slot
   
 GoombaDie:
-  cmp_imm(Goomba); // check for goomba identifier
+  cmp_imm_fcz(Goomba); // check for goomba identifier
   if (!zero_flag) { goto NotGoomba; } // if not found, continue with code
   lda_zpx_nf(Enemy_State); // otherwise check for defeated state
-  cmp_imm(0x2); // if stomped or otherwise defeated,
+  cmp_imm_fc(0x2); // if stomped or otherwise defeated,
   if (carry_flag) { goto NoFToECol; } // skip to next enemy slot
   
 NotGoomba:
-  lda_absx(EnemyOffscrBitsMasked); // if any masked offscreen bits set,
+  lda_absx_fz(EnemyOffscrBitsMasked); // if any masked offscreen bits set,
   if (!zero_flag) { goto NoFToECol; } // skip to next enemy slot
   txa_nf();
   asl_acc_nf(); // otherwise multiply enemy offset by four
   asl_acc_nf();
   carry_flag = false;
-  adc_imm(0x4); // add 4 bytes to it
+  adc_imm_fc(0x4); // add 4 bytes to it
   tax(); // to use enemy's bounding box coordinates
   SprObjectCollisionCore(); // do fireball-to-enemy collision detection
   ldx_zp_nf(ObjectOffset); // return fireball's original offset
@@ -11055,7 +11055,7 @@ NoFToECol:
   pla_nf(); // pull fireball offset from stack
   tay_nf(); // put it in Y
   ldx_zp_nf(0x1); // get enemy object offset
-  dex(); // decrement it
+  dex_fn(); // decrement it
   if (!neg_flag) { goto FireballEnemyCDLoop; } // loop back until collision detection done on all enemies
   
 ExitFBallEnemy:
@@ -11065,12 +11065,12 @@ ExitFBallEnemy:
 void HandleEnemyFBallCol(void) {
   RelativeEnemyPosition(); // get relative coordinate of enemy
   ldx_zp_nf(0x1); // get current enemy object offset
-  lda_zpx(Enemy_Flag); // check buffer flag for d7 set
+  lda_zpx_fn(Enemy_Flag); // check buffer flag for d7 set
   if (!neg_flag) { goto ChkBuzzyBeetle; } // branch if not set to continue
   and_imm_nf(0b00001111); // otherwise mask out high nybble and
   tax_nf(); // use low nybble as enemy offset
   lda_zpx_nf(Enemy_ID);
-  cmp_imm(Bowser); // check enemy identifier for bowser
+  cmp_imm_fcz(Bowser); // check enemy identifier for bowser
   if (zero_flag) { goto HurtBowser; } // branch if found
   ldx_zp_nf(0x1); // otherwise retrieve current enemy offset
   
@@ -11078,7 +11078,7 @@ ChkBuzzyBeetle:
   lda_zpx_nf(Enemy_ID);
   cmp_imm(BuzzyBeetle); // check for buzzy beetle
   if (zero_flag) { return; } // branch if found to leave (buzzy beetles fireproof)
-  cmp_imm(Bowser); // check for bowser one more time (necessary if d7 of flag was clear)
+  cmp_imm_fcz(Bowser); // check for bowser one more time (necessary if d7 of flag was clear)
   if (!zero_flag) { goto ChkOtherEnemies; } // if not found, branch to check other enemies
   
 HurtBowser:
@@ -11093,7 +11093,7 @@ HurtBowser:
   lda_absy_nf(BowserIdentities); // get enemy identifier to replace bowser with
   ram[Enemy_ID + x] = a; // set as new enemy identifier
   lda_imm_nf(0x20); // set A to use starting value for state
-  cpy_imm(0x3); // check to see if using offset of 3 or more
+  cpy_imm_fc(0x3); // check to see if using offset of 3 or more
   if (carry_flag) { goto SetDBSte; } // branch if so
   ora_imm_nf(0x3); // otherwise add 3 to enemy state
   
@@ -11133,7 +11133,7 @@ void ShellOrBlockDefeat(void) {
   ram[Enemy_State + x] = a;
   lda_imm_nf(0x2); // award 200 points by default
   ldy_zpx_nf(Enemy_ID); // check for hammer bro
-  cpy_imm(HammerBro);
+  cpy_imm_fz(HammerBro);
   // branch if not found
   if (zero_flag) {
     lda_imm_nf(0x6); // award 1000 points for hammer bro
@@ -11167,7 +11167,7 @@ void PlayerHammerCollision(void) {
   asl_acc_nf(); // multiply misc object offset by four
   asl_acc_nf();
   carry_flag = false;
-  adc_imm(0x24); // add 36 or $24 bytes to get proper offset
+  adc_imm_fc(0x24); // add 36 or $24 bytes to get proper offset
   tay(); // for misc object bounding box coordinates
   PlayerCollisionCore(); // do player-to-hammer collision detection
   ldx_zp_nf(ObjectOffset); // get misc object offset
@@ -11179,7 +11179,7 @@ void PlayerHammerCollision(void) {
   lda_zpx_nf(Misc_X_Speed);
   eor_imm_nf(0xff); // get two's compliment of
   carry_flag = false; // hammer's horizontal speed
-  adc_imm(0x1);
+  adc_imm_fc(0x1);
   ram[Misc_X_Speed + x] = a; // set to send hammer flying the opposite direction
   lda_abs(StarInvincibleTimer); // if star mario invincibility timer set,
   if (!zero_flag) { return; } // branch to leave
@@ -11199,9 +11199,9 @@ void HandlePowerUpCollision(void) {
   lda_imm_nf(Sfx_PowerUpGrab);
   ram[Square2SoundQueue] = a; // play the power-up sound
   lda_zp_nf(PowerUpType); // check power-up type
-  cmp_imm(0x2);
+  cmp_imm_fc(0x2);
   if (!carry_flag) { goto Shroom_Flower_PUp; } // if mushroom or fire flower, branch
-  cmp_imm(0x3);
+  cmp_imm_fcz(0x3);
   if (zero_flag) { goto SetFor1Up; } // if 1-up mushroom, branch
   lda_imm_nf(0x23); // otherwise set star mario invincibility
   ram[StarInvincibleTimer] = a; // timer, and load the star mario music
@@ -11210,7 +11210,7 @@ void HandlePowerUpCollision(void) {
   return;
   
 Shroom_Flower_PUp:
-  lda_abs(PlayerStatus); // if player status = small, branch
+  lda_abs_fz(PlayerStatus); // if player status = small, branch
   if (zero_flag) { goto UpToSuper; }
   cmp_imm(0x1); // if player status not super, leave
   if (!zero_flag) { goto Shroom_Flower_PUpExit; }
@@ -11289,24 +11289,24 @@ HandlePECollisions:
   lda_imm_nf(0x1);
   ora_absx_nf(Enemy_CollisionBits); // otherwise set d0 now
   ram[Enemy_CollisionBits + x] = a;
-  cpy_imm(Spiny); // branch if spiny
+  cpy_imm_fz(Spiny); // branch if spiny
   if (zero_flag) { goto ChkForPlayerInjury; }
-  cpy_imm(PiranhaPlant); // branch if piranha plant
+  cpy_imm_fcz(PiranhaPlant); // branch if piranha plant
   if (zero_flag) { InjurePlayer(); return; }
-  cpy_imm(Podoboo); // branch if podoboo
+  cpy_imm_fcz(Podoboo); // branch if podoboo
   if (zero_flag) { InjurePlayer(); return; }
-  cpy_imm(BulletBill_CannonVar); // branch if bullet bill
+  cpy_imm_fz(BulletBill_CannonVar); // branch if bullet bill
   if (zero_flag) { goto ChkForPlayerInjury; }
-  cpy_imm(0x15); // branch if object => $15
+  cpy_imm_fc(0x15); // branch if object => $15
   if (carry_flag) { InjurePlayer(); return; }
-  lda_abs(AreaType); // branch if water type level
+  lda_abs_fz(AreaType); // branch if water type level
   if (zero_flag) { InjurePlayer(); return; }
   lda_zpx_nf(Enemy_State); // branch if d7 of enemy state was set
-  asl_acc();
+  asl_acc_fc();
   if (carry_flag) { goto ChkForPlayerInjury; }
   lda_zpx_nf(Enemy_State); // mask out all but 3 LSB of enemy state
   and_imm_nf(0b00000111);
-  cmp_imm(0x2); // branch if enemy is in normal or falling state
+  cmp_imm_fc(0x2); // branch if enemy is in normal or falling state
   if (!carry_flag) { goto ChkForPlayerInjury; }
   lda_zpx_nf(Enemy_ID); // branch to leave if goomba in defeated state
   cmp_imm(Goomba);
@@ -11340,18 +11340,18 @@ ChkForPlayerInjury:
   
 ChkInj:
   lda_zpx_nf(Enemy_ID); // branch if enemy object < $07
-  cmp_imm(Bloober);
+  cmp_imm_fc(Bloober);
   if (!carry_flag) { goto ChkETmrs; }
   lda_zp_nf(Player_Y_Position); // add 12 pixels to player's vertical position
   carry_flag = false;
   adc_imm_nf(0xc);
-  cmp_zpx(Enemy_Y_Position); // compare modified player's position to enemy's position
+  cmp_zpx_fc(Enemy_Y_Position); // compare modified player's position to enemy's position
   if (!carry_flag) { EnemyStomped(); return; } // branch if this player's position above (less than) enemy's
   
 ChkETmrs:
-  lda_abs(StompTimer); // check stomp timer
+  lda_abs_fz(StompTimer); // check stomp timer
   if (!zero_flag) { EnemyStomped(); return; } // branch if set
-  lda_abs(InjuryTimer); // check to see if injured invincibility timer still
+  lda_abs_fz(InjuryTimer); // check to see if injured invincibility timer still
   if (!zero_flag) { ExInjColRoutines(); return; } // counting down, and branch elsewhere to leave if so
   lda_abs_nf(Player_Rel_XPos);
   cmp_abs(Enemy_Rel_XPos); // if player's relative position to the left of enemy's
@@ -11367,7 +11367,7 @@ TInjE:
 }
 
 void InjurePlayer(void) {
-  lda_abs(InjuryTimer); // check again to see if injured invincibility timer is
+  lda_abs_fz(InjuryTimer); // check again to see if injured invincibility timer is
   // at zero, and branch to leave if so
   if (!zero_flag) {
     ExInjColRoutines();
@@ -11377,7 +11377,7 @@ void InjurePlayer(void) {
 }
 
 void ForceInjury(void) {
-  ldx_abs(PlayerStatus); // check player's status
+  ldx_abs_fz(PlayerStatus); // check player's status
   // branch if small
   if (zero_flag) {
     KillPlayer();
@@ -11418,7 +11418,7 @@ void KillPlayer(void) {
   ram[EventMusicQueue] = x; // set event music queue to death music
   lda_imm_nf(0xfc);
   ram[Player_Y_Speed] = a; // set new vertical speed
-  lda_imm(0xb); // set subroutine to run on next frame
+  lda_imm_fz(0xb); // set subroutine to run on next frame
   // branch to set player's state and other things
   if (!zero_flag) {
     SetKRout();
@@ -11429,28 +11429,28 @@ void KillPlayer(void) {
 
 void EnemyStomped(void) {
   lda_zpx_nf(Enemy_ID); // check for spiny, branch to hurt player
-  cmp_imm(Spiny); // if found
+  cmp_imm_fcz(Spiny); // if found
   if (zero_flag) { InjurePlayer(); return; }
   lda_imm_nf(Sfx_EnemyStomp); // otherwise play stomp/swim sound
   ram[Square1SoundQueue] = a;
   lda_zpx_nf(Enemy_ID);
   ldy_imm_nf(0x0); // initialize points data offset for stomped enemies
-  cmp_imm(FlyingCheepCheep); // branch for cheep-cheep
+  cmp_imm_fcz(FlyingCheepCheep); // branch for cheep-cheep
   if (zero_flag) { goto EnemyStompedPts; }
-  cmp_imm(BulletBill_FrenzyVar); // branch for either bullet bill object
+  cmp_imm_fcz(BulletBill_FrenzyVar); // branch for either bullet bill object
   if (zero_flag) { goto EnemyStompedPts; }
-  cmp_imm(BulletBill_CannonVar);
+  cmp_imm_fcz(BulletBill_CannonVar);
   if (zero_flag) { goto EnemyStompedPts; }
-  cmp_imm(Podoboo); // branch for podoboo (this branch is logically impossible
+  cmp_imm_fcz(Podoboo); // branch for podoboo (this branch is logically impossible
   if (zero_flag) { goto EnemyStompedPts; } // for cpu to take due to earlier checking of podoboo)
   iny_nf(); // increment points data offset
-  cmp_imm(HammerBro); // branch for hammer bro
+  cmp_imm_fcz(HammerBro); // branch for hammer bro
   if (zero_flag) { goto EnemyStompedPts; }
   iny_nf(); // increment points data offset
-  cmp_imm(Lakitu); // branch for lakitu
+  cmp_imm_fcz(Lakitu); // branch for lakitu
   if (zero_flag) { goto EnemyStompedPts; }
   iny_nf(); // increment points data offset
-  cmp_imm(Bloober); // branch if NOT bloober
+  cmp_imm_fcz(Bloober); // branch if NOT bloober
   if (!zero_flag) { goto ChkForDemoteKoopa; }
   
 EnemyStompedPts:
@@ -11470,7 +11470,7 @@ EnemyStompedPts:
   return;
   
 ChkForDemoteKoopa:
-  cmp_imm(0x9); // branch elsewhere if enemy object < $09
+  cmp_imm_fc(0x9); // branch elsewhere if enemy object < $09
   if (!carry_flag) { goto HandleStompedShellE; }
   and_imm_nf(0b00000001); // demote koopa paratroopas to ordinary troopas
   ram[Enemy_ID + x] = a;
@@ -11549,16 +11549,16 @@ void EnemiesCollision(void) {
   lda_abs(AreaType);
   if (zero_flag) { return; } // if water area type, leave
   lda_zpx_nf(Enemy_ID);
-  cmp_imm(0x15); // if enemy object => $15, branch to leave
+  cmp_imm_fc(0x15); // if enemy object => $15, branch to leave
   if (carry_flag) { ExitECRoutine(); return; }
-  cmp_imm(Lakitu); // if lakitu, branch to leave
+  cmp_imm_fcz(Lakitu); // if lakitu, branch to leave
   if (zero_flag) { ExitECRoutine(); return; }
-  cmp_imm(PiranhaPlant); // if piranha plant, branch to leave
+  cmp_imm_fcz(PiranhaPlant); // if piranha plant, branch to leave
   if (zero_flag) { ExitECRoutine(); return; }
   lda_absx(EnemyOffscrBitsMasked); // if masked offscreen bits nonzero, branch to leave
   if (!zero_flag) { ExitECRoutine(); return; }
   GetEnemyBoundBoxOfs(); // otherwise, do sub, get appropriate bounding box offset for
-  dex(); // first enemy we're going to compare, then decrement for second
+  dex_fn(); // first enemy we're going to compare, then decrement for second
   if (neg_flag) { ExitECRoutine(); return; } // branch to leave if there are no other enemies
   ECLoop(); // <fallthrough>
 }
@@ -11567,32 +11567,32 @@ void ECLoop(void) {
   ram[0x1] = x; // save enemy object buffer offset for second enemy here
   tya_nf(); // save first enemy's bounding box offset to stack
   pha();
-  lda_zpx(Enemy_Flag); // check enemy object enable flag
+  lda_zpx_fz(Enemy_Flag); // check enemy object enable flag
   // branch if flag not set
   if (zero_flag) {
     ReadyNextEnemy();
     return;
   }
   lda_zpx_nf(Enemy_ID);
-  cmp_imm(0x15); // check for enemy object => $15
+  cmp_imm_fc(0x15); // check for enemy object => $15
   // branch if true
   if (carry_flag) {
     ReadyNextEnemy();
     return;
   }
-  cmp_imm(Lakitu);
+  cmp_imm_fcz(Lakitu);
   // branch if enemy object is lakitu
   if (zero_flag) {
     ReadyNextEnemy();
     return;
   }
-  cmp_imm(PiranhaPlant);
+  cmp_imm_fcz(PiranhaPlant);
   // branch if enemy object is piranha plant
   if (zero_flag) {
     ReadyNextEnemy();
     return;
   }
-  lda_absx(EnemyOffscrBitsMasked);
+  lda_absx_fz(EnemyOffscrBitsMasked);
   // branch if masked offscreen bits set
   if (!zero_flag) {
     ReadyNextEnemy();
@@ -11602,7 +11602,7 @@ void ECLoop(void) {
   asl_acc_nf(); // multiply by four, then add four
   asl_acc_nf();
   carry_flag = false;
-  adc_imm(0x4);
+  adc_imm_fc(0x4);
   tax(); // use as new contents of X
   SprObjectCollisionCore(); // do collision detection using the two enemies here
   ldx_zp_nf(ObjectOffset); // use first enemy offset for X
@@ -11615,7 +11615,7 @@ void ECLoop(void) {
     // branch if at least one of them is set
     if (zero_flag) {
       lda_absy_nf(Enemy_CollisionBits); // load first enemy's collision-related bits
-      and_absx(SetBitsMask); // check to see if bit connected to second enemy is
+      and_absx_fz(SetBitsMask); // check to see if bit connected to second enemy is
       // already set, and move onto next enemy slot if set
       if (!zero_flag) {
         ReadyNextEnemy();
@@ -11641,7 +11641,7 @@ void ReadyNextEnemy(void) {
   pla_nf(); // get first enemy's bounding box offset from the stack
   tay_nf(); // use as Y again
   ldx_zp_nf(0x1); // get and decrement second enemy's object buffer offset
-  dex();
+  dex_fn();
   // loop until all enemy slots have been checked
   if (!neg_flag) {
     ECLoop();
@@ -11660,13 +11660,13 @@ void ProcEnemyCollisions(void) {
   and_imm(0b00100000); // if d5 is set in either state, or both, branch
   if (!zero_flag) { goto ExitProcessEColl; } // to leave and do nothing else at this point
   lda_zpx_nf(Enemy_State);
-  cmp_imm(0x6); // if second enemy state < $06, branch elsewhere
+  cmp_imm_fc(0x6); // if second enemy state < $06, branch elsewhere
   if (carry_flag) {
     lda_zpx_nf(Enemy_ID); // check second enemy identifier for hammer bro
     cmp_imm(HammerBro); // if hammer bro found in alt state, branch to leave
     if (zero_flag) { goto ExitProcessEColl; }
     lda_zpy_nf(Enemy_State); // check first enemy state for d7 set
-    asl_acc();
+    asl_acc_fc();
     // branch if d7 is clear
     if (carry_flag) {
       lda_imm(0x6);
@@ -11681,7 +11681,7 @@ void ProcEnemyCollisions(void) {
     ldx_zp_nf(ObjectOffset);
     lda_absx_nf(ShellChainCounter); // get chain counter for shell
     carry_flag = false;
-    adc_imm(0x4); // add four to get appropriate point offset
+    adc_imm_fc(0x4); // add four to get appropriate point offset
     ldx_zp(0x1);
     SetupFloateyNumber(); // award appropriate number of points for second enemy
     ldx_zp_nf(ObjectOffset); // load original offset of first enemy
@@ -11692,7 +11692,7 @@ ExitProcessEColl:
   }
   // ProcSecondEnemyColl:
   lda_zpy_nf(Enemy_State); // if first enemy state < $06, branch elsewhere
-  cmp_imm(0x6);
+  cmp_imm_fc(0x6);
   if (carry_flag) {
     lda_zpy_nf(Enemy_ID); // check first enemy identifier for hammer bro
     cmp_imm(HammerBro); // if hammer bro found in alt state, branch to leave
@@ -11701,7 +11701,7 @@ ExitProcessEColl:
     ldy_zp_nf(0x1);
     lda_absy_nf(ShellChainCounter); // get chain counter for shell
     carry_flag = false;
-    adc_imm(0x4); // add four to get appropriate point offset
+    adc_imm_fc(0x4); // add four to get appropriate point offset
     ldx_zp(ObjectOffset);
     SetupFloateyNumber(); // award appropriate number of points for first enemy
     ldx_zp_nf(0x1); // load original offset of second enemy
@@ -11724,9 +11724,9 @@ void EnemyTurnAround(void) {
   if (zero_flag) { return; } // if lakitu, leave
   cmp_imm(HammerBro);
   if (zero_flag) { return; } // if hammer bro, leave
-  cmp_imm(Spiny);
+  cmp_imm_fcz(Spiny);
   if (zero_flag) { RXSpd(); return; } // if spiny, turn it around
-  cmp_imm(GreenParatroopaJump);
+  cmp_imm_fcz(GreenParatroopaJump);
   if (zero_flag) { RXSpd(); return; } // if green paratroopa, turn it around
   cmp_imm(0x7);
   if (carry_flag) { return; } // if any OTHER enemy object => $07, leave
@@ -11749,13 +11749,13 @@ void RXSpd(void) {
 void LargePlatformCollision(void) {
   lda_imm_nf(0xff); // save value here
   ram[PlatformCollisionFlag + x] = a;
-  lda_abs(TimerControl); // check master timer control
+  lda_abs_fz(TimerControl); // check master timer control
   // if set, branch to leave
   if (!zero_flag) {
     ExLPC();
     return;
   }
-  lda_zpx(Enemy_State); // if d7 set in object state,
+  lda_zpx_fn(Enemy_State); // if d7 set in object state,
   // branch to leave
   if (neg_flag) {
     ExLPC();
@@ -11817,7 +11817,7 @@ void SmallPlatformCollision(void) {
 ChkSmallPlatLoop:
   ldx_zp(ObjectOffset); // get enemy object offset
   GetEnemyBoundBoxOfs(); // get bounding box offset in Y
-  and_imm(0b00000010); // if d1 of offscreen lower nybble bits was set
+  and_imm_fz(0b00000010); // if d1 of offscreen lower nybble bits was set
   if (!zero_flag) { goto ExSPC; } // then branch to leave
   lda_absy_nf(BoundingBox_UL_YPos); // check top of platform's bounding box for being
   cmp_imm(0x20); // above a specific point
@@ -11832,9 +11832,9 @@ MoveBoundBox:
   ram[BoundingBox_UL_YPos + y] = a;
   lda_absy_nf(BoundingBox_DR_YPos);
   carry_flag = false;
-  adc_imm(0x80);
+  adc_imm_fc(0x80);
   ram[BoundingBox_DR_YPos + y] = a;
-  dec_zp(0x0); // decrement counter we set earlier
+  dec_zp_fz(0x0); // decrement counter we set earlier
   if (!zero_flag) { goto ChkSmallPlatLoop; } // loop back until both bounding boxes are checked
   
 ExSPC:
@@ -11851,9 +11851,9 @@ void ProcLPlatCollisions(void) {
   lda_absy_nf(BoundingBox_DR_YPos); // get difference by subtracting the top
   carry_flag = true; // of the player's bounding box from the bottom
   sbc_abs_nf(BoundingBox_UL_YPos); // of the platform's bounding box
-  cmp_imm(0x4); // if difference too large or negative,
+  cmp_imm_fc(0x4); // if difference too large or negative,
   if (carry_flag) { goto ChkForTopCollision; } // branch, do not alter vertical speed of player
-  lda_zp(Player_Y_Speed); // check to see if player's vertical speed is moving down
+  lda_zp_fn(Player_Y_Speed); // check to see if player's vertical speed is moving down
   if (!neg_flag) { goto ChkForTopCollision; } // if so, don't mess with it
   lda_imm_nf(0x1); // otherwise, set vertical
   ram[Player_Y_Speed] = a; // speed of player to kill jump
@@ -11862,15 +11862,15 @@ ChkForTopCollision:
   lda_abs_nf(BoundingBox_DR_YPos); // get difference by subtracting the top
   carry_flag = true; // of the platform's bounding box from the bottom
   sbc_absy_nf(BoundingBox_UL_YPos); // of the player's bounding box
-  cmp_imm(0x6);
+  cmp_imm_fc(0x6);
   if (carry_flag) { goto PlatformSideCollisions; } // if difference not close enough, skip all of this
-  lda_zp(Player_Y_Speed);
+  lda_zp_fn(Player_Y_Speed);
   if (neg_flag) { goto PlatformSideCollisions; } // if player's vertical speed moving upwards, skip this
   lda_zp_nf(0x0); // get saved bounding box counter from earlier
   ldy_zpx_nf(Enemy_ID);
-  cpy_imm(0x2b); // if either of the two small platform objects are found,
+  cpy_imm_fcz(0x2b); // if either of the two small platform objects are found,
   if (zero_flag) { goto SetCollisionFlag; } // regardless of which one, branch to use bounding box counter
-  cpy_imm(0x2c); // as contents of collision flag
+  cpy_imm_fcz(0x2c); // as contents of collision flag
   if (zero_flag) { goto SetCollisionFlag; }
   txa_nf(); // otherwise use enemy object buffer offset
   
@@ -11925,10 +11925,10 @@ void PositionPlayerOnVPlatSkip(void) {
   cpy_imm(0x1); // if vertical high byte offscreen, skip this
   if (!zero_flag) { return; }
   carry_flag = true; // subtract 32 pixels from vertical coordinate
-  sbc_imm(0x20); // for the player object's height
+  sbc_imm_fc(0x20); // for the player object's height
   ram[Player_Y_Position] = a; // save as player's new vertical coordinate
   tya_nf();
-  sbc_imm(0x0); // subtract borrow and store as player's
+  sbc_imm_fc(0x0); // subtract borrow and store as player's
   ram[Player_Y_HighPos] = a; // new vertical high byte
   lda_imm(0x0);
   ram[Player_Y_Speed] = a; // initialize vertical speed and low byte of force
@@ -11977,11 +11977,11 @@ void PlayerBGCollision(void) {
   cmp_imm(0x4);
   if (!carry_flag) { goto ExPBGCol; } // if running routines $00-$03 branch to leave
   lda_imm_nf(0x1); // load default player state for swimming
-  ldy_abs(SwimmingFlag); // if swimming flag set,
+  ldy_abs_fz(SwimmingFlag); // if swimming flag set,
   if (!zero_flag) { goto SetPSte; } // branch ahead to set default state
-  lda_zp(Player_State); // if player in normal state,
+  lda_zp_fz(Player_State); // if player in normal state,
   if (zero_flag) { goto SetFallS; } // branch to set default state for falling
-  cmp_imm(0x3);
+  cmp_imm_fz(0x3);
   if (!zero_flag) { goto ChkOnScr; } // if in any other state besides climbing, skip to next part
   
 SetFallS:
@@ -12005,12 +12005,12 @@ ExPBGCol:
   
 ChkCollSize:
   ldy_imm_nf(0x2); // load default offset
-  lda_abs(CrouchingFlag);
+  lda_abs_fz(CrouchingFlag);
   if (!zero_flag) { goto GBBAdr; } // if player crouching, skip ahead
-  lda_abs(PlayerSize);
+  lda_abs_fz(PlayerSize);
   if (!zero_flag) { goto GBBAdr; } // if player small, skip ahead
   dey_nf(); // otherwise decrement offset for big player not crouching
-  lda_abs(SwimmingFlag);
+  lda_abs_fz(SwimmingFlag);
   if (!zero_flag) { goto GBBAdr; } // if swimming flag set, skip ahead
   dey_nf(); // otherwise decrement offset
   
@@ -12019,7 +12019,7 @@ GBBAdr:
   ram[0xeb] = a; // store value here
   tay_nf(); // put value into Y, as offset for block buffer routine
   ldx_abs_nf(PlayerSize); // get player's size as offset
-  lda_abs(CrouchingFlag);
+  lda_abs_fz(CrouchingFlag);
   if (zero_flag) { goto HeadChk; } // if player not crouching, branch ahead
   inx_nf(); // otherwise increment size as offset
   
@@ -12031,14 +12031,14 @@ HeadChk:
   if (zero_flag) { goto DoFootCheck; } // player, and branch if nothing above player's head
   CheckForCoinMTiles(); // check to see if player touched coin with their head
   if (carry_flag) { goto AwardTouchedCoin; } // if so, branch to some other part of code
-  ldy_zp(Player_Y_Speed); // check player's vertical speed
+  ldy_zp_fn(Player_Y_Speed); // check player's vertical speed
   if (!neg_flag) { goto DoFootCheck; } // if player not moving upwards, branch elsewhere
   ldy_zp_nf(0x4); // check lower nybble of vertical coordinate returned
   cpy_imm(0x4); // from collision detection routine
   if (!carry_flag) { goto DoFootCheck; } // if low nybble < 4, branch
   CheckForSolidMTiles(); // check to see what player's head bumped on
   if (carry_flag) { goto SolidOrClimb; } // if player collided with solid metatile, branch
-  ldy_abs(AreaType); // otherwise check area type
+  ldy_abs_fz(AreaType); // otherwise check area type
   if (zero_flag) { goto NYSpd; } // if water level, branch ahead
   ldy_abs(BlockBounceTimer); // if block bounce timer not expired,
   if (!zero_flag) { goto NYSpd; } // branch ahead, do not process collision
@@ -12046,7 +12046,7 @@ HeadChk:
   goto DoFootCheck; // jump ahead to skip these other parts here
   
 SolidOrClimb:
-  cmp_imm(0x26); // if climbing metatile,
+  cmp_imm_fz(0x26); // if climbing metatile,
   if (zero_flag) { goto NYSpd; } // branch ahead and do not play sound
   lda_imm_nf(Sfx_Bump);
   ram[Square1SoundQueue] = a; // otherwise load bump sound
@@ -12080,7 +12080,7 @@ AwardTouchedCoin:
 ChkFootMTile:
   CheckForClimbMTiles(); // check to see if player landed on climbable metatiles
   if (carry_flag) { goto DoPlayerSideCheck; } // if so, branch
-  ldy_zp(Player_Y_Speed); // check player's vertical speed
+  ldy_zp_fn(Player_Y_Speed); // check player's vertical speed
   if (neg_flag) { goto DoPlayerSideCheck; } // if player moving upwards, branch
   cmp_imm(0xc5);
   if (!zero_flag) { goto ContChk; } // if player did not touch axe, skip ahead
@@ -12089,7 +12089,7 @@ ChkFootMTile:
 ContChk:
   ChkInvisibleMTiles(); // do sub to check for hidden coin or 1-up blocks
   if (zero_flag) { goto DoPlayerSideCheck; } // if either found, branch
-  ldy_abs(JumpspringAnimCtrl); // if jumpspring animating right now,
+  ldy_abs_fz(JumpspringAnimCtrl); // if jumpspring animating right now,
   if (!zero_flag) { goto InitSteP; } // branch ahead
   ldy_zp_nf(0x4); // check lower nybble of vertical coordinate returned
   cpy_imm(0x5); // from collision detection routine
@@ -12124,13 +12124,13 @@ SideCheckLoop:
   iny_nf(); // move onto the next one
   ram[0xeb] = y; // store it
   lda_zp_nf(Player_Y_Position);
-  cmp_imm(0x20); // check player's vertical position
+  cmp_imm_fc(0x20); // check player's vertical position
   if (!carry_flag) { goto BHalf; } // if player is in status bar area, branch ahead to skip this part
   cmp_imm(0xe4);
   if (carry_flag) { goto ExSCH; } // branch to leave if player is too far down
   BlockBufferColli_Side(); // do player-to-bg collision detection on one half of player
   if (zero_flag) { goto BHalf; } // branch ahead if nothing found
-  cmp_imm(0x1c); // otherwise check for pipe metatiles
+  cmp_imm_fz(0x1c); // otherwise check for pipe metatiles
   if (zero_flag) { goto BHalf; } // if collided with sideways pipe (top), branch ahead
   cmp_imm(0x6b);
   if (zero_flag) { goto BHalf; } // if collided with water pipe (top), branch ahead
@@ -12177,13 +12177,13 @@ ChkPBtm:
   ldy_zp_nf(PlayerFacingDir); // get player's facing direction
   dey();
   if (!zero_flag) { goto StopPlayerMove; } // if facing left, branch to impede movement
-  cmp_imm(0x6c); // otherwise check for pipe metatiles
+  cmp_imm_fz(0x6c); // otherwise check for pipe metatiles
   if (zero_flag) { goto PipeDwnS; } // if collided with sideways pipe (bottom), branch
   cmp_imm(0x1f); // if collided with water pipe (bottom), continue
   if (!zero_flag) { goto StopPlayerMove; } // otherwise branch to impede player's movement
   
 PipeDwnS:
-  lda_abs(Player_SprAttrib); // check player's attributes
+  lda_abs_fz(Player_SprAttrib); // check player's attributes
   if (!zero_flag) { goto PlyrPipe; } // if already set, branch, do not play sound again
   ldy_imm_nf(Sfx_PipeDown_Injury);
   ram[Square1SoundQueue] = y; // otherwise load pipedown/injury sound
@@ -12192,10 +12192,10 @@ PlyrPipe:
   ora_imm_nf(0b00100000);
   ram[Player_SprAttrib] = a; // set background priority bit in player attributes
   lda_zp_nf(Player_X_Position);
-  and_imm(0b00001111); // get lower nybble of player's horizontal coordinate
+  and_imm_fz(0b00001111); // get lower nybble of player's horizontal coordinate
   if (zero_flag) { goto ChkGERtn; } // if at zero, branch ahead to skip this part
   ldy_imm_nf(0x0); // set default offset for timer setting data
-  lda_abs(ScreenLeft_PageLoc); // load page location for left side of screen
+  lda_abs_fz(ScreenLeft_PageLoc); // load page location for left side of screen
   if (zero_flag) { goto SetCATmr; } // if at page zero, use default offset
   iny_nf(); // otherwise increment offset
   
@@ -12253,17 +12253,17 @@ void ImpedePlayerMove(void) {
   lda_imm_nf(0x0); // initialize value here
   ldy_zp_nf(Player_X_Speed); // get player's horizontal speed
   ldx_zp_nf(0x0); // check value set earlier for
-  dex(); // left side collision
+  dex_fz(); // left side collision
   if (!zero_flag) { goto RImpd; } // if right side collision, skip this part
   inx_nf(); // return value to X
-  cpy_imm(0x0); // if player moving to the left,
+  cpy_imm_fcn(0x0); // if player moving to the left,
   if (neg_flag) { goto ExIPM; } // branch to invert bit and leave
   lda_imm_nf(0xff); // otherwise load A with value to be used later
   goto NXSpd; // and jump to affect movement
   
 RImpd:
   ldx_imm_nf(0x2); // return $02 to X
-  cpy_imm(0x1); // if player moving to the right,
+  cpy_imm_fcn(0x1); // if player moving to the right,
   if (!neg_flag) { goto ExIPM; } // branch to invert bit and leave
   lda_imm_nf(0x1); // otherwise load A with value to be used here
   
@@ -12272,17 +12272,17 @@ NXSpd:
   ram[SideCollisionTimer] = y; // set timer of some sort
   ldy_imm_nf(0x0);
   ram[Player_X_Speed] = y; // nullify player's horizontal speed
-  cmp_imm(0x0); // if value set in A not set to $ff,
+  cmp_imm_fn(0x0); // if value set in A not set to $ff,
   if (!neg_flag) { goto PlatF; } // branch ahead, do not decrement Y
   dey_nf(); // otherwise decrement Y now
   
 PlatF:
   ram[0x0] = y; // store Y as high bits of horizontal adder
   carry_flag = false;
-  adc_zp(Player_X_Position); // add contents of A to player's horizontal
+  adc_zp_fc(Player_X_Position); // add contents of A to player's horizontal
   ram[Player_X_Position] = a; // position to move player left or right
   lda_zp_nf(Player_PageLoc);
-  adc_zp(0x0); // add high bits and carry to
+  adc_zp_fc(0x0); // add high bits and carry to
   ram[Player_PageLoc] = a; // page location if necessary
   
 ExIPM:
@@ -12304,20 +12304,20 @@ ExHC:
   return; // leave if too far left or too far right
   
 ChkForFlagpole:
-  cmp_imm(0x24); // check climbing metatiles
+  cmp_imm_fz(0x24); // check climbing metatiles
   if (zero_flag) { goto FlagpoleCollision; } // branch if flagpole ball found
-  cmp_imm(0x25);
+  cmp_imm_fz(0x25);
   if (!zero_flag) { goto VineCollision; } // branch to alternate code if flagpole shaft not found
   
 FlagpoleCollision:
   lda_zp_nf(GameEngineSubroutine);
-  cmp_imm(0x5); // check for end-of-level routine running
+  cmp_imm_fz(0x5); // check for end-of-level routine running
   if (zero_flag) { goto PutPlayerOnVine; } // if running, branch to end of climbing code
   lda_imm_nf(0x1);
   ram[PlayerFacingDir] = a; // set player's facing direction to right
   inc_abs_nf(ScrollLock); // set scroll lock flag
   lda_zp_nf(GameEngineSubroutine);
-  cmp_imm(0x4); // check for flagpole slide routine running
+  cmp_imm_fcz(0x4); // check for flagpole slide routine running
   if (zero_flag) { goto RunFR; } // if running, branch to end of flagpole code here
   lda_imm(BulletBill_CannonVar); // load identifier for bullet bills (cannon variant)
   KillEnemies(); // get rid of them
@@ -12330,9 +12330,9 @@ FlagpoleCollision:
   ram[FlagpoleCollisionYPos] = a; // store player's vertical coordinate here to be used later
   
 ChkFlagpoleYPosLoop:
-  cmp_absx(FlagpoleYPosData); // compare with current vertical coordinate data
+  cmp_absx_fc(FlagpoleYPosData); // compare with current vertical coordinate data
   if (carry_flag) { goto MtchF; } // if player's => current, branch to use current offset
-  dex(); // otherwise decrement offset to use
+  dex_fz(); // otherwise decrement offset to use
   if (!zero_flag) { goto ChkFlagpoleYPosLoop; } // do this until all data is checked (use last one if all checked)
   
 MtchF:
@@ -12344,10 +12344,10 @@ RunFR:
   goto PutPlayerOnVine; // jump to end of climbing code
   
 VineCollision:
-  cmp_imm(0x26); // check for climbing metatile used on vines
+  cmp_imm_fz(0x26); // check for climbing metatile used on vines
   if (!zero_flag) { goto PutPlayerOnVine; }
   lda_zp_nf(Player_Y_Position); // check player's vertical coordinate
-  cmp_imm(0x20); // for being in status bar area
+  cmp_imm_fc(0x20); // for being in status bar area
   if (carry_flag) { goto PutPlayerOnVine; } // branch if not that far up
   lda_imm_nf(0x1);
   ram[GameEngineSubroutine] = a; // otherwise set to run autoclimb routine next frame
@@ -12361,7 +12361,7 @@ PutPlayerOnVine:
   lda_zp_nf(Player_X_Position); // get player's horizontal coordinate
   carry_flag = true;
   sbc_abs_nf(ScreenLeft_X_Pos); // subtract from left side horizontal coordinate
-  cmp_imm(0x10);
+  cmp_imm_fc(0x10);
   if (carry_flag) { goto SetVXPl; } // if 16 or more pixels difference, do not alter facing direction
   lda_imm_nf(0x2);
   ram[PlayerFacingDir] = a; // otherwise force player to face left
@@ -12374,7 +12374,7 @@ SetVXPl:
   asl_acc_nf();
   asl_acc_nf();
   carry_flag = false;
-  adc_absy(ClimbXPosAdder - 1); // add pixels depending on facing direction
+  adc_absy_fc(ClimbXPosAdder - 1); // add pixels depending on facing direction
   ram[Player_X_Position] = a; // store as player's horizontal coordinate
   lda_zp(0x6); // get low byte of block buffer address again
   if (!zero_flag) { return; } // if not zero, branch
@@ -12410,9 +12410,9 @@ void ChkForLandJumpSpring(void) {
 }
 
 void ChkJumpspringMetatiles(void) {
-  cmp_imm(0x67); // check for top jumpspring metatile
+  cmp_imm_fzn(0x67); // check for top jumpspring metatile
   if (zero_flag) { goto JSFnd; } // branch to set carry if found
-  cmp_imm(0x68); // check for bottom jumpspring metatile
+  cmp_imm_fzn(0x68); // check for bottom jumpspring metatile
   carry_flag = false; // clear carry flag
   if (!zero_flag) { return; } // branch to use cleared carry if not found
   
@@ -12445,10 +12445,10 @@ void HandlePipeEntry(void) {
   asl_acc_nf(); // multiply by four
   tax_nf(); // save as offset to warp zone numbers (starts at left pipe)
   lda_zp_nf(Player_X_Position); // get player's horizontal position
-  cmp_imm(0x60);
+  cmp_imm_fc(0x60);
   if (!carry_flag) { goto GetWNum; } // if player at left, not near middle, use offset and skip ahead
   inx_nf(); // otherwise increment for middle pipe
-  cmp_imm(0xa0);
+  cmp_imm_fc(0xa0);
   if (!carry_flag) { goto GetWNum; } // if player at middle, but not too far right, use offset and skip
   inx_nf(); // otherwise increment for last pipe
   
@@ -12481,7 +12481,7 @@ void CheckForClimbMTiles(void) {
 }
 
 void CheckForCoinMTiles(void) {
-  cmp_imm(0xc2); // check for regular coin
+  cmp_imm_fcz(0xc2); // check for regular coin
   // branch if found
   if (!zero_flag) {
     cmp_imm(0xc3); // check for underwater coin
@@ -12499,9 +12499,9 @@ void CheckForCoinMTiles(void) {
 void GetMTileAttrib(void) {
   tay_nf(); // save metatile value into Y
   and_imm_nf(0b11000000); // mask out all but 2 MSB
-  asl_acc();
-  rol_acc(); // shift and rotate d7-d6 to d1-d0
-  rol_acc();
+  asl_acc_fc();
+  rol_acc_fc(); // shift and rotate d7-d6 to d1-d0
+  rol_acc_fc();
   tax_nf(); // use as offset for metatile data
   tya(); // get original metatile value back
   // -------------------------------------------------------------------------------------
@@ -12515,7 +12515,7 @@ void EnemyToBGCollisionDet(void) {
   SubtEnemyYPos(); // otherwise, do a subroutine here
   if (!carry_flag) { goto EnemyToBGCollisionDetExit; } // if enemy vertical coord + 62 < 68, branch to leave
   ldy_zpx_nf(Enemy_ID);
-  cpy_imm(Spiny); // if enemy object is not spiny, branch elsewhere
+  cpy_imm_fz(Spiny); // if enemy object is not spiny, branch elsewhere
   if (!zero_flag) { goto DoIDCheckBGColl; }
   lda_zpx_nf(Enemy_Y_Position);
   cmp_imm(0x25); // if enemy vertical coordinate < 36 branch to leave
@@ -12555,13 +12555,13 @@ EnemyToBGCollisionDetExit:
 HandleEToBGCollision:
   ChkForNonSolids(); // if something is underneath enemy, find out what
   if (zero_flag) { goto NoEToBGCollision; } // if blank $26, coins, or hidden blocks, jump, enemy falls through
-  cmp_imm(0x23);
+  cmp_imm_fz(0x23);
   if (!zero_flag) { LandEnemyProperly(); return; } // check for blank metatile $23 and branch if not found
   ldy_zp_nf(0x2); // get vertical coordinate used to find block
   lda_imm_nf(0x0); // store default blank metatile in that spot so we won't
   dynamic_ram_write(read_word(0x6) + y, a); // trigger this routine accidentally again
   lda_zpx_nf(Enemy_ID);
-  cmp_imm(0x15); // if enemy object => $15, branch ahead
+  cmp_imm_fc(0x15); // if enemy object => $15, branch ahead
   if (carry_flag) { ChkToStunEnemies(); return; }
   cmp_imm(Goomba); // if enemy object not goomba, branch ahead of this routine
   if (!zero_flag) { goto GiveOEPoints; }
@@ -12574,21 +12574,21 @@ GiveOEPoints:
 }
 
 void ChkToStunEnemies(void) {
-  cmp_imm(0x9); // perform many comparisons on enemy object identifier
+  cmp_imm_fc(0x9); // perform many comparisons on enemy object identifier
   if (!carry_flag) {
     SetStun();
     return;
   }
-  cmp_imm(0x11); // if the enemy object identifier is equal to the values
+  cmp_imm_fc(0x11); // if the enemy object identifier is equal to the values
   // $09, $0e, $0f or $10, it will be modified, and not
   if (carry_flag) {
     SetStun();
     return;
   }
-  cmp_imm(0xa); // modified if not any of those values, note that piranha plant will
+  cmp_imm_fc(0xa); // modified if not any of those values, note that piranha plant will
   // always fail this test because A will still have vertical
   if (carry_flag) {
-    cmp_imm(PiranhaPlant); // coordinate from previous addition, also these comparisons
+    cmp_imm_fc(PiranhaPlant); // coordinate from previous addition, also these comparisons
     // are only necessary if branching from $d7a1
     if (!carry_flag) {
       SetStun();
@@ -12609,10 +12609,10 @@ void SetStun(void) {
   dec_zpx_nf(Enemy_Y_Position);
   dec_zpx_nf(Enemy_Y_Position); // subtract two pixels from enemy's vertical position
   lda_zpx_nf(Enemy_ID);
-  cmp_imm(Bloober); // check for bloober object
+  cmp_imm_fcz(Bloober); // check for bloober object
   if (zero_flag) { goto SetWYSpd; }
   lda_imm_nf(0xfd); // set default vertical speed
-  ldy_abs(AreaType);
+  ldy_abs_fz(AreaType);
   if (!zero_flag) { goto SetNotW; } // if area type not water, set as speed, otherwise
   
 SetWYSpd:
@@ -12627,9 +12627,9 @@ SetNotW:
   
 ChkBBill:
   lda_zpx_nf(Enemy_ID);
-  cmp_imm(BulletBill_CannonVar); // check for bullet bill (cannon variant)
+  cmp_imm_fcz(BulletBill_CannonVar); // check for bullet bill (cannon variant)
   if (zero_flag) { goto NoCDirF; }
-  cmp_imm(BulletBill_FrenzyVar); // check for bullet bill (frenzy variant)
+  cmp_imm_fcz(BulletBill_FrenzyVar); // check for bullet bill (frenzy variant)
   if (zero_flag) { goto NoCDirF; } // branch if either found, direction does not change
   ram[Enemy_MovingDir + x] = y; // store as moving direction
   
@@ -12645,31 +12645,31 @@ void LandEnemyProperly(void) {
   lda_zp_nf(0x4); // check lower nybble of vertical coordinate saved earlier
   carry_flag = true;
   sbc_imm_nf(0x8); // subtract eight pixels
-  cmp_imm(0x5); // used to determine whether enemy landed from falling
+  cmp_imm_fc(0x5); // used to determine whether enemy landed from falling
   if (carry_flag) { ChkForRedKoopa(); return; } // branch if lower nybble in range of $0d-$0f before subtract
   lda_zpx_nf(Enemy_State);
   and_imm(0b01000000); // branch if d6 in enemy state is set
   if (!zero_flag) { goto LandEnemyInitState; }
   lda_zpx_nf(Enemy_State);
-  asl_acc(); // branch if d7 in enemy state is not set
+  asl_acc_fc(); // branch if d7 in enemy state is not set
   if (!carry_flag) { goto ChkLandedEnemyState; }
   
 SChkA:
   DoEnemySideCheck(); return; // if lower nybble < $0d, d7 set but d6 not set, jump here
   
 ChkLandedEnemyState:
-  lda_zpx(Enemy_State); // if enemy in normal state, branch back to jump here
+  lda_zpx_fz(Enemy_State); // if enemy in normal state, branch back to jump here
   if (zero_flag) { goto SChkA; }
-  cmp_imm(0x5); // if in state used by spiny's egg
+  cmp_imm_fz(0x5); // if in state used by spiny's egg
   if (zero_flag) { goto ProcEnemyDirection; } // then branch elsewhere
   cmp_imm(0x3); // if already in state used by koopas and buzzy beetles
   if (carry_flag) { goto ExSteChk; } // or in higher numbered state, branch to leave
   lda_zpx_nf(Enemy_State); // load enemy state again (why?)
-  cmp_imm(0x2); // if not in $02 state (used by koopas and buzzy beetles)
+  cmp_imm_fz(0x2); // if not in $02 state (used by koopas and buzzy beetles)
   if (!zero_flag) { goto ProcEnemyDirection; } // then branch elsewhere
   lda_imm_nf(0x10); // load default timer here
   ldy_zpx_nf(Enemy_ID); // check enemy identifier for spiny
-  cpy_imm(Spiny);
+  cpy_imm_fcz(Spiny);
   if (!zero_flag) { goto SetForStn; } // branch if not found
   lda_imm_nf(0x0); // set timer for $00 if spiny
   
@@ -12686,7 +12686,7 @@ ProcEnemyDirection:
   lda_zpx_nf(Enemy_ID); // check enemy identifier for goomba
   cmp_imm(Goomba); // branch if found
   if (zero_flag) { goto LandEnemyInitState; }
-  cmp_imm(Spiny); // check for spiny
+  cmp_imm_fcz(Spiny); // check for spiny
   if (!zero_flag) { goto InvtD; } // branch if not found
   lda_imm_nf(0x1);
   ram[Enemy_MovingDir + x] = a; // send enemy moving to the right by default
@@ -12711,7 +12711,7 @@ CNwCDir:
 LandEnemyInitState:
   EnemyLanding(); // land enemy properly
   lda_zpx_nf(Enemy_State);
-  and_imm(0b10000000); // if d7 of enemy state is set, branch
+  and_imm_fz(0b10000000); // if d7 of enemy state is set, branch
   if (!zero_flag) { goto NMovShellFallBit; }
   lda_imm(0x0); // otherwise initialize enemy state and leave
   ram[Enemy_State + x] = a; // note this will also turn spiny's egg into spiny
@@ -12726,10 +12726,10 @@ NMovShellFallBit:
 
 void ChkForRedKoopa(void) {
   lda_zpx_nf(Enemy_ID); // check for red koopa troopa $03
-  cmp_imm(RedKoopa);
+  cmp_imm_fz(RedKoopa);
   // branch if not found
   if (zero_flag) {
-    lda_zpx(Enemy_State);
+    lda_zpx_fz(Enemy_State);
     // if enemy found and in normal state, branch
     if (zero_flag) {
       ChkForBump_HammerBroJ();
@@ -12739,7 +12739,7 @@ void ChkForRedKoopa(void) {
   // Chk2MSBSt:
   lda_zpx_nf(Enemy_State); // save enemy state into Y
   tay_nf();
-  asl_acc(); // check for d7 set
+  asl_acc_fc(); // check for d7 set
   // branch if not set
   if (carry_flag) {
     lda_zpx_nf(Enemy_State);
@@ -12767,7 +12767,7 @@ void DoEnemySideCheck(void) {
     
 SdeCLoop:
     lda_zp_nf(0xeb); // check value
-    cmp_zpx(Enemy_MovingDir); // compare value against moving direction
+    cmp_zpx_fcz(Enemy_MovingDir); // compare value against moving direction
     // branch if different and do not seek block there
     if (zero_flag) {
       lda_imm(0x1); // set flag in A for save horizontal coordinate
@@ -12791,11 +12791,11 @@ SdeCLoop:
 }
 
 void ChkForBump_HammerBroJ(void) {
-  cpx_imm(0x5); // check if we're on the special use slot
+  cpx_imm_fz(0x5); // check if we're on the special use slot
   // and if so, branch ahead and do not play sound
   if (!zero_flag) {
     lda_zpx_nf(Enemy_State); // if enemy state d7 not set, branch
-    asl_acc(); // ahead and do not play sound
+    asl_acc_fc(); // ahead and do not play sound
     if (carry_flag) {
       lda_imm_nf(Sfx_Bump); // otherwise, play bump sound
       ram[Square1SoundQueue] = a; // sound will never be played if branching from ChkForRedKoopa
@@ -12848,7 +12848,7 @@ void EnemyJump(void) {
 void PlayerEnemyDiff(void) {
   lda_zpx_nf(Enemy_X_Position); // get distance between enemy object's
   carry_flag = true; // horizontal coordinate and the player's
-  sbc_zp(Player_X_Position); // horizontal coordinate
+  sbc_zp_fc(Player_X_Position); // horizontal coordinate
   ram[0x0] = a; // and store here
   lda_zpx_nf(Enemy_PageLoc);
   sbc_zp(Player_PageLoc); // subtract borrow, then leave
@@ -12891,7 +12891,7 @@ void KillEnemyAboveBlock(void) {
 }
 
 void UnderHammerBro(void) {
-  lda_absx(EnemyFrameTimer); // check timer used by hammer bro
+  lda_absx_fz(EnemyFrameTimer); // check timer used by hammer bro
   // branch if not expired
   if (!zero_flag) {
     NoUnderHammerBro();
@@ -12920,7 +12920,7 @@ void BlockBufferChk_Enemy(void) {
   pha(); // save contents of A to stack
   txa_nf();
   carry_flag = false; // add 1 to X to run sub with enemy offset in mind
-  adc_imm(0x1);
+  adc_imm_fc(0x1);
   tax_nf();
   pla(); // pull A from stack and jump elsewhere
   BBChk_E();
@@ -12954,9 +12954,9 @@ void FireballBGCollision(void) {
   if (zero_flag) { goto ClearBounceFlag; } // if nothing underneath fireball, branch
   ChkForNonSolids(); // check for non-solid metatiles
   if (zero_flag) { goto ClearBounceFlag; } // branch if any found
-  lda_zpx(Fireball_Y_Speed); // if fireball's vertical speed set to move upwards,
+  lda_zpx_fn(Fireball_Y_Speed); // if fireball's vertical speed set to move upwards,
   if (neg_flag) { goto InitFireballExplode; } // branch to set exploding bit in fireball's state
-  lda_zpx(FireballBouncingFlag); // if bouncing flag already set,
+  lda_zpx_fz(FireballBouncingFlag); // if bouncing flag already set,
   if (!zero_flag) { goto InitFireballExplode; } // branch to set exploding bit in fireball's state
   lda_imm_nf(0xfd);
   ram[Fireball_Y_Speed + x] = a; // otherwise set vertical speed to move upwards (give it bounce)
@@ -12988,7 +12988,7 @@ InitFireballExplode:
 void GetFireballBoundBox(void) {
   txa_nf(); // add seven bytes to offset
   carry_flag = false; // to use in routines as offset for fireball
-  adc_imm(0x7);
+  adc_imm_fc(0x7);
   tax_nf();
   ldy_imm(0x2); // set offset for relative coordinates
   // unconditional branch
@@ -13002,7 +13002,7 @@ void GetFireballBoundBox(void) {
 void GetMiscBoundBox(void) {
   txa_nf(); // add nine bytes to offset
   carry_flag = false; // to use in routines as offset for misc object
-  adc_imm(0x9);
+  adc_imm_fc(0x9);
   tax_nf();
   ldy_imm(0x6); // set offset for relative coordinates
   FBallB(); // <fallthrough>
@@ -13030,13 +13030,13 @@ void SmallPlatformBoundBox(void) {
 void GetMaskedOffScrBits(void) {
   lda_zpx_nf(Enemy_X_Position); // get enemy object position relative
   carry_flag = true; // to the left side of the screen
-  sbc_abs(ScreenLeft_X_Pos);
+  sbc_abs_fc(ScreenLeft_X_Pos);
   ram[0x1] = a; // store here
   lda_zpx_nf(Enemy_PageLoc); // subtract borrow from current page location
-  sbc_abs(ScreenLeft_PageLoc); // of left side
+  sbc_abs_fcn(ScreenLeft_PageLoc); // of left side
   // if enemy object is beyond left edge, branch
   if (!neg_flag) {
-    ora_zp(0x1);
+    ora_zp_fz(0x1);
     // if precisely at the left edge, branch
     if (!zero_flag) {
       ldy_zp_nf(0x0); // if to the right of left edge, use value in $00 for A
@@ -13057,7 +13057,7 @@ void GetMaskedOffScrBits(void) {
 void MoveBoundBoxOffscreen(void) {
   txa_nf(); // multiply offset by 4
   asl_acc_nf();
-  asl_acc();
+  asl_acc_fc();
   tay_nf(); // use as offset here
   lda_imm(0xff);
   ram[EnemyBoundingBoxCoord + y] = a; // load value into four locations here and leave
@@ -13070,7 +13070,7 @@ void LargePlatformBoundBox(void) {
   inx(); // increment X to get the proper offset
   GetXOffscreenBits(); // then jump directly to the sub for horizontal offscreen bits
   dex_nf(); // decrement to return to original offset
-  cmp_imm(0xfe); // if completely offscreen, branch to put entire bounding
+  cmp_imm_fc(0xfe); // if completely offscreen, branch to put entire bounding
   // box offscreen, otherwise start getting coordinates
   if (carry_flag) {
     MoveBoundBoxOffscreen();
@@ -13082,7 +13082,7 @@ void LargePlatformBoundBox(void) {
 void SetupEOffsetFBBox(void) {
   txa_nf(); // add 1 to offset to properly address
   carry_flag = false; // the enemy object memory locations
-  adc_imm(0x1);
+  adc_imm_fc(0x1);
   tax_nf();
   ldy_imm(0x1); // load 1 as offset here, same reason
   BoundingBoxCore(); // do a sub to get the coordinates of the bounding box
@@ -13092,22 +13092,22 @@ void SetupEOffsetFBBox(void) {
 void CheckRightScreenBBox(void) {
   lda_abs_nf(ScreenLeft_X_Pos); // add 128 pixels to left side of screen
   carry_flag = false; // and store as horizontal coordinate of middle
-  adc_imm(0x80);
+  adc_imm_fc(0x80);
   ram[0x2] = a;
   lda_abs_nf(ScreenLeft_PageLoc); // add carry to page location of left side of screen
   adc_imm_nf(0x0); // and store as page location of middle
   ram[0x1] = a;
   lda_zpx_nf(SprObject_X_Position); // get horizontal coordinate
-  cmp_zp(0x2); // compare against middle horizontal coordinate
+  cmp_zp_fc(0x2); // compare against middle horizontal coordinate
   lda_zpx_nf(SprObject_PageLoc); // get page location
-  sbc_zp(0x1); // subtract from middle page location
+  sbc_zp_fc(0x1); // subtract from middle page location
   // if object is on the left side of the screen, branch
   if (carry_flag) {
-    lda_absy(BoundingBox_DR_XPos); // check right-side edge of bounding box for offscreen
+    lda_absy_fn(BoundingBox_DR_XPos); // check right-side edge of bounding box for offscreen
     // coordinates, branch if still on the screen
     if (!neg_flag) {
       lda_imm_nf(0xff); // load offscreen value here to use on one or both horizontal sides
-      ldx_absy(BoundingBox_UL_XPos); // check left-side edge of bounding box for offscreen
+      ldx_absy_fn(BoundingBox_UL_XPos); // check left-side edge of bounding box for offscreen
       // coordinates, and branch if still on the screen
       if (!neg_flag) {
         ram[BoundingBox_UL_XPos + y] = a; // store offscreen value for left side
@@ -13120,14 +13120,14 @@ void CheckRightScreenBBox(void) {
     return;
   }
   // CheckLeftScreenBBox:
-  lda_absy(BoundingBox_UL_XPos); // check left-side edge of bounding box for offscreen
+  lda_absy_fn(BoundingBox_UL_XPos); // check left-side edge of bounding box for offscreen
   // coordinates, and branch if still on the screen
   if (neg_flag) {
-    cmp_imm(0xa0); // check to see if left-side edge is in the middle of the
+    cmp_imm_fc(0xa0); // check to see if left-side edge is in the middle of the
     // screen or really offscreen, and branch if still on
     if (carry_flag) {
       lda_imm_nf(0x0);
-      ldx_absy(BoundingBox_DR_XPos); // check right-side edge of bounding box for offscreen
+      ldx_absy_fn(BoundingBox_DR_XPos); // check right-side edge of bounding box for offscreen
       // coordinates, branch if still onscreen
       if (neg_flag) {
         ram[BoundingBox_DR_XPos + y] = a; // store offscreen value for right side
@@ -13174,7 +13174,7 @@ void BoundingBoxCore(void) {
   ram[BoundingBox_UL_Corner + y] = a;
   lda_zp_nf(0x2);
   carry_flag = false;
-  adc_absx(BoundBoxCtrlData + 2); // add the fourth number to the relative vertical coordinate
+  adc_absx_fc(BoundBoxCtrlData + 2); // add the fourth number to the relative vertical coordinate
   ram[BoundingBox_LR_Corner + y] = a; // and store
   pla_nf(); // get original offset loaded into $00 * y from stack
   tay_nf(); // use as Y
@@ -13193,40 +13193,40 @@ void SprObjectCollisionCore(void) {
   
 CollisionCoreLoop:
   lda_absy_nf(BoundingBox_UL_Corner); // compare left/top coordinates
-  cmp_absx(BoundingBox_UL_Corner); // of first and second objects' bounding boxes
+  cmp_absx_fc(BoundingBox_UL_Corner); // of first and second objects' bounding boxes
   if (carry_flag) { goto FirstBoxGreater; } // if first left/top => second, branch
-  cmp_absx(BoundingBox_LR_Corner); // otherwise compare to right/bottom of second
+  cmp_absx_fcz(BoundingBox_LR_Corner); // otherwise compare to right/bottom of second
   if (!carry_flag) { goto SecondBoxVerticalChk; } // if first left/top < second right/bottom, branch elsewhere
   if (zero_flag) { goto CollisionFound; } // if somehow equal, collision, thus branch
   lda_absy_nf(BoundingBox_LR_Corner); // if somehow greater, check to see if bottom of
-  cmp_absy(BoundingBox_UL_Corner); // first object's bounding box is greater than its top
+  cmp_absy_fc(BoundingBox_UL_Corner); // first object's bounding box is greater than its top
   if (!carry_flag) { goto CollisionFound; } // if somehow less, vertical wrap collision, thus branch
-  cmp_absx(BoundingBox_UL_Corner); // otherwise compare bottom of first bounding box to the top
+  cmp_absx_fc(BoundingBox_UL_Corner); // otherwise compare bottom of first bounding box to the top
   if (carry_flag) { goto CollisionFound; } // of second box, and if equal or greater, collision, thus branch
   ldy_zp(0x6); // otherwise return with carry clear and Y = $0006
   return; // note horizontal wrapping never occurs
   
 SecondBoxVerticalChk:
   lda_absx_nf(BoundingBox_LR_Corner); // check to see if the vertical bottom of the box
-  cmp_absx(BoundingBox_UL_Corner); // is greater than the vertical top
+  cmp_absx_fc(BoundingBox_UL_Corner); // is greater than the vertical top
   if (!carry_flag) { goto CollisionFound; } // if somehow less, vertical wrap collision, thus branch
   lda_absy_nf(BoundingBox_LR_Corner); // otherwise compare horizontal right or vertical bottom
-  cmp_absx(BoundingBox_UL_Corner); // of first box with horizontal left or vertical top of second box
+  cmp_absx_fc(BoundingBox_UL_Corner); // of first box with horizontal left or vertical top of second box
   if (carry_flag) { goto CollisionFound; } // if equal or greater, collision, thus branch
   ldy_zp(0x6); // otherwise return with carry clear and Y = $0006
   return;
   
 FirstBoxGreater:
-  cmp_absx(BoundingBox_UL_Corner); // compare first and second box horizontal left/vertical top again
+  cmp_absx_fz(BoundingBox_UL_Corner); // compare first and second box horizontal left/vertical top again
   if (zero_flag) { goto CollisionFound; } // if first coordinate = second, collision, thus branch
-  cmp_absx(BoundingBox_LR_Corner); // if not, compare with second object right or bottom edge
+  cmp_absx_fcz(BoundingBox_LR_Corner); // if not, compare with second object right or bottom edge
   if (!carry_flag) { goto CollisionFound; } // if left/top of first less than or equal to right/bottom of second
   if (zero_flag) { goto CollisionFound; } // then collision, thus branch
-  cmp_absy(BoundingBox_LR_Corner); // otherwise check to see if top of first box is greater than bottom
+  cmp_absy_fcz(BoundingBox_LR_Corner); // otherwise check to see if top of first box is greater than bottom
   if (!carry_flag) { goto NoCollisionFound; } // if less than or equal, no collision, branch to end
   if (zero_flag) { goto NoCollisionFound; }
   lda_absy_nf(BoundingBox_LR_Corner); // otherwise compare bottom of first to top of second
-  cmp_absx(BoundingBox_UL_Corner); // if bottom of first is greater than top of second, vertical wrap
+  cmp_absx_fc(BoundingBox_UL_Corner); // if bottom of first is greater than top of second, vertical wrap
   if (carry_flag) { goto CollisionFound; } // collision, and branch, otherwise, proceed onwards here
   
 NoCollisionFound:
@@ -13237,7 +13237,7 @@ NoCollisionFound:
 CollisionFound:
   inx_nf(); // increment offsets on both objects to check
   iny_nf(); // the vertical coordinates
-  dec_zp(0x7); // decrement counter to reflect this
+  dec_zp_fn(0x7); // decrement counter to reflect this
   if (!neg_flag) { goto CollisionCoreLoop; } // if counter not expired, branch to loop
   carry_flag = true; // otherwise we already did both sets, therefore collision, so set carry
   ldy_zp(0x6); // load original value set here earlier, then leave
@@ -13253,7 +13253,7 @@ void BlockBufferChk_FBall(void) {
   ldy_imm_nf(0x1a); // set offset for block buffer adder data
   txa_nf();
   carry_flag = false;
-  adc_imm(0x7); // add seven bytes to use
+  adc_imm_fc(0x7); // add seven bytes to use
   tax_nf();
   lda_imm(0x0); //  ResJmpM: lda #$00 ;set A to return vertical coordinate
   BBChk_E(); // <fallthrough>
@@ -13290,12 +13290,12 @@ void BlockBufferCollision(void) {
   ram[0x4] = y; // save contents of Y here
   lda_absy_nf(BlockBuffer_X_Adder); // add horizontal coordinate
   carry_flag = false; // of object to value obtained using Y as offset
-  adc_zpx(SprObject_X_Position);
+  adc_zpx_fc(SprObject_X_Position);
   ram[0x5] = a; // store here
   lda_zpx_nf(SprObject_PageLoc);
   adc_imm_nf(0x0); // add carry to page location
   and_imm_nf(0x1); // get LSB, mask out all other bits
-  lsr_acc(); // move to carry
+  lsr_acc_fc(); // move to carry
   ora_zp_nf(0x5); // get stored value
   ror_acc_nf(); // rotate carry to MSB of A
   lsr_acc_nf(); // and effectively move high nybble to
@@ -13308,13 +13308,13 @@ void BlockBufferCollision(void) {
   adc_absy_nf(BlockBuffer_Y_Adder); // add it to value obtained using Y as offset
   and_imm_nf(0b11110000); // mask out low nybble
   carry_flag = true;
-  sbc_imm(0x20); // subtract 32 pixels for the status bar
+  sbc_imm_fc(0x20); // subtract 32 pixels for the status bar
   ram[0x2] = a; // store result here
   tay_nf(); // use as offset for block buffer
   lda_indy_nf(0x6); // check current content of block buffer
   ram[0x3] = a; // and store here
   ldy_zp_nf(0x4); // get old contents of Y again
-  pla(); // pull A from stack
+  pla_fz(); // pull A from stack
   // if A = 1, branch
   if (zero_flag) {
     lda_zpx_nf(SprObject_Y_Position); // if A = 0, load vertical coordinate
@@ -13339,7 +13339,7 @@ void DrawVine(void) {
   ram[0x0] = y; // save offset here
   lda_abs_nf(Enemy_Rel_YPos); // get relative vertical coordinate
   carry_flag = false;
-  adc_absy(VineYPosAdder); // add value using offset in Y to get value
+  adc_absy_fc(VineYPosAdder); // add value using offset in Y to get value
   ldx_absy_nf(VineObjOffset); // get offset to vine
   ldy_absx(Enemy_SprDataOffset); // get sprite data offset
   ram[0x2] = y; // store sprite data offset here
@@ -13370,10 +13370,10 @@ VineTL:
   iny_nf();
   iny_nf();
   iny_nf();
-  dex(); // move onto next sprite
+  dex_fn(); // move onto next sprite
   if (!neg_flag) { goto VineTL; } // loop until all sprites are done
   ldy_zp_nf(0x2); // get original offset
-  lda_zp(0x0); // get offset to vine adding data
+  lda_zp_fz(0x0); // get offset to vine adding data
   // if offset not zero, skip this part
   if (zero_flag) {
     lda_imm_nf(0xe0);
@@ -13386,7 +13386,7 @@ ChkFTop:
   lda_abs_nf(VineStart_Y_Position); // get original starting vertical coordinate
   carry_flag = true;
   sbc_absy_nf(Sprite_Y_Position); // subtract top-most sprite's Y coordinate
-  cmp_imm(0x64); // if two coordinates are less than 100/$64 pixels
+  cmp_imm_fc(0x64); // if two coordinates are less than 100/$64 pixels
   // apart, skip this to leave sprite alone
   if (carry_flag) {
     lda_imm_nf(0xf8);
@@ -13398,7 +13398,7 @@ ChkFTop:
   iny_nf();
   iny_nf();
   inx_nf(); // move onto next sprite
-  cpx_imm(0x6); // do this until all sprites are checked
+  cpx_imm_fcz(0x6); // do this until all sprites are checked
   if (!zero_flag) { goto ChkFTop; }
   ldy_zp(0x0); // return offset set earlier
 }
@@ -13409,12 +13409,12 @@ void SixSpriteStacker(void) {
 StkLp:
   ram[Sprite_Data + y] = a; // store X or Y coordinate into OAM data
   carry_flag = false;
-  adc_imm(0x8); // add eight pixels
+  adc_imm_fc(0x8); // add eight pixels
   iny_nf();
   iny_nf(); // move offset four bytes forward
   iny_nf();
   iny_nf();
-  dex(); // do another sprite
+  dex_fz(); // do another sprite
   if (!zero_flag) { goto StkLp; } // do this until all sprites are done
   ldy_zp(0x2); // get saved OAM data offset and leave
   // -------------------------------------------------------------------------------------
@@ -13422,15 +13422,15 @@ StkLp:
 
 void DrawHammer(void) {
   ldy_absx_nf(Misc_SprDataOffset); // get misc object OAM data offset
-  lda_abs(TimerControl);
+  lda_abs_fz(TimerControl);
   if (!zero_flag) { goto ForceHPose; } // if master timer control set, skip this part
   lda_zpx_nf(Misc_State); // otherwise get hammer's state
   and_imm_nf(0b01111111); // mask out d7
-  cmp_imm(0x1); // check to see if set to 1 yet
+  cmp_imm_fz(0x1); // check to see if set to 1 yet
   if (zero_flag) { goto GetHPose; } // if so, branch
   
 ForceHPose:
-  ldx_imm(0x0); // reset offset here
+  ldx_imm_fz(0x0); // reset offset here
   if (zero_flag) { goto RenderH; } // do unconditional branch to rendering part
   
 GetHPose:
@@ -13453,7 +13453,7 @@ RenderH:
   adc_absx_nf(FirstSprXPos); // add first sprite horizontal adder based on offset
   ram[Sprite_X_Position + y] = a; // store as sprite X coordinate for first sprite
   carry_flag = false;
-  adc_absx(SecondSprXPos); // add second sprite horizontal adder based on offset
+  adc_absx_fc(SecondSprXPos); // add second sprite horizontal adder based on offset
   ram[Sprite_X_Position + 4 + y] = a; // store as sprite X coordinate for second sprite
   lda_absx_nf(FirstSprTilenum);
   ram[Sprite_Tilenumber + y] = a; // get and store tile number of first sprite
@@ -13487,11 +13487,11 @@ void FlagpoleGfxHandler(void) {
   ram[Sprite_X_Position + 4 + y] = a; // as X coordinate for second and third sprites
   ram[Sprite_X_Position + 8 + y] = a;
   carry_flag = false;
-  adc_imm(0xc); // add twelve more pixels and
+  adc_imm_fc(0xc); // add twelve more pixels and
   ram[0x5] = a; // store here to be used later by floatey number
   lda_zpx(Enemy_Y_Position); // get vertical coordinate
   DumpTwoSpr(); // and do sub to dump into first and second sprites
-  adc_imm(0x8); // add eight pixels
+  adc_imm_fc(0x8); // add eight pixels
   ram[Sprite_Y_Position + 8 + y] = a; // and store into third sprite
   lda_abs_nf(FlagpoleFNum_Y_Pos); // get vertical coordinate for floatey number
   ram[0x2] = a; // store it here
@@ -13506,7 +13506,7 @@ void FlagpoleGfxHandler(void) {
   ram[Sprite_Tilenumber + 8 + y] = a; // into first and third sprites
   lda_imm_nf(0x7f);
   ram[Sprite_Tilenumber + 4 + y] = a; // put skull tile into second sprite
-  lda_abs(FlagpoleCollisionYPos); // get vertical coordinate at time of collision
+  lda_abs_fz(FlagpoleCollisionYPos); // get vertical coordinate at time of collision
   // if zero, branch ahead
   if (!zero_flag) {
     tya_nf();
@@ -13514,7 +13514,7 @@ void FlagpoleGfxHandler(void) {
     adc_imm_nf(0xc);
     tay_nf(); // put back in Y
     lda_abs_nf(FlagpoleScore); // get offset used to award points for touching flagpole
-    asl_acc(); // multiply by 2 to get proper offset here
+    asl_acc_fc(); // multiply by 2 to get proper offset here
     tax_nf();
     lda_absx_nf(FlagpoleScoreNumTiles); // get appropriate tile data
     ram[0x0] = a;
@@ -13571,9 +13571,9 @@ void DrawLargePlatform(void) {
   lda_zpx(Enemy_Y_Position); // get vertical coordinate
   DumpFourSpr(); // dump into first four sprites as Y coordinate
   ldy_abs_nf(AreaType);
-  cpy_imm(0x3); // check for castle-type level
+  cpy_imm_fcz(0x3); // check for castle-type level
   if (zero_flag) { goto ShrinkPlatform; }
-  ldy_abs(SecondaryHardMode); // check for secondary hard mode flag set
+  ldy_abs_fz(SecondaryHardMode); // check for secondary hard mode flag set
   if (zero_flag) { goto SetLast2Platform; } // branch if not set elsewhere
   
 ShrinkPlatform:
@@ -13584,7 +13584,7 @@ SetLast2Platform:
   ram[Sprite_Y_Position + 16 + y] = a; // store vertical coordinate or offscreen
   ram[Sprite_Y_Position + 20 + y] = a; // coordinate into last two sprites as Y coordinate
   lda_imm_nf(0x5b); // load default tile for platform (girder)
-  ldx_abs(CloudTypeOverride);
+  ldx_abs_fz(CloudTypeOverride);
   if (zero_flag) { goto SetPlatformTilenum; } // if cloud level override flag not set, use
   lda_imm_nf(0x75); // otherwise load other tile for platform (puff)
   
@@ -13599,7 +13599,7 @@ SetPlatformTilenum:
   GetXOffscreenBits(); // get offscreen bits again
   dex_nf();
   ldy_absx_nf(Enemy_SprDataOffset); // get OAM data offset
-  asl_acc(); // rotate d7 into carry, save remaining
+  asl_acc_fc(); // rotate d7 into carry, save remaining
   pha(); // bits to the stack
   if (!carry_flag) { goto SChk2; }
   lda_imm_nf(0xf8); // if d7 was set, move first sprite offscreen
@@ -13607,7 +13607,7 @@ SetPlatformTilenum:
   
 SChk2:
   pla_nf(); // get bits from stack
-  asl_acc(); // rotate d6 into carry
+  asl_acc_fc(); // rotate d6 into carry
   pha(); // save to stack
   if (!carry_flag) { goto SChk3; }
   lda_imm_nf(0xf8); // if d6 was set, move second sprite offscreen
@@ -13615,7 +13615,7 @@ SChk2:
   
 SChk3:
   pla_nf(); // get bits from stack
-  asl_acc(); // rotate d5 into carry
+  asl_acc_fc(); // rotate d5 into carry
   pha(); // save to stack
   if (!carry_flag) { goto SChk4; }
   lda_imm_nf(0xf8); // if d5 was set, move third sprite offscreen
@@ -13623,7 +13623,7 @@ SChk3:
   
 SChk4:
   pla_nf(); // get bits from stack
-  asl_acc(); // rotate d4 into carry
+  asl_acc_fc(); // rotate d4 into carry
   pha(); // save to stack
   if (!carry_flag) { goto SChk5; }
   lda_imm_nf(0xf8); // if d4 was set, move fourth sprite offscreen
@@ -13631,7 +13631,7 @@ SChk4:
   
 SChk5:
   pla_nf(); // get bits from stack
-  asl_acc(); // rotate d3 into carry
+  asl_acc_fc(); // rotate d3 into carry
   pha(); // save to stack
   if (!carry_flag) { goto SChk6; }
   lda_imm_nf(0xf8); // if d3 was set, move fifth sprite offscreen
@@ -13639,7 +13639,7 @@ SChk5:
   
 SChk6:
   pla_nf(); // get bits from stack
-  asl_acc(); // rotate d2 into carry
+  asl_acc_fc(); // rotate d2 into carry
   if (!carry_flag) { goto SLChk; } // save to stack
   lda_imm_nf(0xf8);
   ram[Sprite_Y_Position + 20 + y] = a; // if d2 was set, move sixth sprite offscreen
@@ -13654,7 +13654,7 @@ SLChk:
 
 void DrawFloateyNumber_Coin(void) {
   lda_zp_nf(FrameCounter); // get frame counter
-  lsr_acc(); // divide by 2
+  lsr_acc_fc(); // divide by 2
   // branch if d0 not set to raise number every other frame
   if (!carry_flag) {
     dec_zpx_nf(Misc_Y_Position); // otherwise, decrement vertical coordinate
@@ -13665,7 +13665,7 @@ void DrawFloateyNumber_Coin(void) {
   lda_abs_nf(Misc_Rel_XPos); // get relative horizontal coordinate
   ram[Sprite_X_Position + y] = a; // store as X coordinate for first sprite
   carry_flag = false;
-  adc_imm(0x8); // add eight pixels
+  adc_imm_fc(0x8); // add eight pixels
   ram[Sprite_X_Position + 4 + y] = a; // store as X coordinate for second sprite
   lda_imm_nf(0x2);
   ram[Sprite_Attributes + y] = a; // store attribute byte in both sprites
@@ -13679,7 +13679,7 @@ void DrawFloateyNumber_Coin(void) {
 void JCoinGfxHandler(void) {
   ldy_absx_nf(Misc_SprDataOffset); // get coin/floatey number's OAM data offset
   lda_zpx_nf(Misc_State); // get state of misc object
-  cmp_imm(0x2); // if 2 or greater,
+  cmp_imm_fc(0x2); // if 2 or greater,
   // branch to draw floatey number
   if (carry_flag) {
     DrawFloateyNumber_Coin();
@@ -13694,7 +13694,7 @@ void JCoinGfxHandler(void) {
   ram[Sprite_X_Position + y] = a;
   ram[Sprite_X_Position + 4 + y] = a; // store as X coordinate for first and second sprites
   lda_zp_nf(FrameCounter); // get frame counter
-  lsr_acc(); // divide by 2 to alter every other frame
+  lsr_acc_fc(); // divide by 2 to alter every other frame
   and_imm_nf(0b00000011); // mask out d2-d1
   tax_nf(); // use as graphical offset
   lda_absx_nf(JumpingCoinTiles); // load tile number
@@ -13731,7 +13731,7 @@ void DrawPowerUp(void) {
   txa_nf();
   pha(); // save power-up type to the stack
   asl_acc_nf();
-  asl_acc(); // multiply by four to get proper offset
+  asl_acc_fc(); // multiply by four to get proper offset
   tax_nf(); // use as X
   lda_imm_nf(0x1);
   ram[0x7] = a; // set counter here to draw two rows of sprite object
@@ -13742,7 +13742,7 @@ PUpDrawLoop:
   ram[0x0] = a;
   lda_absx(PowerUpGfxTable + 1); // load right tile
   DrawOneSpriteRow(); // branch to draw one row of our power-up object
-  dec_zp(0x7); // decrement counter
+  dec_zp_fn(0x7); // decrement counter
   if (!neg_flag) { goto PUpDrawLoop; } // branch until two rows are drawn
   ldy_abs_nf(Enemy_SprDataOffset + 5); // get sprite data offset again
   pla(); // pull saved power-up type from the stack
@@ -13753,13 +13753,13 @@ PUpDrawLoop:
     if (!zero_flag) {
       ram[0x0] = a; // store power-up type here now
       lda_zp_nf(FrameCounter); // get frame counter
-      lsr_acc(); // divide by 2 to change colors every two frames
+      lsr_acc_fc(); // divide by 2 to change colors every two frames
       and_imm_nf(0b00000011); // mask out all but d1 and d0 (previously d2 and d1)
       ora_abs_nf(Enemy_SprAttrib + 5); // add background priority bit if any set
       ram[Sprite_Attributes + y] = a; // set as new palette bits for top left and
       ram[Sprite_Attributes + 4 + y] = a; // top right sprites for fire flower and star
       ldx_zp_nf(0x0);
-      dex(); // check power-up type for fire flower
+      dex_fz(); // check power-up type for fire flower
       // if found, skip this part
       if (!zero_flag) {
         ram[Sprite_Attributes + 8 + y] = a; // otherwise set new palette bits  for bottom left
@@ -13803,7 +13803,7 @@ void DrawOneSpriteRow(void) {
 
 void MoveESprRowOffscreen(void) {
   carry_flag = false; // add A to enemy object OAM data offset
-  adc_absx(Enemy_SprDataOffset);
+  adc_absx_fc(Enemy_SprDataOffset);
   tay_nf(); // use as offset
   lda_imm(0xf8);
   DumpTwoSpr(); // move first row of sprites offscreen
@@ -13811,7 +13811,7 @@ void MoveESprRowOffscreen(void) {
 
 void MoveESprColOffscreen(void) {
   carry_flag = false; // add A to enemy object OAM data offset
-  adc_absx(Enemy_SprDataOffset);
+  adc_absx_fc(Enemy_SprDataOffset);
   tay(); // use as offset
   MoveColOffscreen(); // move first and second row sprites in column offscreen
   ram[Sprite_Data + 16 + y] = a; // move third row sprite in column offscreen
@@ -13830,7 +13830,7 @@ void DrawBlock(void) {
   ram[0x5] = a; // store here
   lda_imm_nf(0x3);
   ram[0x4] = a; // set attribute byte here
-  lsr_acc();
+  lsr_acc_fc();
   ram[0x3] = a; // set horizontal flip bit here (will not be used)
   ldy_absx_nf(Block_SprDataOffset); // get sprite data offset
   ldx_imm_nf(0x0); // reset X for use as offset to tile data
@@ -13840,12 +13840,12 @@ DBlkLoop:
   ram[0x0] = a; // set here
   lda_absx(DefaultBlockObjTiles + 1); // get right tile number
   DrawOneSpriteRow(); // do sub to write tile numbers to first row of sprites
-  cpx_imm(0x4); // check incremented offset
+  cpx_imm_fcz(0x4); // check incremented offset
   if (!zero_flag) { goto DBlkLoop; } // and loop back until all four sprites are done
   ldx_zp_nf(ObjectOffset); // get block object offset
   ldy_absx_nf(Block_SprDataOffset); // get sprite data offset
   lda_abs_nf(AreaType);
-  cmp_imm(0x1); // check for ground level type area
+  cmp_imm_fz(0x1); // check for ground level type area
   // if found, branch to next part
   if (!zero_flag) {
     lda_imm_nf(0x86);
@@ -13854,7 +13854,7 @@ DBlkLoop:
   }
   // ChkRep:
   lda_absx_nf(Block_Metatile); // check replacement metatile
-  cmp_imm(0xc4); // if not used block metatile, then
+  cmp_imm_fcz(0xc4); // if not used block metatile, then
   // branch ahead to use current graphics
   if (zero_flag) {
     lda_imm_nf(0x87); // set A for used block tile
@@ -13863,10 +13863,10 @@ DBlkLoop:
     dey_nf(); // return Y to original offset
     lda_imm_nf(0x3); // set palette bits
     ldx_abs_nf(AreaType);
-    dex(); // check for ground level type area again
+    dex_fz(); // check for ground level type area again
     // if found, use current palette bits
     if (!zero_flag) {
-      lsr_acc(); // otherwise set to $01
+      lsr_acc_fc(); // otherwise set to $01
     }
     // SetBFlip:
     ldx_zp_nf(ObjectOffset); // put block object offset back in X
@@ -13881,7 +13881,7 @@ DBlkLoop:
   // BlkOffscr:
   lda_abs_nf(Block_OffscreenBits); // get offscreen bits for block object
   pha(); // save to stack
-  and_imm(0b00000100); // check to see if d2 in offscreen bits are set
+  and_imm_fz(0b00000100); // check to see if d2 in offscreen bits are set
   // if not set, branch, otherwise move sprites offscreen
   if (!zero_flag) {
     lda_imm_nf(0xf8); // move offscreen two OAMs
@@ -13913,7 +13913,7 @@ void DrawBrickChunks(void) {
   ram[0x0] = a;
   lda_imm_nf(0x75); // set tile number for ball (something residual, likely)
   ldy_zp_nf(GameEngineSubroutine);
-  cpy_imm(0x5); // if end-of-level routine running,
+  cpy_imm_fcz(0x5); // if end-of-level routine running,
   if (zero_flag) { goto DChunks; } // use palette and tile number assigned
   lda_imm_nf(0x3); // otherwise set different palette bits
   ram[0x0] = a;
@@ -13927,7 +13927,7 @@ DChunks:
   asl_acc_nf();
   asl_acc_nf();
   asl_acc_nf(); // move low nybble to high
-  asl_acc();
+  asl_acc_fc();
   and_imm_nf(0xc0); // get what was originally d3-d2 of low nybble
   ora_zp_nf(0x0); // add palette bits
   iny(); // increment offset for attribute bytes
@@ -13943,8 +13943,8 @@ DChunks:
   sbc_abs_nf(ScreenLeft_X_Pos); // subtract coordinate of left side from original coordinate
   ram[0x0] = a; // store result as relative horizontal coordinate of original
   carry_flag = true;
-  sbc_abs(Block_Rel_XPos); // get difference of relative positions of original - current
-  adc_zp(0x0); // add original relative position to result
+  sbc_abs_fc(Block_Rel_XPos); // get difference of relative positions of original - current
+  adc_zp_fc(0x0); // add original relative position to result
   adc_imm_nf(0x6); // plus 6 pixels to position second brick chunk correctly
   ram[Sprite_X_Position + 4 + y] = a; // save into X coordinate of second sprite
   lda_abs_nf(Block_Rel_YPos + 1); // get second block object's relative vertical coordinate
@@ -13954,14 +13954,14 @@ DChunks:
   ram[Sprite_X_Position + 8 + y] = a; // save into X coordinate of third sprite
   lda_zp_nf(0x0); // use original relative horizontal position
   carry_flag = true;
-  sbc_abs(Block_Rel_XPos + 1); // get difference of relative positions of original - current
-  adc_zp(0x0); // add original relative position to result
-  adc_imm(0x6); // plus 6 pixels to position fourth brick chunk correctly
+  sbc_abs_fc(Block_Rel_XPos + 1); // get difference of relative positions of original - current
+  adc_zp_fc(0x0); // add original relative position to result
+  adc_imm_fc(0x6); // plus 6 pixels to position fourth brick chunk correctly
   ram[Sprite_X_Position + 12 + y] = a; // save into X coordinate of fourth sprite
   lda_abs(Block_OffscreenBits); // get offscreen bits for block object
   ChkLeftCo(); // do sub to move left half of sprites offscreen if necessary
   lda_abs_nf(Block_OffscreenBits); // get offscreen bits again
-  asl_acc(); // shift d7 into carry
+  asl_acc_fc(); // shift d7 into carry
   if (!carry_flag) { goto ChnkOfs; } // if d7 not set, branch to last part
   lda_imm(0xf8);
   DumpTwoSpr(); // otherwise move top sprites offscreen
@@ -13997,7 +13997,7 @@ void DrawFirebar(void) {
   ram[Sprite_Tilenumber + y] = a; // thus tile changes every four frames
   pla_nf(); // get from stack
   lsr_acc_nf(); // divide by four again
-  lsr_acc();
+  lsr_acc_fc();
   lda_imm(0x2); // load value $02 to set palette in attrib byte
   // if last bit shifted out was not set, skip this
   if (carry_flag) {
@@ -14014,7 +14014,7 @@ void DrawExplosion_Fireball(void) {
   inc_zpx_nf(Fireball_State); // increment state for next frame
   lsr_acc_nf(); // divide by 2
   and_imm_nf(0b00000111); // mask out all but d3-d1
-  cmp_imm(0x3); // check to see if time to kill fireball
+  cmp_imm_fc(0x3); // check to see if time to kill fireball
   // branch if so, otherwise continue to draw explosion
   if (carry_flag) {
     KillFireBall();
@@ -14045,7 +14045,7 @@ void DrawExplosion_Fireworks(void) {
   ram[Sprite_X_Position + y] = a;
   ram[Sprite_X_Position + 4 + y] = a;
   carry_flag = false; // add eight pixels horizontally
-  adc_imm(0x8); // for third and fourth sprites
+  adc_imm_fc(0x8); // for third and fourth sprites
   ram[Sprite_X_Position + 8 + y] = a;
   ram[Sprite_X_Position + 12 + y] = a;
   lda_imm_nf(0x2); // set palette attributes for all sprites, but
@@ -14099,7 +14099,7 @@ void DrawSmallPlatform(void) {
   carry_flag = false;
   adc_imm_nf(0x80); // add 128 pixels
   tax_nf();
-  cpx_imm(0x20); // if below status bar (taking wrap into account)
+  cpx_imm_fc(0x20); // if below status bar (taking wrap into account)
   // then do not change altered coordinate
   if (!carry_flag) {
     lda_imm_nf(0xf8); // otherwise move last three sprites offscreen
@@ -14110,7 +14110,7 @@ void DrawSmallPlatform(void) {
   ram[Sprite_Y_Position + 20 + y] = a;
   lda_abs_nf(Enemy_OffscreenBits); // get offscreen bits
   pha(); // save to stack
-  and_imm(0b00001000); // check d3
+  and_imm_fz(0b00001000); // check d3
   if (!zero_flag) {
     lda_imm_nf(0xf8); // if d3 was set, move first and
     ram[Sprite_Y_Position + y] = a; // fourth sprites offscreen
@@ -14119,7 +14119,7 @@ void DrawSmallPlatform(void) {
   // SOfs:
   pla_nf(); // move out and back into stack
   pha();
-  and_imm(0b00000100); // check d2
+  and_imm_fz(0b00000100); // check d2
   if (!zero_flag) {
     lda_imm_nf(0xf8); // if d2 was set, move second and
     ram[Sprite_Y_Position + 4 + y] = a; // fifth sprites offscreen
@@ -14127,7 +14127,7 @@ void DrawSmallPlatform(void) {
   }
   // SOfs2:
   pla_nf(); // get from stack
-  and_imm(0b00000010); // check d1
+  and_imm_fz(0b00000010); // check d1
   if (!zero_flag) {
     lda_imm_nf(0xf8); // if d1 was set, move third and
     ram[Sprite_Y_Position + 8 + y] = a; // sixth sprites offscreen
@@ -14164,7 +14164,7 @@ void DrawPlayer_Intermediate(void) {
 PIntLoop:
   lda_absx_nf(IntermediatePlayerData); // load data to display player as he always
   ram[0x2 + x] = a; // appears on world/lives display
-  dex();
+  dex_fn();
   if (!neg_flag) { goto PIntLoop; } // do this until all data is loaded
   ldx_imm_nf(0xb8); // load offset for small standing
   ldy_imm(0x4); // load sprite data offset
@@ -14213,13 +14213,13 @@ void DrawPlayerLoop(void) {
 
 void ProcessPlayerAction(void) {
   lda_zp_nf(Player_State); // get player's state
-  cmp_imm(0x3);
+  cmp_imm_fcz(0x3);
   if (zero_flag) { goto ActionClimbing; } // if climbing, branch here
-  cmp_imm(0x2);
+  cmp_imm_fcz(0x2);
   if (zero_flag) { goto ActionFalling; } // if falling, branch here
-  cmp_imm(0x1);
+  cmp_imm_fcz(0x1);
   if (!zero_flag) { goto ProcOnGroundActs; } // if not jumping, branch here
-  lda_abs(SwimmingFlag);
+  lda_abs_fz(SwimmingFlag);
   if (!zero_flag) { goto ActionSwimming; } // if swimming flag set, branch elsewhere
   ldy_imm_nf(0x6); // load offset for crouching
   lda_abs(CrouchingFlag); // get crouching flag
@@ -14236,10 +14236,10 @@ ProcOnGroundActs:
   ora_zp(Left_Right_Buttons); // and left/right controller bits
   if (zero_flag) { goto NonAnimatedActs; } // if no speed or buttons pressed, use standing offset
   lda_abs_nf(Player_XSpeedAbsolute); // load walking/running speed
-  cmp_imm(0x9);
+  cmp_imm_fc(0x9);
   if (!carry_flag) { goto ActionWalkRun; } // if less than a certain amount, branch, too slow to skid
   lda_zp_nf(Player_MovingDir); // otherwise check to see if moving direction
-  and_zp(PlayerFacingDir); // and facing direction are the same
+  and_zp_fz(PlayerFacingDir); // and facing direction are the same
   if (!zero_flag) { goto ActionWalkRun; } // if moving direction = facing direction, branch, don't skid
   iny(); // otherwise increment to skid offset ($03)
   
@@ -14273,10 +14273,10 @@ ActionSwimming:
   ldy_imm(0x1); // load offset for swimming
   GetGfxOffsetAdder();
   lda_abs_nf(JumpSwimTimer); // check jump/swim timer
-  ora_abs(PlayerAnimCtrl); // and animation frame control
+  ora_abs_fz(PlayerAnimCtrl); // and animation frame control
   if (!zero_flag) { FourFrameExtent(); return; } // if any one of these set, branch ahead
   lda_zp_nf(A_B_Buttons);
-  asl_acc(); // check for A button pressed
+  asl_acc_fc(); // check for A button pressed
   if (carry_flag) { FourFrameExtent(); return; } // branch to same place if A button pressed
   GetCurrentAnimOffset(); // <fallthrough>
 }
@@ -14300,7 +14300,7 @@ void AnimationControl(void) {
   ram[0x0] = a; // store upper extent here
   GetCurrentAnimOffset(); // get proper offset to graphics table
   pha(); // save offset to stack
-  lda_abs(PlayerAnimTimer); // load animation frame timer
+  lda_abs_fz(PlayerAnimTimer); // load animation frame timer
   // branch if not expired
   if (zero_flag) {
     lda_abs_nf(PlayerAnimTimerSet); // get animation frame timer amount
@@ -14308,7 +14308,7 @@ void AnimationControl(void) {
     lda_abs_nf(PlayerAnimCtrl);
     carry_flag = false; // add one to animation frame control
     adc_imm_nf(0x1);
-    cmp_zp(0x0); // compare to upper extent
+    cmp_zp_fc(0x0); // compare to upper extent
     // if frame control + 1 < upper extent, use as next
     if (carry_flag) {
       lda_imm_nf(0x0); // otherwise initialize frame control
@@ -14325,7 +14325,7 @@ void GetGfxOffsetAdder(void) {
   if (!zero_flag) {
     tya_nf(); // for big player
     carry_flag = false; // otherwise add eight bytes to offset
-    adc_imm(0x8); // for small player
+    adc_imm_fc(0x8); // for small player
     tay();
   }
 }
@@ -14333,11 +14333,11 @@ void GetGfxOffsetAdder(void) {
 void HandleChangeSize(void) {
   ldy_abs_nf(PlayerAnimCtrl); // get animation frame control
   lda_zp_nf(FrameCounter);
-  and_imm(0b00000011); // get frame counter and execute this code every
+  and_imm_fz(0b00000011); // get frame counter and execute this code every
   // fourth frame, otherwise branch ahead
   if (zero_flag) {
     iny_nf(); // increment frame control
-    cpy_imm(0xa); // check for preset upper extent
+    cpy_imm_fc(0xa); // check for preset upper extent
     // if not there yet, skip ahead to use
     if (carry_flag) {
       ldy_imm_nf(0x0); // otherwise initialize both grow/shrink flag
@@ -14347,7 +14347,7 @@ void HandleChangeSize(void) {
     ram[PlayerAnimCtrl] = y; // store proper frame control
   }
   // GorSLog:
-  lda_abs(PlayerSize); // get player's size
+  lda_abs_fz(PlayerSize); // get player's size
   // if player small, skip ahead to next part
   if (!zero_flag) {
     ShrinkPlayer();
@@ -14361,17 +14361,17 @@ void HandleChangeSize(void) {
 void GetOffsetFromAnimCtrl(void) {
   asl_acc_nf(); // multiply animation frame control
   asl_acc_nf(); // by eight to get proper amount
-  asl_acc(); // to add to our offset
+  asl_acc_fc(); // to add to our offset
   adc_absy(PlayerGfxTblOffsets); // add to offset to graphics table
 }
 
 void ShrinkPlayer(void) {
   tya_nf(); // add ten bytes to frame control as offset
   carry_flag = false;
-  adc_imm(0xa); // this thing apparently uses two of the swimming frames
+  adc_imm_fc(0xa); // this thing apparently uses two of the swimming frames
   tax_nf(); // to draw the player shrinking
   ldy_imm_nf(0x9); // load offset for small player swimming
-  lda_absx(ChangeSizeOffsetAdder); // get what would normally be offset adder
+  lda_absx_fz(ChangeSizeOffsetAdder); // get what would normally be offset adder
   // and branch to use offset if nonzero
   if (zero_flag) {
     ldy_imm_nf(0x1); // otherwise load offset for big player swimming
@@ -14383,14 +14383,14 @@ void ShrinkPlayer(void) {
 void ChkForPlayerAttrib(void) {
   ldy_abs_nf(Player_SprDataOffset); // get sprite data offset
   lda_zp_nf(GameEngineSubroutine);
-  cmp_imm(0xb); // if executing specific game engine routine,
+  cmp_imm_fcz(0xb); // if executing specific game engine routine,
   if (zero_flag) { goto KilledAtt; } // branch to change third and fourth row OAM attributes
   lda_abs_nf(PlayerGfxOffset); // get graphics table offset
-  cmp_imm(0x50);
+  cmp_imm_fcz(0x50);
   if (zero_flag) { goto C_S_IGAtt; } // if crouch offset, either standing offset,
-  cmp_imm(0xb8); // or intermediate growing offset,
+  cmp_imm_fcz(0xb8); // or intermediate growing offset,
   if (zero_flag) { goto C_S_IGAtt; } // go ahead and execute code to change
-  cmp_imm(0xc0); // fourth row OAM attributes only
+  cmp_imm_fcz(0xc0); // fourth row OAM attributes only
   if (zero_flag) { goto C_S_IGAtt; }
   cmp_imm(0xc8);
   if (!zero_flag) { return; } // if none of these, branch to leave
@@ -14468,7 +14468,7 @@ void RelativeBlockPosition(void) {
 void VariableObjOfsRelPos(void) {
   ram[0x0] = x; // store value to add to A here
   carry_flag = false;
-  adc_zp(0x0); // add A to value stored
+  adc_zp_fc(0x0); // add A to value stored
   tax(); // use as enemy offset
   GetObjRelativePosition();
   ldx_zp(ObjectOffset); // reload old object offset and leave
@@ -14515,7 +14515,7 @@ void GetMiscOffscreenBits(void) {
 void GetProperObjOffset(void) {
   txa_nf(); // move offset to A
   carry_flag = false;
-  adc_absy(ObjOffsetData); // add amount of bytes to offset depending on setting in Y
+  adc_absy_fc(ObjOffsetData); // add amount of bytes to offset depending on setting in Y
   tax(); // put back in X and leave
 }
 
@@ -14534,7 +14534,7 @@ void GetBlockOffscreenBits(void) {
 void SetOffscrBitsOffset(void) {
   ram[0x0] = x;
   carry_flag = false; // add contents of X to A to get
-  adc_zp(0x0); // appropriate offset, then give back to X
+  adc_zp_fc(0x0); // appropriate offset, then give back to X
   tax_nf();
   GetOffScreenBitsSet(); // <fallthrough>
 }
@@ -14546,7 +14546,7 @@ void GetOffScreenBitsSet(void) {
   asl_acc_nf(); // move low nybble to high nybble
   asl_acc_nf();
   asl_acc_nf();
-  asl_acc();
+  asl_acc_fc();
   ora_zp_nf(0x0); // mask together with previously saved low nybble
   ram[0x0] = a; // store both here
   pla_nf(); // get offscreen bits offset from stack
@@ -14579,16 +14579,16 @@ void GetXOffscreenBits(void) {
 XOfsLoop:
   lda_absy_nf(ScreenEdge_X_Pos); // get pixel coordinate of edge
   carry_flag = true; // get difference between pixel coordinate of edge
-  sbc_zpx(SprObject_X_Position); // and pixel coordinate of object position
+  sbc_zpx_fc(SprObject_X_Position); // and pixel coordinate of object position
   ram[0x7] = a; // store here
   lda_absy_nf(ScreenEdge_PageLoc); // get page location of edge
   sbc_zpx_nf(SprObject_PageLoc); // subtract from page location of object position
   ldx_absy_nf(DefaultXOnscreenOfs); // load offset value here
-  cmp_imm(0x0);
+  cmp_imm_fn(0x0);
   // if beyond right edge or in front of left edge, branch
   if (!neg_flag) {
     ldx_absy_nf(DefaultXOnscreenOfs + 1); // if not, load alternate offset value here
-    cmp_imm(0x1);
+    cmp_imm_fcn(0x1);
     // if one page or more to the left of either edge, branch
     if (neg_flag) {
       lda_imm_nf(0x38); // if no branching, load value here and store
@@ -14615,16 +14615,16 @@ void GetYOffscreenBits(void) {
 YOfsLoop:
   lda_absy_nf(HighPosUnitData); // load coordinate for edge of vertical unit
   carry_flag = true;
-  sbc_zpx(SprObject_Y_Position); // subtract from vertical coordinate of object
+  sbc_zpx_fc(SprObject_Y_Position); // subtract from vertical coordinate of object
   ram[0x7] = a; // store here
   lda_imm_nf(0x1); // subtract one from vertical high byte of object
   sbc_zpx_nf(SprObject_Y_HighPos);
   ldx_absy_nf(DefaultYOnscreenOfs); // load offset value here
-  cmp_imm(0x0);
+  cmp_imm_fn(0x0);
   // if under top of the screen or beyond bottom, branch
   if (!neg_flag) {
     ldx_absy_nf(DefaultYOnscreenOfs + 1); // if not, load alternate offset value here
-    cmp_imm(0x1);
+    cmp_imm_fcn(0x1);
     // if one vertical unit or more above the screen, branch
     if (neg_flag) {
       lda_imm_nf(0x20); // if no branching, load value here and store
@@ -14653,10 +14653,10 @@ void DividePDiff(void) {
     lsr_acc_nf();
     lsr_acc_nf();
     and_imm_nf(0x7); // mask out all but 3 LSB
-    cpy_imm(0x1); // right side of the screen or top?
+    cpy_imm_fc(0x1); // right side of the screen or top?
     // if so, branch, use difference / 8 as offset
     if (!carry_flag) {
-      adc_zp(0x5); // if not, add value to difference / 8
+      adc_zp_fc(0x5); // if not, add value to difference / 8
     }
     // SetOscrO:
     tax(); // use as offset
@@ -14672,13 +14672,13 @@ void DividePDiff(void) {
 void DrawSpriteObject(void) {
   lda_zp_nf(0x3); // get saved flip control bits
   lsr_acc_nf();
-  lsr_acc(); // move d1 into carry
+  lsr_acc_fc(); // move d1 into carry
   lda_zp_nf(0x0);
   if (!carry_flag) { goto NoHFlip; } // if d1 not set, branch
   ram[Sprite_Tilenumber + 4 + y] = a; // store first tile into second sprite
   lda_zp_nf(0x1); // and second into first sprite
   ram[Sprite_Tilenumber + y] = a;
-  lda_imm(0x40); // activate horizontal flip OAM attribute
+  lda_imm_fz(0x40); // activate horizontal flip OAM attribute
   if (!zero_flag) { goto SetHFAt; } // and unconditionally branch
   
 NoHFlip:
@@ -14705,7 +14705,7 @@ SetHFAt:
   ram[0x2] = a;
   tya_nf(); // add eight to the offset in Y to
   carry_flag = false; // move to the next two sprites
-  adc_imm(0x8);
+  adc_imm_fc(0x8);
   tay_nf();
   inx_nf(); // increment offset to return it to the
   inx(); // routine that called this subroutine
@@ -14726,16 +14726,16 @@ SndOn:
   write_joypad2(a); // disable irqs and set frame counter mode???
   lda_imm_nf(0xf);
   apu_write(SND_MASTERCTRL_REG, a); // enable first four channels
-  lda_abs(PauseModeFlag); // is sound already in pause mode?
+  lda_abs_fz(PauseModeFlag); // is sound already in pause mode?
   if (!zero_flag) { goto InPause; }
   lda_zp_nf(PauseSoundQueue); // if not, check pause sfx queue
   cmp_imm(0x1);
   if (!zero_flag) { goto RunSoundSubroutines; } // if queue is empty, skip pause mode routine
   
 InPause:
-  lda_abs(PauseSoundBuffer); // check pause sfx buffer
+  lda_abs_fz(PauseSoundBuffer); // check pause sfx buffer
   if (!zero_flag) { goto ContPau; }
-  lda_zp(PauseSoundQueue); // check pause queue
+  lda_zp_fz(PauseSoundQueue); // check pause queue
   if (zero_flag) { goto SkipSoundSubroutines; }
   ram[PauseSoundBuffer] = a; // if queue full, store in buffer and activate
   ram[PauseModeFlag] = a; // pause mode to interrupt game sounds
@@ -14750,16 +14750,16 @@ InPause:
   ram[Squ1_SfxLenCounter] = a;
   
 PTone1F:
-  lda_imm(0x44); // play first tone
+  lda_imm_fz(0x44); // play first tone
   if (!zero_flag) { goto PTRegC; } // unconditional branch
   
 ContPau:
   lda_abs_nf(Squ1_SfxLenCounter); // check pause length left
-  cmp_imm(0x24); // time to play second?
+  cmp_imm_fcz(0x24); // time to play second?
   if (zero_flag) { goto PTone2F; }
-  cmp_imm(0x1e); // time to play first again?
+  cmp_imm_fcz(0x1e); // time to play first again?
   if (zero_flag) { goto PTone1F; }
-  cmp_imm(0x18); // time to play second again?
+  cmp_imm_fcz(0x18); // time to play second again?
   if (!zero_flag) { goto DecPauC; } // only load regs during times, otherwise skip
   
 PTone2F:
@@ -14771,12 +14771,12 @@ PTRegC:
   PlaySqu1Sfx();
   
 DecPauC:
-  dec_abs(Squ1_SfxLenCounter); // decrement pause sfx counter
+  dec_abs_fz(Squ1_SfxLenCounter); // decrement pause sfx counter
   if (!zero_flag) { goto SkipSoundSubroutines; }
   lda_imm_nf(0x0); // disable sound if in pause mode and
   apu_write(SND_MASTERCTRL_REG, a); // not currently playing the pause sfx
   lda_abs_nf(PauseSoundBuffer); // if no longer playing pause sfx, check to see
-  cmp_imm(0x2); // if we need to be playing sound again
+  cmp_imm_fcz(0x2); // if we need to be playing sound again
   if (!zero_flag) { goto SkipPIn; }
   lda_imm_nf(0x0); // clear pause mode to allow game sounds again
   ram[PauseModeFlag] = a;
@@ -14803,7 +14803,7 @@ SkipSoundSubroutines:
   ram[PauseSoundQueue] = a;
   ldy_abs_nf(DAC_Counter); // load some sort of counter
   lda_zp_nf(AreaMusicBuffer);
-  and_imm(0b00000011); // check for specific music
+  and_imm_fz(0b00000011); // check for specific music
   if (zero_flag) { goto NoIncDAC; }
   inc_abs_nf(DAC_Counter); // increment and check counter
   cpy_imm(0x30);
@@ -14856,7 +14856,7 @@ void PlaySqu2Sfx(void) {
 }
 
 void SetFreq_Squ2(void) {
-  ldx_imm(0x4); // set frequency reg offset for square 2 sound channel
+  ldx_imm_fz(0x4); // set frequency reg offset for square 2 sound channel
   // unconditional branch
   if (!zero_flag) {
     Dump_Freq_Regs();
@@ -14866,7 +14866,7 @@ void SetFreq_Squ2(void) {
 }
 
 void SetFreq_Tri(void) {
-  ldx_imm(0x8); // set frequency reg offset for triangle sound channel
+  ldx_imm_fz(0x8); // set frequency reg offset for triangle sound channel
   // unconditional branch
   if (!zero_flag) {
     Dump_Freq_Regs();
@@ -14881,7 +14881,7 @@ void PlayFlagpoleSlide(void) {
   ram[Squ1_SfxLenCounter] = a;
   lda_imm(0x62); // load part of reg contents for flagpole sound
   SetFreq_Squ1();
-  ldx_imm(0x99); // now load the rest
+  ldx_imm_fz(0x99); // now load the rest
   if (!zero_flag) {
     FPS2nd();
     return;
@@ -14890,7 +14890,7 @@ void PlayFlagpoleSlide(void) {
 }
 
 void PlaySmallJump(void) {
-  lda_imm(0x26); // branch here for small mario jumping sound
+  lda_imm_fz(0x26); // branch here for small mario jumping sound
   if (!zero_flag) {
     JumpRegContents();
     return;
@@ -14914,7 +14914,7 @@ void JumpRegContents(void) {
 
 void ContinueSndJump(void) {
   lda_abs_nf(Squ1_SfxLenCounter); // jumping sounds seem to be composed of three parts
-  cmp_imm(0x25); // check for time to play second part yet
+  cmp_imm_fcz(0x25); // check for time to play second part yet
   if (zero_flag) {
     ldx_imm_nf(0x5f); // load second part
     ldy_imm(0xf6);
@@ -14925,7 +14925,7 @@ void ContinueSndJump(void) {
     }
   }
   // N2Prt:
-  cmp_imm(0x20); // check for third part
+  cmp_imm_fcz(0x20); // check for third part
   if (!zero_flag) {
     DecJpFPS();
     return;
@@ -14951,7 +14951,7 @@ void DmpJpFPS(void) {
 
 void PlayFireballThrow(void) {
   lda_imm_nf(0x5);
-  ldy_imm(0x99); // load reg contents for fireball throw sound
+  ldy_imm_fz(0x99); // load reg contents for fireball throw sound
   // unconditional branch
   if (!zero_flag) {
     Fthrow();
@@ -14976,12 +14976,12 @@ void Fthrow(void) {
 
 void ContinueBumpThrow(void) {
   lda_abs_nf(Squ1_SfxLenCounter); // check for second part of bump sound
-  cmp_imm(0x6);
+  cmp_imm_fcz(0x6);
   if (!zero_flag) {
     DecJpFPS();
     return;
   }
-  lda_imm(0xbb); // load second part directly
+  lda_imm_fz(0xbb); // load second part directly
   dynamic_ram_write(SND_SQUARE1_REG + 1, a);
   DecJpFPS(); // <fallthrough>
 }
@@ -15000,36 +15000,36 @@ void Square1SfxHandler(void) {
   if (zero_flag) { goto CheckSfx1Buffer; }
   ram[Square1SoundBuffer] = y; // if found, put in buffer
   if (neg_flag) { PlaySmallJump(); return; } // small jump
-  lsr_zp(Square1SoundQueue);
+  lsr_zp_fc(Square1SoundQueue);
   if (carry_flag) { PlayBigJump(); return; } // big jump
-  lsr_zp(Square1SoundQueue);
+  lsr_zp_fc(Square1SoundQueue);
   if (carry_flag) { PlayBump(); return; } // bump
-  lsr_zp(Square1SoundQueue);
+  lsr_zp_fc(Square1SoundQueue);
   if (carry_flag) { goto PlaySwimStomp; } // swim/stomp
-  lsr_zp(Square1SoundQueue);
+  lsr_zp_fc(Square1SoundQueue);
   if (carry_flag) { PlaySmackEnemy(); return; } // smack enemy
-  lsr_zp(Square1SoundQueue);
+  lsr_zp_fc(Square1SoundQueue);
   if (carry_flag) { PlayPipeDownInj(); return; } // pipedown/injury
-  lsr_zp(Square1SoundQueue);
+  lsr_zp_fc(Square1SoundQueue);
   if (carry_flag) { PlayFireballThrow(); return; } // fireball throw
-  lsr_zp(Square1SoundQueue);
+  lsr_zp_fc(Square1SoundQueue);
   if (carry_flag) { PlayFlagpoleSlide(); return; } // slide flagpole
   
 CheckSfx1Buffer:
   lda_zp(Square1SoundBuffer); // check for sfx in buffer
   if (zero_flag) { goto ExS1H; } // if not found, exit sub
   if (neg_flag) { ContinueSndJump(); return; } // small mario jump
-  lsr_acc();
+  lsr_acc_fc();
   if (carry_flag) { ContinueSndJump(); return; } // big mario jump
-  lsr_acc();
+  lsr_acc_fc();
   if (carry_flag) { ContinueBumpThrow(); return; } // bump
-  lsr_acc();
+  lsr_acc_fc();
   if (carry_flag) { goto ContinueSwimStomp; } // swim/stomp
-  lsr_acc();
+  lsr_acc_fc();
   if (carry_flag) { ContinueSmackEnemy(); return; } // smack enemy
-  lsr_acc();
+  lsr_acc_fc();
   if (carry_flag) { ContinuePipeDownInj(); return; } // pipedown/injury
-  lsr_acc();
+  lsr_acc_fc();
   if (carry_flag) { ContinueBumpThrow(); return; } // fireball throw
   lsr_acc();
   if (carry_flag) { DecrementSfx1Length(); return; } // slide flagpole
@@ -15049,9 +15049,9 @@ ContinueSwimStomp:
   ldy_abs_nf(Squ1_SfxLenCounter); // look up reg contents in data section based on
   lda_absy_nf(SwimStompEnvelopeData - 1); // length of sound left, used to control sound's
   apu_write(SND_SQUARE1_REG, a); // envelope
-  cpy_imm(0x6);
+  cpy_imm_fcz(0x6);
   if (!zero_flag) { BranchToDecLength1(); return; }
-  lda_imm(0x9e); // when the length counts down to a certain point, put this
+  lda_imm_fz(0x9e); // when the length counts down to a certain point, put this
   dynamic_ram_write(SND_SQUARE1_REG + 2, a); // directly into the LSB of square 1's frequency divider
   BranchToDecLength1(); // <fallthrough>
 }
@@ -15082,11 +15082,11 @@ void PlaySmackEnemy(void) {
 
 void ContinueSmackEnemy(void) {
   ldy_abs_nf(Squ1_SfxLenCounter); // check about halfway through
-  cpy_imm(0x8);
+  cpy_imm_fcz(0x8);
   if (!zero_flag) { goto SmSpc; }
   lda_imm_nf(0xa0); // if we're at the about-halfway point, make the second tone
   dynamic_ram_write(SND_SQUARE1_REG + 2, a); // in the smack enemy sound
-  lda_imm(0x9f);
+  lda_imm_fz(0x9f);
   if (!zero_flag) { goto SmTick; }
   
 SmSpc:
@@ -15142,7 +15142,7 @@ void ContinuePipeDownInj(void) {
 
 void PlayCoinGrab(void) {
   lda_imm_nf(0x35); // load length of coin grab sound
-  ldx_imm(0x8d); // and part of reg contents
+  ldx_imm_fz(0x8d); // and part of reg contents
   if (!zero_flag) {
     CGrab_TTickRegL();
     return;
@@ -15203,7 +15203,7 @@ void PlayBlast(void) {
   lda_imm_nf(0x20); // load length of fireworks/gunfire sound
   ram[Squ2_SfxLenCounter] = a;
   ldy_imm_nf(0x94); // load reg contents of fireworks/gunfire sound
-  lda_imm(0x5e);
+  lda_imm_fz(0x5e);
   if (!zero_flag) {
     SBlasJ();
     return;
@@ -15213,13 +15213,13 @@ void PlayBlast(void) {
 
 void ContinueBlast(void) {
   lda_abs_nf(Squ2_SfxLenCounter); // check for time to play second part
-  cmp_imm(0x18);
+  cmp_imm_fcz(0x18);
   if (!zero_flag) {
     DecrementSfx2Length();
     return;
   }
   ldy_imm_nf(0x93); // load second part reg contents then
-  lda_imm(0x18);
+  lda_imm_fz(0x18);
   SBlasJ(); // <fallthrough>
 }
 
@@ -15240,7 +15240,7 @@ void PlayPowerUpGrab(void) {
 
 void ContinuePowerUpGrab(void) {
   lda_abs_nf(Squ2_SfxLenCounter); // load frequency reg based on length left over
-  lsr_acc(); // divide by 2
+  lsr_acc_fc(); // divide by 2
   // alter frequency every other frame
   if (carry_flag) {
     DecrementSfx2Length();
@@ -15272,7 +15272,7 @@ void BlstSJp(void) {
 
 void ContinueBowserFall(void) {
   lda_abs_nf(Squ2_SfxLenCounter); // check for almost near the end
-  cmp_imm(0x8);
+  cmp_imm_fcz(0x8);
   if (!zero_flag) {
     DecrementSfx2Length();
     return;
@@ -15313,7 +15313,7 @@ DivLLoop:
     JumpToDecLength2();
     return;
   }
-  dex();
+  dex_fz();
   if (!zero_flag) { goto DivLLoop; } // do this until all bits checked, if none set, continue
   tay_nf();
   lda_absy_nf(ExtraLifeFreqData - 1); // load our reg contents
@@ -15328,7 +15328,7 @@ DivLLoop:
 }
 
 void PlayGrowPowerUp(void) {
-  lda_imm(0x10); // load length of power-up reveal sound
+  lda_imm_fz(0x10); // load length of power-up reveal sound
   if (!zero_flag) {
     GrowItemRegs();
     return;
@@ -15371,25 +15371,25 @@ void ContinueGrowItems(void) {
 
 void Square2SfxHandler(void) {
   lda_zp_nf(Square2SoundBuffer); // special handling for the 1-up sound to keep it
-  and_imm(Sfx_ExtraLife); // from being interrupted by other sounds on square 2
+  and_imm_fz(Sfx_ExtraLife); // from being interrupted by other sounds on square 2
   if (!zero_flag) { ContinueExtraLife(); return; }
   ldy_zp(Square2SoundQueue); // check for sfx in queue
   if (zero_flag) { goto CheckSfx2Buffer; }
   ram[Square2SoundBuffer] = y; // if found, put in buffer and check for the following
   if (neg_flag) { PlayBowserFall(); return; } // bowser fall
-  lsr_zp(Square2SoundQueue);
+  lsr_zp_fc(Square2SoundQueue);
   if (carry_flag) { PlayCoinGrab(); return; } // coin grab
-  lsr_zp(Square2SoundQueue);
+  lsr_zp_fc(Square2SoundQueue);
   if (carry_flag) { PlayGrowPowerUp(); return; } // power-up reveal
-  lsr_zp(Square2SoundQueue);
+  lsr_zp_fc(Square2SoundQueue);
   if (carry_flag) { PlayGrowVine(); return; } // vine grow
-  lsr_zp(Square2SoundQueue);
+  lsr_zp_fc(Square2SoundQueue);
   if (carry_flag) { PlayBlast(); return; } // fireworks/gunfire
-  lsr_zp(Square2SoundQueue);
+  lsr_zp_fc(Square2SoundQueue);
   if (carry_flag) { PlayTimerTick(); return; } // timer tick
-  lsr_zp(Square2SoundQueue);
+  lsr_zp_fc(Square2SoundQueue);
   if (carry_flag) { PlayPowerUpGrab(); return; } // power-up grab
-  lsr_zp(Square2SoundQueue);
+  lsr_zp_fc(Square2SoundQueue);
   if (carry_flag) { PlayExtraLife(); return; } // 1-up
   
 CheckSfx2Buffer:
@@ -15398,15 +15398,15 @@ CheckSfx2Buffer:
   if (neg_flag) { ContinueBowserFall(); return; } // bowser fall
   lsr_acc();
   if (carry_flag) { goto Cont_CGrab_TTick; } // coin grab
-  lsr_acc();
+  lsr_acc_fc();
   if (carry_flag) { ContinueGrowItems(); return; } // power-up reveal
-  lsr_acc();
+  lsr_acc_fc();
   if (carry_flag) { ContinueGrowItems(); return; } // vine grow
-  lsr_acc();
+  lsr_acc_fc();
   if (carry_flag) { ContinueBlast(); return; } // fireworks/gunfire
   lsr_acc();
   if (carry_flag) { goto Cont_CGrab_TTick; } // timer tick
-  lsr_acc();
+  lsr_acc_fc();
   if (carry_flag) { ContinuePowerUpGrab(); return; } // power-up grab
   lsr_acc();
   if (carry_flag) { ContinueExtraLife(); return; } // 1-up
@@ -15422,7 +15422,7 @@ void PlayBowserFall(void) {
   lda_imm_nf(0x38); // load length of bowser defeat sound
   ram[Squ2_SfxLenCounter] = a;
   ldy_imm_nf(0xc4); // load contents of reg for bowser defeat sound
-  lda_imm(0x18);
+  lda_imm_fz(0x18);
   BlstSJp(); // <fallthrough>
 }
 
@@ -15434,7 +15434,7 @@ void PlayBrickShatter(void) {
 
 void ContinueBrickShatter(void) {
   lda_abs_nf(Noise_SfxLenCounter);
-  lsr_acc(); // divide by 2 and check for bit set to use offset
+  lsr_acc_fc(); // divide by 2 and check for bit set to use offset
   if (!carry_flag) {
     DecrementSfx3Length();
     return;
@@ -15464,18 +15464,18 @@ void DecrementSfx3Length(void) {
 }
 
 void NoiseSfxHandler(void) {
-  ldy_zp(NoiseSoundQueue); // check for sfx in queue
+  ldy_zp_fz(NoiseSoundQueue); // check for sfx in queue
   if (zero_flag) { goto CheckNoiseBuffer; }
   ram[NoiseSoundBuffer] = y; // if found, put in buffer
-  lsr_zp(NoiseSoundQueue);
+  lsr_zp_fc(NoiseSoundQueue);
   if (carry_flag) { PlayBrickShatter(); return; } // brick shatter
-  lsr_zp(NoiseSoundQueue);
+  lsr_zp_fc(NoiseSoundQueue);
   if (carry_flag) { goto PlayBowserFlame; } // bowser flame
   
 CheckNoiseBuffer:
   lda_zp(NoiseSoundBuffer); // check for sfx in buffer
   if (zero_flag) { goto ExNH; } // if not found, exit sub
-  lsr_acc();
+  lsr_acc_fc();
   if (carry_flag) { ContinueBrickShatter(); return; } // brick shatter
   lsr_acc();
   if (carry_flag) { goto ContinueBowserFlame; } // bowser flame
@@ -15489,7 +15489,7 @@ PlayBowserFlame:
   
 ContinueBowserFlame:
   lda_abs_nf(Noise_SfxLenCounter);
-  lsr_acc();
+  lsr_acc_fc();
   tay_nf();
   ldx_imm_nf(0xf); // load reg contents of bowser flame sound
   lda_absy(BowserFlameEnvData - 1);
@@ -15503,12 +15503,12 @@ void ContinueMusic(void) {
 }
 
 void MusicHandler(void) {
-  lda_zp(EventMusicQueue); // check event music queue
+  lda_zp_fz(EventMusicQueue); // check event music queue
   if (!zero_flag) {
     LoadEventMusic();
     return;
   }
-  lda_zp(AreaMusicQueue); // check area music queue
+  lda_zp_fz(AreaMusicQueue); // check area music queue
   if (!zero_flag) {
     LoadAreaMusic();
     return;
@@ -15535,12 +15535,12 @@ void LoadEventMusic(void) {
   ldy_imm_nf(0x0);
   ram[NoteLengthTblAdder] = y; // default value for additional length byte offset
   ram[AreaMusicBuffer] = y; // clear area music buffer
-  cmp_imm(TimeRunningOutMusic); // is it time running out music?
+  cmp_imm_fz(TimeRunningOutMusic); // is it time running out music?
   if (!zero_flag) {
     FindEventMusicHeader();
     return;
   }
-  ldx_imm(0x8); // load offset to be added to length byte of header
+  ldx_imm_fz(0x8); // load offset to be added to length byte of header
   ram[NoteLengthTblAdder] = x;
   // unconditional branch
   if (!zero_flag) {
@@ -15570,17 +15570,17 @@ void HandleAreaMusicLoopB(void) {
   ldy_imm_nf(0x0); // clear event music buffer
   ram[EventMusicBuffer] = y;
   ram[AreaMusicBuffer] = a; // copy area music queue contents to buffer
-  cmp_imm(0x1); // is it ground level music?
+  cmp_imm_fz(0x1); // is it ground level music?
   if (zero_flag) {
     inc_abs_nf(GroundMusicHeaderOfs); // increment but only if playing ground level music
     ldy_abs_nf(GroundMusicHeaderOfs); // is it time to loopback ground level music?
-    cpy_imm(0x32);
+    cpy_imm_fcz(0x32);
     // branch ahead with alternate offset
     if (!zero_flag) {
       LoadHeader();
       return;
     }
-    ldy_imm(0x11);
+    ldy_imm_fz(0x11);
     // unconditional branch
     if (!zero_flag) {
       GMLoopB();
@@ -15595,7 +15595,7 @@ void HandleAreaMusicLoopB(void) {
 
 void FindEventMusicHeader(void) {
   iny_nf(); // increment Y pointer based on previously loaded queue contents
-  lsr_acc(); // bit shift and increment until we find a set bit for music
+  lsr_acc_fc(); // bit shift and increment until we find a set bit for music
   if (!carry_flag) {
     FindEventMusicHeader();
     return;
@@ -15635,7 +15635,7 @@ void LoadHeader(void) {
 }
 
 void HandleSquare2Music(void) {
-  dec_abs(Squ2_NoteLenCounter); // decrement square 2 note length
+  dec_abs_fz(Squ2_NoteLenCounter); // decrement square 2 note length
   if (!zero_flag) { goto MiscSqu2MusicTasks; } // is it time for more data?  if not, branch to end tasks
   ldy_zp_nf(MusicOffset_Square2); // increment square 2 music offset and fetch data
   inc_zp_nf(MusicOffset_Square2);
@@ -15646,7 +15646,7 @@ void HandleSquare2Music(void) {
   
 EndOfMusicData:
   lda_abs_nf(EventMusicBuffer); // check secondary buffer for time running out music
-  cmp_imm(TimeRunningOutMusic);
+  cmp_imm_fcz(TimeRunningOutMusic);
   if (!zero_flag) { goto NotTRO; }
   lda_abs(AreaMusicBuffer_Alt); // load previously saved contents of primary buffer
   if (!zero_flag) { goto MusicLoopBack; } // and start playing the song again if there is one
@@ -15697,10 +15697,10 @@ SkipFqL1:
   ram[Squ2_NoteLenCounter] = a;
   
 MiscSqu2MusicTasks:
-  lda_zp(Square2SoundBuffer); // is there a sound playing on square 2?
+  lda_zp_fz(Square2SoundBuffer); // is there a sound playing on square 2?
   if (!zero_flag) { goto HandleSquare1Music; }
   lda_abs_nf(EventMusicBuffer); // check for death music or d4 set on secondary buffer
-  and_imm(0b10010001); // note that regs for death music or d4 are loaded by default
+  and_imm_fz(0b10010001); // note that regs for death music or d4 are loaded by default
   if (!zero_flag) { goto HandleSquare1Music; }
   ldy_abs(Squ2_EnvelopeDataCtrl); // check for contents saved from LoadControlRegs
   if (zero_flag) { goto NoDecEnv1; }
@@ -15713,9 +15713,9 @@ NoDecEnv1:
   dynamic_ram_write(SND_SQUARE2_REG + 1, x);
   
 HandleSquare1Music:
-  ldy_zp(MusicOffset_Square1); // is there a nonzero offset here?
+  ldy_zp_fz(MusicOffset_Square1); // is there a nonzero offset here?
   if (zero_flag) { goto HandleTriangleMusic; } // if not, skip ahead to the triangle channel
-  dec_abs(Squ1_NoteLenCounter); // decrement square 1 note length
+  dec_abs_fz(Squ1_NoteLenCounter); // decrement square 1 note length
   if (!zero_flag) { goto MiscSqu1MusicTasks; } // is it time for more data?
   
 FetchSqu1MusicData:
@@ -15733,7 +15733,7 @@ FetchSqu1MusicData:
 Squ1NoteHandler:
   AlternateLengthHandler();
   ram[Squ1_NoteLenCounter] = a; // save contents of A in square 1 note counter
-  ldy_zp(Square1SoundBuffer); // is there a sound playing on square 1?
+  ldy_zp_fz(Square1SoundBuffer); // is there a sound playing on square 1?
   if (!zero_flag) { goto HandleTriangleMusic; }
   txa_nf();
   and_imm(0b00111110); // change saved data to appropriate note format
@@ -15746,10 +15746,10 @@ SkipCtrlL:
   Dump_Squ1_Regs();
   
 MiscSqu1MusicTasks:
-  lda_zp(Square1SoundBuffer); // is there a sound playing on square 1?
+  lda_zp_fz(Square1SoundBuffer); // is there a sound playing on square 1?
   if (!zero_flag) { goto HandleTriangleMusic; }
   lda_abs_nf(EventMusicBuffer); // check for death music or d4 set on secondary buffer
-  and_imm(0b10010001);
+  and_imm_fz(0b10010001);
   if (!zero_flag) { goto DeathMAltReg; }
   ldy_abs(Squ1_EnvelopeDataCtrl); // check saved envelope offset
   if (zero_flag) { goto NoDecEnv2; }
@@ -15760,7 +15760,7 @@ NoDecEnv2:
   apu_write(SND_SQUARE1_REG, a); // based on offset set by first load
   
 DeathMAltReg:
-  lda_abs(AltRegContentFlag); // check for alternate control reg data
+  lda_abs_fz(AltRegContentFlag); // check for alternate control reg data
   if (!zero_flag) { goto DoAltLoad; }
   lda_imm_nf(0x7f); // load this value if zero, the alternate value
   
@@ -15769,7 +15769,7 @@ DoAltLoad:
   
 HandleTriangleMusic:
   lda_zp_nf(MusicOffset_Triangle);
-  dec_abs(Tri_NoteLenCounter); // decrement triangle note length
+  dec_abs_fz(Tri_NoteLenCounter); // decrement triangle note length
   if (!zero_flag) { goto HandleNoiseMusic; } // is it time for more data?
   ldy_zp_nf(MusicOffset_Triangle); // increment square 1 music offset and fetch data
   inc_zp_nf(MusicOffset_Triangle);
@@ -15790,24 +15790,24 @@ TriNoteHandler:
   ldx_abs_nf(Tri_NoteLenBuffer); // save length in triangle note counter
   ram[Tri_NoteLenCounter] = x;
   lda_abs_nf(EventMusicBuffer);
-  and_imm(0b01101110); // check for death music or d4 set on secondary buffer
+  and_imm_fz(0b01101110); // check for death music or d4 set on secondary buffer
   if (!zero_flag) { goto NotDOrD4; } // if playing any other secondary, skip primary buffer check
   lda_zp_nf(AreaMusicBuffer); // check primary buffer for water or castle level music
-  and_imm(0b00001010);
+  and_imm_fz(0b00001010);
   if (zero_flag) { goto HandleNoiseMusic; } // if playing any other primary, or death or d4, go on to noise routine
   
 NotDOrD4:
   txa_nf(); // if playing water or castle music or any secondary
-  cmp_imm(0x12); // besides death music or d4 set, check length of note
+  cmp_imm_fc(0x12); // besides death music or d4 set, check length of note
   if (carry_flag) { goto LongN; }
   lda_abs_nf(EventMusicBuffer); // check for win castle music again if not playing a long note
-  and_imm(EndOfCastleMusic);
+  and_imm_fz(EndOfCastleMusic);
   if (zero_flag) { goto MediN; }
-  lda_imm(0xf); // load value $0f if playing the win castle music and playing a short
+  lda_imm_fz(0xf); // load value $0f if playing the win castle music and playing a short
   if (!zero_flag) { goto LoadTriCtrlReg; } // note, load value $1f if playing water or castle level music or any
   
 MediN:
-  lda_imm(0x1f); // secondary besides death and d4 except win castle or win castle and playing
+  lda_imm_fz(0x1f); // secondary besides death and d4 except win castle or win castle and playing
   if (!zero_flag) { goto LoadTriCtrlReg; } // a short note, and load value $ff if playing a long note on water, castle
   
 LongN:
@@ -15836,13 +15836,13 @@ NoiseBeatHandler:
   AlternateLengthHandler();
   ram[Noise_BeatLenCounter] = a; // store length in noise beat counter
   txa_nf();
-  and_imm(0b00111110); // reload data and erase length bits
+  and_imm_fz(0b00111110); // reload data and erase length bits
   if (zero_flag) { goto SilentBeat; } // if no beat data, silence
-  cmp_imm(0x30); // check the beat data and play the appropriate
+  cmp_imm_fcz(0x30); // check the beat data and play the appropriate
   if (zero_flag) { goto LongBeat; } // noise accordingly
-  cmp_imm(0x20);
+  cmp_imm_fcz(0x20);
   if (zero_flag) { goto StrongBeat; }
-  and_imm(0b00010000);
+  and_imm_fz(0b00010000);
   if (zero_flag) { goto SilentBeat; }
   lda_imm_nf(0x1c); // short beat data
   ldx_imm_nf(0x3);
@@ -15872,10 +15872,10 @@ PlayBeat:
 
 void AlternateLengthHandler(void) {
   tax_nf(); // save a copy of original byte into X
-  ror_acc(); // save LSB from original byte into carry
+  ror_acc_fc(); // save LSB from original byte into carry
   txa_nf(); // reload original byte and rotate three times
-  rol_acc(); // turning xx00000x into 00000xxx, with the
-  rol_acc(); // bit in carry as the MSB here
+  rol_acc_fc(); // turning xx00000x into 00000xxx, with the
+  rol_acc_fc(); // bit in carry as the MSB here
   rol_acc_nf();
   ProcessLengthData(); // <fallthrough>
 }
@@ -15883,24 +15883,24 @@ void AlternateLengthHandler(void) {
 void ProcessLengthData(void) {
   and_imm_nf(0b00000111); // clear all but the three LSBs
   carry_flag = false;
-  adc_zp(0xf0); // add offset loaded from first header byte
-  adc_abs(NoteLengthTblAdder); // add extra if time running out music
+  adc_zp_fc(0xf0); // add offset loaded from first header byte
+  adc_abs_fc(NoteLengthTblAdder); // add extra if time running out music
   tay_nf();
   lda_absy(MusicLengthLookupTbl); // load length
 }
 
 void LoadControlRegs(void) {
   lda_abs_nf(EventMusicBuffer); // check secondary buffer for win castle music
-  and_imm(EndOfCastleMusic);
+  and_imm_fz(EndOfCastleMusic);
   if (zero_flag) { goto NotECstlM; }
-  lda_imm(0x4); // this value is only used for win castle music
+  lda_imm_fz(0x4); // this value is only used for win castle music
   if (!zero_flag) { goto AllMus; } // unconditional branch
   
 NotECstlM:
   lda_zp_nf(AreaMusicBuffer);
-  and_imm(0b01111101); // check primary buffer for water music
+  and_imm_fz(0b01111101); // check primary buffer for water music
   if (zero_flag) { goto WaterMus; }
-  lda_imm(0x8); // this is the default value for all other music
+  lda_imm_fz(0x8); // this is the default value for all other music
   if (!zero_flag) { goto AllMus; }
   
 WaterMus:
@@ -15913,14 +15913,14 @@ AllMus:
 
 void LoadEnvelopeData(void) {
   lda_abs_nf(EventMusicBuffer); // check secondary buffer for win castle music
-  and_imm(EndOfCastleMusic);
+  and_imm_fz(EndOfCastleMusic);
   if (!zero_flag) {
     lda_absy(EndOfCastleMusicEnvData); // load data from offset for win castle music
     return;
   }
   // LoadUsualEnvData:
   lda_zp_nf(AreaMusicBuffer); // check primary buffer for water music
-  and_imm(0b01111101);
+  and_imm_fz(0b01111101);
   if (!zero_flag) {
     lda_absy(AreaMusicEnvData); // load default data from offset for all other music
     return;
