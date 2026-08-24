@@ -1,9 +1,9 @@
 #include "instructions.h"
 
-// Generated code calls specialised flag-preserving or flag-free entry points.
-// Both variants use the same inline semantic core, so each 6502 operation has
-// one implementation while call sites remain predictable function calls. The
-// flag mode is constant in every wrapper, so Clang folds the condition at -O3.
+// Generated code calls flag-free helpers without a suffix and uses a suffix
+// listing each flag that must be updated (for example, _fz or _fczn). Every
+// entry point shares the same inline semantic core, so each 6502 operation has
+// one implementation. Clang folds the constant flag mask at -O3.
 
 typedef enum {
     FLAGS_NONE = 0,
@@ -24,24 +24,24 @@ static inline void update_nz_masked(uint8_t value, FlagMask mask) {
 }
 
 #define DEFINE_READ_VARIANTS(name, arg_type, read_expr, operation, all_flags) \
-    void name(arg_type arg) { operation((read_expr), all_flags); } \
-    void name##_nf(arg_type arg) { operation((read_expr), FLAGS_NONE); } \
+    void name(arg_type arg) { operation((read_expr), FLAGS_NONE); } \
     void name##_fc(arg_type arg) { operation((read_expr), FLAG_CARRY); } \
     void name##_fz(arg_type arg) { operation((read_expr), FLAG_ZERO); } \
     void name##_fn(arg_type arg) { operation((read_expr), FLAG_NEGATIVE); } \
     void name##_fcz(arg_type arg) { operation((read_expr), FLAG_CARRY | FLAG_ZERO); } \
     void name##_fcn(arg_type arg) { operation((read_expr), FLAG_CARRY | FLAG_NEGATIVE); } \
-    void name##_fzn(arg_type arg) { operation((read_expr), FLAGS_NZ); }
+    void name##_fzn(arg_type arg) { operation((read_expr), FLAGS_NZ); } \
+    void name##_fczn(arg_type arg) { operation((read_expr), all_flags); }
 
 #define DEFINE_IMPLIED_VARIANTS(name, operation, all_flags) \
-    void name(void) { operation(all_flags); } \
-    void name##_nf(void) { operation(FLAGS_NONE); } \
+    void name(void) { operation(FLAGS_NONE); } \
     void name##_fc(void) { operation(FLAG_CARRY); } \
     void name##_fz(void) { operation(FLAG_ZERO); } \
     void name##_fn(void) { operation(FLAG_NEGATIVE); } \
     void name##_fcz(void) { operation(FLAG_CARRY | FLAG_ZERO); } \
     void name##_fcn(void) { operation(FLAG_CARRY | FLAG_NEGATIVE); } \
-    void name##_fzn(void) { operation(FLAGS_NZ); }
+    void name##_fzn(void) { operation(FLAGS_NZ); } \
+    void name##_fczn(void) { operation(all_flags); }
 
 // Loads
 
@@ -350,14 +350,14 @@ static inline void cmp_values(uint8_t lhs, uint8_t rhs, FlagMask mask) {
 }
 
 #define DEFINE_COMPARE_VARIANTS(name, arg_type, lhs, rhs) \
-    void name(arg_type arg) { cmp_values((lhs), (rhs), FLAGS_CNZ); } \
-    void name##_nf(arg_type arg) { cmp_values((lhs), (rhs), FLAGS_NONE); } \
+    void name(arg_type arg) { cmp_values((lhs), (rhs), FLAGS_NONE); } \
     void name##_fc(arg_type arg) { cmp_values((lhs), (rhs), FLAG_CARRY); } \
     void name##_fz(arg_type arg) { cmp_values((lhs), (rhs), FLAG_ZERO); } \
     void name##_fn(arg_type arg) { cmp_values((lhs), (rhs), FLAG_NEGATIVE); } \
     void name##_fcz(arg_type arg) { cmp_values((lhs), (rhs), FLAG_CARRY | FLAG_ZERO); } \
     void name##_fcn(arg_type arg) { cmp_values((lhs), (rhs), FLAG_CARRY | FLAG_NEGATIVE); } \
-    void name##_fzn(arg_type arg) { cmp_values((lhs), (rhs), FLAGS_NZ); }
+    void name##_fzn(arg_type arg) { cmp_values((lhs), (rhs), FLAGS_NZ); } \
+    void name##_fczn(arg_type arg) { cmp_values((lhs), (rhs), FLAGS_CNZ); }
 
 DEFINE_COMPARE_VARIANTS(cmp_imm, uint8_t, a, arg)
 DEFINE_COMPARE_VARIANTS(cmp_zp, uint8_t, a, zero_page(arg))
