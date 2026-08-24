@@ -229,8 +229,6 @@ fn flag_helper_suffix(op: @parse.OpCode, id: Int, low: @lower.AsmLowering) -> St
   if writes.is_none() {
     ""
   } else if live_writes.is_none() {
-    "_nf"
-  } else if live_writes == writes {
     ""
   } else {
     let mut suffix = "_f"
