@@ -23,25 +23,41 @@ static inline void update_nz_masked(uint8_t value, FlagMask mask) {
     }
 }
 
-#define DEFINE_READ_VARIANTS(name, arg_type, read_expr, operation, all_flags) \
+#define DEFINE_READ_VARIANTS_FLAGS_NZ(name, arg_type, read_expr, operation) \
     void name(arg_type arg) { operation((read_expr), FLAGS_NONE); } \
-    void name##_fc(arg_type arg) { operation((read_expr), FLAG_CARRY); } \
     void name##_fz(arg_type arg) { operation((read_expr), FLAG_ZERO); } \
     void name##_fn(arg_type arg) { operation((read_expr), FLAG_NEGATIVE); } \
+    void name##_fzn(arg_type arg) { operation((read_expr), FLAGS_NZ); }
+
+#define DEFINE_READ_VARIANTS_FLAGS_CNZ(name, arg_type, read_expr, operation) \
+    DEFINE_READ_VARIANTS_FLAGS_NZ(name, arg_type, read_expr, operation) \
+    void name##_fc(arg_type arg) { operation((read_expr), FLAG_CARRY); } \
     void name##_fcz(arg_type arg) { operation((read_expr), FLAG_CARRY | FLAG_ZERO); } \
     void name##_fcn(arg_type arg) { operation((read_expr), FLAG_CARRY | FLAG_NEGATIVE); } \
-    void name##_fzn(arg_type arg) { operation((read_expr), FLAGS_NZ); } \
-    void name##_fczn(arg_type arg) { operation((read_expr), all_flags); }
+    void name##_fczn(arg_type arg) { operation((read_expr), FLAGS_CNZ); }
 
-#define DEFINE_IMPLIED_VARIANTS(name, operation, all_flags) \
+#define DEFINE_IMPLIED_VARIANTS_FLAGS_NZ(name, operation) \
     void name(void) { operation(FLAGS_NONE); } \
-    void name##_fc(void) { operation(FLAG_CARRY); } \
     void name##_fz(void) { operation(FLAG_ZERO); } \
     void name##_fn(void) { operation(FLAG_NEGATIVE); } \
+    void name##_fzn(void) { operation(FLAGS_NZ); }
+
+#define DEFINE_IMPLIED_VARIANTS_FLAGS_CNZ(name, operation) \
+    DEFINE_IMPLIED_VARIANTS_FLAGS_NZ(name, operation) \
+    void name##_fc(void) { operation(FLAG_CARRY); } \
     void name##_fcz(void) { operation(FLAG_CARRY | FLAG_ZERO); } \
     void name##_fcn(void) { operation(FLAG_CARRY | FLAG_NEGATIVE); } \
-    void name##_fzn(void) { operation(FLAGS_NZ); } \
-    void name##_fczn(void) { operation(all_flags); }
+    void name##_fczn(void) { operation(FLAGS_CNZ); }
+
+#define SELECT_READ_VARIANTS(flags) SELECT_READ_VARIANTS_(flags)
+#define SELECT_READ_VARIANTS_(flags) DEFINE_READ_VARIANTS_##flags
+#define DEFINE_READ_VARIANTS(name, arg_type, read_expr, operation, flags) \
+    SELECT_READ_VARIANTS(flags)(name, arg_type, read_expr, operation)
+
+#define SELECT_IMPLIED_VARIANTS(flags) SELECT_IMPLIED_VARIANTS_(flags)
+#define SELECT_IMPLIED_VARIANTS_(flags) DEFINE_IMPLIED_VARIANTS_##flags
+#define DEFINE_IMPLIED_VARIANTS(name, operation, flags) \
+    SELECT_IMPLIED_VARIANTS(flags)(name, operation)
 
 // Loads
 
@@ -267,7 +283,7 @@ static inline void inc_memory(uint16_t addr, FlagMask mask) {
 }
 
 DEFINE_READ_VARIANTS(inc_zp, uint8_t, (uint16_t)arg, inc_memory, FLAGS_NZ)
-DEFINE_READ_VARIANTS(inc_zpx, uint8_t, (uint16_t)(arg + x), inc_memory, FLAGS_NZ)
+DEFINE_READ_VARIANTS(inc_zpx, uint8_t, (uint8_t)(arg + x), inc_memory, FLAGS_NZ)
 DEFINE_READ_VARIANTS(inc_abs, uint16_t, arg, inc_memory, FLAGS_NZ)
 DEFINE_READ_VARIANTS(inc_absx, uint16_t, arg + x, inc_memory, FLAGS_NZ)
 
@@ -279,7 +295,7 @@ static inline void dec_memory(uint16_t addr, FlagMask mask) {
 }
 
 DEFINE_READ_VARIANTS(dec_zp, uint8_t, (uint16_t)arg, dec_memory, FLAGS_NZ)
-DEFINE_READ_VARIANTS(dec_zpx, uint8_t, (uint16_t)(arg + x), dec_memory, FLAGS_NZ)
+DEFINE_READ_VARIANTS(dec_zpx, uint8_t, (uint8_t)(arg + x), dec_memory, FLAGS_NZ)
 DEFINE_READ_VARIANTS(dec_abs, uint16_t, arg, dec_memory, FLAGS_NZ)
 DEFINE_READ_VARIANTS(dec_absx, uint16_t, arg + x, dec_memory, FLAGS_NZ)
 
@@ -415,4 +431,12 @@ void sei(void) {}
 
 #undef DEFINE_COMPARE_VARIANTS
 #undef DEFINE_IMPLIED_VARIANTS
+#undef SELECT_IMPLIED_VARIANTS_
+#undef SELECT_IMPLIED_VARIANTS
+#undef DEFINE_IMPLIED_VARIANTS_FLAGS_CNZ
+#undef DEFINE_IMPLIED_VARIANTS_FLAGS_NZ
 #undef DEFINE_READ_VARIANTS
+#undef SELECT_READ_VARIANTS_
+#undef SELECT_READ_VARIANTS
+#undef DEFINE_READ_VARIANTS_FLAGS_CNZ
+#undef DEFINE_READ_VARIANTS_FLAGS_NZ
