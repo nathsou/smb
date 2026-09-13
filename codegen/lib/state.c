@@ -26,5 +26,5 @@ void load_state(uint8_t *state) {
     memcpy(nametable, state + SAVE_STATE_NAMETABLE_OFFSET, NAMETABLE_SIZE);
     memcpy(palette.u8, state + SAVE_STATE_PALETTE_OFFSET, PALETTE_SIZE);
     memcpy(oam, state + SAVE_STATE_OAM_OFFSET, OAM_SIZE);
-    memset(audio_buffer, 0, AUDIO_BUFFER_SIZE); // clear audio buffer
+    apu_clear_buffer(); // discard samples generated before the restored state
 }

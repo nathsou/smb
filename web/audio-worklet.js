@@ -8,7 +8,7 @@ class APUAudioProcessor extends AudioWorkletProcessor {
         this.buffer = new Float32Array(this.bufferSize);
         this.writeIndex = 0;
         this.readIndex = 0;
-        this.bufferFilled = false;
+        this.lastSample = 0;
         this.bufferLowThreshold = this.bufferSize / 4;
 
         this.port.onmessage = (event) => {
@@ -17,8 +17,13 @@ class APUAudioProcessor extends AudioWorkletProcessor {
                 const chunkSize = event.data.chunkSize;
 
                 for (let i = 0; i < chunkSize; i++) {
+                    const nextWriteIndex = (this.writeIndex + 1) & this.bufferMask;
+                    // Preserve queued samples if the producer gets ahead. An
+                    // overwrite would splice unrelated waveform sections and
+                    // produce a click.
+                    if (nextWriteIndex === this.readIndex) break;
                     this.buffer[this.writeIndex] = newSamples[i];
-                    this.writeIndex = (this.writeIndex + 1) & this.bufferMask;
+                    this.writeIndex = nextWriteIndex;
                 }
             }
         };
@@ -36,8 +41,11 @@ class APUAudioProcessor extends AudioWorkletProcessor {
         const channel = outputs[0][0];
 
         for (let i = 0; i < channel.length; i++) {
-            channel[i] = this.buffer[this.readIndex];
-            this.readIndex = (this.readIndex + 1) & this.bufferMask;
+            if (this.readIndex !== this.writeIndex) {
+                this.lastSample = this.buffer[this.readIndex];
+                this.readIndex = (this.readIndex + 1) & this.bufferMask;
+            }
+            channel[i] = this.lastSample;
         }
 
         // Notify main thread if the buffer is running low

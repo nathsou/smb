@@ -2,7 +2,7 @@ CC = clang
 
 CFLAGS = -g -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function -Wno-unused-value -Wconversion -Wsign-conversion -Wno-missing-braces
 CFLAGS += -I./raylib-quickstart/build/external/raylib-master/src
-CFLAGS += -O3 -std=c99
+CFLAGS += -O3 -std=c11
 CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -ferror-limit=0
 
@@ -36,7 +36,7 @@ build: clean
 	$(CC) $(CFLAGS) -o smb ${MAIN} $(SOURCES) codegen/lib/common.c $(GC_FLAGS) $(RAYLIB_FLAGS) $(OBJECTS)
 
 wasm: clean
-	$(CC) -O3 -ffunction-sections -fdata-sections --target=wasm32 -nostdlib -Wl,--gc-sections -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined -o web/smb.wasm $(SOURCES)
+	$(CC) -O3 -std=c11 -ffunction-sections -fdata-sections --target=wasm32 -nostdlib -Wl,--gc-sections -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined -o web/smb.wasm $(SOURCES)
 
 hash: clean
 	$(CC) $(CFLAGS) -o hash codegen/hash.c $(SOURCES) codegen/lib/rec.c codegen/lib/common.c $(GC_FLAGS)

@@ -25,6 +25,8 @@
 #define CONTROLLER1_SELECT_KEY KEY_SPACE
 
 #define AUDIO_SAMPLE_RATE 48000
+#define AUDIO_STREAM_BUFFER_SIZE 512
+#define AUDIO_BUFFER_TARGET 2048
 #define SAVE_FILE "smb.sav"
 
 bool last_save_state_loaded = false;
@@ -175,11 +177,19 @@ int main(void) {
     SetTargetFPS(60);
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "SMB");
 
-    SetAudioStreamBufferSizeDefault(128);
+    SetAudioStreamBufferSizeDefault(AUDIO_STREAM_BUFFER_SIZE);
 
     InitAudioDevice();
     AudioStream stream = LoadAudioStream(AUDIO_SAMPLE_RATE, 8, 1);
     SetAudioStreamCallback(stream, audio_input_callback);
+
+    while (apu_buffered_samples() < AUDIO_BUFFER_TARGET) {
+        // Keep the game and APU timelines together while priming the queue.
+        next_frame();
+        ppu_render();
+        apu_step_frame();
+    }
+
     PlayAudioStream(stream);
 
     Image image = {
@@ -202,6 +212,8 @@ int main(void) {
     
     int gamepad = 0;
     GamepadMapping *mapping = NULL;
+    size_t audio_underrun_samples = 0;
+    size_t audio_diagnostic_frames = 0;
 
     while (!WindowShouldClose()) {
         if (mapping == NULL && IsGamepadAvailable(gamepad)) {
@@ -234,6 +246,16 @@ int main(void) {
 
             load_state(last_save_state);
             should_load_state = false;
+        }
+
+        audio_underrun_samples += apu_take_underrun_samples();
+        audio_diagnostic_frames++;
+        if (audio_diagnostic_frames == 60) {
+            if (audio_underrun_samples > 0) {
+                fprintf(stderr, "Audio underrun: %zu samples in the last 60 frames\n", audio_underrun_samples);
+            }
+            audio_underrun_samples = 0;
+            audio_diagnostic_frames = 0;
         }
     }
 

@@ -293,6 +293,7 @@ static const float TRIANGLE_MIXER_LOOKUP[] = {
     0.6870166f, 0.6892762f, 0.69152504f, 0.6937633f, 0.6959909f, 0.69820803f, 0.7004148f, 0.7026111f,
     0.7047972f, 0.7069731f, 0.7091388f, 0.7112945f, 0.7134401f, 0.7155759f, 0.7177018f, 0.7198179f,
     0.72192425f, 0.72402096f, 0.726108f, 0.72818565f, 0.7302538f, 0.73231256f, 0.73436195f, 0.7364021f,
+    0.73843306f, 0.74045485f, 0.74246758f,
 };
 
 typedef struct {
@@ -350,7 +351,7 @@ inline void triangle_step_length_counter(Triangle* tc) {
 }
 
 void triangle_step_timer(Triangle* tc) {
-    if (timer_step(&tc->timer) && tc->linear_counter > 0 && !length_counter_is_zero(&tc->length_counter)) {
+    if (tc->timer.period > 1 && timer_step(&tc->timer) && tc->linear_counter > 0 && !length_counter_is_zero(&tc->length_counter)) {
         tc->duty_cycle = (tc->duty_cycle + 1) & 31;
     }
 }
@@ -363,12 +364,8 @@ void triangle_set_enabled(Triangle* tc, bool enabled) {
 }
 
 uint8_t triangle_output(const Triangle* tc) {
-    if (!tc->enabled ||
-        length_counter_is_zero(&tc->length_counter) ||
-        tc->linear_counter == 0 ||
-        tc->timer.period <= 2) {
-        return 0;
-    }
+    // The triangle DAC holds its current sequencer value while the channel is
+    // halted. Returning zero here creates an audible pop at note boundaries.
     return SEQUENCER_LOOKUP[tc->duty_cycle & 0x1F];
 }
 
@@ -389,16 +386,9 @@ typedef struct {
 
 void noise_init(Noise* self) {
     self->enabled = false;
-    self->length_counter.counter = 0;
-    self->envelope.constant_mode = false;
-    self->envelope.looping = false;
-    self->envelope.start = false;
-    self->envelope.constant_volume = 0;
-    self->envelope.period = 0;
-    self->envelope.divider = 0;
-    self->envelope.decay = 0;
-    self->timer.counter = 0;
-    self->timer.period = 0;
+    length_counter_init(&self->length_counter);
+    envelope_init(&self->envelope);
+    timer_init(&self->timer);
     self->shift_register = 1;
     self->mode = false;
 }
@@ -422,9 +412,7 @@ void noise_step_timer(Noise* self) {
 }
 
 void noise_step_length_counter(Noise* self) {
-    if (self->length_counter.counter > 0) {
-        self->length_counter.counter--;
-    }
+    length_counter_step(&self->length_counter);
 }
 
 void noise_step_envelope(Noise* self) {
@@ -433,7 +421,7 @@ void noise_step_envelope(Noise* self) {
 
 void noise_write_control(Noise* self, uint8_t val) {
     bool halt_length_counter = (val & 0x20) != 0;
-    self->length_counter.counter = halt_length_counter ? 0 : self->length_counter.counter;
+    length_counter_set_enabled(&self->length_counter, !halt_length_counter);
     self->envelope.looping = halt_length_counter;
     self->envelope.constant_mode = (val & 0x10) != 0;
     self->envelope.period = val & 0x0F;
@@ -446,12 +434,12 @@ void noise_write_period(Noise* self, uint8_t val) {
 }
 
 void noise_write_length(Noise* self, uint8_t val) {
-    self->length_counter.counter = val >> 3;
+    length_counter_set(&self->length_counter, val >> 3);
     self->envelope.start = true;
 }
 
 uint8_t noise_output(const Noise* self) {
-    if ((self->shift_register & 1) == 1 || self->length_counter.counter == 0) {
+    if (!self->enabled || (self->shift_register & 1) == 1 || length_counter_is_zero(&self->length_counter)) {
         return 0;
     } else {
         return envelope_output(&self->envelope);
@@ -646,7 +634,10 @@ float filter_output(Filter* f, float x) {
 size_t sample_rate;
 uint8_t audio_buffer[AUDIO_BUFFER_SIZE];
 uint8_t web_audio_buffer[AUDIO_BUFFER_SIZE];
-uint16_t audio_buffer_index;
+_Atomic size_t audio_read_index;
+_Atomic size_t audio_write_index;
+_Atomic size_t audio_underrun_samples;
+_Atomic uint8_t audio_last_sample;
 Pulse pulse1, pulse2;
 Triangle triangle;
 Noise noise;
@@ -654,6 +645,9 @@ DeltaModulationChannel dmc;
 Filter filter1, filter2, filter3;
 size_t frame_counter;
 uint16_t audio_buffer_size = AUDIO_BUFFER_SIZE;
+size_t quarter_frame_counter;
+uint64_t sample_phase;
+bool five_step_mode;
 
 void apu_init(size_t frequency) {
     memset(audio_buffer, 0, AUDIO_BUFFER_SIZE);
@@ -664,8 +658,15 @@ void apu_init(size_t frequency) {
     dmc_init(&dmc);
 
     sample_rate = frequency;
-    audio_buffer_index = 0;
+    atomic_init(&audio_read_index, 0);
+    atomic_init(&audio_write_index, 0);
+    atomic_init(&audio_underrun_samples, 0);
+    atomic_init(&audio_last_sample, 128);
+    atomic_store_explicit(&audio_underrun_samples, 0, memory_order_relaxed);
     frame_counter = 0;
+    five_step_mode = false;
+    quarter_frame_counter = 0;
+    sample_phase = 0;
 
     filter_init_high_pass(&filter1, sample_rate, 90.0f);
     filter_init_high_pass(&filter2, sample_rate, 440.0f);
@@ -698,6 +699,10 @@ uint8_t apu_get_sample(void) {
 
     return (uint8_t)(255.0f * sample);
 }
+
+void apu_step_envelope(void);
+void apu_step_length_counter(void);
+void apu_step_sweep(void);
 
 void apu_write(uint16_t addr, uint8_t value) {
     switch (addr) {
@@ -796,6 +801,18 @@ void apu_write(uint16_t addr, uint8_t value) {
         }
         // Frame counter
         case 0x4017: {
+            frame_counter = 0;
+            five_step_mode = (value & 0x80) != 0;
+
+            // SMB writes $C0 here once per frame. Bit 7 selects the five-step
+            // sequence, which immediately clocks the envelope/linear and
+            // length/sweep units on real hardware.
+            if (five_step_mode) {
+                apu_step_envelope();
+                apu_step_length_counter();
+                apu_step_sweep();
+                noise_step_envelope(&noise);
+            }
             break;
         }
     }
@@ -829,36 +846,45 @@ void apu_step_sweep(void) {
 
 const size_t CYCLES_PER_FRAME = CPU_FREQUENCY / FRAME_RATE;
 
-void apu_step_quarter_frame(void) {
-    static size_t quarter_frame_counter = 0;
+static inline void apu_queue_sample(uint8_t sample) {
+    size_t write_index = atomic_load_explicit(&audio_write_index, memory_order_relaxed);
+    size_t next_write_index = (write_index + 1) % AUDIO_BUFFER_SIZE;
+    size_t read_index = atomic_load_explicit(&audio_read_index, memory_order_acquire);
 
+    if (next_write_index == read_index) {
+        return;
+    }
+
+    audio_buffer[write_index] = sample;
+    atomic_store_explicit(&audio_write_index, next_write_index, memory_order_release);
+}
+
+void apu_step_quarter_frame(void) {
     /* sequencer steps */
-    frame_counter = (frame_counter + 1) % 5;  // TODO: confirm 4‑step never used
-    if (frame_counter & 1) {
+    frame_counter++;
+    if (frame_counter == 1 || frame_counter == 3) {
         apu_step_envelope();
-    } else {
+    } else if (frame_counter == 2 || (frame_counter == 4 && !five_step_mode) || (frame_counter == 5 && five_step_mode)) {
         apu_step_length_counter();
         apu_step_envelope();
         apu_step_sweep();
+
+        if (frame_counter == 4 || frame_counter == 5) {
+            frame_counter = 0;
+        }
     }
 
     size_t cycles = CYCLES_PER_FRAME / 4;
-    size_t spf_quarter = sample_rate / (4 * FRAME_RATE);
-    size_t spf_frame = sample_rate / FRAME_RATE;
-    size_t to_write = (quarter_frame_counter == 3)
-                      ? (spf_frame - 3 * spf_quarter)
-                      : spf_quarter;
-
-    size_t acc = 0;
     for (size_t i = 0; i < cycles; ++i) {
-        acc += to_write;
-        if (acc >= cycles) {
-            acc -= cycles;
-            if (audio_buffer_index < AUDIO_BUFFER_SIZE) {
-                audio_buffer[audio_buffer_index++] = apu_get_sample();
-            }
-        }
         apu_step_timer();
+
+        // Use the CPU clock as the source of truth so fractional samples are
+        // distributed over time instead of truncating each quarter-frame.
+        sample_phase += sample_rate;
+        if (sample_phase >= CPU_FREQUENCY) {
+            sample_phase -= CPU_FREQUENCY;
+            apu_queue_sample(apu_get_sample());
+        }
     }
 
     quarter_frame_counter = (quarter_frame_counter + 1) & 3;
@@ -874,13 +900,38 @@ void apu_step_frame(void) {
 }
 
 void apu_fill_buffer(uint8_t* cb_buffer, size_t size) {
-    while (audio_buffer_index < size) {
-        apu_step_quarter_frame();
+    size_t read_index = atomic_load_explicit(&audio_read_index, memory_order_relaxed);
+    size_t write_index = atomic_load_explicit(&audio_write_index, memory_order_acquire);
+    size_t copied = 0;
+
+    while (copied < size && read_index != write_index) {
+        uint8_t sample = audio_buffer[read_index];
+        atomic_store_explicit(&audio_last_sample, sample, memory_order_relaxed);
+        cb_buffer[copied++] = sample;
+        read_index = (read_index + 1) % AUDIO_BUFFER_SIZE;
     }
 
-    size_t len = size > audio_buffer_index ? audio_buffer_index : size;
+    atomic_store_explicit(&audio_read_index, read_index, memory_order_release);
+    uint8_t last_sample = atomic_load_explicit(&audio_last_sample, memory_order_relaxed);
+    while (copied < size) {
+        cb_buffer[copied++] = last_sample;
+        atomic_fetch_add_explicit(&audio_underrun_samples, 1, memory_order_relaxed);
+    }
+}
 
-    memcpy(cb_buffer, audio_buffer, len);
-    audio_buffer_index -= len;
-    memcpy(audio_buffer, audio_buffer + len, audio_buffer_index);
+size_t apu_buffered_samples(void) {
+    size_t read_index = atomic_load_explicit(&audio_read_index, memory_order_acquire);
+    size_t write_index = atomic_load_explicit(&audio_write_index, memory_order_acquire);
+    return (write_index + AUDIO_BUFFER_SIZE - read_index) % AUDIO_BUFFER_SIZE;
+}
+
+size_t apu_take_underrun_samples(void) {
+    return atomic_exchange_explicit(&audio_underrun_samples, 0, memory_order_relaxed);
+}
+
+void apu_clear_buffer(void) {
+    size_t write_index = atomic_load_explicit(&audio_write_index, memory_order_acquire);
+    atomic_store_explicit(&audio_read_index, write_index, memory_order_release);
+    atomic_store_explicit(&audio_last_sample, 128, memory_order_relaxed);
+    atomic_store_explicit(&audio_underrun_samples, 0, memory_order_relaxed);
 }
