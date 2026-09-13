@@ -83,6 +83,7 @@ bool handle_inputs(void) {
         if (audio_muted) {
             // Clear existing buffers when muting
             ndspChnWaveBufClear(0);
+            apu_clear_buffer();
             // Ensure buffers are marked DONE so they can be refilled if unmuted
              waveBuf[0].status = NDSP_WBUF_DONE;
              waveBuf[1].status = NDSP_WBUF_DONE;
