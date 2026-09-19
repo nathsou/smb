@@ -12,6 +12,30 @@ uint8_t sp;
 bool carry_flag;
 bool zero_flag;
 bool neg_flag;
+bool overflow_flag;
+bool interrupt_disabled;
+bool decimal_flag;
+uint16_t cpu_resume_pc;
+
+// C calls express normal continuations; the guest stack remains observable to
+// PHA/PLA, TSX, memory accesses, and return-address-based inline dispatchers.
+void cpu_call_begin(uint16_t return_address) {
+    ram[0x100 + sp--] = (uint8_t)(return_address >> 8);
+    ram[0x100 + sp--] = (uint8_t)return_address;
+}
+
+void cpu_call_end(void) {
+    sp = (uint8_t)(sp + 2);
+}
+
+void cpu_yield(uint16_t pc) {
+    cpu_resume_pc = pc;
+}
+
+void cpu_unresolved_jump(uint16_t pc) {
+    cpu_resume_pc = pc;
+    __builtin_trap(); // explicit unsupported transfer, never silent fallthrough
+}
 
 uint8_t ram[2048];
 
@@ -38,6 +62,10 @@ void cpu_init(void) {
     carry_flag = false;
     zero_flag = false;
     neg_flag = false;
+    overflow_flag = false;
+    interrupt_disabled = true;
+    decimal_flag = false;
+    cpu_resume_pc = 0;
 
     // controller
     controller1_state = 0;
@@ -73,7 +101,7 @@ uint8_t read_byte(uint16_t addr) {
     }
 
     if (addr >= 0x8000) {
-        return data[addr - 0x8000];
+        return data[(addr - 0x8000) % PRG_IMAGE_SIZE];
     }
 
     return 0;

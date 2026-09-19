@@ -127,11 +127,17 @@ fn Emitter::emit_data_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"stdint.h\"")
   self.emit("#include \"constants.h\"")
   self.emit("")
-  self.emit("extern const uint8_t data[\{low.table_offset}];")
+  let size = match low.program { Some(p) => p.image.bytes.length(); None => low.table_offset }
+  self.emit("extern const uint8_t data[\{size}];")
+  self.emit("#define PRG_IMAGE_SIZE \{size}")
   self.emit("")
 
   for label, table in low.tables_by_label {
-    self.emit("#define \{label} 0x\{hex(0x8000 + table.offset)}")
+    let address = match low.program {
+      Some(p) => p.image.symbols[label]
+      None => 0x8000 + table.offset
+    }
+    self.emit("#define \{label} 0x\{hex(address)}")
   }
 
   self.emit("")
@@ -145,22 +151,34 @@ fn Emitter::emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("const uint8_t data[] = {")
   self.indentation += 1
 
-  for table in low.tables {
-    self.emit("")
-    self.emit("// \{table.name}")
-
-    for line in table.lines {
-      match line {
-        Data(data~, comment~) => {
-          let data = data.map(show_expr).join(", ")
-
-          match comment.val {
-            "" => self.emit(data + ",")
-            _ => self.emit("\{data}, // \{comment.val}")
-          }
-        }
-        Comment(comment) => {
-          self.emit("// \{comment}")
+  if low.program is Some(p) {
+    let labels: Map[Int, Array[String]] = Map([])
+    for i, item in p.image.source {
+      if item is Label(name) {
+        let pc = p.image.addresses[i]
+        if !labels.contains(pc) { labels[pc] = [] }
+        labels[pc].push(name)
+      }
+    }
+    let mut offset = 0
+    while offset < p.image.bytes.length() {
+      let pc = p.image.origin + offset
+      if labels.get(pc) is Some(names) { self.emit("// \{names.join(", ")}") }
+      let bytes = []
+      for _ in 0..<16 {
+        bytes.push("0x" + hex(p.image.bytes[offset]).pad_start(2, '0'))
+        offset += 1
+        if offset == p.image.bytes.length() || labels.contains(p.image.origin + offset) { break }
+      }
+      self.emit(bytes.join(", ") + ",")
+    }
+  } else {
+    for table in low.tables {
+      self.emit("// \{table.name}")
+      for line in table.lines {
+        match line {
+          Data(data~, comment~) => self.emit(data.map(show_expr).join(", ") + ", // " + comment.val)
+          Comment(comment) => self.emit("// " + comment)
         }
       }
     }
@@ -432,7 +450,9 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
                 "if (\{cond}) { \{self.gen_jump(target, low)} }"
               }
               (JMP, _) => {
-                self.gen_jump(args, low)
+                if low.program is Some(p) && p.idle.contains(id) {
+                  "cpu_yield(0x\{hex(id)}); return;"
+                } else { self.gen_jump(args, low) }
               }
               (JSR, _) => {
                 let target = match mode {
@@ -440,7 +460,9 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
                   _ => ""
                 }
 
-                "\{target}();"
+                if id >= 0 && low.program is Some(_) {
+                  "cpu_call_begin(0x\{hex(id + 2)}); \{target}(); cpu_call_end();"
+                } else { "\{target}();" }
               }
               (RTS, _) => "return;"
               _ => {
@@ -464,17 +486,29 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
 
         self.emit(stmt)
       }
-      JumpEngine(jump_table~) => {
-        self.emit("switch (a) {")
-        self.indentation += 1
-
-        for idx, label in jump_table {
-          self.emit("case \{idx}: \{rename_label(label)}(); return;")
+      JumpEngine(jump_table~, site~) => {
+        let program = low.program.unwrap()
+        let dispatch = program.dispatches[site]
+        self.emit("cpu_call_begin(0x\{hex(site + 2)});")
+        for inst in dispatch.setup {
+          let mode = try low.lower_mode(@image.source_mode(program.image, inst)) catch { _ => abort("Invalid dispatcher instruction") }
+          self.emit_item(@lower.AsmItem::Inst(id=-1, op=inst.op, mode~, comment=None), low)
         }
-
+        self.emit("switch (read_word(0x\{hex(dispatch.pointer)})) {")
+        self.indentation += 1
+        let emitted: Set[Int] = Set([])
+        for idx, label in jump_table {
+          let address = dispatch.targets[idx]
+          if !emitted.contains(address) {
+            self.emit("case 0x\{hex(address)}: \{rename_label(label)}(); return;")
+            emitted.add(address)
+          }
+        }
+        self.emit("default: cpu_unresolved_jump(read_word(0x\{hex(dispatch.pointer)})); return;")
         self.indentation -= 1
         self.emit("}")
       }
+
       If(cond~, then~, otherwise~, comment~) => {
         let cond = show_cond_opcode(cond)
 

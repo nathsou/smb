@@ -50,7 +50,7 @@ pub(all) enum AsmAddressingMode {
 pub(all) enum AsmItem {
   Label(String)
   Inst(id~: Int, op~: @parse.OpCode, mode~: AsmAddressingMode, comment~: String?)
-  JumpEngine(jump_table~: Array[String])
+  JumpEngine(jump_table~: Array[String], site~: Int)
   If(cond~: @parse.OpCode, then~: Array[AsmItem], otherwise~: Array[AsmItem]?, comment~: String?)
   Comment(String)
 } derive (Debug)

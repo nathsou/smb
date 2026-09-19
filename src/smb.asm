@@ -671,7 +671,7 @@ GameOverModeValue     = 3
 
 ;-------------------------------------------------------------------------------------
 
-Start__sub:
+Start:
              sei                          ;pretty standard 6502 type init here
              cld
              lda #%00010000               ;init PPU control register 1 
@@ -709,7 +709,7 @@ ColdBoot:    jsr InitializeMemory         ;clear memory using pointer in Y
              lda Mirror_PPU_CTRL_REG1
              ora #%10000000               ;enable NMIs
              jsr WritePPUReg1
-            rti ; temporary host reset exit: jmp EndlessLoop              ;endless loop, need I say more?
+EndlessLoop: jmp EndlessLoop              ;endless loop, need I say more?
 
 ;-------------------------------------------------------------------------------------
 ;$00 - vram buffer address table low, also used for pseudorandom bit
@@ -736,7 +736,7 @@ VRAM_AddrTable_High:
 VRAM_Buffer_Offset:
       .db <VRAM_Buffer1_Offset, <VRAM_Buffer2_Offset
 
-NonMaskableInterrupt__sub:
+NonMaskableInterrupt:
                lda Mirror_PPU_CTRL_REG1  ;disable NMIs in mirror reg
                and #%01111111            ;save all other bits
                sta Mirror_PPU_CTRL_REG1
@@ -939,11 +939,10 @@ OperModeExecutionTree:
 
 MoveAllSpritesOffscreen:
               ldy #$00                ;this routine moves all sprites off the screen
-              jmp RecoveredSkip0                 ;BIT instruction opcode
+              .db $2c                 ;BIT instruction opcode
 
 MoveSpritesOffscreen:
               ldy #$04                ;this routine moves all but sprite 0
-RecoveredSkip0:
               lda #$f8                ;off the screen
 SprInitLoop:  sta Sprite_Y_Position,y ;write 248 into OAM data's Y coordinate
               iny                     ;which will move it off the screen
@@ -2368,21 +2367,21 @@ WorldSelectMessage2:
 ;$06 - jump address low
 ;$07 - jump address high
 
-; JumpEngine:
-;        asl          ;shift bit from contents of A
-;        tay
-;        pla          ;pull saved return address from stack
-;        sta $04      ;save to indirect
-;        pla
-;        sta $05
-;        iny
-;        lda ($04),y  ;load pointer from indirect
-;        sta $06      ;note that if an RTS is performed in next routine
-;        iny          ;it will return to the execution before the sub
-;        lda ($04),y  ;that called this routine
-;        sta $07
-;        jmp ($06)    ;jump to the address we loaded
-; 
+JumpEngine:
+       asl          ;shift bit from contents of A
+       tay
+       pla          ;pull saved return address from stack
+       sta $04      ;save to indirect
+       pla
+       sta $05
+       iny
+       lda ($04),y  ;load pointer from indirect
+       sta $06      ;note that if an RTS is performed in next routine
+       iny          ;it will return to the execution before the sub
+       lda ($04),y  ;that called this routine
+       sta $07
+       jmp ($06)    ;jump to the address we loaded
+
 ;-------------------------------------------------------------------------------------
 
 InitializeNameTables:
@@ -3919,11 +3918,10 @@ Hole_Water:
 
 QuestionBlockRow_High:
       lda #$03    ;start on the fourth row
-      jmp RecoveredSkip1     ;BIT instruction opcode
+      .db $2c     ;BIT instruction opcode
 
 QuestionBlockRow_Low:
       lda #$07             ;start on the eighth row
-RecoveredSkip1:
       pha                  ;save whatever row to the stack for now
       jsr ChkLrgObjLength  ;get low nybble and save as length
       pla
@@ -3936,15 +3934,14 @@ RecoveredSkip1:
 
 Bridge_High:
       lda #$06  ;start on the seventh row from top of screen
-      jmp RecoveredSkip2   ;BIT instruction opcode
+      .db $2c   ;BIT instruction opcode
 
 Bridge_Middle:
       lda #$07  ;start on the eighth row
-      jmp RecoveredSkip2   ;BIT instruction opcode
+      .db $2c   ;BIT instruction opcode
 
 Bridge_Low:
       lda #$09             ;start on the tenth row
-RecoveredSkip2:
       pha                  ;save whatever row to the stack for now
       jsr ChkLrgObjLength  ;get low nybble and save as length
       pla
@@ -7340,15 +7337,14 @@ BlockCode: jsr JumpEngine          ;run appropriate subroutine depending on bloc
 
 MushFlowerBlock:
       lda #$00       ;load mushroom/fire flower into power-up type
-      jmp RecoveredSkip3        ;BIT instruction opcode
+      .db $2c        ;BIT instruction opcode
 
 StarBlock:
       lda #$02       ;load star into power-up type
-      jmp RecoveredSkip3        ;BIT instruction opcode
+      .db $2c        ;BIT instruction opcode
 
 ExtraLifeMushBlock:
       lda #$03         ;load 1-up mushroom into power-up type
-RecoveredSkip3:
       sta $39          ;store correct power-up type
       jmp SetupPowerUp
 
@@ -7657,10 +7653,10 @@ SetXMoveAmt: sty $00                 ;set movement amount here
 MaxSpdBlockData:
       .db $06, $08
 
-; ResidualGravityCode:
-;       ldy #$00       ;this part appears to be residual,
-;       .db $2c        ;no code branches or jumps to it...
-; 
+ResidualGravityCode:
+      ldy #$00       ;this part appears to be residual,
+      .db $2c        ;no code branches or jumps to it...
+
 ImposeGravityBlock:
       ldy #$01       ;set offset for maximum speed
       lda #$50       ;set movement amount here
@@ -7676,11 +7672,10 @@ ImposeGravitySprObj:
 
 MovePlatformDown:
       lda #$00    ;save value to stack (if branching here, execute next
-      jmp RecoveredSkip4     ;part as BIT instruction)
+      .db $2c     ;part as BIT instruction)
 
 MovePlatformUp:
            lda #$01        ;save value to stack
-RecoveredSkip4:
            pha
            ldy Enemy_ID,x  ;get enemy object identifier
            inx             ;increment offset for enemy object
@@ -11846,11 +11841,10 @@ PositionPlayerOnS_Plat:
       lda Enemy_Y_Position,x     ;for offset
       clc                        ;add positioning data using offset to the vertical
       adc PlayerPosSPlatData-1,y ;coordinate
-      jmp RecoveredSkip5                    ;BIT instruction opcode
+      .db $2c                    ;BIT instruction opcode
 
 PositionPlayerOnVPlat:
          lda Enemy_Y_Position,x    ;get vertical coordinate
-RecoveredSkip5:
          ldy GameEngineSubroutine
          cpy #$0b                  ;if certain routine being executed on this frame,
          beq ExPlPos               ;skip all of this
@@ -13010,14 +13004,14 @@ BlockBufferChk_Enemy:
       pla        ;pull A from stack and jump elsewhere
       jmp BBChk_E
 
-; ResidualMiscObjectCode:
-;       txa
-;       clc           ;supposedly used once to set offset for
-;       adc #$0d      ;miscellaneous objects
-;       tax
-;       ldy #$1b      ;supposedly used once to set offset for block buffer data
-;       jmp ResJmpM   ;probably used in early stages to do misc to bg collision detection
-; 
+ResidualMiscObjectCode:
+      txa
+      clc           ;supposedly used once to set offset for
+      adc #$0d      ;miscellaneous objects
+      tax
+      ldy #$1b      ;supposedly used once to set offset for block buffer data
+      jmp ResJmpM   ;probably used in early stages to do misc to bg collision detection
+
 BlockBufferChk_FBall:
          ldy #$1a                  ;set offset for block buffer adder data
          txa
@@ -13050,11 +13044,10 @@ BlockBufferColli_Feet:
 
 BlockBufferColli_Head:
        lda #$00       ;set flag to return vertical coordinate
-       jmp RecoveredSkip6        ;BIT instruction opcode
+       .db $2c        ;BIT instruction opcode
 
 BlockBufferColli_Side:
        lda #$01       ;set flag to return horizontal coordinate
-RecoveredSkip6:
        ldx #$00       ;set offset for player object
 
 BlockBufferCollision:
@@ -16353,7 +16346,7 @@ BrickShatterEnvData:
 
 ;-------------------------------------------------------------------------------------
 ;INTERRUPT VECTORS
-;
-;      .dw NonMaskableInterrupt
-;      .dw Start
-;      .dw $fff0  ;unused
+
+      .dw NonMaskableInterrupt
+      .dw Start
+      .dw $fff0  ;unused

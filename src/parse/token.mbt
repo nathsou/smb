@@ -14,6 +14,7 @@ pub(all) enum ConstantSize {
 } derive (Debug, Eq)
 
 enum Token {
+  EOF
   Comment(comment~: String, is_inline~: Bool)
   Identifier(String)
   Label(String)
