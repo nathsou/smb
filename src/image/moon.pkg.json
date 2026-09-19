@@ -1,0 +1,6 @@
+{
+  "import": [
+    "nathsou/smb/parse",
+    "moonbitlang/core/debug"
+  ]
+}
