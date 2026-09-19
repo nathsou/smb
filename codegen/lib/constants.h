@@ -524,8 +524,8 @@
 #define ColdBootOffset LOW_BYTE(0x7fe)
 #define TitleScreenDataOffset 0x1ec0
 #define SoundMemory 0x7b0
-#define SwimTileRepOffset PlayerGraphicsTable + 0x9e
-#define MusicHeaderOffsetData MusicHeaderData - 1
+#define SwimTileRepOffset (PlayerGraphicsTable + 0x9e)
+#define MusicHeaderOffsetData (MusicHeaderData - 1)
 #define MHD MusicHeaderData
 #define A_Button 0b10000000
 #define B_Button 0b01000000

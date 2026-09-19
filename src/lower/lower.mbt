@@ -183,19 +183,31 @@ fn AsmLowering::collect_defines(self: AsmLowering) -> Unit raise LoweringError {
   }
 }
 
-pub fn AsmLowering::lower_mode(self: AsmLowering, mode: @parse.SourceAddressingMode) -> AsmAddressingMode raise LoweringError {
+pub fn AsmLowering::lower_mode(self: AsmLowering, mode: @parse.SourceAddressingMode, op~: @parse.OpCode? = None) -> AsmAddressingMode raise LoweringError {
   match mode {
             Accumulator => Accumulator
             Implied => Implied
             Immediate(operand) => Immediate(self.type_expr(operand))
             Relative(addr~) => Relative(self.type_expr(addr))
             AbsoluteOrZeroPage(addr~) | AbsoluteOrZeroPageX(addr~) | AbsoluteOrZeroPageY(addr~) => {
+              let numeric = match self.program {
+                Some(p) => try Some(p.image.eval(addr)) catch { _ => None }
+                None => None
+              }
               let addr = self.type_expr(addr)
               let size: @parse.ConstantSize = match addr.ty() {
                 ConstTy(size) => size
                 ArrayTy(_) | LabelTy => Word
               }
 
+              let size = match numeric {
+                Some(v) if v >= 0 && v < 256 => {
+                  let kind = match mode { AbsoluteOrZeroPage(_) => "zp"; AbsoluteOrZeroPageX(_) => "zpx"; _ => "zpy" }
+                  if op is Some(opcode) && @image.encoding(opcode, kind) == None { @parse.Word } else { @parse.Byte }
+                }
+                Some(_) => @parse.Word
+                None => size
+              }
               match (mode, size) {
                 (AbsoluteOrZeroPage(_), Byte) => ZeroPage(addr)
                 (AbsoluteOrZeroPage(_), Word) => Absolute(addr)
@@ -262,7 +274,7 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
 
           self.lowered.push(JumpEngine(jump_table~, site=self.program.unwrap().addresses[item_idx]))
         } else {
-          let addr_mode = self.lower_mode(mode)
+          let addr_mode = self.lower_mode(mode, op=Some(op))
 
           let comment = match self.items.get(item_idx + 1) {
             Some(Comment(comment~, is_inline=true)) => Some(comment)

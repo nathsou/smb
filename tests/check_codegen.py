@@ -4,6 +4,7 @@ import argparse
 import pathlib
 import subprocess
 import hashlib
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -31,5 +32,11 @@ if __name__ == "__main__":
         "codegen/lib/code.h", "codegen/lib/data.c", "codegen/lib/data.h",
         "codegen/lib/constants.h")
     run("make", "hash")
+    with tempfile.TemporaryDirectory(prefix="smb-semantics-") as tmp:
+        executable = str(pathlib.Path(tmp) / "cpu-semantics")
+        sources = ["instructions", "cpu", "code", "data", "ppu", "apu"]
+        run("cc", "-std=c99", "-O2", "-o", executable, "tests/cpu_semantics.c",
+            *(f"codegen/lib/{name}.c" for name in sources))
+        run(executable)
     if args.rom:
         run("./hash")
