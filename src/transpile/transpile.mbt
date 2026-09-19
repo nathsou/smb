@@ -5,6 +5,7 @@ pub(all) struct Emitter {
   mut jsr_return_index: Int
   local_labels: Set[String]
   used_labels: Set[String]
+  mut function_name: String
 }
 
 pub fn Emitter::new() -> Emitter {
@@ -14,6 +15,7 @@ pub fn Emitter::new() -> Emitter {
     jsr_return_index: 0,
     local_labels: Set([]),
     used_labels: Set([]),
+    function_name: "",
   }
 }
 
@@ -391,7 +393,7 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
 
         if !is_subroutine_label && self.used_labels.contains(name) {
           self.emit("\n\{rename_label(name)}:")
-        } else {
+        } else if name != self.function_name && !name.has_prefix("loc_") {
           self.emit("// \{rename_label(name)}:")
         }
       }
@@ -489,12 +491,8 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
       JumpEngine(jump_table~, site~) => {
         let program = low.program.unwrap()
         let dispatch = program.dispatches[site]
-        self.emit("cpu_call_begin(0x\{hex(site + 2)});")
-        for inst in dispatch.setup {
-          let mode = try low.lower_mode(@image.source_mode(program.image, inst)) catch { _ => abort("Invalid dispatcher instruction") }
-          self.emit_item(@lower.AsmItem::Inst(id=-1, op=inst.op, mode~, comment=None), low)
-        }
-        self.emit("switch (read_word(0x\{hex(dispatch.pointer)})) {")
+        let helper = @image.address_name(program.image, dispatch.helper)
+        self.emit("switch (\{helper}(0x\{hex(site + 2)})) {")
         self.indentation += 1
         let emitted: Set[Int] = Set([])
         for idx, label in jump_table {
@@ -509,6 +507,14 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
         self.emit("}")
       }
 
+      DoWhile(cond~, body~, comment~) => {
+        self.emit("do {")
+        self.indentation += 1
+        for child in body { self.emit_item(child, low) }
+        self.indentation -= 1
+        let comment = match comment { Some(text) => " // " + text; None => "" }
+        self.emit("} while (\{show_cond_opcode(cond)});\{comment}")
+      }
       If(cond~, then~, otherwise~, comment~) => {
         let cond = show_cond_opcode(cond)
 
@@ -539,6 +545,7 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
             }
 
             self.indentation -= 1
+            self.emit("}")
           }
           None => self.emit("}")
         }
@@ -550,12 +557,16 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
 }
 
 fn Emitter::emit_flat_subroutine(self: Emitter, subroutine: @lower.AsmFlatSubroutine, low: @lower.AsmLowering) -> Unit {
+  self.function_name = subroutine.name
   self.used_labels.clear()
   fn collect(items: Array[@lower.AsmItem]) {
     for item in items {
       match item {
-        Inst(op=JMP | BCC | BCS | BEQ | BNE | BMI | BPL | BVC | BVS,
-          mode=Relative(Ident(name~, ..)) | Absolute(Ident(name~, ..)), ..) => self.used_labels.add(name)
+        Inst(id~, op=JMP | BCC | BCS | BEQ | BNE | BMI | BPL | BVC | BVS,
+          mode=Relative(Ident(name~, ..)) | Absolute(Ident(name~, ..)), ..) => {
+          if !(low.program is Some(p) && p.idle.contains(id)) { self.used_labels.add(name) }
+        }
+        DoWhile(body~, ..) => collect(body)
         If(then~, otherwise~, ..) => {
           collect(then)
           if otherwise is Some(other) { collect(other) }
@@ -586,6 +597,34 @@ fn Emitter::emit_flat_subroutine(self: Emitter, subroutine: @lower.AsmFlatSubrou
 fn Emitter::emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"code.h\"")
   self.emit("")
+
+  if low.program is Some(p) {
+    let helpers: Map[Int, @image.Dispatch] = Map([])
+    for dispatch in p.dispatches.values() { helpers[dispatch.helper] = dispatch }
+    let addresses = helpers.keys().to_array()
+    addresses.sort()
+    for address in addresses {
+      let dispatch = helpers[address]
+      let name = @image.address_name(p.image, address)
+      self.emit("// Return-address indexed dispatch; effects preserved from the original helper.")
+      self.emit("static uint16_t \{name}(uint16_t return_address) {")
+      self.indentation += 1
+      self.emit("cpu_call_begin(return_address);")
+      for inst in dispatch.setup {
+        let mode = try low.lower_mode(@image.source_mode(p.image, inst)) catch { _ => abort("Invalid dispatcher instruction") }
+        let mut comment: String? = None
+        for i, item in p.image.source {
+          if p.image.addresses[i] == inst.pc && item is Inst(_) {
+            if p.image.source.get(i + 1) is Some(Comment(comment=text, is_inline=true)) { comment = Some(text) }
+          }
+        }
+        self.emit_item(@lower.AsmItem::Inst(id=-1, op=inst.op, mode~, comment~), low)
+      }
+      self.emit("return read_word(0x\{hex(dispatch.pointer)});")
+      self.indentation -= 1
+      self.emit("}\n")
+    }
+  }
 
   for sub in low.flat_subroutines {
     self.emit_flat_subroutine(sub, low)
