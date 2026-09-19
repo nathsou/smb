@@ -101,6 +101,7 @@ DEFINE_READ_VARIANTS(ldy_absx, uint16_t, absolute_x(arg), ldy_value, FLAGS_NZ)
 
 static inline void adc_value(uint8_t value, FlagMask mask) {
     uint16_t sum = (uint16_t)a + (uint16_t)value + (uint16_t)carry_flag;
+    overflow_flag = ((~(a ^ value) & (a ^ (uint8_t)sum)) & 0x80) != 0;
     a = (uint8_t)sum;
     if (mask & FLAG_CARRY) {
         carry_flag = (sum & 0x100) != 0;
@@ -118,6 +119,7 @@ DEFINE_READ_VARIANTS(adc_absy, uint16_t, absolute_y(arg), adc_value, FLAGS_CNZ)
 
 static inline void sbc_value(uint8_t value, FlagMask mask) {
     uint16_t diff = a - value - (carry_flag ? 0 : 1);
+    overflow_flag = (((a ^ value) & (a ^ (uint8_t)diff)) & 0x80) != 0;
     a = (uint8_t)diff;
     if (mask & FLAG_CARRY) {
         carry_flag = diff <= 0xff;
@@ -404,6 +406,7 @@ static inline void pla_value(FlagMask mask) {
 DEFINE_IMPLIED_VARIANTS(pla, pla_value, FLAGS_NZ)
 
 static inline void bit_value(uint8_t value, FlagMask mask) {
+    overflow_flag = (value & 0x40) != 0;
     if (mask & FLAG_ZERO) {
         zero_flag = (a & value) == 0;
     }
@@ -425,9 +428,9 @@ void sec(void) {
     carry_flag = true;
 }
 
-void cld(void) {}
-void sed(void) {}
-void sei(void) {}
+void cld(void) { decimal_flag = false; }
+void sed(void) { decimal_flag = true; }
+void sei(void) { interrupt_disabled = true; }
 
 #undef DEFINE_COMPARE_VARIANTS
 #undef DEFINE_IMPLIED_VARIANTS
@@ -440,3 +443,23 @@ void sei(void) {}
 #undef SELECT_READ_VARIANTS
 #undef DEFINE_READ_VARIANTS_FLAGS_CNZ
 #undef DEFINE_READ_VARIANTS_FLAGS_NZ
+
+void cli(void) { interrupt_disabled = false; }
+void clv(void) { overflow_flag = false; }
+void nop(void) {}
+
+void php(void) {
+    ram[0x100 + sp--] = (uint8_t)(0x30 | carry_flag | (zero_flag << 1) |
+        (interrupt_disabled << 2) | (decimal_flag << 3) |
+        (overflow_flag << 6) | (neg_flag << 7));
+}
+
+void plp(void) {
+    uint8_t p = ram[0x100 + ++sp];
+    carry_flag = (p & 1) != 0;
+    zero_flag = (p & 2) != 0;
+    interrupt_disabled = (p & 4) != 0;
+    decimal_flag = (p & 8) != 0;
+    overflow_flag = (p & 0x40) != 0;
+    neg_flag = (p & 0x80) != 0;
+}

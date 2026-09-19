@@ -1,6 +1,7 @@
 
 pub(all) struct AsmLowering {
   items: Array[@parse.SourceItem]
+  program: @image.Program?
   lowered: Array[AsmItem]
   mut next_instruction_id: Int
   defines: Map[String, TypedExpr]
@@ -18,9 +19,10 @@ pub(all) struct AsmLowering {
 
 pub suberror LoweringError { LoweringError(String) } derive(Debug)
 
-pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
+pub fn AsmLowering::new(items: Array[@parse.SourceItem], program~: @image.Program? = None) -> AsmLowering {
   {
     items,
+    program,
     lowered: [],
     next_instruction_id: 0,
     defines: {},
@@ -51,7 +53,7 @@ fn AsmLowering::detect_table(self: AsmLowering, name: String, index: Int) -> Asm
         match elem_size {
           Some(size) => {
             if size != directive_elem_size {
-              raise LoweringError("Inconsistent element size in table")
+              elem_size = Some(Byte)
             }
           }
           None => elem_size = {
@@ -111,31 +113,25 @@ fn AsmLowering::collect_labels_and_tables(self: AsmLowering) -> Unit raise Lower
 
     match item {
       Label(name) => {
-        let is_alias = match name {
-          "GameText" | "AreaAddrOffsets" => true
-          _ => false
+        let aliases = [name]
+        let mut last = idx
+        let mut scan = idx + 1
+        while scan < self.items.length() {
+          match self.items[scan] {
+            Label(alias_) => { aliases.push(alias_); last = scan }
+            Comment(_) => ()
+            _ => break
+          }
+          scan += 1
         }
-
-        match self.detect_table(name, idx + (if is_alias { 1 } else { 0 })) {
+        match self.detect_table(name, last) {
           Some(table) => {
             self.tables.push(table)
             self.table_offset += table.size
-            self.tables_by_label[table.name] = table
-
-            if is_alias {
-              let alias_ = match self.items[idx + 1] {
-                Label(name) => name
-                _ => raise LoweringError("Expected alias label")
-              }
-
-              self.tables_by_label[alias_] = table
-            }
-
-            idx_increment = table.items_count
+            for alias_ in aliases { self.tables_by_label[alias_] = table }
+            idx_increment = last - idx + table.items_count
           }
-          None => {
-            self.jump_target_labels.add(name)
-          }
+          None => { self.jump_target_labels.add(name) }
         }
       }
       _ => ()
@@ -187,6 +183,35 @@ fn AsmLowering::collect_defines(self: AsmLowering) -> Unit raise LoweringError {
   }
 }
 
+pub fn AsmLowering::lower_mode(self: AsmLowering, mode: @parse.SourceAddressingMode) -> AsmAddressingMode raise LoweringError {
+  match mode {
+            Accumulator => Accumulator
+            Implied => Implied
+            Immediate(operand) => Immediate(self.type_expr(operand))
+            Relative(addr~) => Relative(self.type_expr(addr))
+            AbsoluteOrZeroPage(addr~) | AbsoluteOrZeroPageX(addr~) | AbsoluteOrZeroPageY(addr~) => {
+              let addr = self.type_expr(addr)
+              let size: @parse.ConstantSize = match addr.ty() {
+                ConstTy(size) => size
+                ArrayTy(_) | LabelTy => Word
+              }
+
+              match (mode, size) {
+                (AbsoluteOrZeroPage(_), Byte) => ZeroPage(addr)
+                (AbsoluteOrZeroPage(_), Word) => Absolute(addr)
+                (AbsoluteOrZeroPageX(_), Byte) => ZeroPageX(addr)
+                (AbsoluteOrZeroPageX(_), Word) => AbsoluteX(addr)
+                (AbsoluteOrZeroPageY(_), Byte) => ZeroPageY(addr)
+                (AbsoluteOrZeroPageY(_), Word) => AbsoluteY(addr)
+                _ => raise LoweringError("Invalid addressing mode")
+              }
+            }
+            Indirect(addr~) => Indirect(self.type_expr(addr))
+            IndexedIndirect(addr~) => IndexedIndirect(self.type_expr(addr))
+            IndirectIndexed(addr~) => IndirectIndexed(self.type_expr(addr))
+          }
+}
+
 fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringError {
   let mut inside_table = false
   let mut item_idx = 0
@@ -207,7 +232,7 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
         }
       }
       Inst(op~, mode~) => {
-        if op == JSR && (match mode { AbsoluteOrZeroPage(addr=Ident("JumpEngine")) => true; _ => false }) {
+        if op == JSR && (match self.program { Some(p) => p.dispatches.contains(p.addresses[item_idx]); None => false }) {
           let jump_table: Array[String] = []
           inside_table = true
 
@@ -235,41 +260,16 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
             }
           }
 
-          self.lowered.push(JumpEngine(jump_table~))
+          self.lowered.push(JumpEngine(jump_table~, site=self.program.unwrap().addresses[item_idx]))
         } else {
-          let addr_mode: AsmAddressingMode = match mode {
-            Accumulator => Accumulator
-            Implied => Implied
-            Immediate(operand) => Immediate(self.type_expr(operand))
-            Relative(addr~) => Relative(self.type_expr(addr))
-            AbsoluteOrZeroPage(addr~) | AbsoluteOrZeroPageX(addr~) | AbsoluteOrZeroPageY(addr~) => {
-              let addr = self.type_expr(addr)
-              let size: @parse.ConstantSize = match addr.ty() {
-                ConstTy(size) => size
-                ArrayTy(_) | LabelTy => Word
-              }
-
-              match (mode, size) {
-                (AbsoluteOrZeroPage(_), Byte) => ZeroPage(addr)
-                (AbsoluteOrZeroPage(_), Word) => Absolute(addr)
-                (AbsoluteOrZeroPageX(_), Byte) => ZeroPageX(addr)
-                (AbsoluteOrZeroPageX(_), Word) => AbsoluteX(addr)
-                (AbsoluteOrZeroPageY(_), Byte) => ZeroPageY(addr)
-                (AbsoluteOrZeroPageY(_), Word) => AbsoluteY(addr)
-                _ => raise LoweringError("Invalid addressing mode")
-              }
-            }
-            Indirect(addr~) => Indirect(self.type_expr(addr))
-            IndexedIndirect(addr~) => IndexedIndirect(self.type_expr(addr))
-            IndirectIndexed(addr~) => IndirectIndexed(self.type_expr(addr))
-          }
+          let addr_mode = self.lower_mode(mode)
 
           let comment = match self.items.get(item_idx + 1) {
             Some(Comment(comment~, is_inline=true)) => Some(comment)
             _ => None
           }
 
-          let id = self.next_instruction_id
+          let id = match self.program { Some(p) => p.addresses[item_idx]; None => self.next_instruction_id }
           self.next_instruction_id += 1
           self.lowered.push(Inst(id~, op~, mode=addr_mode, comment~))
         }
@@ -311,7 +311,7 @@ fn AsmLowering::collect_jump_targets(self: AsmLowering) -> Unit {
           self.targets.jump_targets.add(label)
         }
       }
-      JumpEngine(jump_table~) => {
+      JumpEngine(jump_table~, ..) => {
         for label in jump_table {
           self.targets.subroutines.add(label)
         }
@@ -343,6 +343,9 @@ fn AsmLowering::next_non_comment_item_index(self: AsmLowering, start: Int) -> In
 }
 
 fn AsmLowering::collect_basic_block_leaders(self: AsmLowering) -> Array[Int] {
+  if self.program is Some(p) {
+    for root in p.roots { self.targets.subroutines.add(root) }
+  }
   self.collect_jump_targets()
   let leader_indices = []
 
@@ -486,7 +489,7 @@ fn AsmLowering::collect_basic_blocks(self: AsmLowering) -> Unit raise LoweringEr
           }
         }
       }
-      JumpEngine(jump_table~) => {
+      JumpEngine(jump_table~, ..) => {
         for label in jump_table {
           match self.bb_by_label.get(label) {
             Some(target_bb) => {

@@ -4,6 +4,7 @@ suberror PipelineError {
   LexerError(@parse.LexerError)
   ParserError(@parse.ParserError)
   LoweringError(@lower.LoweringError)
+  ImageError(@image.ImageError)
 } derive(Debug)
 
 fn read_rom() -> String raise PipelineError {
@@ -38,7 +39,10 @@ fn parse() -> Array[@parse.SourceItem] raise PipelineError {
 
 fn lower() -> @lower.AsmLowering raise PipelineError {
   let instructions = parse()
-  let lowering = @lower.AsmLowering::new(instructions)
+  let program = try @image.discover(@image.assemble(instructions)) catch {
+    error => raise ImageError(error)
+  }
+  let lowering = @lower.AsmLowering::new(program.source, program=Some(program))
   try lowering.lower() catch {
     err => raise LoweringError(err)
   } noraise {

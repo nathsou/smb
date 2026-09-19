@@ -33,3 +33,35 @@ test "all documented opcode encodings round trip" {
   assert_eq(count, 151)
   assert_eq(decoding(0x02), None)
 }
+
+test "renamed dispatch with different scratch addresses is proven by execution" {
+  let image = fixture(".org $8000\nBoot:\n lda #$01\n jsr Choose\n .dw First, Second\nFirst:\n rts\nSecond:\n rts\nChoose:\n asl\n tay\n pla\n sta $20\n pla\n sta $21\n iny\n lda ($20),y\n sta $22\n iny\n lda ($20),y\n sta $23\n jmp ($22)\nNmi:\n rti\n.org $fffa\n.dw Nmi, Boot, Nmi\n")
+  let p = discover(image)
+  assert_eq(p.dispatches.length(), 1)
+  let dispatch = p.dispatches[0x8002]
+  assert_eq(dispatch.pointer, 0x22)
+  assert_eq(dispatch.targets[1], image.symbols["Second"])
+  assert_eq(p.instructions.contains(image.symbols["Choose"]), false)
+  assert_eq(dispatch.setup.length(), 12)
+}
+
+test "constant branch does not decode adjacent padding" {
+  let image = fixture(".org $8000\nBoot:\n lda #$01\n bne Exit\n .db $02\nExit:\n rts\nNmi:\n rti\n.org $fffa\n.dw Nmi, Boot, Nmi\n")
+  let p = discover(image)
+  assert_eq(p.instructions.contains(0x8004), false)
+  assert_eq(condition(@parse.BNE, p.facts[0x8002]), Some(true))
+}
+
+test "overlapping BIT and immediate-load entries both survive" {
+  let image = fixture(".org $8000\nBoot:\n jsr First\n jsr Second\n rts\nFirst:\n ldy #$00\n .db $2c\nSecond:\n ldy #$04\n rts\nNmi:\n rti\n.org $fffa\n.dw Nmi, Boot, Nmi\n")
+  let p = discover(image)
+  assert_eq(p.instructions[0x8009].op, @parse.BIT)
+  assert_eq(p.instructions[0x800a].op, @parse.LDY)
+  assert_eq(p.instructions[0x8009].arg, 0x04a0)
+}
+
+test "unknown branch facts are not mistaken for false" {
+  let image = fixture(".org $8000\nBoot:\n lda $00\n beq Left\n lda #$01\n jmp Join\nLeft:\n lda #$02\nJoin:\n cmp #$01\n bne Exit\n nop\nExit:\n rts\nNmi:\n rti\n.org $fffa\n.dw Nmi, Boot, Nmi\n")
+  let p = discover(image)
+  assert_eq(p.facts[image.symbols["Join"]].a, None)
+}
