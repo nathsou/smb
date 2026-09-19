@@ -65,3 +65,14 @@ test "unknown branch facts are not mistaken for false" {
   let p = discover(image)
   assert_eq(p.facts[image.symbols["Join"]].a, None)
 }
+
+test "complementary branches preserve the stack path condition" {
+  let p = discover(fixture(".org $8000\nBoot:\n pha\n pla\n bcc Exit\n bcs Exit\n pla\nExit:\n rts\nNmi:\n rti\n.org $fffa\n.dw Nmi, Boot, Nmi\n"))
+  p.validate_stacks()
+}
+
+test "unrecognized return-token manipulation is rejected" {
+  let p = discover(fixture(".org $8000\nBoot:\n jsr Broken\n rts\nBroken:\n pla\n rts\nNmi:\n rti\n.org $fffa\n.dw Nmi, Boot, Nmi\n"))
+  let rejected = try { p.validate_stacks(); false } catch { _ => true }
+  assert_eq(rejected, true)
+}

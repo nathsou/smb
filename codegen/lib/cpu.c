@@ -24,7 +24,12 @@ void cpu_call_begin(uint16_t return_address) {
     ram[0x100 + sp--] = (uint8_t)return_address;
 }
 
-void cpu_call_end(void) {
+void cpu_call_end(uint16_t expected_return_address) {
+    uint16_t actual = (uint16_t)(ram[0x100 + (uint8_t)(sp + 1)] |
+        (ram[0x100 + (uint8_t)(sp + 2)] << 8));
+    if (actual != expected_return_address) {
+        cpu_unresolved_jump((uint16_t)(actual + 1));
+    }
     sp = (uint8_t)(sp + 2);
 }
 

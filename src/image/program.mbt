@@ -208,8 +208,8 @@ pub fn discover(image: Image) -> Program raise ImageError {
       (RTS | RTI, _) => ()
       (BRK, _) => raise InvalidImage("BRK requires interrupt scheduling at \{pc}")
       (_, "rel") => {
-        if condition(inst.op, f) != Some(false) { work.push((branch_target(inst), after)) }
-        if condition(inst.op, f) != Some(true) { work.push((inst.next, after)) }
+        if condition(inst.op, f) != Some(false) { work.push((branch_target(inst), assume_condition(inst.op, true, after))) }
+        if condition(inst.op, f) != Some(true) { work.push((inst.next, assume_condition(inst.op, false, after))) }
       }
       _ => work.push((inst.next, after))
     }

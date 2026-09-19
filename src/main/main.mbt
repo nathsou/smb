@@ -42,6 +42,7 @@ fn lower() -> @lower.AsmLowering raise PipelineError {
   let program = try @image.discover(@image.assemble(instructions)) catch {
     error => raise ImageError(error)
   }
+  try program.validate_stacks() catch { error => raise ImageError(error) }
   let lowering = @lower.AsmLowering::new(program.source, program=Some(program))
   try lowering.lower() catch {
     err => raise LoweringError(err)

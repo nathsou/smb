@@ -252,7 +252,7 @@ fn flag_helper_suffix(op: @parse.OpCode, id: Int, low: @lower.AsmLowering) -> St
 
   if writes.is_none() {
     ""
-  } else if live_writes.is_none() {
+  } else if !live_writes.carry && !live_writes.zero && !live_writes.negative {
     ""
   } else {
     let mut suffix = "_f"
@@ -278,6 +278,14 @@ fn is_dead_flag_only_instruction(
   low: @lower.AsmLowering,
 ) -> Bool {
   match (op, mode) {
+    (BIT, Absolute(expr) | ZeroPage(expr)) => {
+      match compute_expr_range(expr, low) {
+        Some({ min, max }) if min == max && ((min >= 0 && max < 0x2000) || (min >= 0x8000 && max < 65536)) => {
+          @lower.flag_writes(op).intersect(low.flag_live_after(id)).is_none()
+        }
+        _ => false
+      }
+    }
     (CMP | CPX | CPY, Immediate(_)) => {
       @lower.flag_writes(op).intersect(low.flag_live_after(id)).is_none()
     }
@@ -456,7 +464,7 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
                 }
 
                 if id >= 0 && low.program is Some(_) {
-                  "cpu_call_begin(0x\{hex(id + 2)}); \{target}(); cpu_call_end();"
+                  "cpu_call_begin(0x\{hex(id + 2)}); \{target}(); cpu_call_end(0x\{hex(id + 2)});"
                 } else { "\{target}();" }
               }
               (RTS, _) => "return;"

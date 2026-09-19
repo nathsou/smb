@@ -60,14 +60,15 @@ pub(all) struct FlagLiveness {
   carry: Bool
   zero: Bool
   negative: Bool
+  overflow: Bool
 } derive (Debug, Eq)
 
 pub fn FlagLiveness::none() -> FlagLiveness {
-  { carry: false, zero: false, negative: false }
+  { carry: false, zero: false, negative: false, overflow: false }
 }
 
 pub fn FlagLiveness::all() -> FlagLiveness {
-  { carry: true, zero: true, negative: true }
+  { carry: true, zero: true, negative: true, overflow: true }
 }
 
 pub fn FlagLiveness::union(self: FlagLiveness, other: FlagLiveness) -> FlagLiveness {
@@ -75,6 +76,7 @@ pub fn FlagLiveness::union(self: FlagLiveness, other: FlagLiveness) -> FlagLiven
     carry: self.carry || other.carry,
     zero: self.zero || other.zero,
     negative: self.negative || other.negative,
+    overflow: self.overflow || other.overflow,
   }
 }
 
@@ -83,6 +85,7 @@ pub fn FlagLiveness::subtract(self: FlagLiveness, other: FlagLiveness) -> FlagLi
     carry: self.carry && !other.carry,
     zero: self.zero && !other.zero,
     negative: self.negative && !other.negative,
+    overflow: self.overflow && !other.overflow,
   }
 }
 
@@ -91,11 +94,12 @@ pub fn FlagLiveness::intersect(self: FlagLiveness, other: FlagLiveness) -> FlagL
     carry: self.carry && other.carry,
     zero: self.zero && other.zero,
     negative: self.negative && other.negative,
+    overflow: self.overflow && other.overflow,
   }
 }
 
 pub fn FlagLiveness::is_none(self: FlagLiveness) -> Bool {
-  !self.carry && !self.zero && !self.negative
+  !self.carry && !self.zero && !self.negative && !self.overflow
 }
 
 pub(all) struct BasicBlockLink {

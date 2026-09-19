@@ -42,6 +42,20 @@ pub fn condition(op: @parse.OpCode, f: Facts) -> Bool? {
   }
 }
 
+pub fn assume_condition(op: @parse.OpCode, taken: Bool, f: Facts) -> Facts {
+  match op {
+    BEQ => { ..f, z: Some(taken) }
+    BNE => { ..f, z: Some(!taken) }
+    BCS => { ..f, c: Some(taken) }
+    BCC => { ..f, c: Some(!taken) }
+    BMI => { ..f, n: Some(taken) }
+    BPL => { ..f, n: Some(!taken) }
+    BVS => { ..f, v: Some(taken) }
+    BVC => { ..f, v: Some(!taken) }
+    _ => f
+  }
+}
+
 pub fn transfer(inst: Instruction, f: Facts) -> Facts {
   let operand = if inst.mode == "imm" { Some(inst.arg) } else { None }
   match inst.op {
