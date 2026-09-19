@@ -59,10 +59,26 @@ The output of the code generator is in the `codegen/` folder. To regenerate it:
 1. Install [Moonbit](https://www.moonbitlang.com/):
 
 ```bash
-$ curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s '0.10.7+bc794d341'
+$ curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s '0.10.9+6e6c44045'
 ```
 
 2. Run `make codegen`
+
+The generator accepts the original, unmodified disassembly. It assembles an
+original-address PRG image, recovers reachable instructions and callable regions,
+and emits structured C with the source comments. See the
+[analysis and migration notes](docs/recompiler-migration.md) for techniques,
+validation, and current NROM limitations.
+
+Run `python3 tests/check_codegen.py` for the ROM-free regression suite, or append
+`--rom` with a local `smb.nes` to compare PRG bytes and replay the recorded 7,987
+frames. These checks do not require Raylib.
+
+To compile another compatible assembly input into a separate directory:
+
+```bash
+moon run src/main -- --input tests/nrom128.asm --output /tmp/nrom-codegen
+```
 
 ## References & Resources
 
