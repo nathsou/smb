@@ -3,6 +3,8 @@ pub(all) struct Emitter {
   output: StringBuilder
   mut indentation: Int
   mut jsr_return_index: Int
+  local_labels: Set[String]
+  used_labels: Set[String]
 }
 
 pub fn Emitter::new() -> Emitter {
@@ -10,6 +12,8 @@ pub fn Emitter::new() -> Emitter {
     output: StringBuilder::new(),
     indentation: 0,
     jsr_return_index: 0,
+    local_labels: Set([]),
+    used_labels: Set([]),
   }
 }
 
@@ -193,13 +197,13 @@ fn rename_label(label: String) -> String {
   }
 }
 
-fn gen_jump(target: String, low: @lower.AsmLowering) -> String {
+fn Emitter::gen_jump(self: Emitter, target: String, low: @lower.AsmLowering) -> String {
   let renamed_label = rename_label(target)
 
   match target {
     "__ret__" => "return;"
     _ => {
-      if low.targets.subroutines.contains(target) {
+      if !self.local_labels.contains(target) && low.targets.subroutines.contains(target) {
         "\{renamed_label}(); return;"
       } else {
         "goto \{renamed_label};"
@@ -365,10 +369,12 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
     match item {
       Label(name) => {
         // do not output labels for subroutines
-        let is_subroutine_label = low.is_subroutine_label(name);
+        let is_subroutine_label = !self.local_labels.contains(name);
 
-        if !is_subroutine_label {
+        if !is_subroutine_label && self.used_labels.contains(name) {
           self.emit("\n\{rename_label(name)}:")
+        } else {
+          self.emit("// \{rename_label(name)}:")
         }
       }
       Inst(id~, op~, mode~, comment~) => {
@@ -423,10 +429,10 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
                   _ => abort("unreachable")
                 }
 
-                "if (\{cond}) { \{gen_jump(target, low)} }"
+                "if (\{cond}) { \{self.gen_jump(target, low)} }"
               }
               (JMP, _) => {
-                gen_jump(args, low)
+                self.gen_jump(args, low)
               }
               (JSR, _) => {
                 let target = match mode {
@@ -463,7 +469,7 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
         self.indentation += 1
 
         for idx, label in jump_table {
-          self.emit("case \{idx}: \{gen_jump(label, low)}")
+          self.emit("case \{idx}: \{rename_label(label)}(); return;")
         }
 
         self.indentation -= 1
@@ -510,6 +516,27 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
 }
 
 fn Emitter::emit_flat_subroutine(self: Emitter, subroutine: @lower.AsmFlatSubroutine, low: @lower.AsmLowering) -> Unit {
+  self.used_labels.clear()
+  fn collect(items: Array[@lower.AsmItem]) {
+    for item in items {
+      match item {
+        Inst(op=JMP | BCC | BCS | BEQ | BNE | BMI | BPL | BVC | BVS,
+          mode=Relative(Ident(name~, ..)) | Absolute(Ident(name~, ..)), ..) => self.used_labels.add(name)
+        If(then~, otherwise~, ..) => {
+          collect(then)
+          if otherwise is Some(other) { collect(other) }
+        }
+        _ => ()
+      }
+    }
+  }
+  collect(subroutine.items)
+  self.local_labels.clear()
+  for sub in low.subroutines {
+    if sub.name == subroutine.name {
+      for label in sub.internal_labels { self.local_labels.add(label) }
+    }
+  }
   self.indentation = 0
   self.emit("void \{rename_label(subroutine.name)}(void) {")
   self.indentation = 1

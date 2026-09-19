@@ -66,6 +66,7 @@ fn run() -> Unit raise Error {
   try transpile() catch {
       err => {
           println(@debug.to_string(err))
+          abort("Code generation failed")
       }
   } noraise {
       tr => {
@@ -79,7 +80,7 @@ fn run() -> Unit raise Error {
 fn main {
   try run() catch {
     err => {
-      println("Error: \{Show::to_string(err)}")
+      abort("Error: \{Show::to_string(err)}")
     }
   }
 }

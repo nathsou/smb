@@ -264,8 +264,8 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
             IndirectIndexed(addr~) => IndirectIndexed(self.type_expr(addr))
           }
 
-          let comment = match self.items[item_idx + 1] {
-            Comment(comment~, is_inline=true) => Some(comment)
+          let comment = match self.items.get(item_idx + 1) {
+            Some(Comment(comment~, is_inline=true)) => Some(comment)
             _ => None
           }
 
@@ -279,9 +279,9 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
           self.lowered.push(Comment(comment))
         }
       }
-      Directive(name="db" | "dw" as name, args~) => {
+      Directive(name="db" | "dw", ..) => {
         if !inside_table {
-          raise LoweringError("Raw data in code detected: \{name} \{Repr(args)}")
+          () // Unlabelled padding is not an executable source instruction.
         }
       }
       _ => ()
@@ -355,7 +355,7 @@ fn AsmLowering::collect_basic_block_leaders(self: AsmLowering) -> Array[Int] {
         }
       }
       None => {
-        leader_indices.push(self.lowered.length() - 1)
+        ()
       }
     }
   }
@@ -382,12 +382,14 @@ fn AsmLowering::collect_basic_block_leaders(self: AsmLowering) -> Array[Int] {
     }
   }
 
+  if !leader_indices.is_empty() {
+    leader_indices.push(self.lowered.length())
+  }
   leader_indices
 }
 
 priv struct ItemInfo {
   item: AsmItem
-  index: Int
 }
 
 fn BasicBlock::last_non_comment_item(self: BasicBlock) -> ItemInfo? {
@@ -396,7 +398,7 @@ fn BasicBlock::last_non_comment_item(self: BasicBlock) -> ItemInfo? {
   while i >= 0 {
     match self.items[i] {
       Comment(_) => ()
-      item => return Some({ item, index: i })
+      item => return Some({ item, })
     }
 
     i -= 1
@@ -573,7 +575,6 @@ fn BasicBlock::flags_escape(self: BasicBlock) -> Bool {
           Absolute(Ident(name="__ret__", ..)),
         ..
       ),
-      ..
     }) => true
     _ => false
   }
@@ -653,121 +654,63 @@ pub fn AsmLowering::flag_live_after(self: AsmLowering, id: Int) -> FlagLiveness 
   }
 }
 
-fn AsmLowering::rewrite_bb(self: AsmLowering, bb: BasicBlock, visited: Set[Int]) -> Unit raise LoweringError {
-  if visited.contains(bb.id) {
-    return
-  }
+pub fn AsmLowering::is_subroutine_label(self: AsmLowering, label: String) -> Bool {
+  self.targets.subroutines.contains(label)
+}
 
-  match bb.name {
-    Some(name) => {
-      if self.is_subroutine_label(name) {
-        let sub: AsmSubroutine = {
-          name,
-          blocks: [bb],
-          entry: bb,
-          exit: bb,
-          internal_labels: Set([]),
-        }
-
-        let mut i = bb.id + 1
-
-        while i < self.basic_blocks.length() {
-          let next_bb = self.basic_blocks[i]
-
-          // if this is an exit bb, or if it's a subroutine entry, we're done for this function
-          if next_bb.predecessors.is_empty() || next_bb.is_subroutine_entry {
-            break
-          }
-
-          match next_bb.name {
-            Some(next_name) => {
-              if self.is_subroutine_label(next_name) {
-                // insert fallthrough call to the next subroutine
-                let prev_bb = sub.blocks[sub.blocks.length() - 1]
-                if prev_bb.successors.length() > 0 && prev_bb.has_fallthrough() {
-                  prev_bb.items.push(Inst(id=-1, op=JSR, mode=Absolute(Ident(name=next_name, ty=LabelTy)), comment=Some("<fallthrough>")))
-                  prev_bb.items.push(Inst(id=-1, op=RTS, mode=Implied, comment=None))
-                }
-                break
-              }
-            }
-            None => ()
-          }
-
-          sub.blocks.push(next_bb)
-          visited.add(next_bb.id)
-          i += 1
-        }
-
-        sub.exit = sub.blocks[sub.blocks.length() - 1]
-        self.subroutines.push(sub)
+// A machine block may participate in several callable entry regions. Follow
+// actual edges, not source order; a JSR's callee is not an intraprocedural edge.
+// Shared tails stay local until outlining them is proven safe. This also keeps
+// backedges in one C frame rather than turning loops into host recursion.
+fn AsmLowering::collect_subroutines(self: AsmLowering) -> Unit raise LoweringError {
+  let entries = self.targets.subroutines.to_array()
+  entries.sort_by(fn(a, b) { self.bb_by_label[a].id - self.bb_by_label[b].id })
+  let entry_names: Map[Int, String] = Map([])
+  let reach: Map[Int, Set[Int]] = Map([])
+  for name in entries {
+    let entry = self.bb_by_label[name]
+    entry_names[entry.id] = name
+    let seen: Set[Int] = Set([])
+    let work = [entry]
+    while !work.is_empty() {
+      let bb = work.pop().unwrap()
+      if seen.contains(bb.id) { continue }
+      seen.add(bb.id)
+      match bb.last_non_comment_item() {
+        Some({ item: JumpEngine(_) }) => ()
+        _ => for link in bb.successors { work.push(link.bb) }
       }
     }
-    None => ()
+    reach[entry.id] = seen
   }
-}
-
-pub fn AsmLowering::is_subroutine_label(self: AsmLowering, label: String) -> Bool {
-  self.targets.subroutines.contains(label) || label.has_suffix("__sub")
-}
-
-fn AsmLowering::collect_subroutines(self: AsmLowering) -> Unit raise LoweringError {
-  let components = self.collect_connected_components()
-  let visited = Set([])
-
-  for component in components {
-    for bb in component {
-      let _ = self.rewrite_bb(bb,visited)
-    }
-  }
-}
-
-fn BasicBlock::dfs(self: BasicBlock, visited: Set[Int]) -> Array[BasicBlock] {
-  let stack = [self]
-  let blocks = []
-
-  while !stack.is_empty() {
-    let bb = stack.pop().unwrap()
-
-    if !visited.contains(bb.id) {
+  for name in entries {
+    let entry = self.bb_by_label.get(name).unwrap_or_error(LoweringError("Missing entry: \{name}"))
+    let visited: Set[Int] = Set([])
+    let pending = [entry]
+    let blocks = []
+    let labels: Set[String] = Set([])
+    while !pending.is_empty() {
+      let bb = pending.pop().unwrap()
+      if visited.contains(bb.id) { continue }
       visited.add(bb.id)
       blocks.push(bb)
-
-      for link in bb.successors {
-        stack.push(link.bb)
+      for item in bb.items {
+        if item is Label(label) { labels.add(label) }
+      }
+      match bb.last_non_comment_item() {
+        Some({ item: JumpEngine(_) }) => ()
+        _ => for link in bb.successors {
+          // Outline an existing entry only across an acyclic edge. A transfer
+          // inside an SCC stays local, even if its target is also callable.
+          if entry_names.contains(link.bb.id) && !reach[link.bb.id].contains(bb.id) {
+            continue
+          }
+          pending.push(link.bb)
+        }
       }
     }
-  }
-
-  blocks.sort_by((a, b) => a.id - b.id)
-  blocks
-}
-
-fn AsmLowering::collect_connected_components(self: AsmLowering) -> Array[Array[BasicBlock]] {
-  let components = []
-  let visited = Set([])
-
-  for bb in self.basic_blocks {
-    if !visited.contains(bb.id) {
-      let blocks = bb.dfs(visited)
-      components.push(blocks)
-    }
-  }
-
-  components
-}
-
-fn AsmLowering::remove_unused_rts(self: AsmLowering) -> Unit raise LoweringError {
-  for sub in self.subroutines {
-    let last_bb = sub.exit
-    let last_item = last_bb.last_non_comment_item().unwrap_or_error(LoweringError("Empty basic block"))
-
-    match last_item.item {
-      Inst(op=RTS, ..) => {
-        let _ = sub.exit.items.remove(last_item.index)
-      }
-      _ => ()
-    }
+    blocks.sort_by(fn(a, b) { a.id - b.id })
+    self.subroutines.push({ name, blocks, entry, exit: blocks.last().unwrap(), internal_labels: labels })
   }
 }
 
@@ -814,7 +757,25 @@ fn negate(cond: @parse.OpCode) -> @parse.OpCode raise LoweringError {
 }
 
 fn AsmLowering::recognize_control_flow(self: AsmLowering, sub: AsmSubroutine) -> AsmFlatSubroutine raise LoweringError {
-  let items = sub.blocks.map(fn(bb) { bb.items }).flatten()
+  let items = []
+  let included: Set[Int] = Set(sub.blocks.map(fn(bb) { bb.id }))
+  for bb in sub.blocks {
+    for item in bb.items { items.push(item) }
+    for link in bb.successors {
+      if link.is_fallthrough && !included.contains(link.bb.id) {
+        for target in link.bb.items {
+          if target is Label(name) && self.targets.subroutines.contains(name) {
+            items.push(Inst(id=-1, op=JSR, mode=Absolute(Ident(name~, ty=LabelTy)), comment=Some("fallthrough")))
+            items.push(Inst(id=-1, op=RTS, mode=Implied, comment=None))
+            break
+          }
+        }
+      }
+    }
+  }
+  if sub.blocks[0].id != sub.entry.id {
+    items.insert(0, Inst(id=-1, op=JMP, mode=Absolute(Ident(name=sub.name, ty=LabelTy)), comment=None))
+  }
   let labels = Set([])
   let new_items = []
   let stack: Array[ControlFlowStackEntry] = []
@@ -900,7 +861,7 @@ fn AsmLowering::recognize_control_flow(self: AsmLowering, sub: AsmSubroutine) ->
         comment~,
       ) => {
         // if this is a subroutine call
-        if self.targets.subroutines.contains(label) {
+        if !sub.internal_labels.contains(label) && self.targets.subroutines.contains(label) {
           push_item(If(
             cond=cond,
             then=[
@@ -963,14 +924,55 @@ fn AsmLowering::collect_flat_subroutines(self: AsmLowering) -> Unit raise Loweri
   }
 }
 
+// Canonicalize return-only destinations before region recovery. The source
+// retains its labels; the internal return marker is never required as input.
+fn AsmLowering::canonicalize_returns(self: AsmLowering) -> Unit {
+  let returns: Set[String] = Set([])
+  let labels = []
+  let first: Map[String, AsmItem] = Map([])
+  for item in self.lowered {
+    match item {
+      Label(name) => labels.push(name)
+      Comment(_) => ()
+      _ => {
+        for name in labels { first[name] = item }
+        labels.clear()
+      }
+    }
+  }
+  let mut changed = true
+  while changed {
+    changed = false
+    for name, item in first {
+      let is_return = match item {
+        Inst(op=RTS, ..) => true
+        Inst(op=JMP, mode=Absolute(Ident(name=target, ..)), ..) => returns.contains(target)
+        _ => false
+      }
+      if is_return && !returns.contains(name) { returns.add(name); changed = true }
+    }
+  }
+  for i in 0..<self.lowered.length() {
+    match self.lowered[i] {
+      Inst(id~, op~, mode=Relative(Ident(name=target, ..)), comment~) if returns.contains(target) => {
+        self.lowered[i] = Inst(id~, op~, mode=Relative(Ident(name="__ret__", ty=LabelTy)), comment~)
+      }
+      Inst(id~, op=JMP, mode=Absolute(Ident(name=target, ..)), comment~) if returns.contains(target) => {
+        self.lowered[i] = Inst(id~, op=RTS, mode=Implied, comment~)
+      }
+      _ => ()
+    }
+  }
+}
+
 pub fn AsmLowering::lower(self: AsmLowering) -> Unit raise LoweringError {
   self.collect_labels_and_tables()
   self.collect_defines()
   self.collect_instructions()
+  self.canonicalize_returns()
   self.collect_basic_blocks()
   self.collect_flag_liveness()
   self.collect_subroutines()
-  self.remove_unused_rts()
   self.collect_flat_subroutines()
 
   // @fs.write_string_to_file(path="cfg.dot", content=self.cfg_dotfile())
