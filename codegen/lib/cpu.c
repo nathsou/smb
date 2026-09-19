@@ -126,6 +126,13 @@ void write_joypad2(uint8_t value) {
 void dynamic_ram_write(uint16_t addr, uint8_t value) {
     if (addr < 0x2000) {
         ram[addr & 0b0000011111111111] = value;
+    } else if (addr < 0x4000) {
+        ppu_write_register(addr, value);
+    } else if (addr == 0x4014) {
+        ppu_transfer_oam((uint16_t)(value << 8));
+    } else if (addr == 0x4016) {
+        write_joypad1(value);
+        write_joypad2(value);
     } else if (addr < 0x4020) {
         apu_write(addr, value);
     }
@@ -193,7 +200,6 @@ inline uint16_t indirect_x_addr(uint8_t addr) {
     uint16_t low_byte = (uint16_t)read_byte(addr1);
     uint16_t high_byte = (uint16_t)(((uint16_t)read_byte(addr2)) << 8);
     return high_byte | low_byte;
-    return read_word(addr1);
 }
 
 inline uint16_t indirect_y_addr(uint8_t addr) {

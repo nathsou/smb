@@ -432,6 +432,37 @@ void cld(void) { decimal_flag = false; }
 void sed(void) { decimal_flag = true; }
 void sei(void) { interrupt_disabled = true; }
 
+// Remaining official addressing forms use the same semantic cores.
+DEFINE_READ_VARIANTS(ora_indx, uint8_t, indirect_x_val(arg), ora_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(asl_zp, uint8_t, (uint16_t)arg, asl_memory, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(ora_indy, uint8_t, indirect_y_val(arg), ora_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(asl_zpx, uint8_t, (uint8_t)(arg + x), asl_memory, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(asl_absx, uint16_t, (uint16_t)(arg + x), asl_memory, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(and_indx, uint8_t, indirect_x_val(arg), and_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(and_indy, uint8_t, indirect_y_val(arg), and_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(and_zpx, uint8_t, zero_page_x(arg), and_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(rol_zpx, uint8_t, (uint8_t)(arg + x), rol_memory, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(rol_absx, uint16_t, (uint16_t)(arg + x), rol_memory, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(eor_indx, uint8_t, indirect_x_val(arg), eor_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(eor_abs, uint16_t, absolute(arg), eor_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(eor_indy, uint8_t, indirect_y_val(arg), eor_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(eor_zpx, uint8_t, zero_page_x(arg), eor_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(lsr_zpx, uint8_t, (uint8_t)(arg + x), lsr_memory, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(eor_absy, uint16_t, absolute_y(arg), eor_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(eor_absx, uint16_t, absolute_x(arg), eor_value, FLAGS_NZ)
+DEFINE_READ_VARIANTS(lsr_absx, uint16_t, (uint16_t)(arg + x), lsr_memory, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(adc_indx, uint8_t, indirect_x_val(arg), adc_value, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(ror_zp, uint8_t, (uint16_t)arg, ror_memory, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(ror_abs, uint16_t, arg, ror_memory, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(adc_indy, uint8_t, indirect_y_val(arg), adc_value, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(ror_zpx, uint8_t, (uint8_t)(arg + x), ror_memory, FLAGS_CNZ)
+DEFINE_READ_VARIANTS(lda_indx, uint8_t, indirect_x_val(arg), lda_value, FLAGS_NZ)
+DEFINE_COMPARE_VARIANTS(cmp_indx, uint8_t, a, indirect_x_val(arg))
+DEFINE_COMPARE_VARIANTS(cmp_indy, uint8_t, a, indirect_y_val(arg))
+DEFINE_READ_VARIANTS(sbc_indx, uint8_t, indirect_x_val(arg), sbc_value, FLAGS_CNZ)
+DEFINE_COMPARE_VARIANTS(cpx_abs, uint16_t, x, absolute(arg))
+DEFINE_READ_VARIANTS(sbc_indy, uint8_t, indirect_y_val(arg), sbc_value, FLAGS_CNZ)
+
 #undef DEFINE_COMPARE_VARIANTS
 #undef DEFINE_IMPLIED_VARIANTS
 #undef SELECT_IMPLIED_VARIANTS_

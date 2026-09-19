@@ -249,6 +249,65 @@ DECLARE_CNZ_FLAG_VARIANTS_16(rol_abs)
 DECLARE_CNZ_FLAG_VARIANTS_0(ror_acc)
 DECLARE_CNZ_FLAG_VARIANTS_16(ror_absx)
 
+void ora_indx(uint8_t arg);
+DECLARE_NZ_FLAG_VARIANTS_8(ora_indx)
+void asl_zp(uint8_t arg);
+DECLARE_CNZ_FLAG_VARIANTS_8(asl_zp)
+void ora_indy(uint8_t arg);
+DECLARE_NZ_FLAG_VARIANTS_8(ora_indy)
+void asl_zpx(uint8_t arg);
+DECLARE_CNZ_FLAG_VARIANTS_8(asl_zpx)
+void asl_absx(uint16_t arg);
+DECLARE_CNZ_FLAG_VARIANTS_16(asl_absx)
+void and_indx(uint8_t arg);
+DECLARE_NZ_FLAG_VARIANTS_8(and_indx)
+void and_indy(uint8_t arg);
+DECLARE_NZ_FLAG_VARIANTS_8(and_indy)
+void and_zpx(uint8_t arg);
+DECLARE_NZ_FLAG_VARIANTS_8(and_zpx)
+void rol_zpx(uint8_t arg);
+DECLARE_CNZ_FLAG_VARIANTS_8(rol_zpx)
+void rol_absx(uint16_t arg);
+DECLARE_CNZ_FLAG_VARIANTS_16(rol_absx)
+void eor_indx(uint8_t arg);
+DECLARE_NZ_FLAG_VARIANTS_8(eor_indx)
+void eor_abs(uint16_t arg);
+DECLARE_NZ_FLAG_VARIANTS_16(eor_abs)
+void eor_indy(uint8_t arg);
+DECLARE_NZ_FLAG_VARIANTS_8(eor_indy)
+void eor_zpx(uint8_t arg);
+DECLARE_NZ_FLAG_VARIANTS_8(eor_zpx)
+void lsr_zpx(uint8_t arg);
+DECLARE_CNZ_FLAG_VARIANTS_8(lsr_zpx)
+void eor_absy(uint16_t arg);
+DECLARE_NZ_FLAG_VARIANTS_16(eor_absy)
+void eor_absx(uint16_t arg);
+DECLARE_NZ_FLAG_VARIANTS_16(eor_absx)
+void lsr_absx(uint16_t arg);
+DECLARE_CNZ_FLAG_VARIANTS_16(lsr_absx)
+void adc_indx(uint8_t arg);
+DECLARE_CNZ_FLAG_VARIANTS_8(adc_indx)
+void ror_zp(uint8_t arg);
+DECLARE_CNZ_FLAG_VARIANTS_8(ror_zp)
+void ror_abs(uint16_t arg);
+DECLARE_CNZ_FLAG_VARIANTS_16(ror_abs)
+void adc_indy(uint8_t arg);
+DECLARE_CNZ_FLAG_VARIANTS_8(adc_indy)
+void ror_zpx(uint8_t arg);
+DECLARE_CNZ_FLAG_VARIANTS_8(ror_zpx)
+void lda_indx(uint8_t arg);
+DECLARE_NZ_FLAG_VARIANTS_8(lda_indx)
+void cmp_indx(uint8_t arg);
+DECLARE_CNZ_FLAG_VARIANTS_8(cmp_indx)
+void cmp_indy(uint8_t arg);
+DECLARE_CNZ_FLAG_VARIANTS_8(cmp_indy)
+void sbc_indx(uint8_t arg);
+DECLARE_CNZ_FLAG_VARIANTS_8(sbc_indx)
+void cpx_abs(uint16_t arg);
+DECLARE_CNZ_FLAG_VARIANTS_16(cpx_abs)
+void sbc_indy(uint8_t arg);
+DECLARE_CNZ_FLAG_VARIANTS_8(sbc_indy)
+
 #undef DECLARE_CNZ_FLAG_VARIANTS_0
 #undef DECLARE_CNZ_FLAG_VARIANTS_16
 #undef DECLARE_CNZ_FLAG_VARIANTS_8

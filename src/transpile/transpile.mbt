@@ -100,7 +100,7 @@ fn show_expr(expr: @lower.TypedExpr) -> String {
         Sub => "-"
       }
 
-      "\{show_expr(lhs)} \{op} \{show_expr(rhs)}"
+      "(\{show_expr(lhs)} \{op} \{show_expr(rhs)})"
     }
   }
 }
@@ -293,7 +293,7 @@ impl Add for Range with add(self: Range, other: Range) -> Range {
 }
 
 impl Sub for Range with sub(self: Range, other: Range) -> Range {
-  { min: self.min - other.min, max: self.max - other.max }
+  { min: self.min - other.max, max: self.max - other.min }
 }
 
 fn compute_expr_range(expr: @lower.TypedExpr, low: @lower.AsmLowering) -> Range? {
@@ -338,50 +338,43 @@ fn write_byte(mode: @lower.AsmAddressingMode, target: Reg, low: @lower.AsmLoweri
     Y => "y"
   }
 
-  fn rewrite(addr: @lower.TypedExpr, suffix: String) -> String {
-    match addr {
-      Ident(name="PPU_CTRL_REG1", ..) => "ppu_ctrl = \{target};"
-      Ident(name="PPU_CTRL_REG2", ..) => "ppu_mask = \{target};"
-      Ident(name="PPU_SPR_ADDR", ..) => "oam_addr = \{target};"
-      Ident(name="PPU_SPR_DATA", ..) => "oam[oam_addr++] = \{target};"
-      Ident(name="PPU_SCROLL_REG", ..) => "ppu_write_scroll(\{target});"
-      Ident(name="PPU_ADDRESS", ..) => "ppu_write_address(\{target});"
-      Ident(name="PPU_DATA", ..) => "ppu_write_data(\{target});"
-      Ident(name="SPR_DMA", ..) => "ppu_transfer_oam((uint16_t)(\{target} << 8));"
-      Ident(name="JOYPAD_PORT", ..) => "write_joypad1(\{target});"
-      Ident(name="JOYPAD_PORT2", ..) => "write_joypad2(\{target});"
-      Ident(
-        name=("SND_REGISTER" | "SND_SQUARE1_REG" | "SND_SQUARE2_REG" | "SND_TRIANGLE_REG" |
-        "SND_NOISE_REG" | "SND_DELTA_REG" | "SND_MASTERCTRL_REG") as name,
-        ..
-      ) => {
-        "apu_write(\{name}, \{target});"
-      }
-      _ => {
-        let value = "\{show_expr(addr)}\{suffix}"
-
-        match compute_range(addr, mode, low) {
-          Some({ min: _, max }) => {
-            if max < 0x2000 {
-              return "ram[\{value}] = \{target};"
-            } else if max < 0x4000 {
-              return "ppu_write_register(0x2000 + (\{show_expr(addr)} & 0b111), \{target});"
-            }
+  fn rewrite(addr: @lower.TypedExpr, suffix: String, zero_page: Bool) -> String {
+    let expression = "\{show_expr(addr)}\{suffix}"
+    let address = if zero_page { "(uint8_t)(\{expression})" } else { expression }
+    if zero_page { return "ram[\{address}] = \{target};" }
+    match compute_range(addr, mode, low) {
+      Some({ min, max }) if min >= 0 && max < 0x800 => return "ram[\{address}] = \{target};"
+      Some({ min, max }) if min >= 0 && max < 0x2000 => return "ram[(\{address}) & 0x7ff] = \{target};"
+      Some({ min, max }) if min == max => {
+        if min >= 0x2000 && min < 0x4000 {
+          return match min & 7 {
+            0 => "ppu_ctrl = \{target};"
+            1 => "ppu_mask = \{target};"
+            3 => "oam_addr = \{target};"
+            4 => "oam[oam_addr++] = \{target};"
+            5 => "ppu_write_scroll(\{target});"
+            6 => "ppu_write_address(\{target});"
+            7 => "ppu_write_data(\{target});"
+            _ => "ppu_write_register((uint16_t)(\{address}), \{target});"
           }
-          None => ()
         }
-
-        "dynamic_ram_write(\{value}, \{target});"
+        if min == 0x4014 { return "ppu_transfer_oam((uint16_t)(\{target} << 8));" }
+        if min == 0x4016 { return "write_joypad1(\{target}); write_joypad2(\{target});" }
+        if min >= 0x4000 && min < 0x4020 { return "apu_write(\{address}, \{target});" }
       }
+      _ => ()
     }
+    "dynamic_ram_write((uint16_t)(\{address}), \{target});"
   }
-
   match mode {
-      ZeroPage(addr) | Absolute(addr) => rewrite(addr, "")
-      ZeroPageX(addr) | AbsoluteX(addr) => rewrite(addr, " + x")
-      ZeroPageY(addr) | AbsoluteY(addr) => rewrite(addr, " + y")
-      IndirectIndexed(addr) => "dynamic_ram_write(read_word(\{show_expr(addr)}) + y, \{target});"
-      Implied | Immediate(_) | Relative(_) | Accumulator| Indirect(_) | IndexedIndirect(_) => abort("unreachable")
+    ZeroPage(addr) | Absolute(addr) => rewrite(addr, "", false)
+    ZeroPageX(addr) => rewrite(addr, " + x", true)
+    ZeroPageY(addr) => rewrite(addr, " + y", true)
+    AbsoluteX(addr) => rewrite(addr, " + x", false)
+    AbsoluteY(addr) => rewrite(addr, " + y", false)
+    IndirectIndexed(addr) => "dynamic_ram_write(indirect_y_addr(\{show_expr(addr)}), \{target});"
+    IndexedIndirect(addr) => "dynamic_ram_write(indirect_x_addr(\{show_expr(addr)}), \{target});"
+    _ => abort("Invalid store addressing mode")
   }
 }
 
@@ -611,7 +604,7 @@ fn Emitter::emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
       self.indentation += 1
       self.emit("cpu_call_begin(return_address);")
       for inst in dispatch.setup {
-        let mode = try low.lower_mode(@image.source_mode(p.image, inst)) catch { _ => abort("Invalid dispatcher instruction") }
+        let mode = try low.lower_mode(@image.source_mode(p.image, inst), op=Some(inst.op)) catch { _ => abort("Invalid dispatcher instruction") }
         let mut comment: String? = None
         for i, item in p.image.source {
           if p.image.addresses[i] == inst.pc && item is Inst(_) {
