@@ -527,54 +527,30 @@ fn AsmLowering::collect_basic_blocks(self: AsmLowering) -> Unit raise LoweringEr
 
 pub fn flag_reads(op: @parse.OpCode) -> FlagLiveness {
   match op {
-    ADC | SBC | ROL | ROR => { carry: true, zero: false, negative: false }
-    BCC | BCS => { carry: true, zero: false, negative: false }
-    BEQ | BNE => { carry: false, zero: true, negative: false }
-    BMI | BPL => { carry: false, zero: false, negative: true }
-    JSR => FlagLiveness::all()
+    ADC | SBC | ROL | ROR => { carry: true, zero: false, negative: false, overflow: false }
+    BCC | BCS => { carry: true, zero: false, negative: false, overflow: false }
+    BEQ | BNE => { carry: false, zero: true, negative: false, overflow: false }
+    BMI | BPL => { carry: false, zero: false, negative: true, overflow: false }
+    BVC | BVS => { ..FlagLiveness::none(), overflow: true }
+    JSR | PHP => FlagLiveness::all()
     _ => FlagLiveness::none()
   }
 }
 
 pub fn flag_writes(op: @parse.OpCode) -> FlagLiveness {
   match op {
-    ADC | SBC | ASL | LSR | ROL | ROR | CMP | CPX | CPY => FlagLiveness::all()
+    ADC | SBC => FlagLiveness::all()
+    ASL | LSR | ROL | ROR | CMP | CPX | CPY => { ..FlagLiveness::all(), overflow: false }
     LDA | LDX | LDY | AND | ORA | EOR | INC | INX | INY | DEC | DEX | DEY |
-    PLA | BIT | TAX | TAY | TSX | TXA | TYA => {
-      { carry: false, zero: true, negative: true }
+    PLA | TAX | TAY | TSX | TXA | TYA => {
+      { carry: false, zero: true, negative: true, overflow: false }
     }
-    CLC | SEC => { carry: true, zero: false, negative: false }
-    JSR => FlagLiveness::all()
+    CLC | SEC => { carry: true, zero: false, negative: false, overflow: false }
+    BIT => { ..FlagLiveness::all(), carry: false }
+    CLV => { ..FlagLiveness::none(), overflow: true }
+    JSR | PLP => FlagLiveness::all()
     _ => FlagLiveness::none()
   }
-}
-
-priv struct FlagUsage {
-  uses: FlagLiveness
-  defs: FlagLiveness
-}
-
-fn BasicBlock::flag_usage(self: BasicBlock) -> FlagUsage {
-  let mut uses = FlagLiveness::none()
-  let mut defs = FlagLiveness::none()
-
-  for item in self.items {
-    match item {
-      Inst(op~, ..) => {
-        uses = uses.union(flag_reads(op).subtract(defs))
-        defs = defs.union(flag_writes(op))
-      }
-      // JumpEngine dispatches to a subroutine. Keep all flags live across it
-      // until call summaries are available.
-      JumpEngine(_) => {
-        uses = uses.union(FlagLiveness::all().subtract(defs))
-        defs = defs.union(FlagLiveness::all())
-      }
-      _ => ()
-    }
-  }
-
-  { uses, defs }
 }
 
 fn BasicBlock::flags_escape(self: BasicBlock) -> Bool {
@@ -595,69 +571,72 @@ fn BasicBlock::flags_escape(self: BasicBlock) -> Bool {
   }
 }
 
+// Matched call/return demands: a callee is analyzed with the union of what
+// its actual callers need at return. No assumption that a call kills every
+// flag, and no unconditional "all flags live" at internal RTS instructions.
 fn AsmLowering::collect_flag_liveness(self: AsmLowering) -> Unit {
-  let usages = self.basic_blocks.map(fn(bb) { bb.flag_usage() })
+  let returns: Map[String, Array[Int]] = Map([])
+  for name in self.targets.subroutines {
+    let pending = [self.bb_by_label[name]]
+    let seen: Set[Int] = Set([])
+    let exits = []
+    while !pending.is_empty() {
+      let bb = pending.pop().unwrap()
+      if seen.contains(bb.id) { continue }
+      seen.add(bb.id)
+      if bb.flags_escape() { exits.push(bb.id) }
+      for link in bb.successors { pending.push(link.bb) }
+    }
+    returns[name] = exits
+  }
   let live_in = self.basic_blocks.map(fn(_) { FlagLiveness::none() })
-  let mut changed = true
-
-  while changed {
-    changed = false
-
-    let mut i = self.basic_blocks.length() - 1
-    while i >= 0 {
-      let bb = self.basic_blocks[i]
-      let mut live_out = FlagLiveness::none()
-
-      if bb.flags_escape() {
-        // Flags are observable at a subroutine return. This conservative
-        // boundary also keeps externally entered code correct.
-        live_out = FlagLiveness::all()
-      } else {
-        for link in bb.successors {
-          live_out = live_out.union(live_in[link.bb.id])
-        }
-      }
-
-      let usage = usages[bb.id]
-      let new_live_in = usage.uses.union(live_out.subtract(usage.defs))
-
-      if new_live_in != live_in[bb.id] {
-        live_in[bb.id] = new_live_in
-        changed = true
-      }
-
-      i -= 1
+  let demands = self.basic_blocks.map(fn(_) { FlagLiveness::none() })
+  for name in self.targets.subroutines {
+    let external = match self.program {
+      Some(p) => p.roots.contains(name)
+      None => name.has_suffix("__sub")
+    }
+    if external {
+      for id in returns[name] { demands[id] = FlagLiveness::all() }
     }
   }
-
-  for bb in self.basic_blocks {
-    let mut live_after = FlagLiveness::none()
-
-    if bb.flags_escape() {
-      live_after = FlagLiveness::all()
-    } else {
-      for link in bb.successors {
-        live_after = live_after.union(live_in[link.bb.id])
-      }
-    }
-
-    let mut i = bb.items.length() - 1
-    while i >= 0 {
-      match bb.items[i] {
-        Inst(id~, op~, ..) => {
-          if id >= 0 {
-            self.flag_liveness[id] = live_after
+  let mut changed = true
+  while changed {
+    changed = false
+    let mut index = self.basic_blocks.length() - 1
+    while index >= 0 {
+      let bb = self.basic_blocks[index]
+      let mut live = demands[index]
+      for link in bb.successors { live = live.union(live_in[link.bb.id]) }
+      let mut i = bb.items.length() - 1
+      while i >= 0 {
+        match bb.items[i] {
+          Inst(id~, op=JSR, mode=Absolute(Ident(name~, ..)), ..) => {
+            self.flag_liveness[id] = live
+            match returns.get(name) {
+              Some(exits) => {
+                for exit in exits {
+                  let next = demands[exit].union(live)
+                  if next != demands[exit] { demands[exit] = next; changed = true }
+                }
+                live = live_in[self.bb_by_label[name].id]
+              }
+              None => live = FlagLiveness::all()
+            }
           }
-
-          live_after = flag_reads(op).union(live_after.subtract(flag_writes(op)))
+          Inst(id~, op~, ..) => {
+            self.flag_liveness[id] = live
+            live = flag_reads(op).union(live.subtract(flag_writes(op)))
+          }
+          // The proven inline helper writes C/Z/N but preserves V before
+          // transferring to the selected handler. Its emitted setup is exact.
+          JumpEngine(_) => live = { ..FlagLiveness::none(), overflow: live.overflow }
+          _ => ()
         }
-        JumpEngine(_) => {
-          live_after = FlagLiveness::all()
-        }
-        _ => ()
+        i -= 1
       }
-
-      i -= 1
+      if live != live_in[index] { live_in[index] = live; changed = true }
+      index -= 1
     }
   }
 }

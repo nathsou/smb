@@ -59,3 +59,18 @@ test "overflow branches can be structured and inverted" {
   let low = lower_fixture("Root__sub:\n bvs Done\n lda #$01\nDone:\n sta $00\n rts\n")
   assert_eq(low.flat_subroutines[0].items.iter().any(fn(item) { item is If(cond=BVC, ..) }), true)
 }
+
+test "a preserving callee propagates its caller's carry demand" {
+  let low = lower_fixture("Root__sub:\n clc\n jsr Preserve\n bcs Done\n lda #$01\nDone:\n rts\nPreserve:\n rts\n")
+  assert_eq(low.flag_live_after(0).carry, true)
+}
+
+test "a defining callee kills the caller's obsolete carry value" {
+  let low = lower_fixture("Root__sub:\n clc\n jsr SetCarry\n bcs Done\n lda #$01\nDone:\n rts\nSetCarry:\n sec\n rts\n")
+  assert_eq(low.flag_live_after(0).carry, false)
+}
+
+test "BIT overflow stays live across CMP for BVS" {
+  let low = lower_fixture("Root__sub:\n bit $20\n cmp #$01\n bvs Done\n lda #$01\nDone:\n rts\n")
+  assert_eq(low.flag_live_after(0).overflow, true)
+}

@@ -48,7 +48,7 @@ int main(void) {
     cpu_call_begin(0x8123);
     assert(ram[0x100 + saved_sp] == 0x81);
     assert(ram[0x100 + (uint8_t)(saved_sp - 1)] == 0x23);
-    cpu_call_end();
+    cpu_call_end(0x8123);
     assert(sp == saved_sp);
 
     dynamic_ram_write(0x1801, 0x55);

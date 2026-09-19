@@ -16,7 +16,7 @@ extern bool overflow_flag, interrupt_disabled, decimal_flag;
 extern uint16_t cpu_resume_pc;
 
 void cpu_call_begin(uint16_t return_address);
-void cpu_call_end(void);
+void cpu_call_end(uint16_t expected_return_address);
 void cpu_yield(uint16_t pc);
 void cpu_unresolved_jump(uint16_t pc);
 
