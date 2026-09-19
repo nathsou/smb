@@ -6,6 +6,8 @@
 #include "ppu.h"
 #include "apu.h"
 
+void cpu_reset_entry(void);
+void cpu_nmi_entry(void);
 void Start(void);
 void NonMaskableInterrupt(void);
 void PauseRoutine(void);

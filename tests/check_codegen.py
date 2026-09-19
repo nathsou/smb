@@ -19,6 +19,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     run("moon", "check")
     run("moon", "test")
+    run("python3", "tests/check_nrom.py")
     expected = "e5c17c42783f430029ab90aa37c73d51c2c320898e533b3ff196dad38c50ae42"
     assert hashlib.sha256((ROOT / "src/smb.asm").read_bytes()).hexdigest() == expected
     run("moon", "run", "src/inspect")

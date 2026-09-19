@@ -1,3 +1,12 @@
+// Optional paths make the compiler usable with independent NROM fixtures.
+fn option(name: String, fallback: String) -> String {
+  let args = @env.args()
+  for i in 0..<(args.length() - 1) {
+    if args[i] == name { return args[i + 1] }
+  }
+  fallback
+}
+
 
 suberror PipelineError {
   IOError(String)
@@ -8,7 +17,7 @@ suberror PipelineError {
 } derive(Debug)
 
 fn read_rom() -> String raise PipelineError {
-  try @fs.read_file_to_string("src/smb.asm") catch {
+  try @fs.read_file_to_string(option("--input", "src/smb.asm")) catch {
     err => raise IOError(Show::to_string(err))
   } noraise {
     assembly => assembly
@@ -56,7 +65,7 @@ fn transpile() -> @transpile.Transpiler raise PipelineError {
   @transpile.Transpiler::transpile(low)
 }
 
-let output_dir: String = "codegen"
+let output_dir: String = option("--output", "codegen")
 let lib_output_dir: String = "\{output_dir}/lib"
 
 fn run() -> Unit raise Error {

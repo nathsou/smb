@@ -363,7 +363,10 @@ fn AsmLowering::collect_basic_block_leaders(self: AsmLowering) -> Array[Int] {
 
   fn insert_leader_index(idx: Int?) {
     match idx {
-      Some(idx) => {
+      Some(index) => {
+        let mut idx = index
+        while idx > 0 && self.lowered[idx - 1] is Comment(_) { idx -= 1 }
+        // Keep preceding block documentation with its labelled entry.
         // avoid duplicates
         if leader_indices.is_empty() || leader_indices[leader_indices.length() - 1] != idx {
           leader_indices.push(idx)
@@ -495,7 +498,7 @@ fn AsmLowering::collect_basic_blocks(self: AsmLowering) -> Unit raise LoweringEr
             connect(bb, target_bb, false)
           }
           None => {
-            if !label.has_prefix("__") { // allow special labels
+            if label != "__ret__" { // allow special labels
               raise LoweringError("Unknown jump target: \{label}")
             }
           }
@@ -508,7 +511,7 @@ fn AsmLowering::collect_basic_blocks(self: AsmLowering) -> Unit raise LoweringEr
               connect(bb, target_bb, false)
             }
             None => {
-              if !label.has_prefix("__") { // allow special labels
+              if label != "__ret__" { // allow special labels
                 raise LoweringError("Unknown jump target: \{label}")
               }
             }
@@ -584,7 +587,13 @@ fn AsmLowering::collect_flag_liveness(self: AsmLowering) -> Unit {
       let bb = pending.pop().unwrap()
       if seen.contains(bb.id) { continue }
       seen.add(bb.id)
-      if bb.flags_escape() { exits.push(bb.id) }
+      let yields = bb.items.iter().any(fn(item) {
+        match (item, self.program) {
+          (Inst(id~, ..), Some(p)) => p.idle.contains(id)
+          _ => false
+        }
+      })
+      if bb.flags_escape() || yields { exits.push(bb.id) }
       for link in bb.successors { pending.push(link.bb) }
     }
     returns[name] = exits

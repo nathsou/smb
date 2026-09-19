@@ -19,6 +19,34 @@ static uint16_t JumpEngine(uint16_t return_address) {
 }
 
 void Start(void) {
+  // SMBDIS.ASM - A COMPREHENSIVE SUPER MARIO BROS. DISASSEMBLY
+  // by doppelganger (doppelheathen@gmail.com)
+  // This file is provided for your own use as-is.  It will require the character rom data
+  // and an iNES file header to get it to work.
+  // There are so many people I have to thank for this, that taking all the credit for
+  // myself would be an unforgivable act of arrogance. Without their help this would
+  // probably not be possible.  So I thank all the peeps in the nesdev scene whose insight into
+  // the 6502 and the NES helped me learn how it works (you guys know who you are, there's no 
+  // way I could have done this without your help), as well as the authors of x816 and SMB 
+  // Utility, and the reverse-engineers who did the original Super Mario Bros. Hacking Project, 
+  // which I compared notes with but did not copy from.  Last but certainly not least, I thank
+  // Nintendo for creating this game and the NES, without which this disassembly would
+  // only be theory.
+  // Assembles with x816.
+  // -------------------------------------------------------------------------------------
+  // DEFINES
+  // NES specific hardware defines
+  //  GAME SPECIFIC DEFINES
+  // sound related defines
+  // -------------------------------------------------------------------------------------
+  // CONSTANTS
+  // sound effects constants
+  // music constants
+  // enemy object constants 
+  // other constants
+  // -------------------------------------------------------------------------------------
+  // DIRECTIVES
+  // -------------------------------------------------------------------------------------
   sei(); // pretty standard 6502 type init here
   cld();
   lda_imm(0b00010000); // init PPU control register 1 
@@ -43,8 +71,8 @@ void Start(void) {
     dex_fn();
   } while (!neg_flag);
   lda_abs(WarmBootValidation); // second checkpoint, check to see if 
-  cmp_imm_fz(0xa5); // another location has a specific value
-  if (zero_flag) {
+  // another location has a specific value
+  if (a == 0xa5) {
     ldy_imm(WarmBootOffset); // if passed both, load warm boot pointer
   }
   
@@ -63,16 +91,16 @@ ColdBoot:
   cpu_call_begin(0x804b); InitializeNameTables(); cpu_call_end(0x804b); // initialize both name tables
   inc_abs(DisableScreenFlag); // set flag to disable screen output
   lda_abs(Mirror_PPU_CTRL_REG1);
-  ora_imm(0b10000000); // enable NMIs
+  ora_imm_fzn(0b10000000); // enable NMIs
   cpu_call_begin(0x8056); WritePPUReg1(); cpu_call_end(0x8056);
   // EndlessLoop:
   cpu_yield(0x8057); return; // endless loop, need I say more?
-  // -------------------------------------------------------------------------------------
-  // $00 - vram buffer address table low, also used for pseudorandom bit
-  // $01 - vram buffer address table high
 }
 
 void NonMaskableInterrupt(void) {
+  // -------------------------------------------------------------------------------------
+  // $00 - vram buffer address table low, also used for pseudorandom bit
+  // $01 - vram buffer address table high
   lda_abs(Mirror_PPU_CTRL_REG1); // disable NMIs in mirror reg
   and_imm(0b01111111); // save all other bits
   ram[Mirror_PPU_CTRL_REG1] = a;
@@ -214,22 +242,21 @@ NoDecTimers:
   ora_imm_fzn(0b10000000); // reactivate NMIs
   ppu_ctrl = a;
   return; // <rti> // we are done until the next frame!
-  // -------------------------------------------------------------------------------------
 }
 
 void PauseRoutine(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs(OperMode); // are we in victory mode?
-  cmp_imm_fz(VictoryModeValue); // if so, go ahead
-  if (!zero_flag) {
-    cmp_imm_fz(GameModeValue); // are we in game mode?
+  // if so, go ahead
+  if (a != VictoryModeValue) {
+    // are we in game mode?
     // if not, leave
-    if (!zero_flag) {
+    if (a != GameModeValue) {
       return;
     }
     lda_abs(OperMode_Task); // if we are in game mode, are we running game engine?
-    cmp_imm_fz(0x3);
     // if not, leave
-    if (!zero_flag) {
+    if (a != 0x3) {
       return;
     }
   }
@@ -267,11 +294,11 @@ SetPause:
   ram[GamePauseStatus] = a;
   // ExitPause:
   return;
-  // -------------------------------------------------------------------------------------
-  // $00 - used for preset value
 }
 
 void SpriteShuffler(void) {
+  // -------------------------------------------------------------------------------------
+  // $00 - used for preset value
   ldy_abs(AreaType); // load level type, likely residual code
   lda_imm(0x28); // load preset value which will put it at
   ram[0x0] = a; // sprite #10
@@ -298,9 +325,9 @@ void SpriteShuffler(void) {
   } while (!neg_flag);
   ldx_abs(SprShuffleAmtOffset); // load offset
   inx();
-  cpx_imm_fz(0x3); // check if offset + 1 goes to 3
+  // check if offset + 1 goes to 3
   // Original branch: if offset + 1 not 3, store
-  if (zero_flag) {
+  if (x == 0x3) {
     ldx_imm(0x0); // otherwise, init to 0
   }
   // SetAmtOffset:
@@ -323,10 +350,10 @@ void SpriteShuffler(void) {
     dey_fn();
   } while (!neg_flag); // do this until all misc spr offsets are loaded
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void OperModeExecutionTree(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs(OperMode); // this is the heart of the entire program,
   switch (JumpEngine(0x8217)) {
     case 0x8231: TitleScreenMode(); return;
@@ -351,7 +378,6 @@ void MoveAllSpritesOffscreen(void) {
     iny_fz();
   } while (!zero_flag);
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void MoveSpritesOffscreen(void) {
@@ -366,10 +392,10 @@ void MoveSpritesOffscreen(void) {
     iny_fz();
   } while (!zero_flag);
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void TitleScreenMode(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs(OperMode_Task);
   switch (JumpEngine(0x8236)) {
     case 0x8fcf: InitializeGame(); return;
@@ -508,10 +534,10 @@ void GoContinue(void) {
   ram[AreaNumber] = x; // will make no difference
   ram[OffScr_AreaNumber] = x;
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void DrawMushroomIcon(void) {
+  // -------------------------------------------------------------------------------------
   ldy_imm(0x7); // read eight bytes to be read by transfer routine
   do {
     // IconDataRead:
@@ -530,10 +556,10 @@ void DrawMushroomIcon(void) {
   ram[(VRAM_Buffer1 + 5)] = a;
   // ExitIcon:
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void DemoEngine(void) {
+  // -------------------------------------------------------------------------------------
   ldx_abs(DemoAction); // load current demo action
   lda_abs_fz(DemoActionTimer); // load current action timer
   // Original branch: if timer still counting down, skip
@@ -555,10 +581,10 @@ void DemoEngine(void) {
   carry_flag = false; // clear carry if demo still going
   // DemoOver:
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void VictoryMode(void) {
+  // -------------------------------------------------------------------------------------
   cpu_call_begin(0x838d); VictoryModeSubroutines(); cpu_call_end(0x838d); // run victory mode subroutines
   lda_abs_fz(OperMode_Task); // get current task of victory mode
   // Original branch: if on bridge collapse, skip enemy processing
@@ -591,14 +617,13 @@ void SetupVictoryMode(void) {
   lda_imm(EndOfCastleMusic);
   ram[EventMusicQueue] = a; // play win castle music
   // jump to set next major task in victory mode
-  // -------------------------------------------------------------------------------------
   // IncModeTask_B:
   inc_abs(OperMode_Task); // move onto next mode
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void PlayerVictoryWalk(void) {
+  // -------------------------------------------------------------------------------------
   ldy_imm(0x0); // set value here to not walk player by default
   ram[VictoryWalkControl] = y;
   lda_zp(Player_PageLoc); // get player's page location
@@ -636,16 +661,15 @@ DontWalk:
   // Original branch: if zero, branch to change modes
   if (!zero_flag) {
     return; // otherwise leave
-    // -------------------------------------------------------------------------------------
   }
   // IncModeTask_A:
   inc_abs(OperMode_Task); // move onto next task in mode
   // ExitMsgs:
   return; // leave
-  // -------------------------------------------------------------------------------------
 }
 
 void PrintVictoryMessages(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs_fz(SecondaryMsgCounter); // load secondary message counter
   // Original branch: if set, branch to increment message counters
   if (zero_flag) {
@@ -655,9 +679,8 @@ void PrintVictoryMessages(void) {
       cmp_imm_fc(0x9); // if at 9 or above, branch elsewhere (this comparison
       if (carry_flag) { goto IncMsgCounter; } // is residual code, counter never reaches 9)
       ldy_abs(WorldNumber); // check world number
-      cpy_imm_fz(World8);
       // Original branch: if not at world 8, skip to next part
-      if (zero_flag) {
+      if (y == World8) {
         cmp_imm_fc(0x3); // check primary message counter again
         if (!carry_flag) { goto IncMsgCounter; } // if not at 3 yet (world 8 only), branch to increment
         sbc_imm(0x1); // otherwise subtract one
@@ -680,9 +703,9 @@ ThankPlayer:
     // SecondPartMsg:
     iny(); // increment Y to do world 8's message
     lda_abs(WorldNumber);
-    cmp_imm_fz(World8); // check world number
+    // check world number
     // Original branch: if at world 8, branch to next part
-    if (!zero_flag) {
+    if (a != World8) {
       dey(); // otherwise decrement Y for world 1-7's message
       cpy_imm_fc(0x4); // if counter at 4 (world 1-7 only)
       if (carry_flag) { goto SetEndTimer; } // branch to set victory end timer
@@ -691,9 +714,9 @@ ThankPlayer:
     }
     
 EvalForMusic:
-    cpy_imm_fz(0x3); // if counter not yet at 3 (world 8 only), branch
+    // if counter not yet at 3 (world 8 only), branch
     // Original branch: to print message only (note world 1-7 will only
-    if (zero_flag) {
+    if (y == 0x3) {
       lda_imm(VictoryMusic); // reach this code if counter = 0, and will always branch)
       ram[EventMusicQueue] = a; // otherwise load victory music first (world 8 only)
     }
@@ -725,19 +748,19 @@ SetEndTimer:
   inc_abs(OperMode_Task); // move onto next task in mode
   // ExitMsgs:
   return; // leave
-  // -------------------------------------------------------------------------------------
 }
 
 void PlayerEndWorld(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs_fz(WorldEndTimer); // check to see if world end timer expired
   // branch to leave if not
   if (!zero_flag) {
     return;
   }
   ldy_abs(WorldNumber); // check world number
-  cpy_imm_fc(World8); // if on world 8, player is done with game, 
+  // if on world 8, player is done with game, 
   // Original branch: thus branch to read controller
-  if (!carry_flag) {
+  if (y < World8) {
     lda_imm(0x0);
     ram[AreaNumber] = a; // otherwise initialize area number used as offset
     ram[LevelNumber] = a; // and level number control to start at area 1
@@ -765,19 +788,19 @@ void PlayerEndWorld(void) {
   cpu_call_begin(0x849d); TerminateGame(); cpu_call_end(0x849d); // do sub to continue other player or end game
   // EndExitTwo:
   return; // leave
-  // -------------------------------------------------------------------------------------
-  // data is used as tiles for numbers
-  // that appear when you defeat enemies
 }
 
 void FloateyNumbersRoutine(void) {
+  // -------------------------------------------------------------------------------------
+  // data is used as tiles for numbers
+  // that appear when you defeat enemies
   lda_absx_fz(FloateyNum_Control); // load control for floatey number
   // if zero, branch to leave
   if (zero_flag) {
     return;
   }
-  cmp_imm_fc(0xb); // if less than $0b, branch
-  if (carry_flag) {
+  // if less than $0b, branch
+  if (a >= 0xb) {
     lda_imm(0xb); // otherwise set to $0b, thus keeping
     ram[FloateyNum_Control + x] = a; // it in range
   }
@@ -791,11 +814,11 @@ void FloateyNumbersRoutine(void) {
   }
   // DecNumTimer:
   dec_absx(FloateyNum_Timer); // decrement value here
-  cmp_imm_fz(0x2b); // if not reached a certain point, branch  
-  if (zero_flag) {
-    cpy_imm_fz(0xb); // check offset for $0b
+  // if not reached a certain point, branch  
+  if (a == 0x2b) {
+    // check offset for $0b
     // Original branch: branch ahead if not found
-    if (zero_flag) {
+    if (y == 0xb) {
       inc_abs(NumberofLives); // give player one extra life (1-up)
       lda_imm(Sfx_ExtraLife);
       ram[Square2SoundQueue] = a; // and play the 1-up sound
@@ -815,14 +838,12 @@ void FloateyNumbersRoutine(void) {
   // ChkTallEnemy:
   ldy_absx(Enemy_SprDataOffset); // get OAM data offset for enemy object
   lda_zpx(Enemy_ID); // get enemy object identifier
-  cmp_imm_fz(Spiny);
   // Original branch: branch if spiny
-  if (!zero_flag) {
+  if (a != Spiny) {
     cmp_imm_fz(PiranhaPlant);
     if (zero_flag) { goto FloateyPart; } // branch if piranha plant
-    cmp_imm_fz(HammerBro);
     // Original branch: branch elsewhere if hammer bro
-    if (!zero_flag) {
+    if (a != HammerBro) {
       cmp_imm_fz(GreyCheepCheep);
       if (zero_flag) { goto FloateyPart; } // branch if cheep-cheep of either color
       cmp_imm_fz(RedCheepCheep);
@@ -869,10 +890,10 @@ FloateyPart:
   ram[(Sprite_Tilenumber + 4) + y] = a; // display the second half
   ldx_zp(ObjectOffset); // get enemy object offset and leave
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void ScreenRoutines(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs(ScreenRoutineTask); // run one of the following subroutines
   switch (JumpEngine(0x856c)) {
     case 0x858b: InitScreen(); return;
@@ -900,21 +921,18 @@ void InitScreen(void) {
   // Original branch: if mode still 0, do not load
   if (!zero_flag) {
     ldx_imm(0x3); // into buffer pointer
-    // -------------------------------------------------------------------------------------
     // SetVRAMAddr_A:
     ram[VRAM_Buffer_AddrCtrl] = x; // store offset into buffer control
   }
   // NextSubtask:
   // move onto next task
-  // -------------------------------------------------------------------------------------
-  // $00 - used as temp counter in GetPlayerColors
   // IncSubtask:
   inc_abs(ScreenRoutineTask); // move onto next task
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void SetupIntermediate(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs(BackgroundColorCtrl); // save current background color control
   pha(); // and player status to stack
   lda_abs(PlayerStatus);
@@ -929,29 +947,27 @@ void SetupIntermediate(void) {
   pla(); // and once we're done, we return bg
   ram[BackgroundColorCtrl] = a; // color ctrl and player status from stack
   // then move onto the next task
-  // -------------------------------------------------------------------------------------
   // IncSubtask:
   inc_abs(ScreenRoutineTask); // move onto next task
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void GetAreaPalette(void) {
+  // -------------------------------------------------------------------------------------
   ldy_abs(AreaType); // select appropriate palette to load
   ldx_absy(AreaPalette); // based on area type
   // SetVRAMAddr_A:
   ram[VRAM_Buffer_AddrCtrl] = x; // store offset into buffer control
   // NextSubtask:
   // move onto next task
-  // -------------------------------------------------------------------------------------
-  // $00 - used as temp counter in GetPlayerColors
   // IncSubtask:
   inc_abs(ScreenRoutineTask); // move onto next task
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void GetBackgroundColor(void) {
+  // -------------------------------------------------------------------------------------
+  // $00 - used as temp counter in GetPlayerColors
   ldy_abs_fz(BackgroundColorCtrl); // check background color control
   // Original branch: if not set, increment task and fetch palette
   if (!zero_flag) {
@@ -973,9 +989,8 @@ void GetPlayerColors(void) {
   }
   // ChkFiery:
   lda_abs(PlayerStatus); // check player status
-  cmp_imm_fz(0x2);
   // Original branch: if fiery, load alternate offset for fiery player
-  if (zero_flag) {
+  if (a == 0x2) {
     ldy_imm(0x8);
   }
   // StartClrGet:
@@ -1012,10 +1027,10 @@ void GetPlayerColors(void) {
   // SetVRAMOffset:
   ram[VRAM_Buffer1_Offset] = a; // store as new vram buffer offset
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void GetAlternatePalette1(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs(AreaStyle); // check for mushroom level style
   cmp_imm_fcz(0x1);
   if (zero_flag) {
@@ -1025,25 +1040,23 @@ void GetAlternatePalette1(void) {
   }
   // NoAltPal:
   // now onto the next task
-  // -------------------------------------------------------------------------------------
   // IncSubtask:
   inc_abs(ScreenRoutineTask); // move onto next task
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void WriteTopStatusLine(void) {
+  // -------------------------------------------------------------------------------------
   lda_imm(0x0); // select main status bar
   cpu_call_begin(0x8656); WriteGameText(); cpu_call_end(0x8656); // output it
   // onto the next task
-  // -------------------------------------------------------------------------------------
   // IncSubtask:
   inc_abs(ScreenRoutineTask); // move onto next task
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void WriteBottomStatusLine(void) {
+  // -------------------------------------------------------------------------------------
   cpu_call_begin(0x865c); GetSBNybbles(); cpu_call_end(0x865c); // write player's score and coin tally to screen
   ldx_abs(VRAM_Buffer1_Offset);
   lda_imm(0x20); // write address for world-area number on screen
@@ -1068,14 +1081,13 @@ void WriteBottomStatusLine(void) {
   carry_flag = false;
   adc_imm_fc(0x6);
   ram[VRAM_Buffer1_Offset] = a;
-  // -------------------------------------------------------------------------------------
   // IncSubtask:
   inc_abs(ScreenRoutineTask); // move onto next task
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void DisplayTimeUp(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs_fz(GameTimerExpiredFlag); // if game timer not expired, increment task
   // Original branch: control 2 tasks forward, otherwise, stay here
   if (!zero_flag) {
@@ -1086,7 +1098,6 @@ void DisplayTimeUp(void) {
     // NoTimeUp:
     inc_abs(ScreenRoutineTask); // increment control task 2 tasks forward
     goto IncSubtask;
-    // -------------------------------------------------------------------------------------
   }
   // OutputInter:
   cpu_call_begin(0x86c9); WriteGameText(); cpu_call_end(0x86c9);
@@ -1098,10 +1109,10 @@ void DisplayTimeUp(void) {
 IncSubtask:
   inc_abs(ScreenRoutineTask); // move onto next task
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void DisplayIntermediate(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs_fz(OperMode); // check primary mode of operation
   // Original branch: if in title screen mode, skip this
   if (!zero_flag) {
@@ -1137,15 +1148,14 @@ NoInter:
     lda_imm(0x8); // set for specific task and leave
     ram[ScreenRoutineTask] = a;
     return;
-    // -------------------------------------------------------------------------------------
   }
   // IncModeTask_B:
   inc_abs(OperMode_Task); // move onto next mode
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void AreaParserTaskControl(void) {
+  // -------------------------------------------------------------------------------------
   inc_abs(DisableScreenFlag); // turn off screen
   do {
     // TaskLoop:
@@ -1160,9 +1170,6 @@ void AreaParserTaskControl(void) {
   lda_imm(0x6); // set vram buffer to output rendered column set
   ram[VRAM_Buffer_AddrCtrl] = a; // on next NMI
   return;
-  // -------------------------------------------------------------------------------------
-  // $00 - vram buffer address table low
-  // $01 - vram buffer address table high
 }
 
 void DrawTitleScreen(void) {
@@ -1173,6 +1180,8 @@ SetVRAMAddr_B:
   // NoAltPal:
   goto IncSubtask; // now onto the next task
   // -------------------------------------------------------------------------------------
+  // $00 - vram buffer address table low
+  // $01 - vram buffer address table high
   
 DrawTitleScreen:
   lda_abs_fz(OperMode); // are we in title screen mode?
@@ -1204,20 +1213,18 @@ OutputTScr:
   } while (!carry_flag); // if not, loop back and do another
   lda_imm(0x5); // set buffer transfer control to $0300,
   goto SetVRAMAddr_B; // increment task and exit
-  // -------------------------------------------------------------------------------------
   
 IncSubtask:
   inc_abs(ScreenRoutineTask); // move onto next task
   return;
-  // -------------------------------------------------------------------------------------
   
 IncModeTask_B:
   inc_abs(OperMode_Task); // move onto next mode
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void ClearBuffersDrawIcon(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs_fz(OperMode); // check game mode
   // Original branch: if not title screen mode, leave
   if (zero_flag) {
@@ -1232,21 +1239,19 @@ void ClearBuffersDrawIcon(void) {
     // IncSubtask:
     inc_abs(ScreenRoutineTask); // move onto next task
     return;
-    // -------------------------------------------------------------------------------------
   }
   // IncModeTask_B:
   inc_abs(OperMode_Task); // move onto next mode
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void WriteTopScore(void) {
+  // -------------------------------------------------------------------------------------
   lda_imm(0xfa); // run display routine to display top score on title
   cpu_call_begin(0x874d); UpdateNumber(); cpu_call_end(0x874d);
   // IncModeTask_B:
   inc_abs(OperMode_Task); // move onto next mode
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void WriteGameText(void) {
@@ -1261,12 +1266,12 @@ WriteGameText:
   pha(); // save text number to stack
   asl_acc();
   tay(); // multiply by 2 and use as offset
-  cpy_imm_fc(0x4); // if set to do top status bar or world/lives display,
+  // if set to do top status bar or world/lives display,
   // Original branch: branch to use current offset as-is
-  if (carry_flag) {
-    cpy_imm_fc(0x8); // if set to do time-up or game over,
+  if (y >= 0x4) {
+    // if set to do time-up or game over,
     // Original branch: branch to check players
-    if (carry_flag) {
+    if (y >= 0x8) {
       ldy_imm(0x8); // otherwise warp zone, therefore set offset
     }
     // Chk2Players:
@@ -1367,10 +1372,10 @@ ChkLuigi:
   } while (!carry_flag);
   lda_imm(0x2c); // load new buffer pointer at end of message
   goto SetVRAMOffset;
-  // -------------------------------------------------------------------------------------
 }
 
 void ResetSpritesAndScreenTimer(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs_fz(ScreenTimer); // check if screen timer has expired
   // if not, branch to leave
   if (!zero_flag) {
@@ -1387,6 +1392,9 @@ void ResetScreenTimer(void) {
   inc_abs(ScreenRoutineTask); // move onto next task
   // NoReset:
   return;
+}
+
+void RenderAreaGraphics(void) {
   // -------------------------------------------------------------------------------------
   // $00 - temp vram buffer offset
   // $01 - temp metatile buffer offset
@@ -1396,9 +1404,6 @@ void ResetScreenTimer(void) {
   // $05 - used to determine attribute table column
   // $06 - metatile graphics table address low
   // $07 - metatile graphics table address high
-}
-
-void RenderAreaGraphics(void) {
   lda_abs(CurrentColumnPos); // store LSB of where we're at
   and_imm(0x1);
   ram[0x5] = a;
@@ -1501,18 +1506,16 @@ SetAttrib:
   }
   // ExitDrawM:
   // jump to set buffer to $0341 and leave
-  // -------------------------------------------------------------------------------------
-  // $00 - temp attribute table address high (big endian order this time!)
-  // $01 - temp attribute table address low
   // SetVRAMCtrl:
   lda_imm(0x6);
   ram[VRAM_Buffer_AddrCtrl] = a; // set buffer to $0341 and leave
   return;
-  // -------------------------------------------------------------------------------------
-  // $00 - used as temporary counter in ColorRotation
 }
 
 void RenderAttributeTables(void) {
+  // -------------------------------------------------------------------------------------
+  // $00 - temp attribute table address high (big endian order this time!)
+  // $01 - temp attribute table address low
   lda_abs(CurrentNTAddr_Low); // get low byte of next name table address
   and_imm(0b00011111); // to be written to, mask out all but 5 LSB,
   carry_flag = true; // subtract four 
@@ -1562,11 +1565,11 @@ void RenderAttributeTables(void) {
   lda_imm(0x6);
   ram[VRAM_Buffer_AddrCtrl] = a; // set buffer to $0341 and leave
   return;
-  // -------------------------------------------------------------------------------------
-  // $00 - used as temporary counter in ColorRotation
 }
 
 void ColorRotation(void) {
+  // -------------------------------------------------------------------------------------
+  // $00 - used as temporary counter in ColorRotation
   lda_zp(FrameCounter); // get frame counter
   and_imm_fz(0x7); // mask out all but three LSB
   // branch if not set to zero to do this every eighth frame
@@ -1574,9 +1577,8 @@ void ColorRotation(void) {
     return;
   }
   ldx_abs(VRAM_Buffer1_Offset); // check vram buffer offset
-  cpx_imm_fc(0x31);
   // if offset over 48 bytes, branch to leave
-  if (carry_flag) {
+  if (x >= 0x31) {
     return;
   }
   tay(); // otherwise use frame counter's 3 LSB as offset here
@@ -1613,15 +1615,18 @@ void ColorRotation(void) {
   ram[VRAM_Buffer1_Offset] = a;
   inc_abs(ColorRotateOffset); // increment color cycling offset
   lda_abs(ColorRotateOffset);
-  cmp_imm_fc(0x6); // check to see if it's still in range
+  // check to see if it's still in range
   // if so, branch to leave
-  if (!carry_flag) {
+  if (a < 0x6) {
     return;
   }
   lda_imm(0x0);
   ram[ColorRotateOffset] = a; // otherwise, init to keep it in range
   // ExitColorRot:
   return; // leave
+}
+
+void RemoveCoin_Axe(void) {
   // -------------------------------------------------------------------------------------
   // $00 - temp store for offset control bit
   // $01 - temp vram buffer offset
@@ -1629,9 +1634,6 @@ void ColorRotation(void) {
   // $03 - temp adder for high byte of name table address
   // $04, $05 - name table address low/high
   // $06, $07 - block buffer address low/high
-}
-
-void RemoveCoin_Axe(void) {
   ldy_imm(0x41); // set low byte so offset points to $0341
   lda_imm(0x3); // load offset for default blank metatile
   ldx_abs_fz(AreaType); // check area type
@@ -1661,9 +1663,9 @@ void DestroyBlockMetatile(void) {
 
 void WriteBlockMetatile(void) {
   ldy_imm(0x3); // load offset for blank metatile
-  cmp_imm_fz(0x0); // check contents of A for blank metatile
+  // check contents of A for blank metatile
   // Original branch: branch if found (unconditional if branched from 8a6b)
-  if (!zero_flag) {
+  if (a != 0x0) {
     ldy_imm(0x0); // load offset for brick metatile w/ line
     cmp_imm_fz(0x58);
     if (zero_flag) { goto UseBOffset; } // use offset if metatile is brick with coins (w/ line)
@@ -1692,7 +1694,6 @@ void MoveVOffset(void) {
 SetVRAMOffset:
   ram[VRAM_Buffer1_Offset] = a; // store as new vram buffer offset
   return;
-  // -------------------------------------------------------------------------------------
   
 MoveVOffset:
   dey(); // decrement vram buffer offset
@@ -1710,9 +1711,9 @@ void PutBlockMetatile(void) {
   tax();
   ldy_imm(0x20); // load high byte for name table 0
   lda_zp(0x6); // get low byte of block buffer pointer
-  cmp_imm_fc(0xd0); // check to see if we're on odd-page block buffer
+  // check to see if we're on odd-page block buffer
   // Original branch: if not, use current high byte
-  if (carry_flag) {
+  if (a >= 0xd0) {
     ldy_imm(0x24); // otherwise load high byte for name table 1
   }
   // SaveHAdder:
@@ -1765,15 +1766,15 @@ void RemBridge(void) {
   ram[(VRAM_Buffer1 + 9) + y] = a; // put null terminator at end
   ldx_zp(0x0); // get offset control bit here
   return; // and leave
-  // -------------------------------------------------------------------------------------
-  // METATILE GRAPHICS TABLE
 }
 
 void InitializeNameTables(void) {
+  // -------------------------------------------------------------------------------------
+  // METATILE GRAPHICS TABLE
   lda_abs(PPU_STATUS); // reset flip-flop
   lda_abs(Mirror_PPU_CTRL_REG1); // load mirror of ppu reg $2000
   ora_imm(0b00010000); // set sprites for first 4k and background for second 4k
-  and_imm(0b11110000); // clear rest of lower nybble, leave higher alone
+  and_imm_fzn(0b11110000); // clear rest of lower nybble, leave higher alone
   cpu_call_begin(0x8e25); WritePPUReg1(); cpu_call_end(0x8e25);
   lda_imm(0x24); // set vram address to start of name table 1
   cpu_call_begin(0x8e2a); WriteNTAddr(); cpu_call_end(0x8e2a);
@@ -1809,11 +1810,11 @@ InitNTLoop:
   ram[HorizontalScroll] = a; // reset scroll variables
   ram[VerticalScroll] = a;
   InitScroll(); return; // initialize scroll registers to zero
-  // -------------------------------------------------------------------------------------
-  // $00 - temp joypad bit
 }
 
 void ReadJoypads(void) {
+  // -------------------------------------------------------------------------------------
+  // $00 - temp joypad bit
   lda_imm(0x1); // reset and clear strobe of joypad ports
   write_joypad1(a); write_joypad2(a);
   lsr_acc();
@@ -1854,13 +1855,13 @@ void ReadPortBits(void) {
   pla();
   ram[(JoypadBitMask + x) & 0x7ff] = a; // save with all bits in another place and leave
   return;
-  // -------------------------------------------------------------------------------------
-  // $00 - vram buffer address table low
-  // $01 - vram buffer address table high
 }
 
 void UpdateScreen(void) {
   goto UpdateScreen;
+  // -------------------------------------------------------------------------------------
+  // $00 - vram buffer address table low
+  // $01 - vram buffer address table high
   
 WriteBufferToScreen:
   ppu_write_address(a); // store high byte of vram address
@@ -1872,10 +1873,10 @@ WriteBufferToScreen:
   asl_acc_fc(); // shift to left and save in stack
   pha();
   lda_abs(Mirror_PPU_CTRL_REG1); // load mirror of $2000,
-  ora_imm(0b00000100); // set ppu to increment by 32 by default
+  ora_imm_fzn(0b00000100); // set ppu to increment by 32 by default
   // Original branch: if d7 of third byte was clear, ppu will
   if (!carry_flag) {
-    and_imm(0b11111011); // only increment by 1
+    and_imm_fzn(0b11111011); // only increment by 1
   }
   // SetupWrites:
   cpu_call_begin(0x8eab); WritePPUReg1(); cpu_call_end(0x8eab); // write to register
@@ -1928,21 +1929,21 @@ void InitScroll(void) {
   ppu_write_scroll(a); // store contents of A into scroll registers
   ppu_write_scroll(a); // and end whatever subroutine led us here
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void WritePPUReg1(void) {
+  // -------------------------------------------------------------------------------------
   ppu_ctrl = a; // write contents of A to PPU register 1
   ram[Mirror_PPU_CTRL_REG1] = a; // and its mirror
   return;
+}
+
+void PrintStatusBarNumbers(void) {
   // -------------------------------------------------------------------------------------
   // $00 - used to store status bar nybbles
   // $02 - used as temp vram offset
   // $03 - used to store length of status bar number
   // status bar name table offset and length data
-}
-
-void PrintStatusBarNumbers(void) {
   ram[0x0] = a; // store player-specific offset
   cpu_call_begin(0x8f0a); OutputNumbers(); cpu_call_end(0x8f0a); // use first nybble to print the coin display
   lda_zp(0x0); // move high nybble to low
@@ -1967,8 +1968,8 @@ void OutputNumbers(void) {
   tay();
   ldx_abs(VRAM_Buffer1_Offset); // get current buffer pointer
   lda_imm(0x20); // put at top of screen by default
-  cpy_imm_fz(0x0); // are we writing top score on title screen?
-  if (zero_flag) {
+  // are we writing top score on title screen?
+  if (y == 0x0) {
     lda_imm(0x22); // if so, put further down on the screen
   }
   // SetupNums:
@@ -2002,10 +2003,10 @@ void OutputNumbers(void) {
   ram[VRAM_Buffer1_Offset] = x; // store it in case we want to use it again
   // ExitOutputN:
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void DigitsMathRoutine(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs(OperMode); // check mode of operation
   cmp_imm_fz(TitleScreenModeValue);
   if (zero_flag) { goto EraseDMods; } // if in title screen mode, branch to lock score
@@ -2045,10 +2046,10 @@ CarryOne:
   sbc_imm(10); // proper BCD number, then increment the digit
   inc_absx((DigitModifier - 1)); // preceding current digit to "carry the one" properly
   goto StoreNewD; // go back to just after we branched here
-  // -------------------------------------------------------------------------------------
 }
 
 void UpdateTopScore(void) {
+  // -------------------------------------------------------------------------------------
   ldx_imm(0x5); // start with mario's score
   cpu_call_begin(0x8f9b); TopScoreCheck(); cpu_call_end(0x8f9b);
   ldx_imm(0xb); // now do luigi's score
@@ -2082,10 +2083,10 @@ void TopScoreCheck(void) {
   } while (!carry_flag);
   // NoTopSc:
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void InitializeGame(void) {
+  // -------------------------------------------------------------------------------------
   ldy_imm(0x6f); // clear all memory as in initialization procedure,
   cpu_call_begin(0x8fd3); InitializeMemory(); cpu_call_end(0x8fd3); // but this time, clear only as far as $076f
   ldy_imm(0x1f);
@@ -2170,10 +2171,10 @@ CheckHalfway:
   ram[DisableScreenFlag] = a;
   inc_abs(OperMode_Task); // increment one of the modes
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void PrimaryGameSetup(void) {
+  // -------------------------------------------------------------------------------------
   lda_imm(0x1);
   ram[FetchNewGameTimerFlag] = a; // set flag to load game timer from header
   ram[PlayerSize] = a; // set player's size to small
@@ -2229,12 +2230,12 @@ void SecondaryGameSetup(void) {
   inc_abs(Sprite0HitDetectFlag); // set sprite #0 check flag
   inc_abs(OperMode_Task); // increment to next task
   return;
-  // -------------------------------------------------------------------------------------
-  // $06 - RAM address low
-  // $07 - RAM address high
 }
 
 void InitializeMemory(void) {
+  // -------------------------------------------------------------------------------------
+  // $06 - RAM address low
+  // $07 - RAM address high
   ldx_imm(0x7); // set initial high byte to $0700-$07ff
   lda_imm(0x0); // set initial low byte to start of page (at $00 of page)
   ram[0x6] = a;
@@ -2243,9 +2244,9 @@ void InitializeMemory(void) {
     ram[0x7] = x;
     do {
       // InitByteLoop:
-      cpx_imm_fz(0x1); // check to see if we're on the stack ($0100-$01ff)
+      // check to see if we're on the stack ($0100-$01ff)
       // Original branch: if not, go ahead anyway
-      if (zero_flag) {
+      if (x == 0x1) {
         cpy_imm_fc(0x60); // otherwise, check to see if we're at $0160-$01ff
         if (carry_flag) { goto SkipByte; } // if so, skip write
       }
@@ -2259,10 +2260,10 @@ SkipByte:
     dex_fn(); // go onto the next page
   } while (!neg_flag); // do this until all pages of memory have been erased
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void GetAreaMusic(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs_fz(OperMode); // if in title screen mode, leave
   if (zero_flag) {
     return;
@@ -2291,10 +2292,10 @@ StoreMusic:
   ram[AreaMusicQueue] = a; // store in queue and leave
   // ExitGetM:
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void Entrance_GameTimerSetup(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs(ScreenLeft_PageLoc); // set current page for area objects
   ram[Player_PageLoc] = a; // as page location for player
   lda_imm(0x28); // store value here
@@ -2368,11 +2369,11 @@ ChkOverR:
   lda_imm(0x7); // set to run player entrance subroutine
   ram[GameEngineSubroutine] = a; // on the next frame of game engine
   return;
-  // -------------------------------------------------------------------------------------
-  // page numbers are in order from -1 to -4
 }
 
 void PlayerLoseLife(void) {
+  // -------------------------------------------------------------------------------------
+  // page numbers are in order from -1 to -4
   inc_abs(DisableScreenFlag); // disable screen and sprite 0 check
   lda_imm(0x0);
   ram[Sprite0HitDetectFlag] = a;
@@ -2421,7 +2422,6 @@ SetHalfway:
   ram[HalfwayPage] = a; // store as halfway page for player
   cpu_call_begin(0x9214); TransposePlayers(); cpu_call_end(0x9214); // switch players around if 2-player game
   // continue the game
-  // -------------------------------------------------------------------------------------
   // ContinueGame:
   cpu_call_begin(0x9266); LoadAreaPointer(); cpu_call_end(0x9266); // update level pointer with
   lda_imm(0x1); // actual world and area numbers, then
@@ -2439,6 +2439,7 @@ SetHalfway:
 }
 
 void GameOverMode(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs(OperMode_Task);
   switch (JumpEngine(0x921d)) {
     case 0x9224: SetupGameOver(); return;
@@ -2457,10 +2458,10 @@ void SetupGameOver(void) {
   inc_abs(DisableScreenFlag); // disable screen output
   inc_abs(OperMode_Task); // set secondary mode to 1
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void RunGameOver(void) {
+  // -------------------------------------------------------------------------------------
   lda_imm(0x0); // reenable screen
   ram[DisableScreenFlag] = a;
   lda_abs(SavedJoypad1Bits); // check controller for start pressed
@@ -2537,10 +2538,10 @@ void TransposePlayers(void) {
   carry_flag = false; // clear carry flag to get game going
   // ExTrans:
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void DoNothing1(void) {
+  // -------------------------------------------------------------------------------------
   lda_imm(0xff); // this is residual code, this value is
   ram[0x6c9] = a; // not used anywhere in the program
   DoNothing2(); // fallthrough
@@ -2549,10 +2550,10 @@ void DoNothing1(void) {
 
 void DoNothing2(void) {
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void AreaParserTaskHandler(void) {
+  // -------------------------------------------------------------------------------------
   ldy_abs_fz(AreaParserTaskNum); // check number of tasks here
   // Original branch: if already set, go ahead
   if (zero_flag) {
@@ -2596,14 +2597,14 @@ void IncrementColumnPos(void) {
   and_imm(0b00011111); // mask out all but 5 LSB (0-1f)
   ram[BlockBufferColumnPos] = a; // and save
   return;
+}
+
+void AreaParserCore(void) {
   // -------------------------------------------------------------------------------------
   // $00 - used as counter, store for low nybble for background, ceiling byte for terrain
   // $01 - used to store floor byte for terrain
   // $07 - used to store terrain metatile
   // $06-$07 - used to store block buffer address
-}
-
-void AreaParserCore(void) {
   lda_abs_fz(BackloadingFlag); // check to see if we are starting right of start
   // Original branch: if not, go ahead and render background, foreground and terrain
   if (!zero_flag) {
@@ -2740,9 +2741,8 @@ NoCloud2:
       cpx_imm_fz(0xd);
       if (zero_flag) { goto RendBBuf; } // if we're at the end, break out of this loop
       lda_abs(AreaType); // check world type for underground area
-      cmp_imm_fz(0x2);
       // Original branch: if not underground, skip this part
-      if (zero_flag) {
+      if (a == 0x2) {
         cpx_imm_fz(0xb);
         if (!zero_flag) { goto EndUChk; } // if we're at the bottom of the screen, override
         lda_imm(0x54); // old terrain type with ground level terrain type
@@ -2788,11 +2788,11 @@ RendBBuf:
     cpx_imm_fc(0xd);
   } while (!carry_flag); // continue until we pass last row, then leave
   return;
-  // numbers lower than these with the same attribute bits
-  // will not be stored in the block buffer
 }
 
 void ProcessAreaData(void) {
+  // numbers lower than these with the same attribute bits
+  // will not be stored in the block buffer
   do {
     
 ProcessAreaData:
@@ -2804,8 +2804,8 @@ ProcessAreaData:
       ram[BehindAreaParserFlag] = a;
       ldy_abs(AreaDataOffset); // get offset of area data pointer
       lda_indy(AreaData); // get first byte of area object
-      cmp_imm_fz(0xfd); // if end-of-area, skip all this crap
-      if (!zero_flag) {
+      // if end-of-area, skip all this crap
+      if (a != 0xfd) {
         lda_absx_fn(AreaObjectLength); // check area object buffer flag
         if (!neg_flag) { goto RdyDecode; } // if buffer not negative, branch, otherwise
         iny();
@@ -2822,8 +2822,8 @@ Chk1Row13:
         dey();
         lda_indy(AreaData); // reread first byte of level object
         and_imm(0xf); // mask out high nybble
-        cmp_imm_fz(0xd); // row 13?
-        if (zero_flag) {
+        // row 13?
+        if (a == 0xd) {
           iny(); // if so, reread second byte of level object
           lda_indy(AreaData);
           dey(); // decrement to get ready to read first byte
@@ -2839,8 +2839,8 @@ Chk1Row13:
           goto NextAObj;
         }
         // Chk1Row14:
-        cmp_imm_fz(0xe); // row 14?
-        if (zero_flag) {
+        // row 14?
+        if (a == 0xe) {
           lda_abs_fz(BackloadingFlag); // check flag for saved page number and branch if set
           if (!zero_flag) { goto RdyDecode; } // to render the object (otherwise bg might not look right)
         }
@@ -2895,15 +2895,14 @@ void DecodeAreaData(void) {
   // Chk1stB:
   ldx_imm(0x10); // load offset of 16 for special row 15
   lda_indy(AreaData); // get first byte of level object again
-  cmp_imm_fz(0xfd);
   // if end of level, leave this routine
-  if (zero_flag) {
+  if (a == 0xfd) {
     return;
   }
   and_imm(0xf); // otherwise, mask out low nybble
-  cmp_imm_fz(0xf); // row 15?
+  // row 15?
   // Original branch: if so, keep the offset of 16
-  if (!zero_flag) {
+  if (a != 0xf) {
     ldx_imm(0x8); // otherwise load offset of 8 for special row 12
     cmp_imm_fz(0xc); // row 12?
     if (zero_flag) { goto ChkRow14; } // if so, keep the offset value of 8
@@ -2913,15 +2912,15 @@ void DecodeAreaData(void) {
 ChkRow14:
   ram[0x7] = x; // store whatever value we just loaded here
   ldx_zp(ObjectOffset); // get object offset again
-  cmp_imm_fz(0xe); // row 14?
-  if (zero_flag) {
+  // row 14?
+  if (a == 0xe) {
     lda_imm(0x0); // if so, load offset with $00
     ram[0x7] = a;
     lda_imm(0x2e); // and load A with another value
   } else {
     // ChkRow13:
-    cmp_imm_fz(0xd); // row 13?
-    if (zero_flag) {
+    // row 13?
+    if (a == 0xd) {
       lda_imm(0x22); // if so, load offset with 34
       ram[0x7] = a;
       iny(); // get next byte
@@ -2933,9 +2932,9 @@ ChkRow14:
       }
       lda_indy(AreaData); // otherwise, get byte again
       and_imm(0b01111111); // mask out d7
-      cmp_imm_fz(0x4b); // check for loop command in low nybble
+      // check for loop command in low nybble
       // Original branch: (plus d6 set for object other than page control)
-      if (zero_flag) {
+      if (a == 0x4b) {
         inc_abs(LoopCommand); // if loop command, set loop command flag
       }
       // Mask2MSB:
@@ -2943,8 +2942,8 @@ ChkRow14:
       goto NormObj; // and jump
     }
     // ChkSRows:
-    cmp_imm_fc(0xc); // row 12-15?
-    if (!carry_flag) {
+    // row 12-15?
+    if (a < 0xc) {
       iny(); // if not, get second byte of level object
       lda_indy(AreaData);
       and_imm_fz(0b01110000); // mask out all but d6-d4
@@ -2958,8 +2957,8 @@ ChkRow14:
       }
       // LrgObj:
       ram[0x0] = a; // store value here (branch for large objects)
-      cmp_imm_fz(0x70); // check for vertical pipe object
-      if (zero_flag) {
+      // check for vertical pipe object
+      if (a == 0x70) {
         lda_indy(AreaData); // if not, reload second byte
         and_imm_fz(0b00001000); // mask out all but d3 (usage control bit)
         if (zero_flag) { goto NotWPipe; } // if d3 clear, branch to get original value
@@ -2993,8 +2992,8 @@ NormObj:
       ldy_abs(AreaDataOffset); // if not, get old offset of level pointer
       lda_indy(AreaData); // and reload first byte
       and_imm(0b00001111);
-      cmp_imm_fz(0xe); // row 14?
-      if (!zero_flag) {
+      // row 14?
+      if (a != 0xe) {
         return;
       }
       lda_abs_fz(BackloadingFlag); // if so, check backloading flag
@@ -3107,19 +3106,19 @@ void AlterAreaAttributes(void) {
   // Alter2:
   pla();
   and_imm(0b00000111); // mask out all but 3 LSB
-  cmp_imm_fc(0x4); // if four or greater, set color control bits
+  // if four or greater, set color control bits
   // Original branch: and nullify foreground scenery bits
-  if (carry_flag) {
+  if (a >= 0x4) {
     ram[BackgroundColorCtrl] = a;
     lda_imm(0x0);
   }
   // SetFore:
   ram[ForegroundScenery] = a; // otherwise set new foreground scenery bits
   return;
-  // --------------------------------
 }
 
 void ScrollLockObject_Warp(void) {
+  // --------------------------------
   ldx_imm(0x4); // load value of 4 for game text routine as default
   lda_abs_fz(WorldNumber); // warp zone (4-3-2), then check world number
   if (!zero_flag) {
@@ -3145,11 +3144,11 @@ void ScrollLockObject(void) {
   eor_imm(0b00000001);
   ram[ScrollLock] = a;
   return;
-  // --------------------------------
-  // $00 - used to store enemy identifier in KillEnemies
 }
 
 void KillEnemies(void) {
+  // --------------------------------
+  // $00 - used to store enemy identifier in KillEnemies
   ram[0x0] = a; // store identifier here
   lda_imm(0x0);
   ldx_imm(0x4); // check for identifier in enemy object buffer
@@ -3164,10 +3163,10 @@ void KillEnemies(void) {
     dex_fn(); // do this until all slots are checked
   } while (!neg_flag);
   return;
-  // --------------------------------
 }
 
 void AreaFrenzy(void) {
+  // --------------------------------
   ldx_zp(0x0); // use area object identifier bit as offset
   lda_absx((FrenzyIDData - 8)); // note that it starts at 8, thus weird address here
   ldy_imm(0x5);
@@ -3182,11 +3181,11 @@ void AreaFrenzy(void) {
 ExitAFrenzy:
   ram[EnemyFrenzyQueue] = a; // store enemy into frenzy queue
   return;
-  // --------------------------------
-  // $06 - used by MushroomLedge to store length
 }
 
 void AreaStyleObject(void) {
+  // --------------------------------
+  // $06 - used by MushroomLedge to store length
   lda_abs(AreaStyle); // load level object style and jump to the right sub
   switch (JumpEngine(0x9745)) {
     case 0x974c: TreeLedge(); return;
@@ -3229,8 +3228,6 @@ NoUnder:
   ldx_zp(0x7); // load row of ledge
   ldy_imm(0x0); // set 0 for no bottom on this part
   RenderUnderPart(); return;
-  // --------------------------------
-  // tiles used by pulleys and rope object
 }
 
 void MushroomLedge(void) {
@@ -3270,11 +3267,11 @@ NoUnder:
   ldx_zp(0x7); // load row of ledge
   ldy_imm(0x0); // set 0 for no bottom on this part
   RenderUnderPart(); return;
-  // --------------------------------
-  // tiles used by pulleys and rope object
 }
 
 void PulleyRopeObject(void) {
+  // --------------------------------
+  // tiles used by pulleys and rope object
   cpu_call_begin(0x97bc); ChkLrgObjLength(); cpu_call_end(0x97bc); // get length of pulley/rope object
   ldy_imm(0x0); // initialize metatile offset
   // Original branch: if starting, render left pulley
@@ -3290,11 +3287,11 @@ RenderPul:
   ram[MetatileBuffer] = a; // render at the top of the screen
   // MushLExit:
   return; // and leave
-  // --------------------------------
-  // $06 - used to store upper limit of rows for CastleObject
 }
 
 void CastleObject(void) {
+  // --------------------------------
+  // $06 - used to store upper limit of rows for CastleObject
   cpu_call_begin(0x9808); GetLrgObjAttrib(); cpu_call_end(0x9808); // save lower nybble as starting row
   ram[0x7] = y; // if starting row is above $0a, game will crash!!!
   ldy_imm(0x4);
@@ -3331,17 +3328,17 @@ void CastleObject(void) {
     return;
   }
   lda_absx(AreaObjectLength); // check length
-  cmp_imm_fz(0x1); // if length almost about to expire, put brick at floor
-  if (!zero_flag) {
+  // if length almost about to expire, put brick at floor
+  if (a != 0x1) {
     ldy_zp_fz(0x7); // check starting row for tall castle ($00)
     if (zero_flag) {
       cmp_imm_fz(0x3); // if found, then check to see if we're at the second column
       if (zero_flag) { goto PlayerStop; }
     }
     // NotTall:
-    cmp_imm_fz(0x2); // if not tall castle, check to see if we're at the third column
+    // if not tall castle, check to see if we're at the third column
     // if we aren't and the castle is tall, don't create flag yet
-    if (!zero_flag) {
+    if (a != 0x2) {
       return;
     }
     cpu_call_begin(0x984d); GetAreaObjXPosition(); cpu_call_end(0x984d); // otherwise, obtain and save horizontal pixel coordinate
@@ -3366,10 +3363,10 @@ PlayerStop:
   ram[(MetatileBuffer + 10)] = y; // this is only done if we're on the second column
   // ExitCastle:
   return;
-  // --------------------------------
 }
 
 void WaterPipe(void) {
+  // --------------------------------
   cpu_call_begin(0x9871); GetLrgObjAttrib(); cpu_call_end(0x9871); // get row and lower nybble
   ldy_absx(AreaObjectLength); // get length (residual code, water pipe is 1 col thick)
   ldx_zp(0x7); // get row
@@ -3378,13 +3375,13 @@ void WaterPipe(void) {
   lda_imm(0x6c);
   ram[(MetatileBuffer + 1) + x] = a;
   return;
+}
+
+void IntroPipe(void) {
   // --------------------------------
   // $05 - used to store length of vertical shaft in RenderSidewaysPipe
   // $06 - used to store leftover horizontal length in RenderSidewaysPipe
   //  and vertical length in VerticalPipe and GetPipeHeight
-}
-
-void IntroPipe(void) {
   ldy_imm(0x3); // check if length set, if not set, set it
   cpu_call_begin(0x9886); ChkLrgObjFixedLength(); cpu_call_end(0x9886);
   ldy_imm(0xa); // set fixed value and render the sideways part
@@ -3516,10 +3513,10 @@ void FindEmptyEnemySlot(void) {
   } while (!zero_flag);
   // ExitEmptyChk:
   return; // if all values nonzero, carry flag is set
-  // --------------------------------
 }
 
 void Hole_Water(void) {
+  // --------------------------------
   cpu_call_begin(0x9959); ChkLrgObjLength(); cpu_call_end(0x9959); // get low nybble and save as length
   lda_imm(0x86); // render waves
   ram[(MetatileBuffer + 10)] = a;
@@ -3527,10 +3524,10 @@ void Hole_Water(void) {
   ldy_imm(0x1); // now render the water underneath
   lda_imm(0x87);
   RenderUnderPart(); return;
-  // --------------------------------
 }
 
 void QuestionBlockRow_High(void) {
+  // --------------------------------
   lda_imm(0x3); // start on the fourth row
   
   // BIT instruction opcode
@@ -3541,7 +3538,6 @@ void QuestionBlockRow_High(void) {
   lda_imm(0xc0);
   ram[MetatileBuffer + x] = a;
   return;
-  // --------------------------------
 }
 
 void QuestionBlockRow_Low(void) {
@@ -3553,10 +3549,10 @@ void QuestionBlockRow_Low(void) {
   lda_imm(0xc0);
   ram[MetatileBuffer + x] = a;
   return;
-  // --------------------------------
 }
 
 void Bridge_High(void) {
+  // --------------------------------
   lda_imm(0x6); // start on the seventh row from top of screen
   
   // BIT instruction opcode
@@ -3572,7 +3568,6 @@ void Bridge_High(void) {
   ldy_imm(0x0); // now render the bridge itself
   lda_imm(0x63);
   RenderUnderPart(); return;
-  // --------------------------------
 }
 
 void Bridge_Middle(void) {
@@ -3589,7 +3584,6 @@ void Bridge_Middle(void) {
   ldy_imm(0x0); // now render the bridge itself
   lda_imm(0x63);
   RenderUnderPart(); return;
-  // --------------------------------
 }
 
 void Bridge_Low(void) {
@@ -3604,18 +3598,18 @@ void Bridge_Low(void) {
   ldy_imm(0x0); // now render the bridge itself
   lda_imm(0x63);
   RenderUnderPart(); return;
-  // --------------------------------
 }
 
 void FlagBalls_Residual(void) {
+  // --------------------------------
   cpu_call_begin(0x9996); GetLrgObjAttrib(); cpu_call_end(0x9996); // get low nybble from object byte
   ldx_imm(0x2); // render flag balls on third row from top
   lda_imm(0x6d); // of screen downwards based on low nybble
   RenderUnderPart(); return;
-  // --------------------------------
 }
 
 void FlagpoleObject(void) {
+  // --------------------------------
   lda_imm(0x24); // render flagpole ball on top
   ram[MetatileBuffer] = a;
   ldx_imm(0x1); // now render the flagpole shaft
@@ -3639,16 +3633,15 @@ void FlagpoleObject(void) {
   ram[(Enemy_ID + 5)] = a; // set flag identifier, note that identifier and coordinates
   inc_zp((Enemy_Flag + 5)); // use last space in enemy object buffer
   return;
-  // --------------------------------
 }
 
 void EndlessRope(void) {
+  // --------------------------------
   ldx_imm(0x0); // render rope from the top to the bottom of screen
   ldy_imm(0xf);
   // DrawRope:
   lda_imm(0x40); // render the actual rope
   RenderUnderPart(); return;
-  // --------------------------------
 }
 
 void BalancePlatRope(void) {
@@ -3665,13 +3658,12 @@ void BalancePlatRope(void) {
   // DrawRope:
   lda_imm(0x40); // render the actual rope
   RenderUnderPart(); return;
-  // --------------------------------
 }
 
 void RowOfCoins(void) {
+  // --------------------------------
   ldy_abs(AreaType); // get area type
   lda_absy(CoinMetatileData); // load appropriate coin metatile
-  // --------------------------------
   // GetRow:
   pha(); // store metatile here
   cpu_call_begin(0x9a47); ChkLrgObjLength(); cpu_call_end(0x9a47); // get row number, load length
@@ -3683,6 +3675,7 @@ void RowOfCoins(void) {
 }
 
 void CastleBridgeObj(void) {
+  // --------------------------------
   ldy_imm(0xc); // load length of 13 columns
   cpu_call_begin(0x9a05); ChkLrgObjFixedLength(); cpu_call_end(0x9a05);
   ChainObj(); return;
@@ -3702,7 +3695,6 @@ void ChainObj(void) {
   // ColObj:
   ldy_imm(0x0); // column length of 1
   RenderUnderPart(); return;
-  // --------------------------------
 }
 
 void EmptyBlock(void) {
@@ -3712,10 +3704,10 @@ void EmptyBlock(void) {
   // ColObj:
   ldy_imm(0x0); // column length of 1
   RenderUnderPart(); return;
-  // --------------------------------
 }
 
 void RowOfBricks(void) {
+  // --------------------------------
   ldy_abs(AreaType); // load area type obtained from area offset pointer
   lda_abs_fz(CloudTypeOverride); // check for cloud type override
   if (!zero_flag) {
@@ -3756,7 +3748,6 @@ void ColumnOfBricks(void) {
   pla(); // restore metatile
   ldx_zp(0x7); // get starting row
   RenderUnderPart(); return; // now render the column
-  // --------------------------------
 }
 
 void ColumnOfSolidBlocks(void) {
@@ -3768,10 +3759,10 @@ void ColumnOfSolidBlocks(void) {
   pla(); // restore metatile
   ldx_zp(0x7); // get starting row
   RenderUnderPart(); return; // now render the column
-  // --------------------------------
 }
 
 void BulletBillCannon(void) {
+  // --------------------------------
   cpu_call_begin(0x9a6b); GetLrgObjAttrib(); cpu_call_end(0x9a6b); // get row and length of bullet bill cannon
   ldx_zp(0x7); // start at first row
   lda_imm(0x64); // render bullet bill cannon
@@ -3797,18 +3788,18 @@ SetupCannon:
   cpu_call_begin(0x9a96); GetAreaObjXPosition(); cpu_call_end(0x9a96); // get proper horizontal coordinate for cannon
   ram[Cannon_X_Position + x] = a; // and store it here
   inx();
-  cpx_imm_fc(0x6); // increment and check offset
+  // increment and check offset
   // Original branch: if not yet reached sixth cannon, branch to save offset
-  if (carry_flag) {
+  if (x >= 0x6) {
     ldx_imm(0x0); // otherwise initialize it
   }
   // StrCOffset:
   ram[Cannon_Offset] = x; // save new offset and leave
   return;
-  // --------------------------------
 }
 
 void StaircaseObject(void) {
+  // --------------------------------
   cpu_call_begin(0x9ab9); ChkLrgObjLength(); cpu_call_end(0x9ab9); // check and load length
   // Original branch: if length already loaded, skip init part
   if (carry_flag) {
@@ -3823,10 +3814,10 @@ void StaircaseObject(void) {
   tay();
   lda_imm(0x61); // now render solid block staircase
   RenderUnderPart(); return;
-  // --------------------------------
 }
 
 void Jumpspring(void) {
+  // --------------------------------
   cpu_call_begin(0x9ad5); GetLrgObjAttrib(); cpu_call_end(0x9ad5);
   cpu_call_begin(0x9ad8); FindEmptyEnemySlot(); cpu_call_end(0x9ad8); // find empty space in enemy object buffer
   cpu_call_begin(0x9adb); GetAreaObjXPosition(); cpu_call_end(0x9adb); // get horizontal coordinate for jumpspring
@@ -3847,11 +3838,11 @@ void Jumpspring(void) {
   lda_imm(0x68);
   ram[(MetatileBuffer + 1) + x] = a;
   return;
-  // --------------------------------
-  // $07 - used to save ID of brick object
 }
 
 void Hidden1UpBlock(void) {
+  // --------------------------------
+  // $07 - used to save ID of brick object
   lda_abs_fz(Hidden1UpFlag); // if flag not set, do not render object
   if (zero_flag) {
     return;
@@ -3924,10 +3915,10 @@ void GetAreaObjectID(void) {
   tay(); // save to Y
   // ExitDecBlock:
   return;
-  // --------------------------------
 }
 
 void Hole_Empty(void) {
+  // --------------------------------
   cpu_call_begin(0x9b43); ChkLrgObjLength(); cpu_call_end(0x9b43); // get lower nybble and save as length
   // Original branch: skip this part if length already loaded
   if (carry_flag) {
@@ -3950,9 +3941,9 @@ void Hole_Empty(void) {
     asl_acc(); // and extend one block beyond each edge
     ram[Whirlpool_Length + x] = a; // save size of whirlpool here
     inx();
-    cpx_imm_fc(0x5); // increment and check offset
+    // increment and check offset
     // Original branch: if not yet reached fifth whirlpool, branch to save offset
-    if (carry_flag) {
+    if (x >= 0x5) {
       ldx_imm(0x0); // otherwise initialize it
     }
     // StrWOffset:
@@ -3964,12 +3955,12 @@ NoWhirlP:
   lda_absx(HoleMetatiles); // render the hole proper
   ldx_imm(0x8);
   ldy_imm(0xf); // start at ninth row and go to bottom, run RenderUnderPart
-  // --------------------------------
   RenderUnderPart(); // fallthrough
   return;
 }
 
 void RenderUnderPart(void) {
+  // --------------------------------
   do {
     ram[AreaObjectHeight] = y; // store vertical length to render
     ldy_absx_fz(MetatileBuffer); // check current spot to see if there's something
@@ -3994,8 +3985,8 @@ DrawThisRow:
     
 WaitOneRow:
     inx();
-    cpx_imm_fc(0xd); // stop rendering if we're at the bottom of the screen
-    if (carry_flag) {
+    // stop rendering if we're at the bottom of the screen
+    if (x >= 0xd) {
       return;
     }
     ldy_abs(AreaObjectHeight); // decrement, and stop rendering if there is no more length
@@ -4003,10 +3994,10 @@ WaitOneRow:
   } while (!neg_flag);
   // ExitUPartR:
   return;
-  // --------------------------------
 }
 
 void ChkLrgObjLength(void) {
+  // --------------------------------
   cpu_call_begin(0x9bae); GetLrgObjAttrib(); cpu_call_end(0x9bae); // get row location and size (length if branched to from here)
   ChkLrgObjFixedLength(); // fallthrough
   return;
@@ -4036,20 +4027,20 @@ void GetLrgObjAttrib(void) {
   and_imm(0b00001111); // as Y, then leave
   tay();
   return;
-  // --------------------------------
 }
 
 void GetAreaObjXPosition(void) {
+  // --------------------------------
   lda_abs(CurrentColumnPos); // multiply current offset where we're at by 16
   asl_acc(); // to obtain horizontal pixel coordinate
   asl_acc();
   asl_acc();
   asl_acc();
   return;
-  // --------------------------------
 }
 
 void GetAreaObjYPosition(void) {
+  // --------------------------------
   lda_zp(0x7); // multiply value by 16
   asl_acc();
   asl_acc(); // this will give us the proper vertical pixel coordinate
@@ -4058,11 +4049,11 @@ void GetAreaObjYPosition(void) {
   carry_flag = false;
   adc_imm(32); // add 32 pixels for the status bar
   return;
-  // -------------------------------------------------------------------------------------
-  // $06-$07 - used to store block buffer address used as indirect
 }
 
 void GetBlockBufferAddr(void) {
+  // -------------------------------------------------------------------------------------
+  // $06-$07 - used to store block buffer address used as indirect
   pha(); // take value of A, save
   lsr_acc(); // move high nybble to low
   lsr_acc();
@@ -4077,12 +4068,12 @@ void GetBlockBufferAddr(void) {
   adc_absy(BlockBufferAddr); // add to low byte
   ram[0x6] = a; // store here and leave
   return;
-  // -------------------------------------------------------------------------------------
-  // unused space
-  // -------------------------------------------------------------------------------------
 }
 
 void LoadAreaPointer(void) {
+  // -------------------------------------------------------------------------------------
+  // unused space
+  // -------------------------------------------------------------------------------------
   cpu_call_begin(0x9c05); FindAreaPointer(); cpu_call_end(0x9c05); // find it and store it here
   ram[AreaPointer] = a;
   GetAreaType(); // fallthrough
@@ -4137,8 +4128,7 @@ void GetAreaDataAddrs(void) {
   lda_indy(AreaData);
   pha(); // save it to the stack for now
   and_imm(0b00000111); // save 3 LSB for foreground scenery or bg color control
-  cmp_imm_fc(0x4);
-  if (carry_flag) {
+  if (a >= 0x4) {
     ram[BackgroundColorCtrl] = a; // if 4 or greater, save value here as bg color control
     lda_imm(0x0);
   }
@@ -4177,9 +4167,9 @@ void GetAreaDataAddrs(void) {
   rol_acc_fc(); // rotate bits over to LSBs
   rol_acc_fc();
   rol_acc();
-  cmp_imm_fz(0b00000011); // if set to 3, store here
+  // if set to 3, store here
   // Original branch: and nullify other value
-  if (zero_flag) {
+  if (a == 0b00000011) {
     ram[CloudTypeOverride] = a; // otherwise store value in other place
     lda_imm(0x0);
   }
@@ -4193,11 +4183,11 @@ void GetAreaDataAddrs(void) {
   adc_imm_fc(0x0);
   ram[AreaDataHigh] = a;
   return;
-  // -------------------------------------------------------------------------------------
-  // GAME LEVELS DATA
 }
 
 void GameMode(void) {
+  // -------------------------------------------------------------------------------------
+  // GAME LEVELS DATA
   lda_abs(OperMode_Task);
   switch (JumpEngine(0xaee1)) {
     case 0x8fe4: InitializeArea(); return;
@@ -4261,9 +4251,9 @@ void GameCoreRoutine(void) {
 NoChgMus:
   ldy_abs(StarInvincibleTimer); // get invincibility timer
   lda_zp(FrameCounter); // get frame counter
-  cpy_imm_fc(0x8); // if timer still above certain point,
+  // if timer still above certain point,
   // Original branch: branch to cycle player's palette quickly
-  if (!carry_flag) {
+  if (y < 0x8) {
     lsr_acc(); // otherwise, divide by 8 to cycle every eighth frame
     lsr_acc();
   }
@@ -4309,10 +4299,10 @@ void UpdScrollVar(void) {
   cpu_call_begin(0xaf91); AreaParserTaskHandler(); cpu_call_end(0xaf91); // update the name table with more level graphics
   // ExitEng:
   return; // and after all that, we're finally done!
-  // -------------------------------------------------------------------------------------
 }
 
 void ScrollHandler(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs(Player_X_Scroll); // load value saved here
   carry_flag = false;
   adc_abs(Platform_X_Scroll); // add value used by left/right platforms
@@ -4329,15 +4319,15 @@ void ScrollHandler(void) {
     dey_fn(); // if value originally set to zero or otherwise
     if (neg_flag) { goto InitScrlAmt; } // negative for left movement, branch
     iny();
-    cpy_imm_fc(0x2); // if value $01, branch and do not decrement
-    if (carry_flag) {
+    // if value $01, branch and do not decrement
+    if (y >= 0x2) {
       dey(); // otherwise decrement by one
     }
     // ChkNearMid:
     lda_abs(Player_Pos_ForScroll);
-    cmp_imm_fc(0x70); // check player's horizontal screen position
+    // check player's horizontal screen position
     // if less than 112 pixels to the right, branch
-    if (!carry_flag) {
+    if (a < 0x70) {
       ScrollScreen();
       return;
     }
@@ -4452,10 +4442,10 @@ void GetScreenPosition(void) {
   adc_imm(0x0); // add carry from before
   ram[ScreenRight_PageLoc] = a; // store as page number where right boundary is
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void GameRoutines(void) {
+  // -------------------------------------------------------------------------------------
   lda_zp(GameEngineSubroutine); // run routine based on number (a few of these routines are   
   switch (JumpEngine(0xb04e)) {
     case 0x9131: Entrance_GameTimerSetup(); return;
@@ -4477,21 +4467,19 @@ void GameRoutines(void) {
 
 void PlayerEntrance(void) {
   lda_abs(AltEntranceControl); // check for mode of alternate entry
-  cmp_imm_fz(0x2);
   // Original branch: if found, branch to enter from pipe or with vine
-  if (!zero_flag) {
+  if (a != 0x2) {
     lda_imm(0x0);
     ldy_zp(Player_Y_Position); // if vertical position above a certain
-    cpy_imm_fc(0x30); // point, nullify controller bits and continue
+    // point, nullify controller bits and continue
     // with player movement code, do not return
-    if (!carry_flag) {
+    if (y < 0x30) {
       AutoControlPlayer();
       return;
     }
     lda_abs(PlayerEntranceCtrl); // check player entry bits from header
-    cmp_imm_fz(0x6);
     // Original branch: if set to 6 or 7, execute pipe intro code
-    if (!zero_flag) {
+    if (a != 0x6) {
       cmp_imm_fz(0x7); // otherwise branch to normal entry
       if (!zero_flag) { goto PlayerRdy; }
     }
@@ -4524,9 +4512,9 @@ void PlayerEntrance(void) {
     }
     // VineEntr:
     lda_abs(VineHeight);
-    cmp_imm_fz(0x60); // check vine height
+    // check vine height
     // if vine not yet reached maximum height, branch to leave
-    if (!zero_flag) {
+    if (a != 0x60) {
       return;
     }
     lda_zp(Player_Y_Position); // get player's vertical coordinate
@@ -4545,9 +4533,9 @@ void PlayerEntrance(void) {
     ram[DisableCollisionDet] = y; // set collision detection disable flag
     cpu_call_begin(0xb0cc); AutoControlPlayer(); cpu_call_end(0xb0cc); // use contents of A to move player up or right, execute sub
     lda_zp(Player_X_Position);
-    cmp_imm_fc(0x48); // check player's horizontal position
+    // check player's horizontal position
     // if not far enough to the right, branch to leave
-    if (!carry_flag) {
+    if (a < 0x48) {
       return;
     }
     
@@ -4562,8 +4550,6 @@ PlayerRdy:
     ram[JoypadOverride] = a; // nullify controller override bits
     // ExitEntr:
     return; // leave!
-    // -------------------------------------------------------------------------------------
-    // $07 - used to hold upper limit of high byte when player falls down hole
   }
   // NextArea:
   inc_abs(AreaNumber); // increment area number used for address loader
@@ -4575,10 +4561,11 @@ PlayerRdy:
   ram[EventMusicQueue] = a; // silence music and leave
   // ExitNA:
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void AutoControlPlayer(void) {
+  // -------------------------------------------------------------------------------------
+  // $07 - used to hold upper limit of high byte when player falls down hole
   ram[SavedJoypadBits] = a; // override controller bits with contents of A if executing here
   PlayerCtrlRoutine(); // fallthrough
   return;
@@ -4586,8 +4573,8 @@ void AutoControlPlayer(void) {
 
 void PlayerCtrlRoutine(void) {
   lda_zp(GameEngineSubroutine); // check task here
-  cmp_imm_fz(0xb); // if certain value is set, branch to skip controller bit loading
-  if (!zero_flag) {
+  // if certain value is set, branch to skip controller bit loading
+  if (a != 0xb) {
     lda_abs_fz(AreaType); // are we in a water type area?
     // Original branch: if not, branch
     if (zero_flag) {
@@ -4657,9 +4644,9 @@ ChkMoveDir:
   cpu_call_begin(0xb159); BoundingBoxCore(); cpu_call_end(0xb159); // get player's bounding box coordinates
   cpu_call_begin(0xb15c); PlayerBGCollision(); cpu_call_end(0xb15c); // do collision detection and process
   lda_zp(Player_Y_Position);
-  cmp_imm_fc(0x40); // check to see if player is higher than 64th pixel
+  // check to see if player is higher than 64th pixel
   // Original branch: if so, branch ahead
-  if (carry_flag) {
+  if (a >= 0x40) {
     lda_zp(GameEngineSubroutine);
     cmp_imm_fz(0x5); // if running end-of-level routine, branch ahead
     if (zero_flag) { goto PlayerHole; }
@@ -4693,9 +4680,9 @@ PlayerHole:
   // HoleDie:
   inx(); // set flag in X for player death
   ldy_zp(GameEngineSubroutine);
-  cpy_imm_fz(0xb); // check for some other routine running
+  // check for some other routine running
   // Original branch: if so, branch ahead
-  if (!zero_flag) {
+  if (y != 0xb) {
     ldy_abs_fz(DeathMusicLoaded); // check value here
     // Original branch: if already set, branch to next part
     if (zero_flag) {
@@ -4733,16 +4720,15 @@ ChkHoleX:
   cpu_call_begin(0xb1c2); SetEntr(); cpu_call_end(0xb1c2); // do sub to set secondary mode
   inc_abs(AltEntranceControl); // set mode of entry to 3
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void Vine_AutoClimb(void) {
+  // -------------------------------------------------------------------------------------
   lda_zp_fz(Player_Y_HighPos); // check to see whether player reached position
   // Original branch: above the status bar yet and if so, set modes
   if (zero_flag) {
     lda_zp(Player_Y_Position);
-    cmp_imm_fc(0xe4);
-    if (!carry_flag) {
+    if (a < 0xe4) {
       SetEntr();
       return;
     }
@@ -4759,10 +4745,10 @@ void SetEntr(void) {
   lda_imm(0x2); // set starting position to override
   ram[AltEntranceControl] = a;
   ChgAreaMode(); return; // set modes
-  // -------------------------------------------------------------------------------------
 }
 
 void VerticalPipeEntry(void) {
+  // -------------------------------------------------------------------------------------
   lda_imm(0x1); // set 1 as movement amount
   cpu_call_begin(0xb1e9); MovePlayerYAxis(); cpu_call_end(0xb1e9); // do sub to move player downwards
   cpu_call_begin(0xb1ec); ScrollHandler(); cpu_call_end(0xb1ec); // do sub to scroll screen with saved force if necessary
@@ -4793,10 +4779,10 @@ void MovePlayerYAxis(void) {
   adc_zp(Player_Y_Position); // add contents of A to player position
   ram[Player_Y_Position] = a;
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void SideExitPipeEntry(void) {
+  // -------------------------------------------------------------------------------------
   cpu_call_begin(0xb208); EnterSidePipe(); cpu_call_end(0xb208); // execute sub to move player to the right
   ldy_imm(0x2);
   // ChgAreaPipe:
@@ -4832,25 +4818,24 @@ void EnterSidePipe(void) {
   tya(); // use contents of Y to
   cpu_call_begin(0xb231); AutoControlPlayer(); cpu_call_end(0xb231); // execute player control routine with ctrl bits nulled
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void PlayerChangeSize(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs(TimerControl); // check master timer control
-  cmp_imm_fz(0xf8); // for specific moment in time
+  // for specific moment in time
   // Original branch: branch if before or after that point
-  if (zero_flag) {
+  if (a == 0xf8) {
   } else {
     // EndChgSize:
-    cmp_imm_fz(0xc4); // check again for another specific moment
+    // check again for another specific moment
     // and branch to leave if before or after that point
-    if (!zero_flag) {
+    if (a != 0xc4) {
       return;
     }
     cpu_call_begin(0xb243); DonePlayerTask(); cpu_call_end(0xb243); // otherwise do sub to init timer control and set routine
     // ExitChgSize:
     return; // and then leave
-    // -------------------------------------------------------------------------------------
   }
   // InitChangeSize:
   ldy_abs_fz(PlayerChangeSizeFlag); // if growing/shrinking flag already set
@@ -4865,18 +4850,17 @@ void PlayerChangeSize(void) {
   ram[PlayerSize] = a;
   // ExitBoth:
   return; // leave
-  // -------------------------------------------------------------------------------------
-  // $00 - used in CyclePlayerPalette to store current palette to cycle
 }
 
 void PlayerInjuryBlink(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs(TimerControl); // check master timer control
   cmp_imm_fcz(0xf0); // for specific moment in time
   // Original branch: branch if before that point
   if (!carry_flag) {
-    cmp_imm_fz(0xc8); // check again for another specific point
+    // check again for another specific point
     // branch if at that point, and not before or after
-    if (zero_flag) {
+    if (a == 0xc8) {
       DonePlayerTask();
       return;
     }
@@ -4900,15 +4884,15 @@ void PlayerInjuryBlink(void) {
   ram[PlayerSize] = a;
   // ExitBoth:
   return; // leave
-  // -------------------------------------------------------------------------------------
-  // $00 - used in CyclePlayerPalette to store current palette to cycle
 }
 
 void PlayerDeath(void) {
+  // -------------------------------------------------------------------------------------
+  // $00 - used in CyclePlayerPalette to store current palette to cycle
   lda_abs(TimerControl); // check master timer control
-  cmp_imm_fc(0xf0); // for specific moment in time
+  // for specific moment in time
   // branch to leave if before that point
-  if (carry_flag) {
+  if (a >= 0xf0) {
     return;
   }
   PlayerCtrlRoutine(); return; // otherwise run player control routine
@@ -4924,9 +4908,9 @@ void DonePlayerTask(void) {
 
 void PlayerFireFlower(void) {
   lda_abs(TimerControl); // check master timer control
-  cmp_imm_fz(0xc0); // for specific moment in time
+  // for specific moment in time
   // Original branch: branch if at moment, not before or after
-  if (!zero_flag) {
+  if (a != 0xc0) {
     lda_zp(FrameCounter); // get frame counter
     lsr_acc();
     lsr_acc(); // divide by four to change every four frames
@@ -4957,18 +4941,19 @@ void ResetPalStar(void) {
 }
 
 void FlagpoleSlide(void) {
+  // -------------------------------------------------------------------------------------
   lda_zp((Enemy_ID + 5)); // check special use enemy slot
-  cmp_imm_fz(FlagpoleFlagObject); // for flagpole flag object
+  // for flagpole flag object
   // Original branch: if not found, branch to something residual
-  if (zero_flag) {
+  if (a == FlagpoleFlagObject) {
     lda_abs(FlagpoleSoundQueue); // load flagpole sound
     ram[Square1SoundQueue] = a; // into square 1's sfx queue
     lda_imm(0x0);
     ram[FlagpoleSoundQueue] = a; // init flagpole sound queue
     ldy_zp(Player_Y_Position);
-    cpy_imm_fc(0x9e); // check to see if player has slid down
+    // check to see if player has slid down
     // Original branch: far enough, and if so, branch with no controller bits set
-    if (!carry_flag) {
+    if (y < 0x9e) {
       lda_imm(0x4); // otherwise force player to climb down (to slide)
     }
     // SlidePlayer:
@@ -4977,16 +4962,15 @@ void FlagpoleSlide(void) {
   // NoFPObj:
   inc_zp(GameEngineSubroutine); // increment to next routine (this may
   return; // be residual code)
-  // -------------------------------------------------------------------------------------
 }
 
 void PlayerEndLevel(void) {
+  // -------------------------------------------------------------------------------------
   lda_imm(0x1); // force player to walk to the right
   cpu_call_begin(0xb2ce); AutoControlPlayer(); cpu_call_end(0xb2ce);
   lda_zp(Player_Y_Position); // check player's vertical position
-  cmp_imm_fc(0xae);
   // Original branch: if player is not yet off the flagpole, skip this part
-  if (carry_flag) {
+  if (a >= 0xae) {
     lda_abs_fz(ScrollLock); // if scroll lock not set, branch ahead to next part
     if (zero_flag) { goto ChkStop; } // because we only need to do this part once
     lda_imm(EndOfLevelMusic);
@@ -5011,16 +4995,16 @@ ChkStop:
   }
   // RdyNextA:
   lda_abs(StarFlagTaskControl);
-  cmp_imm_fz(0x5); // if star flag task control not yet set
+  // if star flag task control not yet set
   // beyond last valid task number, branch to leave
-  if (!zero_flag) {
+  if (a != 0x5) {
     return;
   }
   inc_abs(LevelNumber); // increment level number used for game logic
   lda_abs(LevelNumber);
-  cmp_imm_fz(0x3); // check to see if we have yet reached level -4
+  // check to see if we have yet reached level -4
   // Original branch: and skip this last part here if not
-  if (zero_flag) {
+  if (a == 0x3) {
     ldy_abs(WorldNumber); // get world number as offset
     lda_abs(CoinTallyFor1Ups); // check third area coin tally for bonus 1-ups
     cmp_absy_fc(Hidden1UpCoinAmts); // against minimum value, if player has not collected
@@ -5038,10 +5022,10 @@ NextArea:
   ram[EventMusicQueue] = a; // silence music and leave
   // ExitNA:
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void PlayerMovementSubs(void) {
+  // -------------------------------------------------------------------------------------
   lda_imm(0x0); // set A to init crouch flag by default
   ldy_abs_fz(PlayerSize); // is player small?
   // Original branch: if so, branch
@@ -5062,9 +5046,9 @@ ProcMove:
     return;
   }
   lda_zp(Player_State);
-  cmp_imm_fz(0x3); // get player state
+  // get player state
   // Original branch: if climbing, branch ahead, leave timer unset
-  if (!zero_flag) {
+  if (a != 0x3) {
     ldy_imm(0x18);
     ram[ClimbSideTimer] = y; // otherwise reset timer now
   }
@@ -5079,6 +5063,8 @@ ProcMove:
 }
 
 void OnGroundStateSub(void) {
+  // -------------------------------------------------------------------------------------
+  // $00 - used by ClimbingSub to store high vertical adder
   cpu_call_begin(0xb35c); GetPlayerAnimSpeed(); cpu_call_end(0xb35c); // do a sub to set animation frame timing
   lda_zp_fz(Left_Right_Buttons);
   // Original branch: if left/right controller bits not set, skip instruction
@@ -5090,14 +5076,13 @@ void OnGroundStateSub(void) {
   cpu_call_begin(0xb368); MovePlayerHorizontally(); cpu_call_end(0xb368); // do another sub to move player horizontally
   ram[Player_X_Scroll] = a; // set returned value as player's movement speed for scroll
   return;
-  // --------------------------------
 }
 
 void FallingSub(void) {
+  // --------------------------------
   lda_abs(VerticalForceDown);
   ram[VerticalForce] = a; // dump vertical movement force for falling into main one
   // movement force, then skip ahead to process left/right movement
-  // --------------------------------
   // LRAir:
   lda_zp_fz(Left_Right_Buttons); // check left/right controller bits (check for jumping/falling)
   // Original branch: if not pressing any, skip
@@ -5108,15 +5093,18 @@ void FallingSub(void) {
   cpu_call_begin(0xb3b5); MovePlayerHorizontally(); cpu_call_end(0xb3b5); // do a sub to move player horizontally
   ram[Player_X_Scroll] = a; // set player's speed here, to be used for scroll later
   lda_zp(GameEngineSubroutine);
-  cmp_imm_fz(0xb); // check for specific routine selected
+  // check for specific routine selected
   // Original branch: branch if not set to run
-  if (zero_flag) {
+  if (a == 0xb) {
     lda_imm(0x28);
     ram[VerticalForce] = a; // otherwise set fractional
   }
   // ExitMov1:
   // jump to move player vertically, then leave
-  // --------------------------------
+  // -------------------------------------------------------------------------------------
+  // $00 - used for downward force
+  // $01 - used for upward force
+  // $02 - used for maximum vertical speed
   // MovePlayerVertically:
   ldx_imm(0x0); // set X for player offset
   lda_abs_fz(TimerControl);
@@ -5133,10 +5121,10 @@ void FallingSub(void) {
   ram[0x0] = a;
   lda_imm(0x4); // set maximum vertical speed here
   ImposeGravitySprObj(); return; // then jump to move player vertically
-  // --------------------------------
 }
 
 void JumpSwimSub(void) {
+  // --------------------------------
   ldy_zp_fn(Player_Y_Speed); // if player's vertical speed zero
   // Original branch: or moving downwards, branch to falling
   if (neg_flag) {
@@ -5160,9 +5148,9 @@ ProcSwim:
   if (!zero_flag) {
     cpu_call_begin(0xb39a); GetPlayerAnimSpeed(); cpu_call_end(0xb39a); // do a sub to get animation frame timing
     lda_zp(Player_Y_Position);
-    cmp_imm_fc(0x14); // check vertical position against preset value
+    // check vertical position against preset value
     // Original branch: if not yet reached a certain position, branch ahead
-    if (!carry_flag) {
+    if (a < 0x14) {
       lda_imm(0x18);
       ram[VerticalForce] = a; // otherwise set fractional
     }
@@ -5182,15 +5170,18 @@ LRAir:
   cpu_call_begin(0xb3b5); MovePlayerHorizontally(); cpu_call_end(0xb3b5); // do a sub to move player horizontally
   ram[Player_X_Scroll] = a; // set player's speed here, to be used for scroll later
   lda_zp(GameEngineSubroutine);
-  cmp_imm_fz(0xb); // check for specific routine selected
+  // check for specific routine selected
   // Original branch: branch if not set to run
-  if (zero_flag) {
+  if (a == 0xb) {
     lda_imm(0x28);
     ram[VerticalForce] = a; // otherwise set fractional
   }
   // ExitMov1:
   // jump to move player vertically, then leave
-  // --------------------------------
+  // -------------------------------------------------------------------------------------
+  // $00 - used for downward force
+  // $01 - used for upward force
+  // $02 - used for maximum vertical speed
   // MovePlayerVertically:
   ldx_imm(0x0); // set X for player offset
   lda_abs_fz(TimerControl);
@@ -5207,10 +5198,10 @@ LRAir:
   ram[0x0] = a;
   lda_imm(0x4); // set maximum vertical speed here
   ImposeGravitySprObj(); return; // then jump to move player vertically
-  // --------------------------------
 }
 
 void ClimbingSub(void) {
+  // --------------------------------
   lda_abs(Player_YMF_Dummy);
   carry_flag = false; // add movement force to dummy variable
   adc_abs_fc(Player_Y_MoveForce); // save with carry
@@ -5270,15 +5261,14 @@ void ClimbingSub(void) {
   // InitCSTimer:
   ram[ClimbSideTimer] = a; // initialize timer here
   return;
-  // -------------------------------------------------------------------------------------
-  // $00 - used to store offset to friction data
 }
 
 void PlayerPhysicsSub(void) {
+  // -------------------------------------------------------------------------------------
+  // $00 - used to store offset to friction data
   lda_zp(Player_State); // check player state
-  cmp_imm_fz(0x3);
   // Original branch: if not climbing, branch
-  if (zero_flag) {
+  if (a == 0x3) {
     ldy_imm(0x0);
     lda_zp(Up_Down_Buttons); // get controller bits for up/down
     and_abs_fz(Player_CollisionBits); // check against player's collision detection bits
@@ -5343,9 +5333,8 @@ InitJS:
     lda_imm(0x1); // set player state to jumping/swimming
     ram[Player_State] = a;
     lda_abs(Player_XSpeedAbsolute); // check value related to walking/running speed
-    cmp_imm_fc(0x9);
     // Original branch: branch if below certain values, increment Y
-    if (carry_flag) {
+    if (a >= 0x9) {
       iny(); // for each amount equal or exceeded
       cmp_imm_fc(0x10);
       if (!carry_flag) { goto ChkWtr; }
@@ -5445,9 +5434,9 @@ GetXPhy:
   lda_absy(MaxLeftXSpdData); // get maximum speed to the left
   ram[MaximumLeftSpeed] = a;
   lda_zp(GameEngineSubroutine); // check for specific routine running
-  cmp_imm_fz(0x7); // (player entrance)
+  // (player entrance)
   // Original branch: if not running, skip and use old value of Y
-  if (zero_flag) {
+  if (a == 0x7) {
     ldy_imm(0x3); // otherwise set Y to 3
   }
   // GetXPhy2:
@@ -5468,19 +5457,19 @@ GetXPhy:
   rol_abs(FrictionAdderHigh); // then rotate carry onto d0 of friction adder high
   // ExitPhy:
   return; // and then leave
-  // -------------------------------------------------------------------------------------
 }
 
 void GetPlayerAnimSpeed(void) {
+  // -------------------------------------------------------------------------------------
   ldy_imm(0x0); // initialize offset in Y
   lda_abs(Player_XSpeedAbsolute); // check player's walking/running speed
-  cmp_imm_fc(0x1c); // against preset amount
+  // against preset amount
   // Original branch: if greater than a certain amount, branch ahead
-  if (!carry_flag) {
+  if (a < 0x1c) {
     iny(); // otherwise increment Y
-    cmp_imm_fc(0xe); // compare against lower amount
+    // compare against lower amount
     // Original branch: if greater than this but not greater than first, skip increment
-    if (!carry_flag) {
+    if (a < 0xe) {
       iny(); // otherwise increment Y again
     }
     // ChkSkid:
@@ -5498,9 +5487,9 @@ void GetPlayerAnimSpeed(void) {
   
 ProcSkid:
   lda_abs(Player_XSpeedAbsolute); // check player's walking/running speed
-  cmp_imm_fc(0xb); // against one last amount
+  // against one last amount
   // Original branch: if greater than this amount, branch
-  if (!carry_flag) {
+  if (a < 0xb) {
     lda_zp(PlayerFacingDir);
     ram[Player_MovingDir] = a; // otherwise use facing direction to set moving direction
     lda_imm(0x0);
@@ -5512,14 +5501,14 @@ SetAnimSpd:
   lda_absy(PlayerAnimTmrData); // get animation timer setting using Y as offset
   ram[PlayerAnimTimerSet] = a;
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void ImposeFriction(void) {
+  // -------------------------------------------------------------------------------------
   and_abs(Player_CollisionBits); // perform AND between left/right controller bits and collision flag
-  cmp_imm_fz(0x0); // then compare to zero (this instruction is redundant)
+  // then compare to zero (this instruction is redundant)
   // Original branch: if any bits set, branch to next part
-  if (zero_flag) {
+  if (a == 0x0) {
     lda_zp_fzn(Player_X_Speed);
     if (zero_flag) { goto SetAbsSpd; } // if player has no horizontal speed, branch ahead to last part
     if (!neg_flag) { goto RghtFrict; } // if player moving to the right, branch to slow
@@ -5569,17 +5558,16 @@ XSpdSign:
 SetAbsSpd:
   ram[Player_XSpeedAbsolute] = a; // store walking/running speed here and leave
   return;
+}
+
+void ProcFireball_Bubble(void) {
   // -------------------------------------------------------------------------------------
   // $00 - used to store downward movement force in FireballObjCore
   // $02 - used to store maximum vertical speed in FireballObjCore
   // $07 - used to store pseudorandom bit in BubbleCheck
-}
-
-void ProcFireball_Bubble(void) {
   lda_abs(PlayerStatus); // check player's status
-  cmp_imm_fc(0x2);
   // Original branch: if not fiery, branch
-  if (carry_flag) {
+  if (a >= 0x2) {
     lda_zp(A_B_Buttons);
     and_imm_fz(B_Button); // check for b button pressed
     // Original branch: branch if not pressed
@@ -5700,6 +5688,7 @@ void FireballObjCore(void) {
   // FireballExplosion:
   cpu_call_begin(0xb6f5); RelativeFireballPosition(); cpu_call_end(0xb6f5);
   goto DrawExplosion_Fireball;
+  // -------------------------------------------------------------------------------------
   
 DrawFireball:
   ldy_absx(FBall_SprDataOffset); // get fireball's sprite data offset
@@ -5709,6 +5698,7 @@ DrawFireball:
   ram[Sprite_X_Position + y] = a; // store as sprite X coordinate, then do shared code
   DrawFirebar(); // fallthrough
   return;
+  // -------------------------------------------------------------------------------------
   
 DrawExplosion_Fireball:
   ldy_absx(Alt_SprDataOffset); // get OAM data offset of alternate sort for fireball's explosion
@@ -5726,7 +5716,6 @@ DrawExplosion_Fireball:
   lda_imm(0x0); // clear fireball state to kill it
   ram[(uint8_t)(Fireball_State + x)] = a;
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void BubbleCheck(void) {
@@ -5734,9 +5723,9 @@ void BubbleCheck(void) {
   and_imm(0x1);
   ram[0x7] = a; // store pseudorandom bit here
   lda_zpx(Bubble_Y_Position); // get vertical coordinate for air bubble
-  cmp_imm_fz(0xf8); // if offscreen coordinate not set,
+  // if offscreen coordinate not set,
   // Original branch: branch to move air bubble
-  if (zero_flag) {
+  if (a == 0xf8) {
     lda_abs_fz(AirBubbleTimer); // if air bubble timer not expired,
     // branch to leave, otherwise create new air bubble
     if (!zero_flag) {
@@ -5753,9 +5742,9 @@ void BubbleCheck(void) {
   ram[Bubble_YMF_Dummy + x] = a; // save dummy variable
   lda_zpx(Bubble_Y_Position);
   sbc_imm(0x0); // subtract borrow from airbubble's vertical coordinate
-  cmp_imm_fc(0x20); // if below the status bar,
+  // if below the status bar,
   // Original branch: branch to go ahead and use to move air bubble upwards
-  if (!carry_flag) {
+  if (a < 0x20) {
     lda_imm(0xf8); // otherwise set offscreen coordinate
   }
   // Y_Bubl:
@@ -5796,9 +5785,9 @@ void SetupBubble(void) {
   ram[Bubble_YMF_Dummy + x] = a; // save dummy variable
   lda_zpx(Bubble_Y_Position);
   sbc_imm(0x0); // subtract borrow from airbubble's vertical coordinate
-  cmp_imm_fc(0x20); // if below the status bar,
+  // if below the status bar,
   // Original branch: branch to go ahead and use to move air bubble upwards
-  if (!carry_flag) {
+  if (a < 0x20) {
     lda_imm(0xf8); // otherwise set offscreen coordinate
   }
   // Y_Bubl:
@@ -5814,20 +5803,20 @@ void RunGameTimer(void) {
     return;
   }
   lda_zp(GameEngineSubroutine);
-  cmp_imm_fc(0x8); // if routine number less than eight running,
+  // if routine number less than eight running,
   // branch to leave
-  if (!carry_flag) {
+  if (a < 0x8) {
     return;
   }
-  cmp_imm_fz(0xb); // if running death routine,
+  // if running death routine,
   // branch to leave
-  if (zero_flag) {
+  if (a == 0xb) {
     return;
   }
   lda_zp(Player_Y_HighPos);
-  cmp_imm_fc(0x2); // if player below the screen,
+  // if player below the screen,
   // branch to leave regardless of level type
-  if (carry_flag) {
+  if (a >= 0x2) {
     return;
   }
   lda_abs_fz(GameTimerCtrlTimer); // if game timer control not yet expired,
@@ -5867,10 +5856,10 @@ ResGTCtrl:
   inc_abs(GameTimerExpiredFlag); // set game timer expiration flag
   // ExGTimer:
   return; // leave
-  // -------------------------------------------------------------------------------------
 }
 
 void WarpZoneObject(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs_fz(ScrollLock); // check for scroll lock flag
   // branch if not set to leave
   if (zero_flag) {
@@ -5885,6 +5874,9 @@ void WarpZoneObject(void) {
   ram[ScrollLock] = a; // otherwise nullify scroll lock flag
   inc_abs(WarpZoneControl); // increment warp zone flag to make warp pipes for warp zone
   EraseEnemyObject(); return; // kill this object
+}
+
+void ProcessWhirlpools(void) {
   // -------------------------------------------------------------------------------------
   // $00 - used in WhirlpoolActivate to store whirlpool length / 2, page location of center of whirlpool
   // and also to store movement force exerted on player
@@ -5892,9 +5884,6 @@ void WarpZoneObject(void) {
   // and in WhirlpoolActivate to store center of whirlpool
   // $02 - used in ProcessWhirlpools to store right extent of whirlpool and in
   // WhirlpoolActivate to store maximum vertical speed
-}
-
-void ProcessWhirlpools(void) {
   lda_abs_fz(AreaType); // check for water type level
   // branch to leave if not found
   if (!zero_flag) {
@@ -5991,22 +5980,22 @@ WhPull:
   lsr_acc();
   tax(); // set X for player offset
   ImposeGravity(); return; // jump to put whirlpool effect on player vertically, do not return
-  // -------------------------------------------------------------------------------------
 }
 
 void FlagpoleRoutine(void) {
+  // -------------------------------------------------------------------------------------
   ldx_imm(0x5); // set enemy object offset
   ram[ObjectOffset] = x; // to special use slot
   lda_zpx(Enemy_ID);
-  cmp_imm_fz(FlagpoleFlagObject); // if flagpole flag not found,
+  // if flagpole flag not found,
   // branch to leave
-  if (!zero_flag) {
+  if (a != FlagpoleFlagObject) {
     return;
   }
   lda_zp(GameEngineSubroutine);
-  cmp_imm_fz(0x4); // if flagpole slide routine not running,
+  // if flagpole slide routine not running,
   // Original branch: branch to near the end of code
-  if (zero_flag) {
+  if (a == 0x4) {
     lda_zp(Player_State);
     cmp_imm_fz(0x3); // if player state not climbing,
     if (!zero_flag) { goto SkipScore; } // branch to near the end of code
@@ -6049,10 +6038,10 @@ FPGfx:
   cpu_call_begin(0xb8b4); FlagpoleGfxHandler(); cpu_call_end(0xb8b4); // draw flagpole flag and floatey number
   // ExitFlagP:
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void JumpspringHandler(void) {
+  // -------------------------------------------------------------------------------------
   cpu_call_begin(0xb8bc); GetEnemyOffscreenBits(); cpu_call_end(0xb8bc); // get offscreen information
   lda_abs_fz(TimerControl); // check master timer control
   // Original branch: branch to last section if set
@@ -6077,9 +6066,9 @@ void JumpspringHandler(void) {
     carry_flag = false;
     adc_absy(Jumpspring_Y_PosData); // add value using frame control as offset
     ram[(uint8_t)(Enemy_Y_Position + x)] = a; // store as new vertical position
-    cpy_imm_fc(0x1); // check frame control offset (second frame is $00)
+    // check frame control offset (second frame is $00)
     // Original branch: if offset not yet at third frame ($01), skip to next part
-    if (carry_flag) {
+    if (y >= 0x1) {
       lda_zp(A_B_Buttons);
       and_imm_fz(A_Button); // check saved controller bits for A button press
       if (zero_flag) { goto BounceJS; } // skip to next part if A not pressed
@@ -6117,10 +6106,10 @@ DrawJSpr:
   inc_abs(JumpspringAnimCtrl); // increment frame control to animate jumpspring
   // ExJSpring:
   return; // leave
-  // -------------------------------------------------------------------------------------
 }
 
 void Setup_Vine(void) {
+  // -------------------------------------------------------------------------------------
   lda_imm(VineObject); // load identifier for vine object
   ram[(uint8_t)(Enemy_ID + x)] = a; // store in buffer
   lda_imm(0x1);
@@ -6143,15 +6132,15 @@ void Setup_Vine(void) {
   lda_imm(Sfx_GrowVine);
   ram[Square2SoundQueue] = a; // load vine grow sound
   return;
-  // -------------------------------------------------------------------------------------
-  // $06-$07 - used as address to block buffer data
-  // $02 - used as vertical high nybble of block buffer offset
 }
 
 void VineObjectHandler(void) {
-  cpx_imm_fz(0x5); // check enemy offset for special use slot
+  // -------------------------------------------------------------------------------------
+  // $06-$07 - used as address to block buffer data
+  // $02 - used as vertical high nybble of block buffer offset
+  // check enemy offset for special use slot
   // Original branch: if not in last slot, branch to leave
-  if (zero_flag) {
+  if (x == 0x5) {
     ldy_abs(VineFlagOffset);
     dey(); // decrement vine flag in Y, use as offset
     lda_abs(VineHeight);
@@ -6215,10 +6204,10 @@ RunVSubs:
 ExitVH:
   ldx_zp(ObjectOffset); // get enemy object offset and leave
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void ProcessCannons(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs_fz(AreaType); // get area type
   // if water type area, branch to leave
   if (zero_flag) {
@@ -6286,10 +6275,10 @@ Next3Slt:
   } while (!neg_flag); // do this until first three slots are checked
   // ExCannon:
   return; // then leave
-  // --------------------------------
 }
 
 void BulletBillHandler(void) {
+  // --------------------------------
   lda_abs_fz(TimerControl); // if master timer control set,
   // Original branch: branch to run subroutines except movement sub
   if (zero_flag) {
@@ -6342,10 +6331,10 @@ void BulletBillHandler(void) {
 KillBB:
   cpu_call_begin(0xba87); EraseEnemyObject(); cpu_call_end(0xba87); // kill bullet bill and leave
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void SpawnHammerObj(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs((PseudoRandomBitReg + 1)); // get pseudorandom bits from
   and_imm_fz(0b00000111); // second part of LSFR
   // Original branch: if any bits are set, branch and use as offset
@@ -6376,13 +6365,13 @@ NoHammer:
   ldx_zp(ObjectOffset); // get original enemy object offset
   carry_flag = false; // return with carry clear
   return;
+}
+
+void ProcHammerObj(void) {
   // --------------------------------
   // $00 - used to set downward force
   // $01 - used to set upward force (residual)
   // $02 - used to set maximum speed
-}
-
-void ProcHammerObj(void) {
   lda_abs_fz(TimerControl); // if master timer control set
   // Original branch: skip all of this code and go to last subs at the end
   if (zero_flag) {
@@ -6447,12 +6436,12 @@ RunHSubs:
   cpu_call_begin(0xbb33); GetMiscBoundBox(); cpu_call_end(0xbb33); // get bounding box coordinates
   cpu_call_begin(0xbb36); DrawHammer(); cpu_call_end(0xbb36); // draw the hammer
   return; // and we are done here
-  // -------------------------------------------------------------------------------------
-  // $02 - used to store vertical high nybble offset from block buffer routine
-  // $06 - used to store low byte of block buffer address
 }
 
 void CoinBlock(void) {
+  // -------------------------------------------------------------------------------------
+  // $02 - used to store vertical high nybble offset from block buffer routine
+  // $06 - used to store low byte of block buffer address
   cpu_call_begin(0xbb3a); FindEmptyMiscSlot(); cpu_call_end(0xbb3a); // set offset for empty or last misc object buffer slot
   lda_zpx(Block_PageLoc); // get page location of block object
   ram[Misc_PageLoc + y] = a; // store as page location of misc object
@@ -6517,10 +6506,10 @@ void FindEmptyMiscSlot(void) {
 UseMiscS:
   ram[JumpCoinMiscOffset] = y; // store offset of misc object buffer here (residual)
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void MiscObjectsCore(void) {
+  // -------------------------------------------------------------------------------------
   ldx_imm(0x8); // set at end of misc object buffer
   do {
     // MiscLoop:
@@ -6573,9 +6562,8 @@ void MiscObjectsCore(void) {
       cpu_call_begin(0xbbdd); ImposeGravity(); cpu_call_end(0xbbdd); // do sub to move coin vertically and impose gravity on it
       ldx_zp(ObjectOffset); // get original misc object offset
       lda_zpx(Misc_Y_Speed); // check vertical speed
-      cmp_imm_fz(0x5);
       // Original branch: if not moving downward fast enough, keep state as-is
-      if (zero_flag) {
+      if (a == 0x5) {
         inc_zpx(Misc_State); // otherwise increment state to change to floatey number
       }
       
@@ -6590,10 +6578,10 @@ MiscLoopBack:
     dex_fn(); // decrement misc object offset
   } while (!neg_flag); // loop back until all misc objects handled
   return; // then leave
-  // -------------------------------------------------------------------------------------
 }
 
 void GiveOneCoin(void) {
+  // -------------------------------------------------------------------------------------
   lda_imm(0x1); // set digit modifier to add 1 coin
   ram[(DigitModifier + 5)] = a; // to the current player's coin tally
   ldx_abs(CurrentPlayer); // get current player on the screen
@@ -6601,9 +6589,9 @@ void GiveOneCoin(void) {
   cpu_call_begin(0xbc0b); DigitsMathRoutine(); cpu_call_end(0xbc0b); // update the coin tally
   inc_abs(CoinTally); // increment onscreen player's coin amount
   lda_abs(CoinTally);
-  cmp_imm_fz(100); // does player have 100 coins yet?
+  // does player have 100 coins yet?
   // Original branch: if not, skip all of this
-  if (zero_flag) {
+  if (a == 100) {
     lda_imm(0x0);
     ram[CoinTally] = a; // otherwise, reinitialize coin amount
     inc_abs(NumberofLives); // give the player an extra life
@@ -6644,7 +6632,6 @@ void UpdateNumber(void) {
   // NoZSup:
   ldx_zp(ObjectOffset); // get enemy object buffer offset
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void PwrUpJmp(void) {
@@ -6654,13 +6641,12 @@ void PwrUpJmp(void) {
   lda_imm(0x3);
   ram[(Enemy_BoundBoxCtrl + 5)] = a; // set bounding box size control for power-up object
   lda_zp(PowerUpType);
-  cmp_imm_fc(0x2); // check currently loaded power-up type
+  // check currently loaded power-up type
   // Original branch: if star or 1-up, branch ahead
-  if (!carry_flag) {
+  if (a < 0x2) {
     lda_abs(PlayerStatus); // otherwise check player's current status
-    cmp_imm_fc(0x2);
     // Original branch: if player not fiery, use status as power-up type
-    if (carry_flag) {
+    if (a >= 0x2) {
       lsr_acc(); // otherwise shift right to force fire flower type
     }
     // StrType:
@@ -6672,10 +6658,10 @@ void PwrUpJmp(void) {
   lda_imm(Sfx_GrowPowerUp);
   ram[Square2SoundQueue] = a; // load power-up reveal sound and leave
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void PowerUpObjHandler(void) {
+  // -------------------------------------------------------------------------------------
   ldx_imm(0x5); // set object offset for last slot in enemy object buffer
   ram[ObjectOffset] = x;
   lda_zp_fz((Enemy_State + 5)); // check power-up object's state
@@ -6726,9 +6712,9 @@ ShroomM:
     
 ChkPUSte:
     lda_zp((Enemy_State + 5)); // check power-up object's state
-    cmp_imm_fc(0x6); // for if power-up has risen enough
+    // for if power-up has risen enough
     // if not, don't even bother running these routines
-    if (!carry_flag) {
+    if (a < 0x6) {
       return;
     }
   }
@@ -6742,15 +6728,15 @@ RunPUSubs:
   cpu_call_begin(0xbce9); OffscreenBoundsCheck(); cpu_call_end(0xbce9); // check to see if it went offscreen
   // ExitPUp:
   return; // and we're done
+}
+
+void PlayerHeadCollision(void) {
   // -------------------------------------------------------------------------------------
   // These apply to all routines in this section unless otherwise noted:
   // $00 - used to store metatile from block buffer routine
   // $02 - used to store vertical high nybble offset from block buffer routine
   // $05 - used to store metatile stored in A at beginning of PlayerHeadCollision
   // $06-$07 - used as block buffer address indirect
-}
-
-void PlayerHeadCollision(void) {
   pha(); // store metatile number to stack
   lda_imm(0x11); // load unbreakable block object state by default
   ldx_abs(SprDataOffset_Ctrl); // load offset control bit here
@@ -6783,9 +6769,9 @@ void PlayerHeadCollision(void) {
     ram[(uint8_t)(Block_State + x)] = y; // note this applies to both player sizes
     lda_imm(0xc4); // load empty block metatile into A for now
     ldy_zp(0x0); // get metatile from before
-    cpy_imm_fz(0x58); // is it brick with coins (with line)?
+    // is it brick with coins (with line)?
     // Original branch: if so, branch
-    if (!zero_flag) {
+    if (y != 0x58) {
       cpy_imm_fz(0x5d); // is it brick with coins (without line)?
       if (!zero_flag) { goto PutMTileB; } // if not, branch ahead to store empty block metatile
     }
@@ -6834,9 +6820,8 @@ BigBP:
   and_imm(0xf0); // mask out low nybble to get 16-pixel correspondence
   ram[(uint8_t)(Block_Y_Position + x)] = a; // save as vertical coordinate for block object
   ldy_zpx(Block_State); // get block object state
-  cpy_imm_fz(0x11);
   // Original branch: if set to value loaded for unbreakable, branch
-  if (!zero_flag) {
+  if (y != 0x11) {
     cpu_call_begin(0xbd74); BrickShatter(); cpu_call_end(0xbd74); // execute code for breakable brick
   } else {
     // Unbreak:
@@ -6847,10 +6832,10 @@ BigBP:
   eor_imm(0x1); // and floatey numbers
   ram[SprDataOffset_Ctrl] = a;
   return; // leave!
-  // --------------------------------
 }
 
 void InitBlock_XY_Pos(void) {
+  // --------------------------------
   lda_zp(Player_X_Position); // get player's horizontal coordinate
   carry_flag = false;
   adc_imm_fc(0x8); // add eight pixels
@@ -6863,10 +6848,10 @@ void InitBlock_XY_Pos(void) {
   lda_zp(Player_Y_HighPos);
   ram[(uint8_t)(Block_Y_HighPos + x)] = a; // save vertical high byte of player into
   return; // vertical high byte of block object and leave
-  // --------------------------------
 }
 
 void BumpBlock(void) {
+  // --------------------------------
   cpu_call_begin(0xbd9d); CheckTopOfBlock(); cpu_call_end(0xbd9d); // check to see if there's a coin directly above this block
   lda_imm(Sfx_Bump);
   ram[Square1SoundQueue] = a; // play bump sound
@@ -6901,6 +6886,7 @@ void BumpBlock(void) {
 
 void MushFlowerBlock(void) {
   goto MushFlowerBlock;
+  // -------------------------------------------------------------------------------------
   
 SetupPowerUp:
   lda_imm(PowerUpObject); // load power-up identifier into
@@ -6930,6 +6916,7 @@ MushFlowerBlock:
 
 void StarBlock(void) {
   goto StarBlock;
+  // -------------------------------------------------------------------------------------
   
 SetupPowerUp:
   lda_imm(PowerUpObject); // load power-up identifier into
@@ -6957,6 +6944,7 @@ StarBlock:
 
 void ExtraLifeMushBlock(void) {
   goto ExtraLifeMushBlock;
+  // -------------------------------------------------------------------------------------
   
 SetupPowerUp:
   lda_imm(PowerUpObject); // load power-up identifier into
@@ -6986,10 +6974,10 @@ void VineBlock(void) {
   cpu_call_begin(0xbde6); Setup_Vine(); cpu_call_end(0xbde6); // set up vine object
   // ExitBlockChk:
   return; // leave
-  // --------------------------------
 }
 
 void BlockBumpedChk(void) {
+  // --------------------------------
   ldy_imm(0xd); // start at end of metatile data
   do {
     // BumpChkLoop:
@@ -7003,10 +6991,10 @@ void BlockBumpedChk(void) {
   carry_flag = false; // if none match, return with carry clear
   // MatchBump:
   return; // note carry is set if found match
-  // --------------------------------
 }
 
 void BrickShatter(void) {
+  // --------------------------------
   cpu_call_begin(0xbe04); CheckTopOfBlock(); cpu_call_end(0xbe04); // check to see if there's a coin directly above this block
   lda_imm(Sfx_BrickShatter);
   ram[Block_RepFlag + x] = a; // set flag for block object to immediately replace metatile
@@ -7019,10 +7007,10 @@ void BrickShatter(void) {
   cpu_call_begin(0xbe1a); AddToScore(); cpu_call_end(0xbe1a); // do sub to update the score
   ldx_abs(SprDataOffset_Ctrl); // load control bit and leave
   return;
-  // --------------------------------
 }
 
 void CheckTopOfBlock(void) {
+  // --------------------------------
   ldx_abs(SprDataOffset_Ctrl); // load control bit
   ldy_zp_fz(0x2); // get vertical high nybble offset used in block buffer
   // branch to leave if set to zero, because we're at the top
@@ -7035,9 +7023,9 @@ void CheckTopOfBlock(void) {
   ram[0x2] = a; // store as new vertical high nybble offset
   tay();
   lda_indy(0x6); // get contents of block buffer in same column, one row up
-  cmp_imm_fz(0xc2); // is it a coin? (not underwater)
+  // is it a coin? (not underwater)
   // if not, branch to leave
-  if (!zero_flag) {
+  if (a != 0xc2) {
     return;
   }
   lda_imm(0x0);
@@ -7047,10 +7035,10 @@ void CheckTopOfBlock(void) {
   cpu_call_begin(0xbe3f); SetupJumpCoin(); cpu_call_end(0xbe3f); // create jumping coin object and update coin variables
   // TopEx:
   return; // leave!
-  // --------------------------------
 }
 
 void SpawnBrickChunks(void) {
+  // --------------------------------
   lda_zpx(Block_X_Position); // set horizontal coordinate of block object
   ram[Block_Orig_XPos + x] = a; // as original horizontal coordinate here
   lda_imm(0xf0);
@@ -7074,10 +7062,10 @@ void SpawnBrickChunks(void) {
   lda_imm(0xfa);
   ram[(uint8_t)(Block_Y_Speed + x)] = a; // set vertical speed...again??? (redundant)
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void BlockObjectsCore(void) {
+  // -------------------------------------------------------------------------------------
   lda_zpx_fz(Block_State); // get state of block object
   // Original branch: if not set, branch to leave
   if (!zero_flag) {
@@ -7140,12 +7128,12 @@ void BlockObjectsCore(void) {
 UpdSte:
   ram[(uint8_t)(Block_State + x)] = a; // store contents of A in block object state
   return;
-  // -------------------------------------------------------------------------------------
-  // $02 - used to store offset to block buffer
-  // $06-$07 - used to store block buffer address
 }
 
 void BlockObjMT_Updater(void) {
+  // -------------------------------------------------------------------------------------
+  // $02 - used to store offset to block buffer
+  // $06-$07 - used to store block buffer address
   ldx_imm(0x1); // set offset to start with second block object
   do {
     // UpdateLoop:
@@ -7173,13 +7161,13 @@ NextBUpd:
     dex_fn(); // decrement block object offset
   } while (!neg_flag); // do this until both block objects are dealt with
   return; // then leave
+}
+
+void MoveEnemyHorizontally(void) {
   // -------------------------------------------------------------------------------------
   // $00 - used to store high nybble of horizontal speed as adder
   // $01 - used to store low nybble of horizontal speed
   // $02 - used to store adder to page location
-}
-
-void MoveEnemyHorizontally(void) {
   inx(); // increment offset for enemy offset
   cpu_call_begin(0xbf05); MoveObjectHorizontally(); cpu_call_end(0xbf05); // position object horizontally according to
   ldx_zp(ObjectOffset); // counters, return with saved value in A,
@@ -7209,8 +7197,8 @@ void MoveObjectHorizontally(void) {
   lsr_acc();
   lsr_acc();
   lsr_acc();
-  cmp_imm_fc(0x8); // if < 8, branch, do not change
-  if (carry_flag) {
+  // if < 8, branch, do not change
+  if (a >= 0x8) {
     ora_imm(0b11110000); // otherwise alter high nybble
   }
   // SaveXSpd:
@@ -7241,24 +7229,20 @@ void MoveObjectHorizontally(void) {
   adc_zp(0x0); // to high nybble moved to low
   // ExXMove:
   return; // and leave
-  // -------------------------------------------------------------------------------------
-  // $00 - used for downward force
-  // $01 - used for upward force
-  // $02 - used for maximum vertical speed
 }
 
 void MoveD_EnemyVertically(void) {
+  // --------------------------------
   ldy_imm(0x3d); // set quick movement amount downwards
   lda_zpx(Enemy_State); // then check enemy state
-  cmp_imm_fz(0x5); // if not set to unique state for spiny's egg, go ahead
+  // if not set to unique state for spiny's egg, go ahead
   // Original branch: and use, otherwise set different movement amount, continue on
-  if (zero_flag) {
+  if (a == 0x5) {
     MoveFallingPlatform(); // fallthrough
     return;
   }
   // ContVMove:
   // jump to skip the rest of this
-  // --------------------------------
   // SetHiMax:
   lda_imm(0x3); // set maximum speed in A
   SetXMoveAmt(); // fallthrough
@@ -7269,7 +7253,6 @@ void MoveFallingPlatform(void) {
   ldy_imm(0x20); // set movement amount
   // ContVMove:
   // jump to skip the rest of this
-  // --------------------------------
   // SetHiMax:
   lda_imm(0x3); // set maximum speed in A
   SetXMoveAmt(); // fallthrough
@@ -7277,12 +7260,12 @@ void MoveFallingPlatform(void) {
 }
 
 void MoveDropPlatform(void) {
+  // --------------------------------
   ldy_imm(0x7f); // set movement amount for drop platform
   // skip ahead of other value set here
   // SetMdMax:
   lda_imm(0x2); // set maximum speed in A
   SetXMoveAmt(); return; // unconditional branch
-  // --------------------------------
 }
 
 void MoveEnemySlowVert(void) {
@@ -7290,10 +7273,10 @@ void MoveEnemySlowVert(void) {
   // SetMdMax:
   lda_imm(0x2); // set maximum speed in A
   SetXMoveAmt(); return; // unconditional branch
-  // --------------------------------
 }
 
 void MoveJ_EnemyVertically(void) {
+  // --------------------------------
   ldy_imm(0x1c); // set movement amount for podoboo/other objects
   // SetHiMax:
   lda_imm(0x3); // set maximum speed in A
@@ -7307,10 +7290,10 @@ void SetXMoveAmt(void) {
   cpu_call_begin(0xbf9b); ImposeGravitySprObj(); cpu_call_end(0xbf9b); // do a sub to move enemy object downwards
   ldx_zp(ObjectOffset); // get enemy object buffer offset and leave
   return;
-  // --------------------------------
 }
 
 void ImposeGravityBlock(void) {
+  // --------------------------------
   ldy_imm(0x1); // set offset for maximum speed
   lda_imm(0x50); // set movement amount here
   ram[0x0] = a;
@@ -7323,10 +7306,10 @@ void ImposeGravitySprObj(void) {
   ram[0x2] = a; // set maximum speed here
   lda_imm(0x0); // set value to move downwards
   ImposeGravity(); return; // jump to the code that actually moves it
-  // --------------------------------
 }
 
 void MovePlatformDown(void) {
+  // --------------------------------
   lda_imm(0x0); // save value to stack (if branching here, execute next
   
   // part as BIT instruction)
@@ -7334,9 +7317,9 @@ void MovePlatformDown(void) {
   ldy_zpx(Enemy_ID); // get enemy object identifier
   inx(); // increment offset for enemy object
   lda_imm(0x5); // load default value here
-  cpy_imm_fz(0x29); // residual comparison, object #29 never executes
+  // residual comparison, object #29 never executes
   // Original branch: this code, thus unconditional branch here
-  if (zero_flag) {
+  if (y == 0x29) {
     lda_imm(0x9); // residual code
   }
   // SetDplSpd:
@@ -7351,10 +7334,6 @@ void MovePlatformDown(void) {
   cpu_call_begin(0xbfd3); ImposeGravity(); cpu_call_end(0xbfd3); // do a sub to move object gradually
   ldx_zp(ObjectOffset); // get enemy object offset and leave
   return;
-  // -------------------------------------------------------------------------------------
-  // $00 - used for downward force
-  // $01 - used for upward force
-  // $07 - used as adder for vertical position
 }
 
 void MovePlatformUp(void) {
@@ -7363,9 +7342,9 @@ void MovePlatformUp(void) {
   ldy_zpx(Enemy_ID); // get enemy object identifier
   inx(); // increment offset for enemy object
   lda_imm(0x5); // load default value here
-  cpy_imm_fz(0x29); // residual comparison, object #29 never executes
+  // residual comparison, object #29 never executes
   // Original branch: this code, thus unconditional branch here
-  if (zero_flag) {
+  if (y == 0x29) {
     lda_imm(0x9); // residual code
   }
   // SetDplSpd:
@@ -7380,13 +7359,13 @@ void MovePlatformUp(void) {
   cpu_call_begin(0xbfd3); ImposeGravity(); cpu_call_end(0xbfd3); // do a sub to move object gradually
   ldx_zp(ObjectOffset); // get enemy object offset and leave
   return;
+}
+
+void ImposeGravity(void) {
   // -------------------------------------------------------------------------------------
   // $00 - used for downward force
   // $01 - used for upward force
   // $07 - used as adder for vertical position
-}
-
-void ImposeGravity(void) {
   pha(); // push value to stack
   lda_absx(SprObject_YMF_Dummy);
   carry_flag = false; // add value in movement force to contents of dummy variable
@@ -7448,9 +7427,9 @@ ChkUpM:
     return;
   }
   lda_absx(SprObject_Y_MoveForce);
-  cmp_imm_fc(0x80); // check if fractional part is above certain amount,
+  // check if fractional part is above certain amount,
   // and if so, branch to leave
-  if (carry_flag) {
+  if (a >= 0x80) {
     return;
   }
   lda_zp(0x7);
@@ -7459,10 +7438,10 @@ ChkUpM:
   ram[SprObject_Y_MoveForce + x] = a; // clear fractional
   // ExVMove:
   return; // leave!
-  // -------------------------------------------------------------------------------------
 }
 
 void EnemiesAndLoopsCore(void) {
+  // -------------------------------------------------------------------------------------
   lda_zpx(Enemy_Flag); // check data here for MSB set
   pha(); // save in stack
   asl_acc_fc();
@@ -7476,8 +7455,8 @@ void EnemiesAndLoopsCore(void) {
     // ChkAreaTsk:
     lda_abs(AreaParserTaskNum); // check number of tasks to perform
     and_imm(0x7);
-    cmp_imm_fz(0x7); // if at a specific task, jump and leave
-    if (zero_flag) {
+    // if at a specific task, jump and leave
+    if (a == 0x7) {
       return;
     }
   } else {
@@ -7492,8 +7471,6 @@ void EnemiesAndLoopsCore(void) {
     ram[(uint8_t)(Enemy_Flag + x)] = a; // if second enemy flag not set, also clear first one
     // ExitELCore:
     return;
-    // --------------------------------
-    // loop command data
   }
   
 ProcLoopCommand:
@@ -7572,14 +7549,13 @@ ChkEnemyFrenzy:
   // ProcessEnemyData:
   ldy_abs(EnemyDataOffset); // get offset of enemy object data
   lda_indy(EnemyData); // load first byte
-  cmp_imm_fz(0xff); // check for EOD terminator
-  if (zero_flag) {
+  // check for EOD terminator
+  if (a == 0xff) {
   } else {
     // CheckEndofBuffer:
     and_imm(0b00001111); // check for special row $0e
-    cmp_imm_fz(0xe);
     // Original branch: if found, branch, otherwise
-    if (!zero_flag) {
+    if (a != 0xe) {
       cpx_imm_fc(0x5); // check for end of buffer
       if (!carry_flag) { goto CheckRightBounds; } // if not at end of buffer, branch
       iny();
@@ -7614,9 +7590,9 @@ CheckPageCtrlRow:
     dey();
     lda_indy(EnemyData); // reread first byte
     and_imm(0xf);
-    cmp_imm_fz(0xf); // check for special row $0f
+    // check for special row $0f
     // Original branch: if not found, branch to position enemy object
-    if (zero_flag) {
+    if (a == 0xf) {
       lda_abs_fz(EnemyObjectPageSel); // if page select set,
       if (!zero_flag) { goto PositionEnemyObj; } // branch without reading second byte
       iny();
@@ -7673,15 +7649,15 @@ PositionEnemyObj:
     // CheckForEnemyGroup:
     lda_indy(EnemyData); // get second byte and mask out 2 MSB
     and_imm(0b00111111);
-    cmp_imm_fc(0x37); // check for value below $37
-    if (carry_flag) {
+    // check for value below $37
+    if (a >= 0x37) {
       cmp_imm_fc(0x3f); // if $37 or greater, check for value
       if (!carry_flag) { goto DoGroup; } // below $3f, branch if below $3f
     }
     // BuzzyBeetleMutate:
-    cmp_imm_fz(Goomba); // if below $37, check for goomba
+    // if below $37, check for goomba
     // Original branch: value ($3f or more always fails)
-    if (zero_flag) {
+    if (a == Goomba) {
       ldy_abs_fz(PrimaryHardMode); // check if primary hard mode flag is set
       if (zero_flag) { goto StrID; } // and if so, change goomba to buzzy beetle
       lda_imm(BuzzyBeetle);
@@ -7702,9 +7678,8 @@ CheckFrenzyBuffer:
   // Original branch: then branch ahead to store in enemy object buffer
   if (zero_flag) {
     lda_abs(VineFlagOffset); // otherwise check vine flag offset
-    cmp_imm_fz(0x1);
     // if other value <> 1, leave
-    if (!zero_flag) {
+    if (a != 0x1) {
       return;
     }
     lda_imm(VineObject); // otherwise put vine in enemy identifier
@@ -7757,15 +7732,20 @@ Inc2B:
   ram[EnemyObjectPageSel] = a;
   ldx_zp(ObjectOffset); // reload current offset in enemy buffers
   return; // and leave
+  // --------------------------------
+  // $00 - used to store Y position of group enemies
+  // $01 - used to store enemy ID
+  // $02 - used to store page location of right side of screen
+  // $03 - used to store X position of right side of screen
   
 HandleGroupEnemies:
   ldy_imm(0x0); // load value for green koopa troopa
   carry_flag = true;
   sbc_imm(0x37); // subtract $37 from second byte read
   pha(); // save result in stack for now
-  cmp_imm_fc(0x4); // was byte in $3b-$3e range?
+  // was byte in $3b-$3e range?
   // Original branch: if so, branch
-  if (!carry_flag) {
+  if (a < 0x4) {
     pha(); // save another copy to stack
     ldy_imm(Goomba); // load value for goomba enemy
     lda_abs_fz(PrimaryHardMode); // if primary hard mode flag not set,
@@ -7832,7 +7812,7 @@ HandleGroupEnemies:
   
 NextED:
   goto Inc2B; // jump to increment data offset and leave
-  // --------------------------------
+  // -------------------------------------------------------------------------------------
   
 RunEnemyObjectsCore:
   ldx_zp(ObjectOffset); // get offset for enemy object buffer
@@ -7864,6 +7844,8 @@ RunEnemyObjectsCore:
 }
 
 void ExecGameLoopback(void) {
+  // --------------------------------
+  // loop command data
   lda_zp(Player_PageLoc); // send player back four pages
   carry_flag = true;
   sbc_imm(0x4);
@@ -7954,16 +7936,16 @@ void CheckpointEnemyID(void) {
 
 void NoInitCode(void) {
   return; // this executed when enemy object has no init code
-  // --------------------------------
 }
 
 void InitGoomba(void) {
+  // --------------------------------
   cpu_call_begin(0xc2f3); InitNormalEnemy(); cpu_call_end(0xc2f3); // set appropriate horizontal speed
   SmallBBox(); return; // set $09 as bounding box control, set other values
-  // --------------------------------
 }
 
 void InitPodoboo(void) {
+  // --------------------------------
   lda_imm(0x2); // set enemy position to below
   ram[(uint8_t)(Enemy_Y_HighPos + x)] = a; // the bottom of the screen
   ram[(uint8_t)(Enemy_Y_Position + x)] = a;
@@ -7972,17 +7954,17 @@ void InitPodoboo(void) {
   lsr_acc();
   ram[(uint8_t)(Enemy_State + x)] = a; // initialize enemy state, then jump to use
   SmallBBox(); return; // $09 as bounding box size and set other things
-  // --------------------------------
 }
 
 void InitRetainerObj(void) {
+  // --------------------------------
   lda_imm(0xb8); // set fixed vertical position for
   ram[(uint8_t)(Enemy_Y_Position + x)] = a; // princess/mushroom retainer object
   return;
-  // --------------------------------
 }
 
 void InitNormalEnemy(void) {
+  // --------------------------------
   ldy_imm(0x1); // load offset of 1 by default
   lda_abs_fz(PrimaryHardMode); // check for primary hard mode flag set
   if (zero_flag) {
@@ -7993,7 +7975,6 @@ void InitNormalEnemy(void) {
   // SetESpd:
   ram[(uint8_t)(Enemy_X_Speed + x)] = a; // store as speed for enemy object
   // branch to set bounding box control and other data
-  // --------------------------------
   // TallBBox:
   lda_imm(0x3); // set specific bounding box size control
   // SetBBox:
@@ -8005,14 +7986,15 @@ void InitNormalEnemy(void) {
 }
 
 void InitRedKoopa(void) {
+  // --------------------------------
   cpu_call_begin(0xc320); InitNormalEnemy(); cpu_call_end(0xc320); // load appropriate horizontal speed
   lda_imm(0x1); // set enemy state for red koopa troopa $03
   ram[(uint8_t)(Enemy_State + x)] = a;
   return;
-  // --------------------------------
 }
 
 void InitHammerBro(void) {
+  // --------------------------------
   lda_imm(0x0); // init horizontal speed and timer used by hammer bro
   ram[HammerThrowingTimer + x] = a; // apparently to time hammer throwing
   ram[(uint8_t)(Enemy_X_Speed + x)] = a;
@@ -8020,7 +8002,6 @@ void InitHammerBro(void) {
   lda_absy(HBroWalkingTimerData);
   ram[(EnemyIntervalTimer + x) & 0x7ff] = a; // set value as delay for hammer bro to walk left
   lda_imm(0xb); // set specific value for bounding box size control
-  // --------------------------------
   // SetBBox:
   ram[Enemy_BoundBoxCtrl + x] = a; // set bounding box control here
   lda_imm(0x2); // set moving direction for left
@@ -8040,7 +8021,6 @@ SetESpd:
 InitHorizFlySwimEnemy:
   lda_imm(0x0); // initialize horizontal speed
   goto SetESpd;
-  // --------------------------------
   
 TallBBox:
   lda_imm(0x3); // set specific bounding box size control
@@ -8053,6 +8033,7 @@ TallBBox:
 }
 
 void InitBloober(void) {
+  // --------------------------------
   lda_imm(0x0); // initialize horizontal speed
   ram[(uint8_t)(BlooperMoveSpeed + x)] = a;
   SmallBBox(); // fallthrough
@@ -8062,7 +8043,6 @@ void InitBloober(void) {
 void SmallBBox(void) {
   lda_imm(0x9); // set specific bounding box size control
   // unconditional branch
-  // --------------------------------
   // SetBBox:
   ram[Enemy_BoundBoxCtrl + x] = a; // set bounding box control here
   lda_imm(0x2); // set moving direction for left
@@ -8072,6 +8052,7 @@ void SmallBBox(void) {
 }
 
 void InitRedPTroopa(void) {
+  // --------------------------------
   ldy_imm(0x30); // load central position adder for 48 pixels down
   lda_zpx_fn(Enemy_Y_Position); // set vertical coordinate into location to
   ram[RedPTroopaOrigXPos + x] = a; // be used as original vertical coordinate
@@ -8098,19 +8079,19 @@ void InitVStf(void) {
   ram[(uint8_t)(Enemy_Y_Speed + x)] = a; // and movement force
   ram[Enemy_Y_MoveForce + x] = a;
   return;
-  // --------------------------------
 }
 
 void InitBulletBill(void) {
+  // --------------------------------
   lda_imm(0x2); // set moving direction for left
   ram[(uint8_t)(Enemy_MovingDir + x)] = a;
   lda_imm(0x9); // set bounding box control for $09
   ram[Enemy_BoundBoxCtrl + x] = a;
   return;
-  // --------------------------------
 }
 
 void InitCheepCheep(void) {
+  // --------------------------------
   cpu_call_begin(0xc377); SmallBBox(); cpu_call_end(0xc377); // set vertical bounding box, speed, init others
   lda_absx(PseudoRandomBitReg); // check one portion of LSFR
   and_imm(0b00010000); // get d4 from it
@@ -8118,10 +8099,10 @@ void InitCheepCheep(void) {
   lda_zpx(Enemy_Y_Position);
   ram[CheepCheepOrigYPos + x] = a; // save original vertical coordinate here
   return;
-  // --------------------------------
 }
 
 void InitLakitu(void) {
+  // --------------------------------
   lda_abs_fz(EnemyFrenzyBuffer); // check to see if an enemy is already in
   // Original branch: the frenzy buffer, and branch to kill lakitu if so
   if (zero_flag) {
@@ -8130,8 +8111,6 @@ void InitLakitu(void) {
   }
   // KillLakitu:
   EraseEnemyObject(); return;
-  // --------------------------------
-  // $01-$03 - used to hold pseudorandom difference adjusters
 }
 
 void SetupLakitu(void) {
@@ -8144,16 +8123,17 @@ void SetupLakitu(void) {
   // SetBBox2:
   ram[Enemy_BoundBoxCtrl + x] = a; // set bounding box control then leave
   return;
-  // --------------------------------
 }
 
 void LakituAndSpinyHandler(void) {
+  // --------------------------------
+  // $01-$03 - used to hold pseudorandom difference adjusters
   lda_abs_fz(FrenzyEnemyTimer); // if timer here not expired, leave
   if (!zero_flag) {
     return;
   }
-  cpx_imm_fc(0x5); // if we are on the special use slot, leave
-  if (carry_flag) {
+  // if we are on the special use slot, leave
+  if (x >= 0x5) {
     return;
   }
   lda_imm(0x80); // set timer
@@ -8168,9 +8148,9 @@ void LakituAndSpinyHandler(void) {
   } while (!neg_flag); // loop until all slots are checked
   inc_abs(LakituReappearTimer); // increment reappearance timer
   lda_abs(LakituReappearTimer);
-  cmp_imm_fc(0x7); // check to see if we're up to a certain value yet
+  // check to see if we're up to a certain value yet
   // if not, leave
-  if (!carry_flag) {
+  if (a < 0x7) {
     return;
   }
   ldx_imm(0x4); // start with the last enemy slot again
@@ -8199,8 +8179,7 @@ RetEOfs:
   
 CreateSpiny:
   lda_zp(Player_Y_Position); // if player above a certain point, branch to leave
-  cmp_imm_fc(0x2c);
-  if (!carry_flag) {
+  if (a < 0x2c) {
     return;
   }
   lda_absy_fz(Enemy_State); // if lakitu is not in normal state, branch to leave
@@ -8234,9 +8213,8 @@ CreateSpiny:
   ldx_zp(ObjectOffset); // get enemy object buffer offset
   cpu_call_begin(0xc41f); PlayerLakituDiff(); cpu_call_end(0xc41f); // move enemy, change direction, get value - difference
   ldy_zp(Player_X_Speed); // check player's horizontal speed
-  cpy_imm_fc(0x8);
   // Original branch: if moving faster than a certain amount, branch elsewhere
-  if (!carry_flag) {
+  if (y < 0x8) {
     tay(); // otherwise save value in A to Y for now
     lda_absx((PseudoRandomBitReg + 1));
     and_imm_fz(0b00000011); // get one of the LSFR parts and save the 2 LSB
@@ -8269,10 +8247,10 @@ CreateSpiny:
   ram[(uint8_t)(Enemy_State + x)] = a; // put spiny in egg state and leave
   // ChpChpEx:
   return;
-  // --------------------------------
 }
 
 void InitLongFirebar(void) {
+  // --------------------------------
   cpu_call_begin(0xc45b); DuplicateEnemyObj(); cpu_call_end(0xc45b); // create enemy object for long firebar
   InitShortFirebar(); // fallthrough
   return;
@@ -8301,17 +8279,16 @@ void InitShortFirebar(void) {
   adc_imm(0x0); // add carry to page location
   ram[(uint8_t)(Enemy_PageLoc + x)] = a;
   // set bounding box control (not used) and leave
-  // --------------------------------
-  // $00-$01 - used to hold pseudorandom bits
   // TallBBox2:
   lda_imm(0x3); // set specific value for bounding box control
   // SetBBox2:
   ram[Enemy_BoundBoxCtrl + x] = a; // set bounding box control then leave
   return;
-  // --------------------------------
 }
 
 void InitFlyingCheepCheep(void) {
+  // --------------------------------
+  // $00-$01 - used to hold pseudorandom bits
   lda_abs_fz(FrenzyEnemyTimer); // if timer here not expired yet, branch to leave
   if (!zero_flag) {
     return;
@@ -8415,10 +8392,10 @@ D2XPos1:
   lda_imm(0xf8);
   ram[(uint8_t)(Enemy_Y_Position + x)] = a; // put enemy below the screen, and we are done
   return;
-  // --------------------------------
 }
 
 void InitBowser(void) {
+  // --------------------------------
   cpu_call_begin(0xc54b); DuplicateEnemyObj(); cpu_call_end(0xc54b); // jump to create another bowser object
   ram[BowserFront_Offset] = x; // save offset of first here
   lda_imm(0x0);
@@ -8437,10 +8414,10 @@ void InitBowser(void) {
   lsr_acc();
   ram[BowserMovementSpeed] = a; // set default movement speed here
   return;
-  // --------------------------------
 }
 
 void DuplicateEnemyObj(void) {
+  // --------------------------------
   ldy_imm(0xff); // start at beginning of enemy slots
   do {
     // FSLoop:
@@ -8462,10 +8439,10 @@ void DuplicateEnemyObj(void) {
   ram[Enemy_Y_Position + y] = a; // copy vertical coordinate from original to new
   // FlmEx:
   return; // and then leave
-  // --------------------------------
 }
 
 void InitBowserFlame(void) {
+  // --------------------------------
   lda_abs_fz(FrenzyEnemyTimer); // if timer not expired yet, branch to leave
   if (!zero_flag) {
     return;
@@ -8476,9 +8453,8 @@ void InitBowserFlame(void) {
   ram[NoiseSoundQueue] = a;
   ldy_abs(BowserFront_Offset); // get bowser's buffer offset
   lda_absy(Enemy_ID); // check for bowser
-  cmp_imm_fz(Bowser);
   // Original branch: branch if found
-  if (!zero_flag) {
+  if (a != Bowser) {
     cpu_call_begin(0xc5bd); SetFlameTimer(); cpu_call_end(0xc5bd); // get timer data based on flame counter
     carry_flag = false;
     adc_imm(0x20); // add 32 frames by default
@@ -8535,7 +8511,6 @@ void InitBowserFlame(void) {
   ram[Enemy_X_MoveForce + x] = a; // initialize horizontal movement force, and
   ram[(uint8_t)(Enemy_State + x)] = a; // enemy state
   return;
-  // --------------------------------
 }
 
 void PutAtRightExtent(void) {
@@ -8558,10 +8533,10 @@ void PutAtRightExtent(void) {
   ram[Enemy_X_MoveForce + x] = a; // initialize horizontal movement force, and
   ram[(uint8_t)(Enemy_State + x)] = a; // enemy state
   return;
-  // --------------------------------
 }
 
 void InitFireworks(void) {
+  // --------------------------------
   lda_abs_fz(FrenzyEnemyTimer); // if timer not expired yet, branch to leave
   if (!zero_flag) {
     return;
@@ -8605,33 +8580,32 @@ void InitFireworks(void) {
   ram[(uint8_t)(ExplosionTimerCounter + x)] = a; // set explosion timing counter
   // ExitFWk:
   return;
-  // --------------------------------
 }
 
 void BulletBillCheepCheep(void) {
+  // --------------------------------
   lda_abs_fz(FrenzyEnemyTimer); // if timer not expired yet, branch to leave
   if (!zero_flag) {
     return;
   }
   lda_abs_fz(AreaType); // are we in a water-type level?
   if (!zero_flag) { goto DoBulletBills; } // if not, branch elsewhere
-  cpx_imm_fc(0x3); // are we past third enemy slot?
+  // are we past third enemy slot?
   // if so, branch to leave
-  if (carry_flag) {
+  if (x >= 0x3) {
     return;
   }
   ldy_imm(0x0); // load default offset
   lda_absx(PseudoRandomBitReg);
-  cmp_imm_fc(0xaa); // check first part of LSFR against preset value
+  // check first part of LSFR against preset value
   // Original branch: if less than preset, do not increment offset
-  if (carry_flag) {
+  if (a >= 0xaa) {
     iny(); // otherwise increment
   }
   // ChkW2:
   lda_abs(WorldNumber); // check world number
-  cmp_imm_fz(World2);
   // Original branch: if we're on world 2, do not increment offset
-  if (!zero_flag) {
+  if (a != World2) {
     iny(); // otherwise increment
   }
   // Get17ID:
@@ -8643,8 +8617,8 @@ void BulletBillCheepCheep(void) {
 Set17ID:
   ram[(uint8_t)(Enemy_ID + x)] = a; // store whatever's in A as enemy identifier
   lda_abs(BitMFilter);
-  cmp_imm_fz(0xff); // if not all bits set, skip init part and compare bits
-  if (zero_flag) {
+  // if not all bits set, skip init part and compare bits
+  if (a == 0xff) {
     lda_imm(0x0); // initialize vertical position filter
     ram[BitMFilter] = a;
   }
@@ -8694,14 +8668,10 @@ FireBulletBill:
   ram[Square2SoundQueue] = a;
   lda_imm(BulletBill_FrenzyVar); // load identifier for bullet bill object
   goto Set17ID; // unconditional branch
-  // --------------------------------
-  // $00 - used to store Y position of group enemies
-  // $01 - used to store enemy ID
-  // $02 - used to store page location of right side of screen
-  // $03 - used to store X position of right side of screen
 }
 
 void InitPiranhaPlant(void) {
+  // --------------------------------
   lda_imm(0x1); // set initial speed
   ram[(uint8_t)(PiranhaPlant_Y_Speed + x)] = a;
   lsr_acc();
@@ -8714,14 +8684,13 @@ void InitPiranhaPlant(void) {
   ram[PiranhaPlantUpYPos + x] = a; // save original vertical coordinate - 24 pixels here
   lda_imm(0x9);
   // set specific value for bounding box control
-  // --------------------------------
   // SetBBox2:
   ram[Enemy_BoundBoxCtrl + x] = a; // set bounding box control then leave
   return;
-  // --------------------------------
 }
 
 void InitEnemyFrenzy(void) {
+  // --------------------------------
   lda_zpx(Enemy_ID); // load enemy identifier
   ram[EnemyFrenzyBuffer] = a; // save in enemy frenzy buffer
   carry_flag = true;
@@ -8739,16 +8708,16 @@ void InitEnemyFrenzy(void) {
 
 void NoFrenzyCode(void) {
   return;
-  // --------------------------------
 }
 
 void EndFrenzy(void) {
+  // --------------------------------
   ldy_imm(0x5); // start at last slot
   do {
     // LakituChk:
     lda_absy(Enemy_ID); // check enemy identifiers
-    cmp_imm_fz(Lakitu); // for lakitu
-    if (zero_flag) {
+    // for lakitu
+    if (a == Lakitu) {
       lda_imm(0x1); // if found, set state
       ram[Enemy_State + y] = a;
     }
@@ -8759,10 +8728,10 @@ void EndFrenzy(void) {
   ram[EnemyFrenzyBuffer] = a; // empty enemy frenzy buffer
   ram[(uint8_t)(Enemy_Flag + x)] = a; // disable enemy buffer flag for this object
   return;
-  // --------------------------------
 }
 
 void InitJumpGPTroopa(void) {
+  // --------------------------------
   lda_imm(0x2); // set for movement to the left
   ram[(uint8_t)(Enemy_MovingDir + x)] = a;
   lda_imm(0xf8); // set horizontal speed
@@ -8772,10 +8741,10 @@ void InitJumpGPTroopa(void) {
   // SetBBox2:
   ram[Enemy_BoundBoxCtrl + x] = a; // set bounding box control then leave
   return;
-  // --------------------------------
 }
 
 void InitBalPlatform(void) {
+  // --------------------------------
   dec_zpx(Enemy_Y_Position); // raise vertical position by two pixels
   dec_zpx(Enemy_Y_Position);
   ldy_abs_fz(SecondaryHardMode); // if secondary hard mode flag not set,
@@ -8799,12 +8768,12 @@ void InitBalPlatform(void) {
   ram[(uint8_t)(Enemy_MovingDir + x)] = a; // init moving direction
   tay(); // init Y
   cpu_call_begin(0xc802); PosPlatform(); cpu_call_end(0xc802); // do a sub to add 8 pixels, then run shared code here
-  // --------------------------------
   InitDropPlatform(); // fallthrough
   return;
 }
 
 void InitDropPlatform(void) {
+  // --------------------------------
   lda_imm(0xff);
   ram[PlatformCollisionFlag + x] = a; // set some value here
   // then jump ahead to execute more code
@@ -8814,9 +8783,9 @@ void InitDropPlatform(void) {
   // SPBBox:
   lda_imm(0x5); // set default bounding box size control
   ldy_abs(AreaType);
-  cpy_imm_fz(0x3); // check for castle-type level
+  // check for castle-type level
   // Original branch: use default value if found
-  if (!zero_flag) {
+  if (y != 0x3) {
     ldy_abs_fz(SecondaryHardMode); // otherwise check for secondary hard mode flag
     if (!zero_flag) { goto CasPBB; } // if set, use default value
     lda_imm(0x6); // use alternate value if not castle or secondary not set
@@ -8825,10 +8794,10 @@ void InitDropPlatform(void) {
 CasPBB:
   ram[Enemy_BoundBoxCtrl + x] = a; // set bounding box size control here and leave
   return;
-  // --------------------------------
 }
 
 void InitHoriPlatform(void) {
+  // --------------------------------
   lda_imm(0x0);
   ram[(uint8_t)(XMoveSecondaryCounter + x)] = a; // init one of the moving counters
   // jump ahead to execute more code
@@ -8838,9 +8807,9 @@ void InitHoriPlatform(void) {
   // SPBBox:
   lda_imm(0x5); // set default bounding box size control
   ldy_abs(AreaType);
-  cpy_imm_fz(0x3); // check for castle-type level
+  // check for castle-type level
   // Original branch: use default value if found
-  if (!zero_flag) {
+  if (y != 0x3) {
     ldy_abs_fz(SecondaryHardMode); // otherwise check for secondary hard mode flag
     if (!zero_flag) { goto CasPBB; } // if set, use default value
     lda_imm(0x6); // use alternate value if not castle or secondary not set
@@ -8849,10 +8818,10 @@ void InitHoriPlatform(void) {
 CasPBB:
   ram[Enemy_BoundBoxCtrl + x] = a; // set bounding box size control here and leave
   return;
-  // --------------------------------
 }
 
 void InitVertPlatform(void) {
+  // --------------------------------
   ldy_imm(0x40); // set default value here
   lda_zpx_fn(Enemy_Y_Position); // check vertical position
   // Original branch: if above a certain point, skip this part
@@ -8874,9 +8843,9 @@ void InitVertPlatform(void) {
   // SPBBox:
   lda_imm(0x5); // set default bounding box size control
   ldy_abs(AreaType);
-  cpy_imm_fz(0x3); // check for castle-type level
+  // check for castle-type level
   // Original branch: use default value if found
-  if (!zero_flag) {
+  if (y != 0x3) {
     ldy_abs_fz(SecondaryHardMode); // otherwise check for secondary hard mode flag
     if (!zero_flag) { goto CasPBB; } // if set, use default value
     lda_imm(0x6); // use alternate value if not castle or secondary not set
@@ -8885,7 +8854,6 @@ void InitVertPlatform(void) {
 CasPBB:
   ram[Enemy_BoundBoxCtrl + x] = a; // set bounding box size control here and leave
   return;
-  // --------------------------------
 }
 
 void LargeLiftUp(void) {
@@ -8894,9 +8862,9 @@ void LargeLiftUp(void) {
 SPBBox:
   lda_imm(0x5); // set default bounding box size control
   ldy_abs(AreaType);
-  cpy_imm_fz(0x3); // check for castle-type level
+  // check for castle-type level
   // Original branch: use default value if found
-  if (!zero_flag) {
+  if (y != 0x3) {
     ldy_abs_fz(SecondaryHardMode); // otherwise check for secondary hard mode flag
     if (!zero_flag) { goto CasPBB; } // if set, use default value
     lda_imm(0x6); // use alternate value if not castle or secondary not set
@@ -8912,7 +8880,6 @@ LargeLiftUp:
   // overwrite bounding box for large platforms
   // LargeLiftBBox:
   goto SPBBox; // jump to overwrite bounding box size control
-  // --------------------------------
 }
 
 void LargeLiftDown(void) {
@@ -8921,9 +8888,9 @@ void LargeLiftDown(void) {
 SPBBox:
   lda_imm(0x5); // set default bounding box size control
   ldy_abs(AreaType);
-  cpy_imm_fz(0x3); // check for castle-type level
+  // check for castle-type level
   // Original branch: use default value if found
-  if (!zero_flag) {
+  if (y != 0x3) {
     ldy_abs_fz(SecondaryHardMode); // otherwise check for secondary hard mode flag
     if (!zero_flag) { goto CasPBB; } // if set, use default value
     lda_imm(0x6); // use alternate value if not castle or secondary not set
@@ -8932,16 +8899,15 @@ SPBBox:
 CasPBB:
   ram[Enemy_BoundBoxCtrl + x] = a; // set bounding box size control here and leave
   return;
-  // --------------------------------
   
 LargeLiftDown:
   cpu_call_begin(0xc847); PlatLiftDown(); cpu_call_end(0xc847); // execute code for platforms going down
   // LargeLiftBBox:
   goto SPBBox; // jump to overwrite bounding box size control
-  // --------------------------------
 }
 
 void PlatLiftUp(void) {
+  // --------------------------------
   lda_imm(0x10); // set movement amount here
   ram[Enemy_Y_MoveForce + x] = a;
   lda_imm(0xff); // set moving speed for platforms going up
@@ -8954,10 +8920,10 @@ void PlatLiftUp(void) {
   lda_imm(0x4);
   ram[Enemy_BoundBoxCtrl + x] = a; // set bounding box control for small platforms
   return;
-  // --------------------------------
 }
 
 void PlatLiftDown(void) {
+  // --------------------------------
   lda_imm(0xf0); // set movement amount here
   ram[Enemy_Y_MoveForce + x] = a;
   lda_imm(0x0); // set moving speed for platforms going down
@@ -8969,10 +8935,10 @@ void PlatLiftDown(void) {
   lda_imm(0x4);
   ram[Enemy_BoundBoxCtrl + x] = a; // set bounding box control for small platforms
   return;
-  // --------------------------------
 }
 
 void PosPlatform(void) {
+  // --------------------------------
   lda_zpx(Enemy_X_Position); // get horizontal coordinate
   carry_flag = false;
   adc_absy_fc(PlatPosDataLow); // add or subtract pixels depending on offset
@@ -8981,27 +8947,26 @@ void PosPlatform(void) {
   adc_absy(PlatPosDataHigh); // add or subtract page location depending on offset
   ram[(uint8_t)(Enemy_PageLoc + x)] = a; // store as new page location
   return; // and go back
-  // --------------------------------
 }
 
 void EndOfEnemyInitCode(void) {
+  // --------------------------------
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void NoRunCode(void) {
   return;
-  // --------------------------------
 }
 
 void RunRetainerObj(void) {
+  // --------------------------------
   cpu_call_begin(0xc8d9); GetEnemyOffscreenBits(); cpu_call_end(0xc8d9);
   cpu_call_begin(0xc8dc); RelativeEnemyPosition(); cpu_call_end(0xc8dc);
   EnemyGfxHandler(); return;
-  // --------------------------------
 }
 
 void RunNormalEnemies(void) {
+  // --------------------------------
   lda_imm(0x0); // init sprite attributes
   ram[Enemy_SprAttrib + x] = a;
   cpu_call_begin(0xc8e7); GetEnemyOffscreenBits(); cpu_call_end(0xc8e7);
@@ -9041,26 +9006,26 @@ void EnemyMovementSubs(void) {
 
 void NoMoveCode(void) {
   return;
-  // --------------------------------
 }
 
 void RunBowserFlame(void) {
+  // --------------------------------
   cpu_call_begin(0xc937); ProcBowserFlame(); cpu_call_end(0xc937);
   cpu_call_begin(0xc93a); GetEnemyOffscreenBits(); cpu_call_end(0xc93a);
   cpu_call_begin(0xc93d); RelativeEnemyPosition(); cpu_call_end(0xc93d);
   cpu_call_begin(0xc940); GetEnemyBoundBox(); cpu_call_end(0xc940);
   cpu_call_begin(0xc943); PlayerEnemyCollision(); cpu_call_end(0xc943);
   OffscreenBoundsCheck(); return;
-  // --------------------------------
 }
 
 void RunFirebarObj(void) {
+  // --------------------------------
   cpu_call_begin(0xc949); ProcFirebar(); cpu_call_end(0xc949);
   OffscreenBoundsCheck(); return;
-  // --------------------------------
 }
 
 void RunSmallPlatform(void) {
+  // --------------------------------
   cpu_call_begin(0xc94f); GetEnemyOffscreenBits(); cpu_call_end(0xc94f);
   cpu_call_begin(0xc952); RelativeEnemyPosition(); cpu_call_end(0xc952);
   cpu_call_begin(0xc955); SmallPlatformBoundBox(); cpu_call_end(0xc955);
@@ -9069,10 +9034,10 @@ void RunSmallPlatform(void) {
   cpu_call_begin(0xc95e); DrawSmallPlatform(); cpu_call_end(0xc95e);
   cpu_call_begin(0xc961); MoveSmallPlatform(); cpu_call_end(0xc961);
   OffscreenBoundsCheck(); return;
-  // --------------------------------
 }
 
 void RunLargePlatform(void) {
+  // --------------------------------
   cpu_call_begin(0xc967); GetEnemyOffscreenBits(); cpu_call_end(0xc967);
   cpu_call_begin(0xc96a); RelativeEnemyPosition(); cpu_call_end(0xc96a);
   cpu_call_begin(0xc96d); LargePlatformBoundBox(); cpu_call_end(0xc96d);
@@ -9086,10 +9051,10 @@ void RunLargePlatform(void) {
   cpu_call_begin(0xc97b); RelativeEnemyPosition(); cpu_call_end(0xc97b);
   cpu_call_begin(0xc97e); DrawLargePlatform(); cpu_call_end(0xc97e);
   OffscreenBoundsCheck(); return;
-  // --------------------------------
 }
 
 void LargePlatformSubroutines(void) {
+  // --------------------------------
   lda_zpx(Enemy_ID); // subtract $24 to get proper offset for jump table
   carry_flag = true;
   sbc_imm(0x24);
@@ -9115,10 +9080,10 @@ void EraseEnemyObject(void) {
   ram[Enemy_SprAttrib + x] = a;
   ram[(EnemyFrameTimer + x) & 0x7ff] = a;
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void MovePodoboo(void) {
+  // -------------------------------------------------------------------------------------
   lda_absx_fz(EnemyIntervalTimer); // check enemy timer
   // Original branch: branch to move enemy if not expired
   if (zero_flag) {
@@ -9134,11 +9099,11 @@ void MovePodoboo(void) {
   }
   // PdbM:
   MoveJ_EnemyVertically(); return; // branch to impose gravity on podoboo
-  // --------------------------------
-  // $00 - used in HammerBroJumpCode as bitmask
 }
 
 void ProcHammerBro(void) {
+  // --------------------------------
+  // $00 - used in HammerBroJumpCode as bitmask
   lda_zpx(Enemy_State); // check hammer bro's enemy state for d5 set
   and_imm_fz(0b00100000);
   // Original branch: if not set, go ahead with code
@@ -9266,9 +9231,8 @@ FallE:
   cpu_call_begin(0xca9a); MoveD_EnemyVertically(); cpu_call_end(0xca9a); // do a sub here to move enemy downwards
   ldy_imm(0x0);
   lda_zpx(Enemy_State); // check for enemy state $02
-  cmp_imm_fz(0x2);
   // Original branch: if found, branch to move enemy horizontally
-  if (!zero_flag) {
+  if (a != 0x2) {
     and_imm_fz(0b01000000); // check for d6 set
     if (zero_flag) { goto SteadM; } // if not set, branch to something else
     lda_zpx(Enemy_ID);
@@ -9324,31 +9288,31 @@ MoveDefeatedEnemy:
   MoveEnemyHorizontally(); return; // now move defeated enemy horizontally
   
 ChkKillGoomba:
-  cmp_imm_fz(0xe); // check to see if enemy timer has reached
+  // check to see if enemy timer has reached
   // a certain point, and branch to leave if not
-  if (!zero_flag) {
+  if (a != 0xe) {
     return;
   }
   lda_zpx(Enemy_ID);
-  cmp_imm_fz(Goomba); // check for goomba object
+  // check for goomba object
   // branch if not found
-  if (!zero_flag) {
+  if (a != Goomba) {
     return;
   }
   cpu_call_begin(0xcaf7); EraseEnemyObject(); cpu_call_end(0xcaf7); // otherwise, kill this goomba object
   // NKGmba:
   return; // leave!
-  // --------------------------------
 }
 
 void MoveJumpingEnemy(void) {
+  // --------------------------------
   cpu_call_begin(0xcafb); MoveJ_EnemyVertically(); cpu_call_end(0xcafb); // do a sub to impose gravity on green paratroopa
   MoveEnemyHorizontally(); return; // jump to move enemy horizontally
-  // --------------------------------
 }
 
 void ProcMoveRedPTroopa(void) {
   goto ProcMoveRedPTroopa;
+  // --------------------------------
   
 MoveRedPTroopaDown:
   ldy_imm(0x0); // set Y to move downwards
@@ -9367,15 +9331,11 @@ MoveRedPTroopa:
   ram[0x2] = a; // set maximum speed here
   tya(); // set movement direction in A, and
   // jump to move this thing
-  // --------------------------------
   // RedPTroopaGrav:
   cpu_call_begin(0xbfd3); ImposeGravity(); cpu_call_end(0xbfd3); // do a sub to move object gradually
   ldx_zp(ObjectOffset); // get enemy object offset and leave
   return;
-  // -------------------------------------------------------------------------------------
-  // $00 - used for downward force
-  // $01 - used for upward force
-  // $07 - used as adder for vertical position
+  // --------------------------------
   
 ProcMoveRedPTroopa:
   lda_zpx(Enemy_Y_Speed);
@@ -9406,12 +9366,12 @@ MoveRedPTUpOrDown:
   }
   // MovPTDwn:
   goto MoveRedPTroopaDown; // move downwards
-  // --------------------------------
-  // $00 - used to store adder for movement, also used as adder for platform
-  // $01 - used to store maximum value for secondary counter
 }
 
 void MoveFlyGreenPTroopa(void) {
+  // --------------------------------
+  // $00 - used to store adder for movement, also used as adder for platform
+  // $01 - used to store maximum value for secondary counter
   cpu_call_begin(0xcb27); XMoveCntr_GreenPTroopa(); cpu_call_end(0xcb27); // do sub to increment primary and secondary counters
   cpu_call_begin(0xcb2a); MoveWithXMCntrs(); cpu_call_end(0xcb2a); // do sub to move green paratroopa accordingly, and horizontally
   ldy_imm(0x1); // set Y to move green paratroopa down
@@ -9496,10 +9456,10 @@ void MoveWithXMCntrs(void) {
   pla(); // get secondary counter from stack
   ram[(uint8_t)(XMoveSecondaryCounter + x)] = a; // and return to original place
   return;
-  // --------------------------------
 }
 
 void MoveBloober(void) {
+  // --------------------------------
   lda_zpx(Enemy_State);
   and_imm_fz(0b00100000); // check enemy state for d5 set
   // Original branch: branch if set to move defeated bloober
@@ -9530,9 +9490,9 @@ SBMDir:
     lda_zpx(Enemy_Y_Position); // get vertical coordinate
     carry_flag = true;
     sbc_absx(Enemy_Y_MoveForce); // subtract movement force
-    cmp_imm_fc(0x20); // check to see if position is above edge of status bar
+    // check to see if position is above edge of status bar
     // Original branch: if so, don't do it
-    if (carry_flag) {
+    if (a >= 0x20) {
       ram[(uint8_t)(Enemy_Y_Position + x)] = a; // otherwise, set new vertical position, make bloober swim
     }
     // SwimX:
@@ -9585,9 +9545,8 @@ void ProcSwimmingB(void) {
       adc_imm(0x1);
       ram[Enemy_Y_MoveForce + x] = a; // set movement force
       ram[(uint8_t)(BlooperMoveSpeed + x)] = a; // set as movement speed
-      cmp_imm_fz(0x2);
       // if certain horizontal speed, branch to leave
-      if (!zero_flag) {
+      if (a != 0x2) {
         return;
       }
       inc_zpx(BlooperMoveCounter); // otherwise increment movement counter
@@ -9638,10 +9597,10 @@ ChkNearPlayer:
   lda_imm(0x0);
   ram[(uint8_t)(BlooperMoveCounter + x)] = a; // otherwise nullify movement counter
   return;
-  // --------------------------------
 }
 
 void MoveBulletBill(void) {
+  // --------------------------------
   lda_zpx(Enemy_State); // check bullet bill's enemy object state for d5 set
   and_imm_fz(0b00100000);
   // Original branch: if not set, continue with movement code
@@ -9652,12 +9611,12 @@ void MoveBulletBill(void) {
   lda_imm(0xe8); // set bullet bill's horizontal speed
   ram[(uint8_t)(Enemy_X_Speed + x)] = a; // and move it accordingly (note: this bullet bill
   MoveEnemyHorizontally(); return; // object occurs in frenzy object $17, not from cannons)
-  // --------------------------------
-  // $02 - used to hold preset values
-  // $03 - used to hold enemy state
 }
 
 void MoveSwimmingCheepCheep(void) {
+  // --------------------------------
+  // $02 - used to hold preset values
+  // $03 - used to hold enemy state
   lda_zpx(Enemy_State); // check cheep-cheep's enemy object state
   and_imm_fz(0b00100000); // for d5 set
   // Original branch: if not set, continue with movement code
@@ -9684,15 +9643,15 @@ void MoveSwimmingCheepCheep(void) {
   ram[(uint8_t)(Enemy_PageLoc + x)] = a; // page location, then save
   lda_imm(0x20);
   ram[0x2] = a; // save new value here
-  cpx_imm_fc(0x2); // check enemy object offset
+  // check enemy object offset
   // if in first or second slot, branch to leave
-  if (!carry_flag) {
+  if (x < 0x2) {
     return;
   }
   lda_zpx(CheepCheepMoveMFlag); // check movement flag
-  cmp_imm_fc(0x10); // if movement speed set to $00,
+  // if movement speed set to $00,
   // Original branch: branch to move upwards
-  if (carry_flag) {
+  if (a >= 0x10) {
     lda_absx(Enemy_YMF_Dummy);
     carry_flag = false;
     adc_zp_fc(0x2); // add preset value to dummy variable to get carry
@@ -9728,15 +9687,18 @@ void MoveSwimmingCheepCheep(void) {
     adc_imm(0x1); // to obtain total difference of original vs. current
   }
   // YPDiff:
-  cmp_imm_fc(0xf); // if difference between original vs. current vertical
+  // if difference between original vs. current vertical
   // coordinates < 15 pixels, leave movement speed alone
-  if (!carry_flag) {
+  if (a < 0xf) {
     return;
   }
   tya();
   ram[(uint8_t)(CheepCheepMoveMFlag + x)] = a; // otherwise change movement speed
   // ExSwCC:
   return; // leave
+}
+
+void ProcFirebar(void) {
   // --------------------------------
   // $00 - used as counter for firebar parts
   // $01 - used for oscillated high byte of spin state or to hold horizontal adder
@@ -9751,9 +9713,6 @@ void MoveSwimmingCheepCheep(void) {
   // horizontal adder is at first byte + high byte of spinstate,
   // vertical adder is same + 8 bytes, two's compliment
   // if greater than $08 for proper oscillation
-}
-
-void ProcFirebar(void) {
   cpu_call_begin(0xcd3e); GetEnemyOffscreenBits(); cpu_call_end(0xcd3e); // get offscreen information
   lda_abs(Enemy_OffscreenBits); // check for d3 set
   and_imm_fz(0b00001000); // if so, branch to leave
@@ -9771,12 +9730,11 @@ void ProcFirebar(void) {
   // SusFbar:
   lda_zpx(FirebarSpinState_High); // get high byte of spinstate
   ldy_zpx(Enemy_ID); // check enemy identifier
-  cpy_imm_fc(0x1f);
   // Original branch: if < $1f (long firebar), branch
-  if (carry_flag) {
-    cmp_imm_fz(0x8); // check high byte of spinstate
+  if (y >= 0x1f) {
+    // check high byte of spinstate
     // Original branch: if eight, branch to change
-    if (!zero_flag) {
+    if (a != 0x8) {
       cmp_imm_fz(0x18);
       if (!zero_flag) { goto SetupGFB; } // if not at twenty-four branch to not change
     }
@@ -9802,9 +9760,9 @@ SetupGFB:
   cpu_call_begin(0xcd8b); FirebarCollision(); cpu_call_end(0xcd8b); // draw fireball part and do collision detection
   ldy_imm(0x5); // load value for short firebars by default
   lda_zpx(Enemy_ID);
-  cmp_imm_fc(0x1f); // are we doing a long firebar?
+  // are we doing a long firebar?
   // Original branch: no, branch then
-  if (carry_flag) {
+  if (a >= 0x1f) {
     ldy_imm(0xb); // otherwise load value for long firebars
   }
   // SetMFbar:
@@ -9817,8 +9775,7 @@ SetupGFB:
     cpu_call_begin(0xcda0); GetFirebarPosition(); cpu_call_end(0xcda0); // get fireball position data depending on firebar part
     cpu_call_begin(0xcda3); DrawFirebar_Collision(); cpu_call_end(0xcda3); // position it properly, draw it and do collision detection
     lda_zp(0x0); // check which firebar part
-    cmp_imm_fz(0x4);
-    if (zero_flag) {
+    if (a == 0x4) {
       ldy_abs(DuplicateObj_Offset); // if we arrive at fifth firebar part,
       lda_absy(Enemy_SprDataOffset); // get offset from long firebar and load OAM data offset
       ram[0x6] = a; // using long firebar offset, then store as new one here
@@ -9860,9 +9817,9 @@ void DrawFirebar_Collision(void) {
     sbc_abs(Enemy_Rel_XPos); // current sprite X
   }
   // ChkFOfs:
-  cmp_imm_fc(0x59); // if difference of coordinates within a certain range,
+  // if difference of coordinates within a certain range,
   // Original branch: continue by handling vertical adder
-  if (carry_flag) {
+  if (a >= 0x59) {
     lda_imm(0xf8); // otherwise, load offscreen Y coordinate
   } else {
     // VAHandl:
@@ -9928,8 +9885,8 @@ FBCLoop:
       adc_imm(0x1);
     }
     // ChkVFBD:
-    cmp_imm_fc(0x8); // if difference => 8 pixels, skip ahead of this part
-    if (!carry_flag) {
+    // if difference => 8 pixels, skip ahead of this part
+    if (a < 0x8) {
       lda_zp(0x6); // if firebar on far right on the screen, skip this,
       cmp_imm_fc(0xf0); // because, really, what's the point?
       if (carry_flag) { goto Chk2Ofs; }
@@ -9991,9 +9948,8 @@ NoColFB:
 void GetFirebarPosition(void) {
   pha(); // save high byte of spinstate to the stack
   and_imm(0b00001111); // mask out low nybble
-  cmp_imm_fc(0x9);
   // Original branch: if lower than $09, branch ahead
-  if (carry_flag) {
+  if (a >= 0x9) {
     eor_imm(0b00001111); // otherwise get two's compliment to oscillate
     carry_flag = false;
     adc_imm(0x1);
@@ -10012,8 +9968,8 @@ void GetFirebarPosition(void) {
   carry_flag = false;
   adc_imm(0x8); // add eight this time, to get vertical adder
   and_imm(0b00001111); // mask out high nybble
-  cmp_imm_fc(0x9); // if lower than $09, branch ahead
-  if (carry_flag) {
+  // if lower than $09, branch ahead
+  if (a >= 0x9) {
     eor_imm(0b00001111); // otherwise get two's compliment
     carry_flag = false;
     adc_imm(0x1);
@@ -10035,10 +9991,10 @@ void GetFirebarPosition(void) {
   lda_absy(FirebarMirrorData); // load mirroring data here
   ram[0x3] = a; // store
   return;
-  // --------------------------------
 }
 
 void MoveFlyingCheepCheep(void) {
+  // --------------------------------
   lda_zpx(Enemy_State); // check cheep-cheep's enemy state
   and_imm_fz(0b00100000); // for d5 set
   // Original branch: branch to continue code if not set
@@ -10068,9 +10024,9 @@ void MoveFlyingCheepCheep(void) {
     adc_imm(0x1);
   }
   // AddCCF:
-  cmp_imm_fc(0x8); // if result or two's compliment greater than eight,
+  // if result or two's compliment greater than eight,
   // Original branch: skip to the end without changing movement force
-  if (!carry_flag) {
+  if (a < 0x8) {
     lda_absx(Enemy_Y_MoveForce);
     carry_flag = false;
     adc_imm(0x10); // otherwise add to it
@@ -10085,12 +10041,12 @@ void MoveFlyingCheepCheep(void) {
   lda_absy(FlyCCBPriority); // load bg priority data and store (this is very likely
   ram[Enemy_SprAttrib + x] = a; // broken or residual code, value is overwritten before
   return; // drawing it next frame), then leave
-  // --------------------------------
-  // $00 - used to hold horizontal difference
-  // $01-$03 - used to hold difference adjusters
 }
 
 void MoveLakitu(void) {
+  // --------------------------------
+  // $00 - used to hold horizontal difference
+  // $01-$03 - used to hold difference adjusters
   lda_zpx(Enemy_State); // check lakitu's enemy state
   and_imm_fz(0b00100000); // for d5 set
   // Original branch: if not set, continue with code
@@ -10151,8 +10107,8 @@ void PlayerLakituDiff(void) {
   }
   // ChkLakDif:
   lda_zp(0x0); // get low byte of horizontal difference
-  cmp_imm_fc(0x3c); // if within a certain distance of player, branch
-  if (carry_flag) {
+  // if within a certain distance of player, branch
+  if (a >= 0x3c) {
     lda_imm(0x3c); // otherwise set maximum distance
     ram[0x0] = a;
     lda_zpx(Enemy_ID); // check if lakitu is in our current enemy slot
@@ -10189,8 +10145,8 @@ ChkPSpeed:
     if (zero_flag) { goto SubDifAdj; } // if scroll speed not set, branch to same place
     iny(); // otherwise increment offset
     lda_zp(Player_X_Speed);
-    cmp_imm_fc(0x19); // if player not running, branch
-    if (carry_flag) {
+    // if player not running, branch
+    if (a >= 0x19) {
       lda_abs(ScrollAmount);
       cmp_imm_fc(0x2); // if scroll speed below a certain amount, branch
       if (!carry_flag) { goto ChkSpinyO; } // to same place
@@ -10199,9 +10155,8 @@ ChkPSpeed:
     
 ChkSpinyO:
     lda_zpx(Enemy_ID); // check for spiny object
-    cmp_imm_fz(Spiny);
     // Original branch: branch if not found
-    if (zero_flag) {
+    if (a == Spiny) {
       lda_zp_fz(Player_X_Speed); // if player not moving, skip this part
       if (!zero_flag) { goto SubDifAdj; }
     }
@@ -10222,16 +10177,16 @@ SubDifAdj:
   } while (!neg_flag); // branch until all pixels are subtracted, to adjust difference
   // ExMoveLak:
   return; // leave!!!
-  // -------------------------------------------------------------------------------------
-  // $04-$05 - used to store name table address in little endian order
 }
 
 void BridgeCollapse(void) {
+  // -------------------------------------------------------------------------------------
+  // $04-$05 - used to store name table address in little endian order
   ldx_abs(BowserFront_Offset); // get enemy offset for bowser
   lda_zpx(Enemy_ID); // check enemy object identifier for bowser
-  cmp_imm_fz(Bowser); // if not found, branch ahead,
+  // if not found, branch ahead,
   // Original branch: metatile removal not necessary
-  if (zero_flag) {
+  if (a == Bowser) {
     ram[ObjectOffset] = x; // store as enemy offset here
     lda_zpx_fz(Enemy_State); // if bowser in normal state, skip all of this
     if (zero_flag) { goto RemoveBridge; }
@@ -10336,6 +10291,7 @@ void RunBowser(void) {
 MoveD_Bowser:
   cpu_call_begin(0xd011); MoveEnemySlowVert(); cpu_call_end(0xd011); // do a sub to move bowser downwards
   goto BowserGfxHandler; // jump to draw bowser's front and rear, then leave
+  // --------------------------------
   
 RunBowser:
   lda_zpx(Enemy_State); // if d5 in enemy state is not set
@@ -10438,9 +10394,8 @@ HammerChk:
     if (!zero_flag) { goto MakeBJump; } // some other section of code
     cpu_call_begin(0xd116); MoveEnemySlowVert(); cpu_call_end(0xd116); // otherwise start by moving bowser downwards
     lda_abs(WorldNumber); // check world number
-    cmp_imm_fc(World6);
     // Original branch: if world 1-5, skip this part (not time to throw hammers yet)
-    if (carry_flag) {
+    if (a >= World6) {
       lda_zp(FrameCounter);
       and_imm_fz(0b00000011); // check to see if it's time to execute sub
       if (!zero_flag) { goto SetHmrTmr; } // if not, skip sub, otherwise
@@ -10461,9 +10416,9 @@ SetHmrTmr:
   goto ChkFireB; // jump to execute flames code
   
 MakeBJump:
-  cmp_imm_fz(0x1); // if timer not yet about to expire,
+  // if timer not yet about to expire,
   // Original branch: skip ahead to next part
-  if (zero_flag) {
+  if (a == 0x1) {
     dec_zpx(Enemy_Y_Position); // otherwise decrement vertical coordinate
     cpu_call_begin(0xd144); InitVStf(); cpu_call_end(0xd144); // initialize movement amount
     lda_imm(0xfe);
@@ -10473,9 +10428,9 @@ MakeBJump:
     
 ChkFireB:
     lda_abs(WorldNumber); // check world number here
-    cmp_imm_fz(World8); // world 8?
+    // world 8?
     // Original branch: if so, execute this part here
-    if (!zero_flag) {
+    if (a != World8) {
       cmp_imm_fc(World6); // world 6-7?
       if (carry_flag) { goto BowserGfxHandler; } // if so, skip this part here
     }
@@ -10564,12 +10519,12 @@ void ProcessBowserHalf(void) {
   ram[Enemy_BoundBoxCtrl + x] = a; // set bounding box size control
   cpu_call_begin(0xd1cd); GetEnemyBoundBox(); cpu_call_end(0xd1cd); // get bounding box coordinates
   PlayerEnemyCollision(); return; // do player-to-enemy collision detection
-  // -------------------------------------------------------------------------------------
-  // $00 - used to hold movement force and tile number
-  // $01 - used to hold sprite attribute data
 }
 
 void SetFlameTimer(void) {
+  // -------------------------------------------------------------------------------------
+  // $00 - used to hold movement force and tile number
+  // $01 - used to hold sprite attribute data
   ldy_abs(BowserFlameTimerCtrl); // load counter as offset
   inc_abs(BowserFlameTimerCtrl); // increment
   lda_abs(BowserFlameTimerCtrl); // mask out all but 3 LSB
@@ -10692,10 +10647,10 @@ SetGfxF:
   ram[Sprite_Y_Position + y] = a; // otherwise move first sprite offscreen
   // ExFlmeD:
   return; // leave
-  // --------------------------------
 }
 
 void RunFireworks(void) {
+  // --------------------------------
   dec_zpx_fz(ExplosionTimerCounter); // decrement explosion timing counter here
   // Original branch: if not expired, skip this part
   if (zero_flag) {
@@ -10725,7 +10680,6 @@ FireworksSoundScore:
   lda_imm(0x5); // set part of score modifier for 500 points
   ram[(DigitModifier + 4)] = a;
   // jump to award points accordingly then leave
-  // --------------------------------
   // EndAreaPoints:
   ldy_imm(0xb); // load offset for mario's score by default
   lda_abs_fz(CurrentPlayer); // check player on the screen
@@ -10745,11 +10699,12 @@ FireworksSoundScore:
 }
 
 void RunStarFlagObj(void) {
+  // --------------------------------
   lda_imm(0x0); // initialize enemy frenzy buffer
   ram[EnemyFrenzyBuffer] = a;
   lda_abs(StarFlagTaskControl); // check star flag object task number here
-  cmp_imm_fc(0x5); // if greater than 5, branch to exit
-  if (carry_flag) {
+  // if greater than 5, branch to exit
+  if (a >= 0x5) {
     return;
   }
   switch (JumpEngine(0xd2e7)) {
@@ -10765,9 +10720,8 @@ void RunStarFlagObj(void) {
 void GameTimerFireworks(void) {
   ldy_imm(0x5); // set default state for star flag object
   lda_abs((GameTimerDisplay + 2)); // get game timer's last digit
-  cmp_imm_fz(0x1);
   // Original branch: if last digit of game timer set to 1, skip ahead
-  if (!zero_flag) {
+  if (a != 0x1) {
     ldy_imm(0x3); // otherwise load new value for state
     cmp_imm_fz(0x3);
     if (zero_flag) { goto SetFWC; } // if last digit of game timer set to 3, skip ahead
@@ -10837,9 +10791,9 @@ AwardGameTimerPoints:
 
 void RaiseFlagSetoffFWorks(void) {
   lda_zpx(Enemy_Y_Position); // check star flag's vertical position
-  cmp_imm_fc(0x72); // against preset value
+  // against preset value
   // Original branch: if star flag higher vertically, branch to other code
-  if (carry_flag) {
+  if (a >= 0x72) {
     dec_zpx(Enemy_Y_Position); // otherwise, raise star flag by one pixel
     DrawStarFlag(); return; // and skip this part here
   }
@@ -10909,11 +10863,11 @@ DelayToAreaEnd:
   if (zero_flag) { goto IncrementSFTask2; } // branch to increment task
   // StarFlagExit2:
   return; // otherwise leave
-  // --------------------------------
-  // $00 - used to store horizontal difference between player and piranha plant
 }
 
 void MovePiranhaPlant(void) {
+  // --------------------------------
+  // $00 - used to store horizontal difference between player and piranha plant
   lda_zpx_fz(Enemy_State); // check enemy state
   // Original branch: if set at all, branch to leave
   if (zero_flag) {
@@ -10977,11 +10931,11 @@ PutinPipe:
   lda_imm(0b00100000); // set background priority bit in sprite
   ram[Enemy_SprAttrib + x] = a; // attributes to give illusion of being inside pipe
   return; // then leave
-  // -------------------------------------------------------------------------------------
-  // $07 - spinning speed
 }
 
 void FirebarSpin(void) {
+  // -------------------------------------------------------------------------------------
+  // $07 - spinning speed
   ram[0x7] = a; // save spinning speed here
   lda_zpx_fz(FirebarSpinDirection); // check spinning direction
   // Original branch: if moving counter-clockwise, branch to other part
@@ -11004,16 +10958,15 @@ void FirebarSpin(void) {
   lda_zpx(FirebarSpinState_High); // add carry to what would normally be the vertical speed
   sbc_imm(0x0);
   return;
+}
+
+void BalancePlatform(void) {
   // -------------------------------------------------------------------------------------
   // $00 - used to hold collision flag, Y movement force + 5 or low byte of name table for rope
   // $01 - used to hold high byte of name table for rope
   // $02 - used to hold page location of rope
-}
-
-void BalancePlatform(void) {
   lda_zpx(Enemy_Y_HighPos); // check high byte of vertical position
-  cmp_imm_fz(0x3);
-  if (zero_flag) {
+  if (a == 0x3) {
     EraseEnemyObject(); return; // if far below screen, kill the object
   }
   // DoBPl:
@@ -11205,7 +11158,6 @@ InitPlatformFall:
   // ExPF:
   ldx_zp(ObjectOffset); // get enemy object buffer offset and leave
   return;
-  // --------------------------------
 }
 
 void SetupPlatformRope(void) {
@@ -11261,9 +11213,9 @@ void SetupPlatformRope(void) {
   adc_zp(0x0); // add to horizontal part saved here
   ram[0x0] = a; // save as name table low byte
   lda_absy(Enemy_Y_Position);
-  cmp_imm_fc(0xe8); // if vertical position not below the
+  // if vertical position not below the
   // bottom of the screen, we're done, branch to leave
-  if (!carry_flag) {
+  if (a < 0xe8) {
     return;
   }
   lda_zp(0x0);
@@ -11281,6 +11233,7 @@ void StopPlatforms(void) {
 }
 
 void YMovingPlatform(void) {
+  // --------------------------------
   lda_zpx(Enemy_Y_Speed); // if platform moving up or down, skip ahead to
   ora_absx_fz(Enemy_Y_MoveForce); // check on other position
   if (zero_flag) {
@@ -11316,11 +11269,11 @@ ChkYPCollision:
   cpu_call_begin(0xd605); PositionPlayerOnVPlat(); cpu_call_end(0xd605); // otherwise position player appropriately
   // ExYPl:
   return; // leave
-  // --------------------------------
-  // $00 - used as adder to position player hotizontally
 }
 
 void XMovingPlatform(void) {
+  // --------------------------------
+  // $00 - used as adder to position player hotizontally
   lda_imm(0xe); // load preset maximum value for secondary counter
   cpu_call_begin(0xd60b); XMoveCntr_Platform(); cpu_call_end(0xd60b); // do a sub to increment counters for movement
   cpu_call_begin(0xd60e); MoveWithXMCntrs(); cpu_call_end(0xd60e); // do a sub to move platform accordingly, and return value
@@ -11353,10 +11306,10 @@ void PositionPlayerOnHPlat(void) {
   cpu_call_begin(0xd62f); PositionPlayerOnVPlat(); cpu_call_end(0xd62f); // position player vertically and appropriately
   // ExXMP:
   return; // and we are done here
-  // --------------------------------
 }
 
 void DropPlatform(void) {
+  // --------------------------------
   lda_absx_fn(PlatformCollisionFlag); // if no collision between platform and player
   // occurred, just leave without moving anything
   if (neg_flag) {
@@ -11366,11 +11319,11 @@ void DropPlatform(void) {
   cpu_call_begin(0xd63b); PositionPlayerOnVPlat(); cpu_call_end(0xd63b); // do a sub to position player appropriately
   // ExDPl:
   return; // leave
-  // --------------------------------
-  // $00 - residual value from sub
 }
 
 void RightPlatform(void) {
+  // --------------------------------
+  // $00 - residual value from sub
   cpu_call_begin(0xd63f); MoveEnemyHorizontally(); cpu_call_end(0xd63f); // move platform with current horizontal speed, if any
   ram[0x0] = a; // store saved value here (residual code)
   lda_absx_fn(PlatformCollisionFlag); // check collision flag, if no collision between player
@@ -11383,7 +11336,6 @@ void RightPlatform(void) {
   cpu_call_begin(0xd64d); PositionPlayerOnHPlat(); cpu_call_end(0xd64d); // use saved value from earlier sub to position player
   // ExRPl:
   return; // then leave
-  // --------------------------------
 }
 
 void MoveLargeLiftPlat(void) {
@@ -11399,7 +11351,6 @@ ChkYPCollision:
   // ExYPl:
   return; // leave
   // --------------------------------
-  // $00 - used as adder to position player hotizontally
   
 MoveLargeLiftPlat:
   cpu_call_begin(0xd651); MoveLiftPlatforms(); cpu_call_end(0xd651); // execute common to all large and small lift platforms
@@ -11418,11 +11369,6 @@ void MoveSmallPlatform(void) {
   cpu_call_begin(0xd678); PositionPlayerOnS_Plat(); cpu_call_end(0xd678); // use to position player correctly
   // ExLiftP:
   return; // then leave
-  // -------------------------------------------------------------------------------------
-  // $00 - page location of extended left boundary
-  // $01 - extended left boundary position
-  // $02 - page location of extended right boundary
-  // $03 - extended right boundary position
 }
 
 void MoveLiftPlatforms(void) {
@@ -11442,9 +11388,14 @@ void MoveLiftPlatforms(void) {
 }
 
 void OffscreenBoundsCheck(void) {
+  // -------------------------------------------------------------------------------------
+  // $00 - page location of extended left boundary
+  // $01 - extended left boundary position
+  // $02 - page location of extended right boundary
+  // $03 - extended right boundary position
   lda_zpx(Enemy_ID); // check for cheep-cheep object
-  cmp_imm_fz(FlyingCheepCheep); // branch to leave if found
-  if (zero_flag) {
+  // branch to leave if found
+  if (a == FlyingCheepCheep) {
     return;
   }
   lda_abs(ScreenLeft_X_Pos); // get horizontal coordinate for left side of screen
@@ -11484,25 +11435,25 @@ ExtendLB:
       return;
     }
     lda_zpx(Enemy_State); // if at this point, enemy is offscreen to the right, so check
-    cmp_imm_fz(HammerBro); // if in state used by spiny's egg, do not erase
-    if (zero_flag) {
+    // if in state used by spiny's egg, do not erase
+    if (a == HammerBro) {
       return;
     }
-    cpy_imm_fz(PiranhaPlant); // if piranha plant, do not erase
-    if (zero_flag) {
+    // if piranha plant, do not erase
+    if (y == PiranhaPlant) {
       return;
     }
-    cpy_imm_fz(FlagpoleFlagObject); // if flagpole flag, do not erase
-    if (zero_flag) {
+    // if flagpole flag, do not erase
+    if (y == FlagpoleFlagObject) {
       return;
     }
-    cpy_imm_fz(StarFlagObject); // if star flag, do not erase
-    if (zero_flag) {
+    // if star flag, do not erase
+    if (y == StarFlagObject) {
       return;
     }
-    cpy_imm_fz(JumpspringObject); // if jumpspring, do not erase
+    // if jumpspring, do not erase
     // erase all others too far to the right
-    if (zero_flag) {
+    if (y == JumpspringObject) {
       return;
     }
   }
@@ -11510,13 +11461,13 @@ ExtendLB:
   cpu_call_begin(0xd6d4); EraseEnemyObject(); cpu_call_end(0xd6d4); // erase object if necessary
   // ExScrnBd:
   return; // leave
+}
+
+void FireballEnemyCollision(void) {
   // -------------------------------------------------------------------------------------
   // some unused space
   // -------------------------------------------------------------------------------------
   // $01 - enemy buffer offset
-}
-
-void FireballEnemyCollision(void) {
   lda_zpx_fz(Fireball_State); // check to see if fireball state is set at all
   // Original branch: branch to leave if not
   if (!zero_flag) {
@@ -11544,16 +11495,15 @@ void FireballEnemyCollision(void) {
         lda_zpx_fz(Enemy_Flag); // check to see if buffer flag is set
         if (zero_flag) { goto NoFToECol; } // if not, skip to next enemy slot
         lda_zpx(Enemy_ID); // check enemy identifier
-        cmp_imm_fc(0x24);
         // Original branch: if < $24, branch to check further
-        if (carry_flag) {
+        if (a >= 0x24) {
           cmp_imm_fc(0x2b);
           if (!carry_flag) { goto NoFToECol; } // if in range $24-$2a, skip to next enemy slot
         }
         // GoombaDie:
-        cmp_imm_fz(Goomba); // check for goomba identifier
+        // check for goomba identifier
         // Original branch: if not found, continue with code
-        if (zero_flag) {
+        if (a == Goomba) {
           lda_zpx(Enemy_State); // otherwise check for defeated state
           cmp_imm_fc(0x2); // if stomped or otherwise defeated,
           if (carry_flag) { goto NoFToECol; } // skip to next enemy slot
@@ -11604,9 +11554,9 @@ void HandleEnemyFBallCol(void) {
   }
   // ChkBuzzyBeetle:
   lda_zpx(Enemy_ID);
-  cmp_imm_fz(BuzzyBeetle); // check for buzzy beetle
+  // check for buzzy beetle
   // branch if found to leave (buzzy beetles fireproof)
-  if (zero_flag) {
+  if (a == BuzzyBeetle) {
     return;
   }
   cmp_imm_fz(Bowser); // check for bowser one more time (necessary if d7 of flag was clear)
@@ -11627,9 +11577,9 @@ HurtBowser:
   lda_absy(BowserIdentities); // get enemy identifier to replace bowser with
   ram[(uint8_t)(Enemy_ID + x)] = a; // set as new enemy identifier
   lda_imm(0x20); // set A to use starting value for state
-  cpy_imm_fc(0x3); // check to see if using offset of 3 or more
+  // check to see if using offset of 3 or more
   // Original branch: branch if so
-  if (!carry_flag) {
+  if (y < 0x3) {
     ora_imm(0x3); // otherwise add 3 to enemy state
   }
   // SetDBSte:
@@ -11641,19 +11591,16 @@ HurtBowser:
   goto EnemySmackScore; // unconditional branch to award points
   
 ChkOtherEnemies:
-  cmp_imm_fz(BulletBill_FrenzyVar);
   // branch to leave if bullet bill (frenzy variant) 
-  if (zero_flag) {
+  if (a == BulletBill_FrenzyVar) {
     return;
   }
-  cmp_imm_fz(Podoboo);
   // branch to leave if podoboo
-  if (zero_flag) {
+  if (a == Podoboo) {
     return;
   }
-  cmp_imm_fc(0x15);
   // branch to leave if identifier => $15
-  if (carry_flag) {
+  if (a >= 0x15) {
     return;
   }
   ShellOrBlockDefeat(); // fallthrough
@@ -11665,7 +11612,6 @@ EnemySmackScore:
   ram[Square1SoundQueue] = a;
   // ExHCF:
   return; // and now let's leave
-  // -------------------------------------------------------------------------------------
 }
 
 void ShellOrBlockDefeat(void) {
@@ -11685,15 +11631,14 @@ void ShellOrBlockDefeat(void) {
   ram[(uint8_t)(Enemy_State + x)] = a;
   lda_imm(0x2); // award 200 points by default
   ldy_zpx(Enemy_ID); // check for hammer bro
-  cpy_imm_fz(HammerBro);
   // Original branch: branch if not found
-  if (zero_flag) {
+  if (y == HammerBro) {
     lda_imm(0x6); // award 1000 points for hammer bro
   }
   // GoombaPoints:
-  cpy_imm_fz(Goomba); // check for goomba
+  // check for goomba
   // Original branch: branch if not found
-  if (zero_flag) {
+  if (y == Goomba) {
     lda_imm(0x1); // award 100 points for goomba
   }
   // EnemySmackScore:
@@ -11702,10 +11647,10 @@ void ShellOrBlockDefeat(void) {
   ram[Square1SoundQueue] = a;
   // ExHCF:
   return; // and now let's leave
-  // -------------------------------------------------------------------------------------
 }
 
 void PlayerHammerCollision(void) {
+  // -------------------------------------------------------------------------------------
   lda_zp(FrameCounter); // get frame counter
   lsr_acc_fc(); // shift d0 into carry
   // branch to leave if d0 not set to execute every other frame
@@ -11752,11 +11697,11 @@ void PlayerHammerCollision(void) {
   ram[Misc_Collision_Flag + x] = a;
   // ExPHC:
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void PlayerEnemyCollision(void) {
   goto PlayerEnemyCollision;
+  // -------------------------------------------------------------------------------------
   
 HandlePowerUpCollision:
   cpu_call_begin(0xd802); EraseEnemyObject(); cpu_call_end(0xd802); // erase the power-up object
@@ -11765,9 +11710,8 @@ HandlePowerUpCollision:
   lda_imm(Sfx_PowerUpGrab);
   ram[Square2SoundQueue] = a; // play the power-up sound
   lda_zp(PowerUpType); // check power-up type
-  cmp_imm_fc(0x2);
   // Original branch: if mushroom or fire flower, branch
-  if (carry_flag) {
+  if (a >= 0x2) {
     cmp_imm_fz(0x3);
     if (zero_flag) { goto SetFor1Up; } // if 1-up mushroom, branch
     lda_imm(0x23); // otherwise set star mario invincibility
@@ -11779,8 +11723,8 @@ HandlePowerUpCollision:
   // Shroom_Flower_PUp:
   lda_abs_fz(PlayerStatus); // if player status = small, branch
   if (zero_flag) { goto UpToSuper; }
-  cmp_imm_fz(0x1); // if player status not super, leave
-  if (!zero_flag) {
+  // if player status not super, leave
+  if (a != 0x1) {
     return;
   }
   ldx_zp(ObjectOffset); // get enemy offset, not necessary
@@ -11826,9 +11770,9 @@ PlayerEnemyCollision:
     return;
   }
   lda_zp(GameEngineSubroutine);
-  cmp_imm_fz(0x8); // if not set to run player control routine
+  // if not set to run player control routine
   // on next frame, branch to leave
-  if (!zero_flag) {
+  if (a != 0x8) {
     return;
   }
   lda_zpx(Enemy_State);
@@ -11849,9 +11793,9 @@ PlayerEnemyCollision:
   }
   // CheckForPUpCollision:
   ldy_zpx(Enemy_ID);
-  cpy_imm_fz(PowerUpObject); // check for power-up object
+  // check for power-up object
   // Original branch: if not found, branch to next part
-  if (zero_flag) {
+  if (y == PowerUpObject) {
     goto HandlePowerUpCollision; // otherwise, unconditional jump backwards
   }
   // EColl:
@@ -11871,22 +11815,22 @@ PlayerEnemyCollision:
   lda_imm(0x1);
   ora_absx(Enemy_CollisionBits); // otherwise set d0 now
   ram[Enemy_CollisionBits + x] = a;
-  cpy_imm_fz(Spiny); // branch if spiny
-  if (!zero_flag) {
-    cpy_imm_fz(PiranhaPlant); // branch if piranha plant
-    if (zero_flag) {
+  // branch if spiny
+  if (y != Spiny) {
+    // branch if piranha plant
+    if (y == PiranhaPlant) {
       InjurePlayer();
       return;
     }
-    cpy_imm_fz(Podoboo); // branch if podoboo
-    if (zero_flag) {
+    // branch if podoboo
+    if (y == Podoboo) {
       InjurePlayer();
       return;
     }
     cpy_imm_fz(BulletBill_CannonVar); // branch if bullet bill
     if (zero_flag) { goto ChkForPlayerInjury; }
-    cpy_imm_fc(0x15); // branch if object => $15
-    if (carry_flag) {
+    // branch if object => $15
+    if (y >= 0x15) {
       InjurePlayer();
       return;
     }
@@ -11903,8 +11847,7 @@ PlayerEnemyCollision:
     cmp_imm_fc(0x2); // branch if enemy is in normal or falling state
     if (!carry_flag) { goto ChkForPlayerInjury; }
     lda_zpx(Enemy_ID); // branch to leave if goomba in defeated state
-    cmp_imm_fz(Goomba);
-    if (zero_flag) {
+    if (a == Goomba) {
       return;
     }
     lda_imm(Sfx_EnemySmack); // play smack enemy sound
@@ -11919,9 +11862,9 @@ PlayerEnemyCollision:
     carry_flag = false; // to give points for kicking the shell
     adc_abs(StompChainCounter);
     ldy_absx(EnemyIntervalTimer); // check shell enemy's timer
-    cpy_imm_fc(0x3); // if above a certain point, branch using the points
+    // if above a certain point, branch using the points
     // Original branch: data obtained from the stomp counter + 3
-    if (!carry_flag) {
+    if (y < 0x3) {
       lda_absy(KickedShellPtsData); // otherwise, set points based on proximity to timer expiration
     }
     // KSPts:
@@ -11938,8 +11881,7 @@ ChkForPlayerInjury:
   }
   // ChkInj:
   lda_zpx(Enemy_ID); // branch if enemy object < $07
-  cmp_imm_fc(Bloober);
-  if (carry_flag) {
+  if (a >= Bloober) {
     lda_zp(Player_Y_Position); // add 12 pixels to player's vertical position
     carry_flag = false;
     adc_imm(0xc);
@@ -11961,9 +11903,9 @@ ChkForPlayerInjury:
       }
       // TInjE:
       lda_zpx(Enemy_MovingDir); // if enemy moving towards the left,
-      cmp_imm_fz(0x1); // branch, otherwise do a jump here
+      // branch, otherwise do a jump here
       // to turn the enemy around
-      if (!zero_flag) {
+      if (a != 0x1) {
         InjurePlayer();
         return;
       }
@@ -11976,8 +11918,8 @@ ChkForPlayerInjury:
   
 EnemyStomped:
   lda_zpx(Enemy_ID); // check for spiny, branch to hurt player
-  cmp_imm_fz(Spiny); // if found
-  if (zero_flag) {
+  // if found
+  if (a == Spiny) {
     InjurePlayer();
     return;
   }
@@ -11985,8 +11927,8 @@ EnemyStomped:
   ram[Square1SoundQueue] = a;
   lda_zpx(Enemy_ID);
   ldy_imm(0x0); // initialize points data offset for stomped enemies
-  cmp_imm_fz(FlyingCheepCheep); // branch for cheep-cheep
-  if (!zero_flag) {
+  // branch for cheep-cheep
+  if (a != FlyingCheepCheep) {
     cmp_imm_fz(BulletBill_FrenzyVar); // branch for either bullet bill object
     if (zero_flag) { goto EnemyStompedPts; }
     cmp_imm_fz(BulletBill_CannonVar);
@@ -12021,8 +11963,8 @@ EnemyStompedPts:
   return;
   
 ChkForDemoteKoopa:
-  cmp_imm_fc(0x9); // branch elsewhere if enemy object < $09
-  if (carry_flag) {
+  // branch elsewhere if enemy object < $09
+  if (a >= 0x9) {
     and_imm(0b00000001); // demote koopa paratroopas to ordinary troopas
     ram[(uint8_t)(Enemy_ID + x)] = a;
     ldy_imm(0x0); // return enemy to normal state
@@ -12054,9 +11996,8 @@ ChkForDemoteKoopa:
   
 ChkEnemyFaceRight:
   lda_zpx(Enemy_MovingDir); // check to see if enemy is moving to the right
-  cmp_imm_fz(0x1);
   // Original branch: if not, branch
-  if (zero_flag) {
+  if (a == 0x1) {
     InjurePlayer(); return; // otherwise go back to hurt player
   }
   
@@ -12138,11 +12079,11 @@ void SetupFloateyNumber(void) {
   ram[FloateyNum_X_Pos + x] = a; // set horizontal coordinate and leave
   // ExSFN:
   return;
-  // -------------------------------------------------------------------------------------
-  // $01 - used to hold enemy offset for second enemy
 }
 
 void EnemiesCollision(void) {
+  // -------------------------------------------------------------------------------------
+  // $01 - used to hold enemy offset for second enemy
   lda_zp(FrameCounter); // check counter for d0 set
   lsr_acc_fc();
   // if d0 not set, leave
@@ -12155,8 +12096,8 @@ void EnemiesCollision(void) {
     return;
   }
   lda_zpx(Enemy_ID);
-  cmp_imm_fc(0x15); // if enemy object => $15, branch to leave
-  if (!carry_flag) {
+  // if enemy object => $15, branch to leave
+  if (a < 0x15) {
     cmp_imm_fz(Lakitu); // if lakitu, branch to leave
     if (zero_flag) { goto ExitECRoutine; }
     cmp_imm_fz(PiranhaPlant); // if piranha plant, branch to leave
@@ -12238,11 +12179,11 @@ void ProcEnemyCollisions(void) {
     return;
   }
   lda_zpx(Enemy_State);
-  cmp_imm_fc(0x6); // if second enemy state < $06, branch elsewhere
-  if (carry_flag) {
+  // if second enemy state < $06, branch elsewhere
+  if (a >= 0x6) {
     lda_zpx(Enemy_ID); // check second enemy identifier for hammer bro
-    cmp_imm_fz(HammerBro); // if hammer bro found in alt state, branch to leave
-    if (zero_flag) {
+    // if hammer bro found in alt state, branch to leave
+    if (a == HammerBro) {
       return;
     }
     lda_absy(Enemy_State); // check first enemy state for d7 set
@@ -12271,11 +12212,10 @@ void ProcEnemyCollisions(void) {
   }
   // ProcSecondEnemyColl:
   lda_absy(Enemy_State); // if first enemy state < $06, branch elsewhere
-  cmp_imm_fc(0x6);
-  if (carry_flag) {
+  if (a >= 0x6) {
     lda_absy(Enemy_ID); // check first enemy identifier for hammer bro
-    cmp_imm_fz(HammerBro); // if hammer bro found in alt state, branch to leave
-    if (zero_flag) {
+    // if hammer bro found in alt state, branch to leave
+    if (a == HammerBro) {
       return;
     }
     cpu_call_begin(0xdb01); ShellOrBlockDefeat(); cpu_call_end(0xdb01); // otherwise, kill first enemy
@@ -12300,29 +12240,24 @@ void ProcEnemyCollisions(void) {
 
 void EnemyTurnAround(void) {
   lda_zpx(Enemy_ID); // check for specific enemies
-  cmp_imm_fz(PiranhaPlant);
   // if piranha plant, leave
-  if (zero_flag) {
+  if (a == PiranhaPlant) {
     return;
   }
-  cmp_imm_fz(Lakitu);
   // if lakitu, leave
-  if (zero_flag) {
+  if (a == Lakitu) {
     return;
   }
-  cmp_imm_fz(HammerBro);
   // if hammer bro, leave
-  if (zero_flag) {
+  if (a == HammerBro) {
     return;
   }
-  cmp_imm_fz(Spiny);
   // Original branch: if spiny, turn it around
-  if (!zero_flag) {
+  if (a != Spiny) {
     cmp_imm_fz(GreenParatroopaJump);
     if (zero_flag) { goto RXSpd; } // if green paratroopa, turn it around
-    cmp_imm_fc(0x7);
     // if any OTHER enemy object => $07, leave
-    if (carry_flag) {
+    if (a >= 0x7) {
       return;
     }
   }
@@ -12338,11 +12273,11 @@ RXSpd:
   ram[(uint8_t)(Enemy_MovingDir + x)] = a; // thus effectively turning the enemy around
   // ExTA:
   return; // leave!!!
-  // -------------------------------------------------------------------------------------
-  // $00 - vertical position of platform
 }
 
 void LargePlatformCollision(void) {
+  // -------------------------------------------------------------------------------------
+  // $00 - vertical position of platform
   lda_imm(0xff); // save value here
   ram[PlatformCollisionFlag + x] = a;
   lda_abs_fz(TimerControl); // check master timer control
@@ -12351,9 +12286,9 @@ void LargePlatformCollision(void) {
     lda_zpx_fn(Enemy_State); // if d7 set in object state,
     if (neg_flag) { goto ExLPC; } // branch to leave
     lda_zpx(Enemy_ID);
-    cmp_imm_fz(0x24); // check enemy object identifier for
+    // check enemy object identifier for
     // balance platform, branch if not found
-    if (!zero_flag) {
+    if (a != 0x24) {
       ChkForPlayerC_LargeP();
       return;
     }
@@ -12367,8 +12302,6 @@ void LargePlatformCollision(void) {
 ExLPC:
   ldx_zp(ObjectOffset); // get enemy object buffer offset and leave
   return;
-  // --------------------------------
-  // $00 - counter for bounding boxes
 }
 
 void ChkForPlayerC_LargeP(void) {
@@ -12391,11 +12324,11 @@ void ChkForPlayerC_LargeP(void) {
 ExLPC:
   ldx_zp(ObjectOffset); // get enemy object buffer offset and leave
   return;
-  // --------------------------------
-  // $00 - counter for bounding boxes
 }
 
 void SmallPlatformCollision(void) {
+  // --------------------------------
+  // $00 - counter for bounding boxes
   lda_abs_fz(TimerControl); // if master timer control set,
   // Original branch: branch to leave
   if (zero_flag) {
@@ -12411,9 +12344,9 @@ void SmallPlatformCollision(void) {
       and_imm_fz(0b00000010); // if d1 of offscreen lower nybble bits was set
       if (!zero_flag) { goto ExSPC; } // then branch to leave
       lda_absy(BoundingBox_UL_YPos); // check top of platform's bounding box for being
-      cmp_imm_fc(0x20); // above a specific point
+      // above a specific point
       // Original branch: if so, branch, don't do collision detection
-      if (carry_flag) {
+      if (a >= 0x20) {
         cpu_call_begin(0xdb9e); PlayerCollisionCore(); cpu_call_end(0xdb9e); // otherwise, perform player-to-platform collision detection
         if (carry_flag) { goto ProcSPlatCollisions; } // skip ahead if collision
       }
@@ -12445,9 +12378,9 @@ void ProcLPlatCollisions(void) {
   lda_absy(BoundingBox_DR_YPos); // get difference by subtracting the top
   carry_flag = true; // of the player's bounding box from the bottom
   sbc_abs(BoundingBox_UL_YPos); // of the platform's bounding box
-  cmp_imm_fc(0x4); // if difference too large or negative,
+  // if difference too large or negative,
   // Original branch: branch, do not alter vertical speed of player
-  if (!carry_flag) {
+  if (a < 0x4) {
     lda_zp_fn(Player_Y_Speed); // check to see if player's vertical speed is moving down
     if (!neg_flag) { goto ChkForTopCollision; } // if so, don't mess with it
     lda_imm(0x1); // otherwise, set vertical
@@ -12458,16 +12391,15 @@ ChkForTopCollision:
   lda_abs(BoundingBox_DR_YPos); // get difference by subtracting the top
   carry_flag = true; // of the platform's bounding box from the bottom
   sbc_absy(BoundingBox_UL_YPos); // of the player's bounding box
-  cmp_imm_fc(0x6);
   // Original branch: if difference not close enough, skip all of this
-  if (!carry_flag) {
+  if (a < 0x6) {
     lda_zp_fn(Player_Y_Speed);
     if (neg_flag) { goto PlatformSideCollisions; } // if player's vertical speed moving upwards, skip this
     lda_zp(0x0); // get saved bounding box counter from earlier
     ldy_zpx(Enemy_ID);
-    cpy_imm_fz(0x2b); // if either of the two small platform objects are found,
+    // if either of the two small platform objects are found,
     // Original branch: regardless of which one, branch to use bounding box counter
-    if (!zero_flag) {
+    if (y != 0x2b) {
       cpy_imm_fz(0x2c); // as contents of collision flag
       if (zero_flag) { goto SetCollisionFlag; }
       txa(); // otherwise use enemy object buffer offset
@@ -12487,8 +12419,8 @@ PlatformSideCollisions:
   lda_abs(BoundingBox_DR_XPos); // get difference by subtracting platform's left edge
   carry_flag = true; // from player's right edge
   sbc_absy(BoundingBox_UL_XPos);
-  cmp_imm_fc(0x8); // if difference close enough, skip all of this
-  if (carry_flag) {
+  // if difference close enough, skip all of this
+  if (a >= 0x8) {
     inc_zp(0x0); // otherwise increment value set here for right side collision
     lda_absy(BoundingBox_DR_XPos); // get difference by subtracting player's left edge
     carry_flag = false; // from platform's right edge
@@ -12502,10 +12434,10 @@ PlatformSideCollisions:
 NoSideC:
   ldx_zp(ObjectOffset); // return with enemy object buffer offset
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void PositionPlayerOnS_Plat(void) {
+  // -------------------------------------------------------------------------------------
   tay(); // use bounding box counter saved in collision flag
   lda_zpx(Enemy_Y_Position); // for offset
   carry_flag = false; // add positioning data using offset to the vertical
@@ -12513,14 +12445,14 @@ void PositionPlayerOnS_Plat(void) {
   bit_abs(0xcfb5);
   // BIT instruction opcode
   ldy_zp(GameEngineSubroutine);
-  cpy_imm_fz(0xb); // if certain routine being executed on this frame,
+  // if certain routine being executed on this frame,
   // skip all of this
-  if (zero_flag) {
+  if (y == 0xb) {
     return;
   }
   ldy_zpx(Enemy_Y_HighPos);
-  cpy_imm_fz(0x1); // if vertical high byte offscreen, skip this
-  if (!zero_flag) {
+  // if vertical high byte offscreen, skip this
+  if (y != 0x1) {
     return;
   }
   carry_flag = true; // subtract 32 pixels from vertical coordinate
@@ -12534,20 +12466,19 @@ void PositionPlayerOnS_Plat(void) {
   ram[Player_Y_MoveForce] = a; // and then leave
   // ExPlPos:
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void PositionPlayerOnVPlat(void) {
   lda_zpx(Enemy_Y_Position); // get vertical coordinate
   ldy_zp(GameEngineSubroutine);
-  cpy_imm_fz(0xb); // if certain routine being executed on this frame,
+  // if certain routine being executed on this frame,
   // skip all of this
-  if (zero_flag) {
+  if (y == 0xb) {
     return;
   }
   ldy_zpx(Enemy_Y_HighPos);
-  cpy_imm_fz(0x1); // if vertical high byte offscreen, skip this
-  if (!zero_flag) {
+  // if vertical high byte offscreen, skip this
+  if (y != 0x1) {
     return;
   }
   carry_flag = true; // subtract 32 pixels from vertical coordinate
@@ -12561,10 +12492,10 @@ void PositionPlayerOnVPlat(void) {
   ram[Player_Y_MoveForce] = a; // and then leave
   // ExPlPos:
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void CheckPlayerVertical(void) {
+  // -------------------------------------------------------------------------------------
   lda_abs(Player_OffscreenBits); // if player object is completely offscreen
   cmp_imm_fc(0xf0); // vertically, leave this routine
   if (carry_flag) {
@@ -12579,10 +12510,10 @@ void CheckPlayerVertical(void) {
   cmp_imm_fc(0xd0); // the player is vertically
   // ExCPV:
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void GetEnemyBoundBoxOfs(void) {
+  // -------------------------------------------------------------------------------------
   lda_zp(ObjectOffset); // get enemy object buffer offset
   GetEnemyBoundBoxOfsArg(); // fallthrough
   return;
@@ -12598,27 +12529,26 @@ void GetEnemyBoundBoxOfsArg(void) {
   and_imm(0b00001111); // save low nybble
    // check for all bits set
   return;
+}
+
+void PlayerBGCollision(void) {
   // -------------------------------------------------------------------------------------
   // $00-$01 - used to hold many values, essentially temp variables
   // $04 - holds lower nybble of vertical coordinate from block buffer routine
   // $eb - used to hold block buffer adder
-}
-
-void PlayerBGCollision(void) {
   lda_abs_fz(DisableCollisionDet); // if collision detection disabled flag set,
   // branch to leave
   if (!zero_flag) {
     return;
   }
   lda_zp(GameEngineSubroutine);
-  cmp_imm_fz(0xb); // if running routine #11 or $0b
+  // if running routine #11 or $0b
   // branch to leave
-  if (zero_flag) {
+  if (a == 0xb) {
     return;
   }
-  cmp_imm_fc(0x4);
   // if running routines $00-$03 branch to leave
-  if (!carry_flag) {
+  if (a < 0x4) {
     return;
   }
   lda_imm(0x1); // load default player state for swimming
@@ -12639,17 +12569,17 @@ void PlayerBGCollision(void) {
   
 ChkOnScr:
   lda_zp(Player_Y_HighPos);
-  cmp_imm_fz(0x1); // check player's vertical high byte for still on the screen
+  // check player's vertical high byte for still on the screen
   // branch to leave if not
-  if (!zero_flag) {
+  if (a != 0x1) {
     return;
   }
   lda_imm(0xff);
   ram[Player_CollisionBits] = a; // initialize player's collision flag
   lda_zp(Player_Y_Position);
-  cmp_imm_fc(0xcf); // check player's vertical coordinate
+  // check player's vertical coordinate
   // Original branch: if not too close to the bottom of screen, continue
-  if (carry_flag) {
+  if (a >= 0xcf) {
     // ExPBGCol:
     return; // otherwise leave
   }
@@ -12701,9 +12631,9 @@ GBBAdr:
       goto DoFootCheck; // jump ahead to skip these other parts here
     }
     // SolidOrClimb:
-    cmp_imm_fz(0x26); // if climbing metatile,
+    // if climbing metatile,
     // Original branch: branch ahead and do not play sound
-    if (!zero_flag) {
+    if (a != 0x26) {
       lda_imm(Sfx_Bump);
       ram[Square1SoundQueue] = a; // otherwise load bump sound
     }
@@ -12743,9 +12673,8 @@ ChkFootMTile:
   if (!carry_flag) {
     ldy_zp_fn(Player_Y_Speed); // check player's vertical speed
     if (neg_flag) { goto DoPlayerSideCheck; } // if player moving upwards, branch
-    cmp_imm_fz(0xc5);
     // Original branch: if player did not touch axe, skip ahead
-    if (zero_flag) {
+    if (a == 0xc5) {
       goto HandleAxeMetatile; // otherwise jump to set modes of operation
     }
     // ContChk:
@@ -12755,9 +12684,9 @@ ChkFootMTile:
     // Original branch: branch ahead
     if (zero_flag) {
       ldy_zp(0x4); // check lower nybble of vertical coordinate returned
-      cpy_imm_fc(0x5); // from collision detection routine
+      // from collision detection routine
       // Original branch: if lower nybble < 5, branch
-      if (carry_flag) {
+      if (y >= 0x5) {
         lda_zp(Player_MovingDir);
         ram[0x0] = a; // use player's moving direction as temp variable
         ImpedePlayerMove(); return; // jump to impede player's movement in that direction
@@ -12789,12 +12718,11 @@ DoPlayerSideCheck:
     iny(); // move onto the next one
     ram[0xeb] = y; // store it
     lda_zp(Player_Y_Position);
-    cmp_imm_fc(0x20); // check player's vertical position
+    // check player's vertical position
     // Original branch: if player is in status bar area, branch ahead to skip this part
-    if (carry_flag) {
-      cmp_imm_fc(0xe4);
+    if (a >= 0x20) {
       // branch to leave if player is too far down
-      if (carry_flag) {
+      if (a >= 0xe4) {
         return;
       }
       cpu_call_begin(0xdd75); BlockBufferColli_Side(); cpu_call_end(0xdd75); // do player-to-bg collision detection on one half of player
@@ -12811,14 +12739,12 @@ BHalf:
     ldy_zp(0xeb); // load block adder offset
     iny(); // increment it
     lda_zp(Player_Y_Position); // get player's vertical position
-    cmp_imm_fc(0x8);
     // if too high, branch to leave
-    if (!carry_flag) {
+    if (a < 0x8) {
       return;
     }
-    cmp_imm_fc(0xd0);
     // if too low, branch to leave
-    if (carry_flag) {
+    if (a >= 0xd0) {
       return;
     }
     cpu_call_begin(0xdd94); BlockBufferColli_Side(); cpu_call_end(0xdd94); // do player-to-bg collision detection on other half of player
@@ -12859,9 +12785,9 @@ CheckSideMTiles:
       ldy_zp(PlayerFacingDir); // get player's facing direction
       dey_fz();
       if (!zero_flag) { goto StopPlayerMove; } // if facing left, branch to impede movement
-      cmp_imm_fz(0x6c); // otherwise check for pipe metatiles
+      // otherwise check for pipe metatiles
       // Original branch: if collided with sideways pipe (bottom), branch
-      if (!zero_flag) {
+      if (a != 0x6c) {
         cmp_imm_fz(0x1f); // if collided with water pipe (bottom), continue
         if (!zero_flag) { goto StopPlayerMove; } // otherwise branch to impede player's movement
       }
@@ -12891,13 +12817,12 @@ CheckSideMTiles:
       }
       // ChkGERtn:
       lda_zp(GameEngineSubroutine); // get number of game engine routine running
-      cmp_imm_fz(0x7);
       // if running player entrance routine or
-      if (zero_flag) {
+      if (a == 0x7) {
         return;
       }
-      cmp_imm_fz(0x8); // player control routine, go ahead and branch to leave
-      if (!zero_flag) {
+      // player control routine, go ahead and branch to leave
+      if (a != 0x8) {
         return;
       }
       lda_imm(0x2);
@@ -12929,23 +12854,27 @@ HandleAxeMetatile:
   ram[Player_X_Speed] = a; // set horizontal speed and continue to erase axe metatile
   ErACM(); // fallthrough
   return;
+  // --------------------------------
+  // $02 - high nybble of vertical coordinate from block buffer
+  // $04 - low nybble of horizontal coordinate from block buffer
+  // $06-$07 - block buffer address
   
 HandleClimbing:
   ldy_zp(0x4); // check low nybble of horizontal coordinate returned from
-  cpy_imm_fc(0x6); // collision detection routine against certain values, this
+  // collision detection routine against certain values, this
   // makes actual physical part of vine or flagpole thinner
-  if (!carry_flag) {
+  if (y < 0x6) {
     return;
   }
-  cpy_imm_fc(0xa); // than 16 pixels
-  if (carry_flag) {
+  // than 16 pixels
+  if (y >= 0xa) {
     // ExHC:
     return; // leave if too far left or too far right
   }
   // ChkForFlagpole:
-  cmp_imm_fz(0x24); // check climbing metatiles
+  // check climbing metatiles
   // Original branch: branch if flagpole ball found
-  if (!zero_flag) {
+  if (a != 0x24) {
     cmp_imm_fz(0x25);
     if (!zero_flag) { goto VineCollision; } // branch to alternate code if flagpole shaft not found
   }
@@ -12957,9 +12886,9 @@ HandleClimbing:
   ram[PlayerFacingDir] = a; // set player's facing direction to right
   inc_abs(ScrollLock); // set scroll lock flag
   lda_zp(GameEngineSubroutine);
-  cmp_imm_fz(0x4); // check for flagpole slide routine running
+  // check for flagpole slide routine running
   // Original branch: if running, branch to end of flagpole code here
-  if (!zero_flag) {
+  if (a != 0x4) {
     lda_imm(BulletBill_CannonVar); // load identifier for bullet bills (cannon variant)
     cpu_call_begin(0xde58); KillEnemies(); cpu_call_end(0xde58); // get rid of them
     lda_imm(Silence);
@@ -12985,8 +12914,8 @@ MtchF:
   goto PutPlayerOnVine; // jump to end of climbing code
   
 VineCollision:
-  cmp_imm_fz(0x26); // check for climbing metatile used on vines
-  if (zero_flag) {
+  // check for climbing metatile used on vines
+  if (a == 0x26) {
     lda_zp(Player_Y_Position); // check player's vertical coordinate
     cmp_imm_fc(0x20); // for being in status bar area
     if (carry_flag) { goto PutPlayerOnVine; } // branch if not that far up
@@ -13003,9 +12932,8 @@ PutPlayerOnVine:
   lda_zp(Player_X_Position); // get player's horizontal coordinate
   carry_flag = true;
   sbc_abs(ScreenLeft_X_Pos); // subtract from left side horizontal coordinate
-  cmp_imm_fc(0x10);
   // Original branch: if 16 or more pixels difference, do not alter facing direction
-  if (!carry_flag) {
+  if (a < 0x10) {
     lda_imm(0x2);
     ram[PlayerFacingDir] = a; // otherwise force player to face left
   }
@@ -13030,7 +12958,6 @@ PutPlayerOnVine:
   ram[Player_PageLoc] = a; // store as player's page location
   // ExPVne:
   return; // finally, we're done!
-  // --------------------------------
 }
 
 void ErACM(void) {
@@ -13038,13 +12965,10 @@ void ErACM(void) {
   lda_imm(0x0); // load blank metatile
   dynamic_ram_write(indirect_y_addr(0x6), a); // store to remove old contents from block buffer
   RemoveCoin_Axe(); return; // update the screen accordingly
-  // --------------------------------
-  // $02 - high nybble of vertical coordinate from block buffer
-  // $04 - low nybble of horizontal coordinate from block buffer
-  // $06-$07 - block buffer address
 }
 
 void ChkInvisibleMTiles(void) {
+  // --------------------------------
   cmp_imm_fz(0x5f); // check for hidden coin block
   // branch to leave if found
   if (zero_flag) {
@@ -13053,12 +12977,12 @@ void ChkInvisibleMTiles(void) {
   cmp_imm_fz(0x60); // check for hidden 1-up block
   // ExCInvT:
   return; // leave with zero flag set if either found
-  // --------------------------------
-  // $00-$01 - used to hold bottom right and bottom left metatiles (in that order)
-  // $00 - used as flag by ImpedePlayerMove to restrict specific movement
 }
 
 void ChkForLandJumpSpring(void) {
+  // --------------------------------
+  // $00-$01 - used to hold bottom right and bottom left metatiles (in that order)
+  // $00 - used as flag by ImpedePlayerMove to restrict specific movement
   cpu_call_begin(0xdec6); ChkJumpspringMetatiles(); cpu_call_end(0xdec6); // do sub to check if player landed on jumpspring
   // if carry not set, jumpspring not found, therefore leave
   if (!carry_flag) {
@@ -13077,9 +13001,9 @@ void ChkForLandJumpSpring(void) {
 }
 
 void ChkJumpspringMetatiles(void) {
-  cmp_imm_fz(0x67); // check for top jumpspring metatile
+  // check for top jumpspring metatile
   // Original branch: branch to set carry if found
-  if (!zero_flag) {
+  if (a != 0x67) {
     cmp_imm_fz(0x68); // check for bottom jumpspring metatile
     carry_flag = false; // clear carry flag
     // branch to use cleared carry if not found
@@ -13101,15 +13025,15 @@ void HandlePipeEntry(void) {
     return;
   }
   lda_zp(0x0);
-  cmp_imm_fz(0x11); // check right foot metatile for warp pipe right metatile
+  // check right foot metatile for warp pipe right metatile
   // branch to leave if not found
-  if (!zero_flag) {
+  if (a != 0x11) {
     return;
   }
   lda_zp(0x1);
-  cmp_imm_fz(0x10); // check left foot metatile for warp pipe left metatile
+  // check left foot metatile for warp pipe left metatile
   // branch to leave if not found
-  if (!zero_flag) {
+  if (a != 0x10) {
     return;
   }
   lda_imm(0x30);
@@ -13130,9 +13054,8 @@ void HandlePipeEntry(void) {
   asl_acc(); // multiply by four
   tax(); // save as offset to warp zone numbers (starts at left pipe)
   lda_zp(Player_X_Position); // get player's horizontal position
-  cmp_imm_fc(0x60);
   // Original branch: if player at left, not near middle, use offset and skip ahead
-  if (carry_flag) {
+  if (a >= 0x60) {
     inx(); // otherwise increment for middle pipe
     cmp_imm_fc(0xa0);
     if (!carry_flag) { goto GetWNum; } // if player at middle, but not too far right, use offset and skip
@@ -13202,10 +13125,10 @@ ExIPM:
   and_abs(Player_CollisionBits); // mask out bit that was set here
   ram[Player_CollisionBits] = a; // store to clear bit
   return;
-  // --------------------------------
 }
 
 void CheckForSolidMTiles(void) {
+  // --------------------------------
   cpu_call_begin(0xdf91); GetMTileAttrib(); cpu_call_end(0xdf91); // find appropriate offset based on metatile's 2 MSB
   cmp_absx_fc(SolidMTileUpperExt); // compare current metatile with solid metatiles
   return;
@@ -13243,11 +13166,11 @@ void GetMTileAttrib(void) {
   tya(); // get original metatile value back
   // ExEBG:
   return; // leave
-  // -------------------------------------------------------------------------------------
-  // $06-$07 - address from block buffer routine
 }
 
 void EnemyToBGCollisionDet(void) {
+  // -------------------------------------------------------------------------------------
+  // $06-$07 - address from block buffer routine
   lda_zpx(Enemy_State); // check enemy state for d6 set
   and_imm_fz(0b00100000);
   // if set, branch to leave
@@ -13260,33 +13183,33 @@ void EnemyToBGCollisionDet(void) {
     return;
   }
   ldy_zpx(Enemy_ID);
-  cpy_imm_fz(Spiny); // if enemy object is not spiny, branch elsewhere
-  if (zero_flag) {
+  // if enemy object is not spiny, branch elsewhere
+  if (y == Spiny) {
     lda_zpx(Enemy_Y_Position);
-    cmp_imm_fc(0x25); // if enemy vertical coordinate < 36 branch to leave
-    if (!carry_flag) {
+    // if enemy vertical coordinate < 36 branch to leave
+    if (a < 0x25) {
       return;
     }
   }
   // DoIDCheckBGColl:
-  cpy_imm_fz(GreenParatroopaJump); // check for some other enemy object
+  // check for some other enemy object
   // Original branch: branch if not found
-  if (zero_flag) {
+  if (y == GreenParatroopaJump) {
     EnemyJump(); return; // otherwise jump elsewhere
   }
   // HBChk:
-  cpy_imm_fz(HammerBro); // check for hammer bro
+  // check for hammer bro
   // Original branch: branch if not found
-  if (zero_flag) {
+  if (y == HammerBro) {
     goto HammerBroBGColl; // otherwise jump elsewhere
   }
   // CInvu:
-  cpy_imm_fz(Spiny); // if enemy object is spiny, branch
-  if (!zero_flag) {
+  // if enemy object is spiny, branch
+  if (y != Spiny) {
     cpy_imm_fz(PowerUpObject); // if special power-up object, branch
     if (zero_flag) { goto YesIn; }
-    cpy_imm_fc(0x7); // if enemy object =>$07, branch to leave
-    if (carry_flag) {
+    // if enemy object =>$07, branch to leave
+    if (y >= 0x7) {
       return;
     }
   }
@@ -13303,20 +13226,19 @@ NoEToBGCollision:
 HandleEToBGCollision:
   cpu_call_begin(0xdffc); ChkForNonSolids(); cpu_call_end(0xdffc); // if something is underneath enemy, find out what
   if (zero_flag) { goto NoEToBGCollision; } // if blank $26, coins, or hidden blocks, jump, enemy falls through
-  cmp_imm_fz(0x23);
   // Original branch: check for blank metatile $23 and branch if not found
-  if (zero_flag) {
+  if (a == 0x23) {
     ldy_zp(0x2); // get vertical coordinate used to find block
     lda_imm(0x0); // store default blank metatile in that spot so we won't
     dynamic_ram_write(indirect_y_addr(0x6), a); // trigger this routine accidentally again
     lda_zpx(Enemy_ID);
-    cmp_imm_fc(0x15); // if enemy object => $15, branch ahead
-    if (carry_flag) {
+    // if enemy object => $15, branch ahead
+    if (a >= 0x15) {
       ChkToStunEnemies();
       return;
     }
-    cmp_imm_fz(Goomba); // if enemy object not goomba, branch ahead of this routine
-    if (zero_flag) {
+    // if enemy object not goomba, branch ahead of this routine
+    if (a == Goomba) {
       cpu_call_begin(0xe015); KillEnemyAboveBlock(); cpu_call_end(0xe015); // if enemy object IS goomba, do this sub
     }
     // GiveOEPoints:
@@ -13324,14 +13246,16 @@ HandleEToBGCollision:
     cpu_call_begin(0xe01a); SetupFloateyNumber(); cpu_call_end(0xe01a);
     ChkToStunEnemies(); // fallthrough
     return;
+    // --------------------------------
+    // $04 - low nybble of vertical coordinate from block buffer routine
   }
   // LandEnemyProperly:
   lda_zp(0x4); // check lower nybble of vertical coordinate saved earlier
   carry_flag = true;
   sbc_imm(0x8); // subtract eight pixels
-  cmp_imm_fc(0x5); // used to determine whether enemy landed from falling
+  // used to determine whether enemy landed from falling
   // Original branch: branch if lower nybble in range of $0d-$0f before subtract
-  if (!carry_flag) {
+  if (a < 0x5) {
     lda_zpx(Enemy_State);
     and_imm_fz(0b01000000); // branch if d6 in enemy state is set
     if (zero_flag) {
@@ -13345,12 +13269,12 @@ SChkA:
 ChkLandedEnemyState:
       lda_zpx_fz(Enemy_State); // if enemy in normal state, branch back to jump here
       if (zero_flag) { goto SChkA; }
-      cmp_imm_fz(0x5); // if in state used by spiny's egg
+      // if in state used by spiny's egg
       // Original branch: then branch elsewhere
-      if (!zero_flag) {
-        cmp_imm_fc(0x3); // if already in state used by koopas and buzzy beetles
+      if (a != 0x5) {
+        // if already in state used by koopas and buzzy beetles
         // or in higher numbered state, branch to leave
-        if (carry_flag) {
+        if (a >= 0x3) {
           return;
         }
         lda_zpx(Enemy_State); // load enemy state again (why?)
@@ -13358,9 +13282,8 @@ ChkLandedEnemyState:
         if (!zero_flag) { goto ProcEnemyDirection; } // then branch elsewhere
         lda_imm(0x10); // load default timer here
         ldy_zpx(Enemy_ID); // check enemy identifier for spiny
-        cpy_imm_fz(Spiny);
         // Original branch: branch if not found
-        if (zero_flag) {
+        if (y == Spiny) {
           lda_imm(0x0); // set timer for $00 if spiny
         }
         // SetForStn:
@@ -13376,9 +13299,9 @@ ProcEnemyDirection:
       lda_zpx(Enemy_ID); // check enemy identifier for goomba
       cmp_imm_fz(Goomba); // branch if found
       if (zero_flag) { goto LandEnemyInitState; }
-      cmp_imm_fz(Spiny); // check for spiny
+      // check for spiny
       // Original branch: branch if not found
-      if (zero_flag) {
+      if (a == Spiny) {
         lda_imm(0x1);
         ram[(uint8_t)(Enemy_MovingDir + x)] = a; // send enemy moving to the right by default
         lda_imm(0x8);
@@ -13420,9 +13343,8 @@ LandEnemyInitState:
   
 ChkForRedKoopa:
   lda_zpx(Enemy_ID); // check for red koopa troopa $03
-  cmp_imm_fz(RedKoopa);
   // Original branch: branch if not found
-  if (zero_flag) {
+  if (a == RedKoopa) {
     lda_zpx_fz(Enemy_State);
     // if enemy found and in normal state, branch
     if (zero_flag) {
@@ -13450,8 +13372,8 @@ ChkForRedKoopa:
   
 DoEnemySideCheck:
   lda_zpx(Enemy_Y_Position); // if enemy within status bar, branch to leave
-  cmp_imm_fc(0x20); // because there's nothing there that impedes movement
-  if (!carry_flag) {
+  // because there's nothing there that impedes movement
+  if (a < 0x20) {
     return;
   }
   ldy_imm(0x16); // start by finding block to the left of enemy ($00,$14)
@@ -13481,12 +13403,13 @@ NextSdeC:
   } while (!carry_flag); // enemy ($00, $14) and ($10, $14) pixel coordinates
   // ExESdeC:
   return;
+  // --------------------------------
   
 HammerBroBGColl:
   cpu_call_begin(0xe187); ChkUnderEnemy(); cpu_call_end(0xe187); // check to see if hammer bro is standing on anything
   if (!zero_flag) {
-    cmp_imm_fz(0x23); // check for blank metatile $23 and branch if not found
-    if (zero_flag) {
+    // check for blank metatile $23 and branch if not found
+    if (a == 0x23) {
       KillEnemyAboveBlock(); // fallthrough
       return;
     }
@@ -13508,23 +13431,23 @@ NoUnderHammerBro:
 }
 
 void ChkToStunEnemies(void) {
-  cmp_imm_fc(0x9); // perform many comparisons on enemy object identifier
-  if (!carry_flag) {
+  // perform many comparisons on enemy object identifier
+  if (a < 0x9) {
     SetStun();
     return;
   }
-  cmp_imm_fc(0x11); // if the enemy object identifier is equal to the values
+  // if the enemy object identifier is equal to the values
   // $09, $0e, $0f or $10, it will be modified, and not
-  if (carry_flag) {
+  if (a >= 0x11) {
     SetStun();
     return;
   }
-  cmp_imm_fc(0xa); // modified if not any of those values, note that piranha plant will
+  // modified if not any of those values, note that piranha plant will
   // Original branch: always fail this test because A will still have vertical
-  if (carry_flag) {
-    cmp_imm_fc(PiranhaPlant); // coordinate from previous addition, also these comparisons
+  if (a >= 0xa) {
+    // coordinate from previous addition, also these comparisons
     // are only necessary if branching from $d7a1
-    if (!carry_flag) {
+    if (a < PiranhaPlant) {
       SetStun();
       return;
     }
@@ -13544,8 +13467,8 @@ void SetStun(void) {
   dec_zpx(Enemy_Y_Position);
   dec_zpx(Enemy_Y_Position); // subtract two pixels from enemy's vertical position
   lda_zpx(Enemy_ID);
-  cmp_imm_fz(Bloober); // check for bloober object
-  if (!zero_flag) {
+  // check for bloober object
+  if (a != Bloober) {
     lda_imm(0xfd); // set default vertical speed
     ldy_abs_fz(AreaType);
     if (!zero_flag) { goto SetNotW; } // if area type not water, set as speed, otherwise
@@ -13563,8 +13486,8 @@ SetNotW:
   }
   // ChkBBill:
   lda_zpx(Enemy_ID);
-  cmp_imm_fz(BulletBill_CannonVar); // check for bullet bill (cannon variant)
-  if (!zero_flag) {
+  // check for bullet bill (cannon variant)
+  if (a != BulletBill_CannonVar) {
     cmp_imm_fz(BulletBill_FrenzyVar); // check for bullet bill (frenzy variant)
     if (zero_flag) { goto NoCDirF; } // branch if either found, direction does not change
     ram[(uint8_t)(Enemy_MovingDir + x)] = y; // store as moving direction
@@ -13576,8 +13499,6 @@ NoCDirF:
   ram[(uint8_t)(Enemy_X_Speed + x)] = a; // and store, then leave
   // ExEBGChk:
   return;
-  // --------------------------------
-  // $04 - low nybble of vertical coordinate from block buffer routine
 }
 
 void ChkForBump_HammerBroJ(void) {
@@ -13637,13 +13558,11 @@ RXSpd:
   ram[(uint8_t)(Enemy_MovingDir + x)] = a; // thus effectively turning the enemy around
   // ExTA:
   return; // leave!!!
-  // -------------------------------------------------------------------------------------
-  // $00 - vertical position of platform
   
 ChkForBump_HammerBroJ:
-  cpx_imm_fz(0x5); // check if we're on the special use slot
+  // check if we're on the special use slot
   // Original branch: and if so, branch ahead and do not play sound
-  if (!zero_flag) {
+  if (x != 0x5) {
     lda_zpx(Enemy_State); // if enemy state d7 not set, branch
     asl_acc_fc(); // ahead and do not play sound
     if (!carry_flag) { goto NoBump; }
@@ -13653,9 +13572,8 @@ ChkForBump_HammerBroJ:
   
 NoBump:
   lda_zpx(Enemy_ID); // check for hammer bro
-  cmp_imm_fz(0x5);
   // Original branch: branch if not found
-  if (zero_flag) {
+  if (a == 0x5) {
     lda_imm(0x0);
     ram[0x0] = a; // initialize value here for bitmask  
     ldy_imm(0xfa); // load default vertical speed for jumping
@@ -13663,11 +13581,11 @@ NoBump:
   }
   // InvEnemyDir:
   goto RXSpd; // jump to turn the enemy around
-  // --------------------------------
-  // $00 - used to hold horizontal difference between player and enemy
 }
 
 void PlayerEnemyDiff(void) {
+  // --------------------------------
+  // $00 - used to hold horizontal difference between player and enemy
   lda_zpx(Enemy_X_Position); // get distance between enemy object's
   carry_flag = true; // horizontal coordinate and the player's
   sbc_zp_fc(Player_X_Position); // horizontal coordinate
@@ -13675,10 +13593,10 @@ void PlayerEnemyDiff(void) {
   lda_zpx(Enemy_PageLoc);
   sbc_zp_fcn(Player_PageLoc); // subtract borrow, then leave
   return;
-  // --------------------------------
 }
 
 void EnemyLanding(void) {
+  // --------------------------------
   cpu_call_begin(0xe151); InitVStf(); cpu_call_end(0xe151); // do something here to vertical speed and something else
   lda_zpx(Enemy_Y_Position);
   and_imm(0b11110000); // save high nybble of vertical coordinate, and
@@ -13697,11 +13615,14 @@ void SubtEnemyYPos(void) {
 
 void EnemyJump(void) {
   goto EnemyJump;
+  // --------------------------------
+  // $00 - used to store bitmask (not used but initialized here)
+  // $eb - used in DoEnemySideCheck as counter and to compare moving directions
   
 DoEnemySideCheck:
   lda_zpx(Enemy_Y_Position); // if enemy within status bar, branch to leave
-  cmp_imm_fc(0x20); // because there's nothing there that impedes movement
-  if (!carry_flag) {
+  // because there's nothing there that impedes movement
+  if (a < 0x20) {
     return;
   }
   ldy_imm(0x16); // start by finding block to the left of enemy ($00,$14)
@@ -13752,7 +13673,6 @@ EnemyJump:
   
 DoSide:
   goto DoEnemySideCheck; // check for horizontal blockage, then leave
-  // --------------------------------
 }
 
 void KillEnemyAboveBlock(void) {
@@ -13788,14 +13708,13 @@ void ChkForNonSolids(void) {
   cmp_imm_fz(0x60); // hidden 1-up block?
   // NSFnd:
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void FireballBGCollision(void) {
+  // -------------------------------------------------------------------------------------
   lda_zpx(Fireball_Y_Position); // check fireball's vertical coordinate
-  cmp_imm_fc(0x18);
   // Original branch: if within the status bar area of the screen, branch ahead
-  if (carry_flag) {
+  if (a >= 0x18) {
     cpu_call_begin(0xe1d0); BlockBufferChk_FBall(); cpu_call_end(0xe1d0); // do fireball to background collision detection on bottom of it
     if (zero_flag) { goto ClearBounceFlag; } // if nothing underneath fireball, branch
     cpu_call_begin(0xe1d5); ChkForNonSolids(); cpu_call_end(0xe1d5); // check for non-solid metatiles
@@ -13825,15 +13744,15 @@ InitFireballExplode:
   lda_imm(Sfx_Bump);
   ram[Square1SoundQueue] = a; // load bump sound
   return; // leave
+}
+
+void GetFireballBoundBox(void) {
   // -------------------------------------------------------------------------------------
   // $00 - used to hold one of bitmasks, or offset
   // $01 - used for relative X coordinate, also used to store middle screen page location
   // $02 - used for relative Y coordinate, also used to store middle screen coordinate
   // this data added to relative coordinates of sprite objects
   // stored in order: left edge, top edge, right edge, bottom edge
-}
-
-void GetFireballBoundBox(void) {
   txa(); // add seven bytes to offset
   carry_flag = false; // to use in routines as offset for fireball
   adc_imm(0x7);
@@ -13892,9 +13811,6 @@ void GetFireballBoundBox(void) {
 NoOfs2:
   ldx_zp(ObjectOffset); // get object offset and leave
   return;
-  // -------------------------------------------------------------------------------------
-  // $06 - second object's offset
-  // $07 - counter
 }
 
 void GetMiscBoundBox(void) {
@@ -13955,9 +13871,6 @@ void GetMiscBoundBox(void) {
 NoOfs2:
   ldx_zp(ObjectOffset); // get object offset and leave
   return;
-  // -------------------------------------------------------------------------------------
-  // $06 - second object's offset
-  // $07 - counter
 }
 
 void GetEnemyBoundBox(void) {
@@ -14054,9 +13967,6 @@ CMBits:
 NoOfs2:
   ldx_zp(ObjectOffset); // get object offset and leave
   return;
-  // -------------------------------------------------------------------------------------
-  // $06 - second object's offset
-  // $07 - counter
 }
 
 void SmallPlatformBoundBox(void) {
@@ -14153,18 +14063,15 @@ CMBits:
 NoOfs2:
   ldx_zp(ObjectOffset); // get object offset and leave
   return;
-  // -------------------------------------------------------------------------------------
-  // $06 - second object's offset
-  // $07 - counter
 }
 
 void LargePlatformBoundBox(void) {
   inx(); // increment X to get the proper offset
   cpu_call_begin(0xe276); GetXOffscreenBits(); cpu_call_end(0xe276); // then jump directly to the sub for horizontal offscreen bits
   dex(); // decrement to return to original offset
-  cmp_imm_fc(0xfe); // if completely offscreen, branch to put entire bounding
+  // if completely offscreen, branch to put entire bounding
   // Original branch: box offscreen, otherwise start getting coordinates
-  if (!carry_flag) {
+  if (a < 0xfe) {
     // SetupEOffsetFBBox:
     txa(); // add 1 to offset to properly address
     carry_flag = false; // the enemy object memory locations
@@ -14234,9 +14141,6 @@ void LargePlatformBoundBox(void) {
 NoOfs2:
   ldx_zp(ObjectOffset); // get object offset and leave
   return;
-  // -------------------------------------------------------------------------------------
-  // $06 - second object's offset
-  // $07 - counter
 }
 
 void BoundingBoxCore(void) {
@@ -14279,6 +14183,9 @@ void BoundingBoxCore(void) {
 }
 
 void PlayerCollisionCore(void) {
+  // -------------------------------------------------------------------------------------
+  // $06 - second object's offset
+  // $07 - counter
   ldx_imm(0x0); // initialize X to use player's bounding box for comparison
   SprObjectCollisionCore(); // fallthrough
   return;
@@ -14346,21 +14253,22 @@ CollisionFound:
   carry_flag = true; // otherwise we already did both sets, therefore collision, so set carry
   ldy_zp(0x6); // load original value set here earlier, then leave
   return;
+}
+
+void BlockBufferChk_Enemy(void) {
   // -------------------------------------------------------------------------------------
   // $02 - modified y coordinate
   // $03 - stores metatile involved in block buffer collisions
   // $04 - comes in with offset to block buffer adder data, goes out with low nybble x/y coordinate
   // $05 - modified x coordinate
   // $06-$07 - block buffer address
-}
-
-void BlockBufferChk_Enemy(void) {
   pha(); // save contents of A to stack
   txa();
   carry_flag = false; // add 1 to X to run sub with enemy offset in mind
   adc_imm(0x1);
   tax();
   pla(); // pull A from stack and jump elsewhere
+  // supposedly used once to set offset for
   // BBChk_E:
   cpu_call_begin(0xe3a7); BlockBufferCollision(); cpu_call_end(0xe3a7); // do collision detection subroutine for sprite object
   ldx_zp(ObjectOffset); // get object offset
@@ -14447,14 +14355,14 @@ void BlockBufferCollision(void) {
   ram[0x4] = a; // store masked out result here
   lda_zp_fz(0x3); // get saved content of block buffer
   return; // and leave
+}
+
+void DrawVine(void) {
   // -------------------------------------------------------------------------------------
   // unused byte
   // -------------------------------------------------------------------------------------
   // $00 - offset to vine Y coordinate adder
   // $02 - offset to sprite data
-}
-
-void DrawVine(void) {
   ram[0x0] = y; // save offset here
   lda_abs(Enemy_Rel_YPos); // get relative vertical coordinate
   carry_flag = false;
@@ -14505,9 +14413,9 @@ void DrawVine(void) {
     lda_abs(VineStart_Y_Position); // get original starting vertical coordinate
     carry_flag = true;
     sbc_absy(Sprite_Y_Position); // subtract top-most sprite's Y coordinate
-    cmp_imm_fc(0x64); // if two coordinates are less than 100/$64 pixels
+    // if two coordinates are less than 100/$64 pixels
     // Original branch: apart, skip this to leave sprite alone
-    if (carry_flag) {
+    if (a >= 0x64) {
       lda_imm(0xf8);
       ram[Sprite_Y_Position + y] = a; // otherwise move sprite offscreen
     }
@@ -14538,10 +14446,10 @@ void SixSpriteStacker(void) {
   } while (!zero_flag); // do this until all sprites are done
   ldy_zp(0x2); // get saved OAM data offset and leave
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void DrawHammer(void) {
+  // -------------------------------------------------------------------------------------
   ldy_absx(Misc_SprDataOffset); // get misc object OAM data offset
   lda_abs_fz(TimerControl);
   // Original branch: if master timer control set, skip this part
@@ -14597,15 +14505,15 @@ RenderH:
   cpu_call_begin(0xe53f); DumpTwoSpr(); cpu_call_end(0xe53f); // do sub to move hammer sprites offscreen
   // NoHOffscr:
   return; // leave
+}
+
+void FlagpoleGfxHandler(void) {
   // -------------------------------------------------------------------------------------
   // $00-$01 - used to hold tile numbers ($01 addressed in draw floatey number part)
   // $02 - used to hold Y coordinate for floatey number
   // $03 - residual byte used for flip (but value set here affects nothing)
   // $04 - attribute byte for floatey number
   // $05 - used as X coordinate for floatey number
-}
-
-void FlagpoleGfxHandler(void) {
   ldy_absx(Enemy_SprDataOffset); // get sprite data offset for flagpole flag
   lda_abs(Enemy_Rel_XPos); // get relative horizontal coordinate
   ram[Sprite_X_Position + y] = a; // store as X coordinate for first sprite
@@ -14657,12 +14565,12 @@ void FlagpoleGfxHandler(void) {
   if (zero_flag) {
     return;
   }
-  // -------------------------------------------------------------------------------------
   MoveSixSpritesOffscreen(); // fallthrough
   return;
 }
 
 void MoveSixSpritesOffscreen(void) {
+  // -------------------------------------------------------------------------------------
   lda_imm(0xf8); // set offscreen coordinate if jumping here
   DumpSixSpr(); // fallthrough
   return;
@@ -14692,10 +14600,10 @@ void DumpTwoSpr(void) {
   ram[Sprite_Data + y] = a;
   // ExitDumpSpr:
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void DrawLargePlatform(void) {
+  // -------------------------------------------------------------------------------------
   ldy_absx(Enemy_SprDataOffset); // get OAM data offset
   ram[0x2] = y; // store here
   iny(); // add 3 to it for offset
@@ -14791,11 +14699,11 @@ SetLast2Platform:
   cpu_call_begin(0xe653); MoveSixSpritesOffscreen(); cpu_call_end(0xe653); // otherwise branch to move all sprites offscreen
   // ExDLPl:
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void JCoinGfxHandler(void) {
   goto JCoinGfxHandler;
+  // -------------------------------------------------------------------------------------
   
 DrawFloateyNumber_Coin:
   lda_zp(FrameCounter); // get frame counter
@@ -14849,6 +14757,9 @@ JCoinGfxHandler:
   ldx_zp(ObjectOffset); // get misc object offset
   // ExJCGfx:
   return; // leave
+}
+
+void DrawPowerUp(void) {
   // -------------------------------------------------------------------------------------
   // $00-$01 - used to hold tiles for drawing the power-up, $00 also used to hold power-up type
   // $02 - used to hold bottom row Y position
@@ -14857,9 +14768,6 @@ JCoinGfxHandler:
   // $05 - used to hold X position
   // $07 - counter
   // tiles arranged in top left, right, bottom left, right order
-}
-
-void DrawPowerUp(void) {
   ldy_abs((Enemy_SprDataOffset + 5)); // get power-up's sprite data offset
   lda_abs(Enemy_Rel_YPos); // get relative vertical coordinate
   carry_flag = false;
@@ -14918,17 +14826,6 @@ void DrawPowerUp(void) {
   
 PUpOfs:
   // jump to check to see if power-up is offscreen at all, then leave
-  // -------------------------------------------------------------------------------------
-  // $00-$01 - used in DrawEnemyObjRow to hold sprite tile numbers
-  // $02 - used to store Y position
-  // $03 - used to store moving direction, used to flip enemies horizontally
-  // $04 - used to store enemy's sprite attributes
-  // $05 - used to store X position
-  // $eb - used to hold sprite data offset
-  // $ec - used to hold either altered enemy state or special value used in gfx handler as condition
-  // $ed - used to hold enemy state from buffer 
-  // $ef - used to hold enemy code used in gfx handler (may or may not resemble Enemy_ID values)
-  // tiles arranged in top left, right, middle left, right, bottom left, right order
   // SprObjectOffscrChk:
   ldx_zp(ObjectOffset); // get enemy buffer offset
   lda_abs(Enemy_OffscreenBits); // check offscreen information
@@ -14976,14 +14873,14 @@ PUpOfs:
   }
   cpu_call_begin(0xeb99); MoveESprRowOffscreen(); cpu_call_end(0xeb99); // move all sprites offscreen (A should be 0 by now)
   lda_zpx(Enemy_ID);
-  cmp_imm_fz(Podoboo); // check enemy identifier for podoboo
+  // check enemy identifier for podoboo
   // skip this part if found, we do not want to erase podoboo!
-  if (zero_flag) {
+  if (a == Podoboo) {
     return;
   }
   lda_zpx(Enemy_Y_HighPos); // check high byte of vertical position
-  cmp_imm_fz(0x2); // if not yet past the bottom of the screen, branch
-  if (!zero_flag) {
+  // if not yet past the bottom of the screen, branch
+  if (a != 0x2) {
     return;
   }
   cpu_call_begin(0xeba8); EraseEnemyObject(); cpu_call_end(0xeba8); // what it says
@@ -14992,6 +14889,17 @@ PUpOfs:
 }
 
 void EnemyGfxHandler(void) {
+  // -------------------------------------------------------------------------------------
+  // $00-$01 - used in DrawEnemyObjRow to hold sprite tile numbers
+  // $02 - used to store Y position
+  // $03 - used to store moving direction, used to flip enemies horizontally
+  // $04 - used to store enemy's sprite attributes
+  // $05 - used to store X position
+  // $eb - used to hold sprite data offset
+  // $ec - used to hold either altered enemy state or special value used in gfx handler as condition
+  // $ed - used to hold enemy state from buffer 
+  // $ef - used to hold enemy code used in gfx handler (may or may not resemble Enemy_ID values)
+  // tiles arranged in top left, right, middle left, right, bottom left, right order
   lda_zpx(Enemy_Y_Position); // get enemy object vertical position
   ram[0x2] = a;
   lda_abs(Enemy_Rel_XPos); // get enemy object horizontal position
@@ -15005,9 +14913,9 @@ void EnemyGfxHandler(void) {
   lda_absx(Enemy_SprAttrib);
   ram[0x4] = a; // get enemy object sprite attributes
   lda_zpx(Enemy_ID);
-  cmp_imm_fz(PiranhaPlant); // is enemy object piranha plant?
+  // is enemy object piranha plant?
   // Original branch: if not, branch
-  if (zero_flag) {
+  if (a == PiranhaPlant) {
     ldy_zpx_fn(PiranhaPlant_Y_Speed);
     if (neg_flag) { goto CheckForRetainerObj; } // if piranha plant moving upwards, branch
     ldy_absx_fz(EnemyFrameTimer);
@@ -15021,18 +14929,17 @@ CheckForRetainerObj:
   and_imm(0b00011111); // nullify all but 5 LSB and use as Y
   tay();
   lda_zpx(Enemy_ID); // check for mushroom retainer/princess object
-  cmp_imm_fz(RetainerObject);
   // Original branch: if not found, branch
-  if (zero_flag) {
+  if (a == RetainerObject) {
     ldy_imm(0x0); // if found, nullify saved state in Y
     lda_imm(0x1); // set value that will not be used
     ram[0x3] = a;
     lda_imm(0x15); // set value $15 as code for mushroom retainer/princess object
   }
   // CheckForBulletBillCV:
-  cmp_imm_fz(BulletBill_CannonVar); // otherwise check for bullet bill object
+  // otherwise check for bullet bill object
   // Original branch: if not found, branch again
-  if (zero_flag) {
+  if (a == BulletBill_CannonVar) {
     dec_zp(0x2); // decrement saved vertical position
     lda_imm(0x3);
     ldy_absx_fz(EnemyFrameTimer); // get timer for enemy object
@@ -15047,8 +14954,8 @@ CheckForRetainerObj:
     lda_imm(0x8); // set specific value to unconditionally branch once
   }
   // CheckForJumpspring:
-  cmp_imm_fz(JumpspringObject); // check for jumpspring object
-  if (zero_flag) {
+  // check for jumpspring object
+  if (a == JumpspringObject) {
     ldy_imm(0x3); // set enemy state -2 MSB here for jumpspring object
     ldx_abs(JumpspringAnimCtrl); // get current frame number for jumpspring object
     lda_absx(JumpspringFrameOffsets); // load data using frame number as offset
@@ -15057,9 +14964,9 @@ CheckForRetainerObj:
   ram[0xef] = a; // store saved enemy object value here
   ram[0xec] = y; // and Y here (enemy state -2 MSB if not changed)
   ldx_zp(ObjectOffset); // get enemy object offset
-  cmp_imm_fz(0xc); // check for podoboo object
+  // check for podoboo object
   // Original branch: branch if not found
-  if (zero_flag) {
+  if (a == 0xc) {
     lda_zpx_fn(Enemy_Y_Speed); // if moving upwards, branch
     if (neg_flag) { goto CheckBowserGfxFlag; }
     inc_abs(VerticalFlipFlag); // otherwise, set flag for vertical flip
@@ -15069,8 +14976,7 @@ CheckBowserGfxFlag:
   lda_abs_fz(BowserGfxFlag); // if not drawing bowser at all, skip to something else
   if (!zero_flag) {
     ldy_imm(0x16); // if set to 1, draw bowser's front
-    cmp_imm_fz(0x1);
-    if (!zero_flag) {
+    if (a != 0x1) {
       iny(); // otherwise draw bowser's rear
     }
     // SBwsrGfxOfs:
@@ -15078,13 +14984,12 @@ CheckBowserGfxFlag:
   }
   // CheckForGoomba:
   ldy_zp(0xef); // check value for goomba object
-  cpy_imm_fz(Goomba);
   // Original branch: branch if not found
-  if (zero_flag) {
+  if (y == Goomba) {
     lda_zpx(Enemy_State);
-    cmp_imm_fc(0x2); // check for defeated state
+    // check for defeated state
     // Original branch: if not defeated, go ahead and animate
-    if (carry_flag) {
+    if (a >= 0x2) {
       ldx_imm(0x4); // if defeated, write new value here
       ram[0xec] = x;
     }
@@ -15146,12 +15051,12 @@ CheckBowserRear:
     goto FlipBowserOver; // jump to set vertical flip flag
   }
   // CheckForSpiny:
-  cpx_imm_fz(0x24); // check if value loaded is for spiny
+  // check if value loaded is for spiny
   // Original branch: if not found, branch
-  if (zero_flag) {
-    cpy_imm_fz(0x5); // if enemy state set to $05, do this,
+  if (x == 0x24) {
+    // if enemy state set to $05, do this,
     // Original branch: otherwise branch
-    if (zero_flag) {
+    if (y == 0x5) {
       ldx_imm(0x30); // set to spiny egg offset
       lda_imm(0x2);
       ram[0x3] = a; // set enemy direction to reverse sprites horizontally
@@ -15161,9 +15066,9 @@ CheckBowserRear:
     // NotEgg:
   } else {
     // CheckForLakitu:
-    cpx_imm_fz(0x90); // check value for lakitu's offset loaded
+    // check value for lakitu's offset loaded
     // Original branch: branch if not loaded
-    if (zero_flag) {
+    if (x == 0x90) {
       lda_zp(0xed);
       and_imm_fz(0b00100000); // check for d5 set in enemy state
       // Original branch: branch if set
@@ -15179,9 +15084,8 @@ NoLAFr:
     }
     // CheckUpsideDownShell:
     lda_zp(0xef); // check for enemy object => $04
-    cmp_imm_fc(0x4);
     // Original branch: branch if true
-    if (!carry_flag) {
+    if (a < 0x4) {
       cpy_imm_fc(0x2);
       if (!carry_flag) { goto CheckRightSideUpShell; } // branch if enemy state < $02
       ldx_imm(0x5a); // set for upside-down koopa shell by default
@@ -15199,9 +15103,9 @@ CheckRightSideUpShell:
     ldx_imm(0x72); // set right-side up buzzy beetle shell by default
     inc_zp(0x2); // increment saved vertical position by one pixel
     ldy_zp(0xef);
-    cpy_imm_fz(BuzzyBeetle); // check for buzzy beetle object
+    // check for buzzy beetle object
     // Original branch: branch if found
-    if (!zero_flag) {
+    if (y != BuzzyBeetle) {
       ldx_imm(0x66); // change to right-side up koopa shell if not found
       inc_zp(0x2); // and increment saved vertical position again
     }
@@ -15219,9 +15123,8 @@ CheckRightSideUpShell:
 CheckForHammerBro:
   ldy_zp(ObjectOffset);
   lda_zp(0xef); // check for hammer bro object
-  cmp_imm_fz(HammerBro);
   // Original branch: branch if not found
-  if (zero_flag) {
+  if (a == HammerBro) {
     lda_zp_fz(0xed);
     if (zero_flag) { goto CheckToAnimateEnemy; } // branch if not in normal enemy state
     and_imm_fz(0b00001000);
@@ -15255,9 +15158,9 @@ CheckToAnimateEnemy:
   cmp_imm_fc(0x18); // branch if => $18
   if (carry_flag) { goto CheckDefeatedState; }
   ldy_imm(0x0);
-  cmp_imm_fz(0x15); // check for mushroom retainer/princess object
+  // check for mushroom retainer/princess object
   // Original branch: which uses different code here, branch if not found
-  if (zero_flag) {
+  if (a == 0x15) {
     iny(); // residual instruction
     lda_abs(WorldNumber); // are we on world 8?
     cmp_imm_fc(World8);
@@ -15326,8 +15229,8 @@ CheckForVerticalFlip:
     tya();
     tax(); // give offset to X
     lda_zp(0xef);
-    cmp_imm_fz(HammerBro); // check saved enemy object for hammer bro
-    if (!zero_flag) {
+    // check saved enemy object for hammer bro
+    if (a != HammerBro) {
       cmp_imm_fz(Lakitu); // check saved enemy object for lakitu
       if (zero_flag) { goto FlipEnemyVertically; } // branch for hammer bro or lakitu
       cmp_imm_fc(0x15);
@@ -15357,25 +15260,25 @@ FlipEnemyVertically:
   if (!zero_flag) { goto SkipToOffScrChk; } // branch if so
   lda_zp(0xef);
   ldx_zp(0xec); // get alternate enemy state
-  cmp_imm_fz(0x5); // check for hammer bro object
-  if (zero_flag) {
+  // check for hammer bro object
+  if (a == 0x5) {
   } else {
     // ContES:
-    cmp_imm_fz(Bloober); // check for bloober object
-    if (!zero_flag) {
+    // check for bloober object
+    if (a != Bloober) {
       cmp_imm_fz(PiranhaPlant); // check for piranha plant object
       if (zero_flag) { goto MirrorEnemyGfx; }
       cmp_imm_fz(Podoboo); // check for podoboo object
       if (zero_flag) { goto MirrorEnemyGfx; } // branch if either of three are found
-      cmp_imm_fz(Spiny); // check for spiny object
+      // check for spiny object
       // Original branch: branch closer if not found
-      if (zero_flag) {
+      if (a == Spiny) {
         cpx_imm_fz(0x5); // check spiny's state
         if (!zero_flag) { goto CheckToMirrorLakitu; } // branch if not an egg, otherwise
       }
       // ESRtnr:
-      cmp_imm_fz(0x15); // check for princess/mushroom retainer object
-      if (zero_flag) {
+      // check for princess/mushroom retainer object
+      if (a == 0x15) {
         lda_imm(0x42); // set horizontal flip on bottom right sprite
         ram[(Sprite_Attributes + 20) + y] = a; // note that palette bits were already set earlier
       }
@@ -15393,9 +15296,9 @@ MirrorEnemyGfx:
       ram[(Sprite_Attributes + 8) + y] = a; // in left sprite column of enemy object OAM data
       ram[(Sprite_Attributes + 16) + y] = a;
       ora_imm(0b01000000); // set horizontal flip
-      cpx_imm_fz(0x5); // check for state used by spiny's egg
+      // check for state used by spiny's egg
       // Original branch: if alternate state not set to $05, branch
-      if (zero_flag) {
+      if (x == 0x5) {
         ora_imm(0b10000000); // otherwise set vertical flip
       }
       // EggExc:
@@ -15415,9 +15318,8 @@ MirrorEnemyGfx:
     
 CheckToMirrorLakitu:
     lda_zp(0xef); // check for lakitu enemy object
-    cmp_imm_fz(Lakitu);
     // Original branch: branch if not found
-    if (zero_flag) {
+    if (a == Lakitu) {
       lda_abs_fz(VerticalFlipFlag);
       // Original branch: branch if vertical flip flag not set
       if (zero_flag) {
@@ -15502,14 +15404,14 @@ SprObjectOffscrChk:
   }
   cpu_call_begin(0xeb99); MoveESprRowOffscreen(); cpu_call_end(0xeb99); // move all sprites offscreen (A should be 0 by now)
   lda_zpx(Enemy_ID);
-  cmp_imm_fz(Podoboo); // check enemy identifier for podoboo
+  // check enemy identifier for podoboo
   // skip this part if found, we do not want to erase podoboo!
-  if (zero_flag) {
+  if (a == Podoboo) {
     return;
   }
   lda_zpx(Enemy_Y_HighPos); // check high byte of vertical position
-  cmp_imm_fz(0x2); // if not yet past the bottom of the screen, branch
-  if (!zero_flag) {
+  // if not yet past the bottom of the screen, branch
+  if (a != 0x2) {
     return;
   }
   cpu_call_begin(0xeba8); EraseEnemyObject(); cpu_call_end(0xeba8); // what it says
@@ -15528,6 +15430,12 @@ void DrawEnemyObjRow(void) {
 void DrawOneSpriteRow(void) {
   ram[0x1] = a;
   // draw them
+  // -------------------------------------------------------------------------------------
+  // $00-$01 - tile numbers
+  // $02 - Y coordinate
+  // $03 - flip control
+  // $04 - sprite attributes
+  // $05 - X coordinate
   // DrawSpriteObject:
   lda_zp(0x3); // get saved flip control bits
   lsr_acc();
@@ -15569,9 +15477,6 @@ void DrawOneSpriteRow(void) {
   inx(); // increment offset to return it to the
   inx(); // routine that called this subroutine
   return;
-  // -------------------------------------------------------------------------------------
-  // unused space
-  // -------------------------------------------------------------------------------------
 }
 
 void MoveESprRowOffscreen(void) {
@@ -15589,15 +15494,15 @@ void MoveESprColOffscreen(void) {
   cpu_call_begin(0xebc8); MoveColOffscreen(); cpu_call_end(0xebc8); // move first and second row sprites in column offscreen
   ram[(Sprite_Data + 16) + y] = a; // move third row sprite in column offscreen
   return;
+}
+
+void DrawBlock(void) {
   // -------------------------------------------------------------------------------------
   // $00-$01 - tile numbers
   // $02 - relative Y position
   // $03 - horizontal flip flag (not used here)
   // $04 - attributes
   // $05 - relative X position
-}
-
-void DrawBlock(void) {
   lda_abs(Block_Rel_YPos); // get relative vertical coordinate of block object
   ram[0x2] = a; // store here
   lda_abs(Block_Rel_XPos); // get relative horizontal coordinate of block object
@@ -15619,9 +15524,9 @@ void DrawBlock(void) {
   ldx_zp(ObjectOffset); // get block object offset
   ldy_absx(Block_SprDataOffset); // get sprite data offset
   lda_abs(AreaType);
-  cmp_imm_fz(0x1); // check for ground level type area
+  // check for ground level type area
   // Original branch: if found, branch to next part
-  if (!zero_flag) {
+  if (a != 0x1) {
     lda_imm(0x86);
     ram[Sprite_Tilenumber + y] = a; // otherwise remove brick tiles with lines
     ram[(Sprite_Tilenumber + 4) + y] = a; // and replace then with lineless brick tiles
@@ -15684,11 +15589,11 @@ void MoveColOffscreen(void) {
   ram[(Sprite_Y_Position + 8) + y] = a; // if branched here from enemy graphics handler)
   // ExDBlk:
   return;
-  // -------------------------------------------------------------------------------------
-  // $00 - used to hold palette bits for attribute byte or relative X position
 }
 
 void DrawBrickChunks(void) {
+  // -------------------------------------------------------------------------------------
+  // $00 - used to hold palette bits for attribute byte or relative X position
   lda_imm(0x2); // set palette bits here
   ram[0x0] = a;
   lda_imm(0x75); // set tile number for ball (something residual, likely)
@@ -15765,7 +15670,6 @@ void DrawBrickChunks(void) {
   ram[(Sprite_Y_Position + 12) + y] = a;
   // ExBCDr:
   return; // leave
-  // -------------------------------------------------------------------------------------
 }
 
 void DrawFirebar(void) {
@@ -15787,7 +15691,6 @@ void DrawFirebar(void) {
   // FireA:
   ram[Sprite_Attributes + y] = a; // store attribute byte and leave
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void DrawExplosion_Fireworks(void) {
@@ -15827,6 +15730,7 @@ void DrawExplosion_Fireworks(void) {
 }
 
 void DrawSmallPlatform(void) {
+  // -------------------------------------------------------------------------------------
   ldy_absx(Enemy_SprDataOffset); // get OAM data offset
   lda_imm(0x5b); // load tile number for small platforms
   iny(); // increment offset for tile numbers
@@ -15861,9 +15765,9 @@ void DrawSmallPlatform(void) {
   carry_flag = false;
   adc_imm(0x80); // add 128 pixels
   tax();
-  cpx_imm_fc(0x20); // if below status bar (taking wrap into account)
+  // if below status bar (taking wrap into account)
   // Original branch: then do not change altered coordinate
-  if (!carry_flag) {
+  if (x < 0x20) {
     lda_imm(0xf8); // otherwise move last three sprites offscreen
   }
   // BotSP:
@@ -15898,10 +15802,10 @@ void DrawSmallPlatform(void) {
   // ExSPl:
   ldx_zp(ObjectOffset); // get enemy object offset and leave
   return;
-  // -------------------------------------------------------------------------------------
 }
 
 void DrawBubble(void) {
+  // -------------------------------------------------------------------------------------
   ldy_zp(Player_Y_HighPos); // if player's vertical high position
   dey_fz(); // not within screen, skip all of this
   if (!zero_flag) {
@@ -15924,11 +15828,11 @@ void DrawBubble(void) {
   ram[Sprite_Attributes + y] = a; // set attribute byte
   // ExDBub:
   return; // leave
-  // -------------------------------------------------------------------------------------
-  // $00 - used to store player's vertical offscreen bits
 }
 
 void PlayerGfxHandler(void) {
+  // -------------------------------------------------------------------------------------
+  // $00 - used to store player's vertical offscreen bits
   lda_abs_fz(InjuryTimer); // if player's injured invincibility timer
   // Original branch: not set, skip checkpoint and continue code
   if (!zero_flag) {
@@ -15941,8 +15845,8 @@ void PlayerGfxHandler(void) {
   }
   // CntPl:
   lda_zp(GameEngineSubroutine); // if executing specific game engine routine,
-  cmp_imm_fz(0xb); // branch ahead to some other part
-  if (!zero_flag) {
+  // branch ahead to some other part
+  if (a != 0xb) {
     lda_abs_fz(PlayerChangeSizeFlag); // if grow/shrink flag set
     // Original branch: then branch to some other code
     if (zero_flag) {
@@ -15953,9 +15857,9 @@ void PlayerGfxHandler(void) {
         return;
       }
       lda_zp(Player_State);
-      cmp_imm_fz(0x0); // if player status normal,
+      // if player status normal,
       // branch and do not return
-      if (zero_flag) {
+      if (a == 0x0) {
         FindPlayerAction();
         return;
       }
@@ -16059,7 +15963,6 @@ PlayerOffscreenChk:
     dex_fn(); // decrement row counter
   } while (!neg_flag); // do this until all sprite rows are checked
   return; // then we are done!
-  // -------------------------------------------------------------------------------------
 }
 
 void FindPlayerAction(void) {
@@ -16122,10 +16025,10 @@ PlayerOffscreenChk:
     dex_fn(); // decrement row counter
   } while (!neg_flag); // do this until all sprite rows are checked
   return; // then we are done!
-  // -------------------------------------------------------------------------------------
 }
 
 void DrawPlayer_Intermediate(void) {
+  // -------------------------------------------------------------------------------------
   ldx_imm(0x5); // store data into zero page memory
   do {
     // PIntLoop:
@@ -16140,6 +16043,9 @@ void DrawPlayer_Intermediate(void) {
   ora_imm(0b01000000); // set horizontal flip bit for bottom-right sprite
   ram[(Sprite_Attributes + 32)] = a; // store and leave
   return;
+}
+
+void RenderPlayerSub(void) {
   // -------------------------------------------------------------------------------------
   // $00-$01 - used to hold tile numbers, $00 also used to hold upper extent of animation frames
   // $02 - vertical position
@@ -16148,9 +16054,6 @@ void DrawPlayer_Intermediate(void) {
   // $05 - horizontal position
   // $07 - number of rows to draw
   // these also used in IntermediatePlayerData
-}
-
-void RenderPlayerSub(void) {
   ram[0x7] = a; // store number of rows of sprites to draw
   lda_abs(Player_Rel_XPos);
   ram[Player_Pos_ForScroll] = a; // store player's relative horizontal position
@@ -16184,9 +16087,8 @@ void ProcessPlayerAction(void) {
   if (zero_flag) { goto ActionClimbing; } // if climbing, branch here
   cmp_imm_fz(0x2);
   if (zero_flag) { goto ActionFalling; } // if falling, branch here
-  cmp_imm_fz(0x1);
   // Original branch: if not jumping, branch here
-  if (zero_flag) {
+  if (a == 0x1) {
     lda_abs_fz(SwimmingFlag);
     if (!zero_flag) { goto ActionSwimming; } // if swimming flag set, branch elsewhere
     ldy_imm(0x6); // load offset for crouching
@@ -16313,9 +16215,9 @@ void HandleChangeSize(void) {
   // Original branch: fourth frame, otherwise branch ahead
   if (zero_flag) {
     iny(); // increment frame control
-    cpy_imm_fc(0xa); // check for preset upper extent
+    // check for preset upper extent
     // Original branch: if not there yet, skip ahead to use
-    if (carry_flag) {
+    if (y >= 0xa) {
       ldy_imm(0x0); // otherwise initialize both grow/shrink flag
       ram[PlayerChangeSizeFlag] = y; // and animation frame control
     }
@@ -16354,9 +16256,9 @@ void HandleChangeSize(void) {
 void ChkForPlayerAttrib(void) {
   ldy_abs(Player_SprDataOffset); // get sprite data offset
   lda_zp(GameEngineSubroutine);
-  cmp_imm_fz(0xb); // if executing specific game engine routine,
+  // if executing specific game engine routine,
   // Original branch: branch to change third and fourth row OAM attributes
-  if (!zero_flag) {
+  if (a != 0xb) {
     lda_abs(PlayerGfxOffset); // get graphics table offset
     cmp_imm_fz(0x50);
     if (zero_flag) { goto C_S_IGAtt; } // if crouch offset, either standing offset,
@@ -16364,9 +16266,8 @@ void ChkForPlayerAttrib(void) {
     if (zero_flag) { goto C_S_IGAtt; } // go ahead and execute code to change 
     cmp_imm_fz(0xc0); // fourth row OAM attributes only
     if (zero_flag) { goto C_S_IGAtt; }
-    cmp_imm_fz(0xc8);
     // if none of these, branch to leave
-    if (!zero_flag) {
+    if (a != 0xc8) {
       return;
     }
   }
@@ -16389,11 +16290,11 @@ C_S_IGAtt:
   ram[(Sprite_Attributes + 28) + y] = a; // sprite in the fourth row
   // ExPlyrAt:
   return; // leave
-  // -------------------------------------------------------------------------------------
-  // $00 - used in adding to get proper offset
 }
 
 void RelativePlayerPosition(void) {
+  // -------------------------------------------------------------------------------------
+  // $00 - used in adding to get proper offset
   ldx_imm(0x0); // set offsets for relative cooordinates
   ldy_imm(0x0); // routine to correspond to player object
   // get the coordinates
@@ -16475,11 +16376,11 @@ void GetObjRelativePosition(void) {
   sbc_abs_fc(ScreenLeft_X_Pos);
   ram[SprObject_Rel_XPos + y] = a; // store result here
   return;
-  // -------------------------------------------------------------------------------------
-  // $00 - used as temp variable to hold offscreen bits
 }
 
 void GetPlayerOffscreenBits(void) {
+  // -------------------------------------------------------------------------------------
+  // $00 - used as temp variable to hold offscreen bits
   ldx_imm(0x0); // set offsets for player-specific variables
   ldy_imm(0x0); // and get offscreen information about player
   // GetOffScreenBitsSet:
@@ -16637,11 +16538,6 @@ void RunOffscrBitsSubs(void) {
   lsr_acc();
   ram[0x0] = a; // store here
   // --------------------------------
-  // (these apply to these three subsections)
-  // $04 - used to store proper offset
-  // $05 - used as adder in DividePDiff
-  // $06 - used to store preset value used to compare to pixel difference in $07
-  // $07 - used to store difference between coordinates of object and screen edges
   // GetYOffscreenBits:
   ram[0x4] = x; // save position in buffer to here
   ldy_imm(0x1); // start with top of screen
@@ -16669,19 +16565,23 @@ void RunOffscrBitsSubs(void) {
 YLdBData:
     lda_absx(YOffscreenBitsData); // get offscreen data bits using offset
     ldx_zp(0x4); // reobtain position in buffer
-    cmp_imm_fz(0x0);
     // if bits not zero, branch to leave
-    if (!zero_flag) {
+    if (a != 0x0) {
       return;
     }
     dey_fn(); // otherwise, do bottom of the screen now
   } while (!neg_flag);
   // ExYOfsBS:
   return;
-  // --------------------------------
 }
 
 void GetXOffscreenBits(void) {
+  // --------------------------------
+  // (these apply to these three subsections)
+  // $04 - used to store proper offset
+  // $05 - used as adder in DividePDiff
+  // $06 - used to store preset value used to compare to pixel difference in $07
+  // $07 - used to store difference between coordinates of object and screen edges
   ram[0x4] = x; // save position in buffer to here
   ldy_imm(0x1); // start with right side of screen
   do {
@@ -16708,18 +16608,18 @@ void GetXOffscreenBits(void) {
 XLdBData:
     lda_absx(XOffscreenBitsData); // get bits here
     ldx_zp(0x4); // reobtain position in buffer
-    cmp_imm_fz(0x0); // if bits not zero, branch to leave
-    if (!zero_flag) {
+    // if bits not zero, branch to leave
+    if (a != 0x0) {
       return;
     }
     dey_fn(); // otherwise, do left side of screen now
   } while (!neg_flag); // branch if not already done with left side
   // ExXOfsBS:
   return;
-  // --------------------------------
 }
 
 void DividePDiff(void) {
+  // --------------------------------
   ram[0x5] = a; // store current value in A here
   lda_zp(0x7); // get pixel difference
   cmp_zp_fc(0x6); // compare to preset value
@@ -16740,15 +16640,12 @@ void DividePDiff(void) {
   tax(); // use as offset
   // ExDivPD:
   return; // leave
-  // -------------------------------------------------------------------------------------
-  // $00-$01 - tile numbers
-  // $02 - Y coordinate
-  // $03 - flip control
-  // $04 - sprite attributes
-  // $05 - X coordinate
 }
 
 void SoundEngine(void) {
+  // -------------------------------------------------------------------------------------
+  // unused space
+  // -------------------------------------------------------------------------------------
   lda_abs_fz(OperMode); // are we in title screen mode?
   if (zero_flag) {
     apu_write(SND_MASTERCTRL_REG, a); // if so, disable sound and leave
@@ -16809,8 +16706,8 @@ DecPauC:
   lda_imm(0x0); // disable sound if in pause mode and
   apu_write(SND_MASTERCTRL_REG, a); // not currently playing the pause sfx
   lda_abs(PauseSoundBuffer); // if no longer playing pause sfx, check to see
-  cmp_imm_fz(0x2); // if we need to be playing sound again
-  if (zero_flag) {
+  // if we need to be playing sound again
+  if (a == 0x2) {
     lda_imm(0x0); // clear pause mode to allow game sounds again
     ram[PauseModeFlag] = a;
   }
@@ -16852,10 +16749,10 @@ SkipSoundSubroutines:
 StrWave:
   apu_write((SND_DELTA_REG + 1), y); // store into DMC load register (??)
   return; // we are done here
-  // --------------------------------
 }
 
 void Dump_Squ1_Regs(void) {
+  // --------------------------------
   apu_write((SND_SQUARE1_REG + 1), y); // dump the contents of X and Y into square 1's control regs
   apu_write(SND_SQUARE1_REG, x);
   return;
@@ -16938,11 +16835,11 @@ Dump_Freq_Regs:
 SetFreq_Tri:
   ldx_imm(0x8); // set frequency reg offset for triangle sound channel
   goto Dump_Freq_Regs; // unconditional branch
-  // --------------------------------
 }
 
 void Square1SfxHandler(void) {
   goto Square1SfxHandler;
+  // --------------------------------
   
 PlayFlagpoleSlide:
   lda_imm(0x40); // store length of flagpole sound
@@ -17129,7 +17026,6 @@ ContinuePipeDownInj:
   
 NoPDwnL:
   goto DecrementSfx1Length;
-  // --------------------------------
 }
 
 void StopSquare1Sfx(void) {
@@ -17154,6 +17050,7 @@ void StopSquare2Sfx(void) {
 
 void Square2SfxHandler(void) {
   goto Square2SfxHandler;
+  // --------------------------------
   
 PlayCoinGrab:
   lda_imm(0x35); // load length of coin grab sound
@@ -17351,11 +17248,11 @@ ContinueGrowItems:
   }
   // StopGrowItems:
   goto EmptySfx2Buffer; // branch to stop playing sounds
-  // --------------------------------
 }
 
 void NoiseSfxHandler(void) {
   goto NoiseSfxHandler;
+  // --------------------------------
   
 PlayBrickShatter:
   lda_imm(0x20); // load length of brick shatter sound
@@ -17451,8 +17348,8 @@ HandleAreaMusicLoopB:
   ldy_imm(0x0); // clear event music buffer
   ram[EventMusicBuffer] = y;
   ram[AreaMusicBuffer] = a; // copy area music queue contents to buffer
-  cmp_imm_fz(0x1); // is it ground level music?
-  if (zero_flag) {
+  // is it ground level music?
+  if (a == 0x1) {
     inc_abs(GroundMusicHeaderOfs); // increment but only if playing ground level music
     ldy_abs(GroundMusicHeaderOfs); // is it time to loopback ground level music?
     cpy_imm_fcz(0x32);
@@ -17761,6 +17658,7 @@ PlayBeat:
 
 void MusicHandler(void) {
   goto MusicHandler;
+  // --------------------------------
   
 ContinueMusic:
   goto HandleSquare2Music; // if we have music, start with square 2 channel
@@ -17812,8 +17710,8 @@ HandleAreaMusicLoopB:
   ldy_imm(0x0); // clear event music buffer
   ram[EventMusicBuffer] = y;
   ram[AreaMusicBuffer] = a; // copy area music queue contents to buffer
-  cmp_imm_fz(0x1); // is it ground level music?
-  if (zero_flag) {
+  // is it ground level music?
+  if (a == 0x1) {
     inc_abs(GroundMusicHeaderOfs); // increment but only if playing ground level music
     ldy_abs(GroundMusicHeaderOfs); // is it time to loopback ground level music?
     cpy_imm_fcz(0x32);
@@ -18185,3 +18083,5 @@ void LoadEnvelopeData(void) {
   // music header offsets
 }
 
+void cpu_reset_entry(void) { Start(); }
+void cpu_nmi_entry(void) { NonMaskableInterrupt(); }

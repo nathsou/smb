@@ -52,7 +52,7 @@ pub(all) enum AsmItem {
   Inst(id~: Int, op~: @parse.OpCode, mode~: AsmAddressingMode, comment~: String?)
   JumpEngine(jump_table~: Array[String], site~: Int)
   DoWhile(cond~: @parse.OpCode, body~: Array[AsmItem], comment~: String?)
-  If(cond~: @parse.OpCode, then~: Array[AsmItem], otherwise~: Array[AsmItem]?, comment~: String?)
+  If(comparison~: (String, TypedExpr)?, cond~: @parse.OpCode, then~: Array[AsmItem], otherwise~: Array[AsmItem]?, comment~: String?)
   Comment(String)
 } derive (Debug)
 
