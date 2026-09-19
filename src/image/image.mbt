@@ -182,7 +182,10 @@ fn math_min(a: Int, b: Int) -> Int { if a < b { a } else { b } }
 fn math_max(a: Int, b: Int) -> Int { if a > b { a } else { b } }
 
 pub fn Image::read(self: Image, address: Int) -> Int raise ImageError {
-  self.bytes.get(address - self.origin).unwrap_or_error(InvalidImage("Address outside image: \{address}"))
+  let index = if self.bytes.length() == 16384 && self.origin >= 0x8000 && address >= 0x8000 {
+    (address - 0x8000) & 0x3fff
+  } else { address - self.origin }
+  self.bytes.get(index).unwrap_or_error(InvalidImage("Address outside image: \{address}"))
 }
 
 pub fn Image::word(self: Image, address: Int) -> Int raise ImageError {

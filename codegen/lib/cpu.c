@@ -223,5 +223,14 @@ inline uint8_t indirect_y_val(uint8_t addr) {
 }
 
 inline void next_frame(void) {
-    NonMaskableInterrupt();
+    // The frame adapter delivers NMI while the foreground is at a proven idle
+    // yield. Hardware saves PC/P, not A/X/Y. Keep those stack bytes observable.
+    uint16_t return_pc = cpu_resume_pc;
+    cpu_call_begin(return_pc);
+    php();
+    ram[0x100 + (uint8_t)(sp + 1)] &= (uint8_t)~0x10; // hardware clears B
+    interrupt_disabled = true;
+    cpu_nmi_entry();
+    plp();
+    cpu_call_end(return_pc);
 }

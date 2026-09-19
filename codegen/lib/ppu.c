@@ -326,7 +326,13 @@ void draw_background_tile(
 }
 
 inline bool show_status_bar() {
+    // Optional SMB frame-renderer adapter. The compiler and generic bus do
+    // not depend on this symbol; cycle/scanline rendering is a separate task.
+#ifdef Sprite0HitDetectFlag
     return ram[Sprite0HitDetectFlag];
+#else
+    return false;
+#endif
 }
 
 void render_status_bar(size_t bank_offset) {

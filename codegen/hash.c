@@ -63,7 +63,7 @@ int main(void) {
         return 1;
     }
 
-    Start();
+    cpu_reset_entry();
 
     uint32_t cumulative_hash = HASH_OFFSET_BASIS;
 

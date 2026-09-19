@@ -40,6 +40,9 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
         _ => ()
       }
       if next_depth < 0 || next_depth > 253 { raise InvalidImage("Return-token access or excessive stack depth at \{pc} from \{address_name(self.image, entry)}") }
+      if inst.op == RTI && (entry == reset || !self.roots.contains(address_name(self.image, entry))) {
+        raise InvalidImage("Interrupt return in an ordinary callable region at \{pc}")
+      }
       if inst.op == RTS || inst.op == RTI {
         if depth != 0 { raise InvalidImage("Unbalanced return at \{pc}") }
         continue

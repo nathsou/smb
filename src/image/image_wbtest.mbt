@@ -76,3 +76,31 @@ test "unrecognized return-token manipulation is rejected" {
   let rejected = try { p.validate_stacks(); false } catch { _ => true }
   assert_eq(rejected, true)
 }
+
+test "a byte directive can contain several reachable instructions" {
+  let p = discover(fixture(".org $8000\nBoot:\n jsr Raw\n rts\nRaw:\n.db $a9, $02, $85, $01, $60\nNmi:\n rti\n.org $fffa\n.dw Nmi, Boot, Nmi\n"))
+  assert_eq(p.instructions[0x8004].op, @parse.LDA)
+  assert_eq(p.instructions[0x8006].op, @parse.STA)
+  assert_eq(p.instructions[0x8008].op, @parse.RTS)
+  p.validate_stacks()
+}
+
+test "immutable indirect jumps preserve the 6502 page-wrap behavior" {
+  let p = discover(fixture(".org $8000\n.db $82\nBoot:\n jmp ($80ff)\n.org $80ff\n.db $20\n.org $8100\n.db $99\n.org $8220\nTarget:\n rts\nNmi:\n rti\n.org $fffa\n.dw Nmi, Boot, Nmi\n"))
+  assert_eq(p.instructions.contains(0x8220), true)
+  p.validate_stacks()
+}
+
+test "ordinary callees cannot execute an interrupt return" {
+  let p = discover(fixture(".org $8000\nBoot:\n jsr Broken\n rts\nBroken:\n rti\nNmi:\n rti\n.org $fffa\n.dw Nmi, Boot, Nmi\n"))
+  let rejected = try { p.validate_stacks(); false } catch { _ => true }
+  assert_eq(rejected, true)
+}
+
+test "unknown indirect destinations fail closed" {
+  let rejected = try {
+    let _ = discover(fixture(".org $8000\nBoot:\n jmp ($20)\nNmi:\n rti\n.org $fffa\n.dw Nmi, Boot, Nmi\n"))
+    false
+  } catch { _ => true }
+  assert_eq(rejected, true)
+}

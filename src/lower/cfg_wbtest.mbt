@@ -74,3 +74,10 @@ test "BIT overflow stays live across CMP for BVS" {
   let low = lower_fixture("Root__sub:\n bit $20\n cmp #$01\n bvs Done\n lda #$01\nDone:\n rts\n")
   assert_eq(low.flag_live_after(0).overflow, true)
 }
+
+test "non-escaping comparison flags become a direct C predicate" {
+  let low = lower_fixture("Root__sub:\n lda $00\n cmp #$10\n bcc Small\n inc $01\nSmall:\n lda #$00\n cmp #$00\n rts\n")
+  assert_eq(low.flat_subroutines[0].items.iter().any(fn(item) {
+    item is If(comparison=Some(("a", _)), ..)
+  }), true)
+}

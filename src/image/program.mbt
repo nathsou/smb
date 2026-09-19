@@ -136,6 +136,10 @@ pub fn source_mode(image: Image, inst: Instruction) -> @parse.SourceAddressingMo
 }
 
 pub fn discover(image: Image) -> Program raise ImageError {
+  if !((image.bytes.length() == 32768 && image.origin == 0x8000) ||
+       (image.bytes.length() == 16384 && (image.origin == 0x8000 || image.origin == 0xc000))) {
+    raise InvalidImage("NROM requires a 16 or 32 KiB PRG image in a cartridge window")
+  }
   let words: Map[Int, Int] = Map([])
   for i, item in image.source {
     if item is Directive(name="dw", args~) {
@@ -153,7 +157,7 @@ pub fn discover(image: Image) -> Program raise ImageError {
   for vector in [0xfffc, 0xfffa] {
     let address = canonical(vector)
     if address >= image.origin && address + 1 < image.origin + image.bytes.length() {
-      let target = canonical(image.word(address))
+      let target = image.word(address)
       // Reset sets I. IRQ is discovered below if reachable code can clear it.
       if !roots.contains(target) { roots.push(target) }
     }
@@ -166,7 +170,10 @@ pub fn discover(image: Image) -> Program raise ImageError {
   let work = roots.map(fn(pc) { (pc, Facts::unknown()) })
   while !work.is_empty() {
     let (address, incoming) = work.pop().unwrap()
-    let pc = canonical(address)
+    let pc = address
+    if pc < image.origin || pc >= image.origin + image.bytes.length() {
+      raise InvalidImage("Execution outside the source address window at \{pc}; mirrored code needs an explicit source view")
+    }
     let f = match facts.get(pc) {
       Some(previous) => {
         let joined = previous.join(incoming)
@@ -179,7 +186,7 @@ pub fn discover(image: Image) -> Program raise ImageError {
     let inst = decode(image, pc)
     instructions[pc] = inst
     if inst.op == CLI || inst.op == PLP || inst.op == BRK {
-      let irq = canonical(image.word(canonical(0xfffe)))
+      let irq = image.word(canonical(0xfffe))
       if !roots.contains(irq) { roots.push(irq); work.push((irq, Facts::unknown())) }
     }
     let after = transfer(inst, f)
@@ -214,16 +221,41 @@ pub fn discover(image: Image) -> Program raise ImageError {
       _ => work.push((inst.next, after))
     }
   }
+  let pcs = instructions.keys().to_array()
+  pcs.sort()
+  let following: Map[Int, Int] = Map([])
   let needed: Set[Int] = Set(roots)
-  for inst in instructions.values() {
+  for i, pc in pcs {
+    if i + 1 < pcs.length() { following[pc] = pcs[i + 1] }
+    let inst = instructions[pc]
     if inst.mode == "rel" { needed.add(branch_target(inst)) }
-    if inst.op == JMP || inst.op == JSR { needed.add(inst.arg) }
-
-  }
-  for i, item in image.source {
-    if item is Directive(name="db", ..) && instructions.contains(image.addresses[i]) {
-      needed.add(instructions[image.addresses[i]].next)
+    if inst.op == JMP || inst.op == JSR {
+      if inst.mode == "ind" {
+        let hi = (inst.arg & 0xff00) | ((inst.arg + 1) & 255)
+        needed.add(image.read(inst.arg) | (image.read(hi) << 8))
+      } else { needed.add(inst.arg) }
     }
+    if following.get(pc) != Some(inst.next) { needed.add(inst.next) }
+  }
+  // Assign decoded addresses to byte-producing source spans, allowing several
+  // executable entries inside one .db or one source instruction's encoding.
+  let owners: Map[Int, Int] = Map([])
+  let original_instructions: Set[Int] = Set([])
+  for i, item in image.source {
+    let pc = image.addresses[i]
+    let size = match item {
+      Inst(_) => { original_instructions.add(pc); decode(image, pc).next - pc }
+      Directive(name="db", args~) => args.length()
+      Directive(name="dw", args~) => args.length() * 2
+      _ => 0
+    }
+    for j in 0..<size { owners[pc + j] = i }
+  }
+  let spans: Map[Int, Array[Int]] = Map([])
+  for pc in pcs {
+    let owner = owners.get(pc).unwrap_or_error(InvalidImage("Execution in an origin gap at \{pc}"))
+    if !spans.contains(owner) { spans[owner] = [] }
+    spans[owner].push(pc)
   }
   let source = []
   let addresses = []
@@ -231,29 +263,44 @@ pub fn discover(image: Image) -> Program raise ImageError {
     source.push(item)
     addresses.push(pc)
   }
-  // Source text remains intact. Only the compiler view substitutes decoded
-  // instructions for executable .db bytes and inserts explicit overlap edges.
+  for pc in needed {
+    if instructions.contains(pc) {
+      let name = address_name(image, pc)
+      if !image.symbols.contains(name) { image.symbols[name] = pc }
+    }
+  }
   for i, item in image.source {
-    let pc = image.addresses[i]
-    match item {
-      Inst(_) => {
-        if instructions.contains(pc) {
-          if needed.contains(pc) && address_name(image, pc).has_prefix("loc_") { append(Label(address_name(image, pc)), pc) }
-          let inst = instructions[pc]
-          if inst.mode == "rel" && condition(inst.op, facts[pc]) == Some(true) {
-            append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(address_name(image, branch_target(inst))))), pc)
-          } else if inst.mode != "rel" || condition(inst.op, facts[pc]) != Some(false) {
-            append(item, pc)
-          }
+    let source_pc = image.addresses[i]
+    match spans.get(i) {
+      Some(decoded) => for pc in decoded {
+        let inst = instructions[pc]
+        let name = address_name(image, pc)
+        if name.has_prefix("loc_") && needed.contains(pc) { append(Label(name), pc) }
+        let original = if source_pc == pc && item is Inst(_) && inst.op != JMP && inst.op != JSR && inst.mode != "rel" { item }
+          else { @parse.SourceItem::Inst(op=inst.op, mode=source_mode(image, inst)) }
+        let branch = if inst.mode == "rel" { condition(inst.op, facts[pc]) } else { None }
+        if branch == Some(true) {
+          append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(address_name(image, branch_target(inst))))), pc)
+        } else if inst.op == JMP && inst.mode == "ind" {
+          let hi = (inst.arg & 0xff00) | ((inst.arg + 1) & 255)
+          let target = image.read(inst.arg) | (image.read(hi) << 8)
+          append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(address_name(image, target)))), pc)
+        } else if branch != Some(false) {
+          append(original, pc)
+        }
+        // Address overlap can put a different instruction stream next in
+        // source order. Preserve the actual fallthrough explicitly.
+        let falls = inst.op != JMP && inst.op != RTS && inst.op != RTI &&
+          inst.op != BRK && !dispatches.contains(pc) && branch != Some(true)
+        if falls && following.get(pc) != Some(inst.next) {
+          append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(address_name(image, inst.next)))), pc)
         }
       }
-      Directive(name="db", ..) if instructions.contains(pc) => {
-        let inst = instructions[pc]
-        append(Label(address_name(image, pc)), pc)
-        append(Inst(op=inst.op, mode=source_mode(image, inst)), pc)
-        append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(address_name(image, inst.next)))), pc)
+      None => match item {
+        Inst(_) => ()
+        Label(_) if original_instructions.contains(source_pc) && !instructions.contains(source_pc) => ()
+        _ => append(item, source_pc)
       }
-      _ => append(item, pc)
     }
   }
   { image, instructions, dispatches, roots: roots.map(fn(pc) { address_name(image, pc) }), facts, idle, source, addresses }

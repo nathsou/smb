@@ -1,1 +1,10 @@
-{"is-main":true,"import":["nathsou/smb/image","nathsou/smb/parse","moonbitlang/x/fs","moonbitlang/core/debug"]}
+{
+  "is-main": true,
+  "import": [
+    "nathsou/smb/image",
+    "nathsou/smb/parse",
+    "moonbitlang/x/fs",
+    "moonbitlang/core/debug",
+    "moonbitlang/core/env"
+  ]
+}

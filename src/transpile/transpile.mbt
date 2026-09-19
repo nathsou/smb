@@ -85,6 +85,7 @@ fn show_const(base~: @parse.ConstantBase, value~: Int) -> String {
 fn show_expr(expr: @lower.TypedExpr) -> String {
   match expr {
     Const(base~, value~, size=_, ty=_) => show_const(base~, value~)
+    Ident(name~, ty=LabelTy) => "ROM_ADDR_" + name
     Ident(name~, ty=_) => name
     Unary(op~, expr~, ty=_) => {
       let macro_ = match op {
@@ -134,6 +135,11 @@ fn Emitter::emit_data_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#define PRG_IMAGE_SIZE \{size}")
   self.emit("")
 
+  if low.program is Some(p) {
+    let symbols = p.image.symbols.keys().to_array()
+    symbols.sort()
+    for name in symbols { self.emit("#define ROM_ADDR_\{name} 0x\{hex(p.image.symbols[name])}") }
+  }
   for label, table in low.tables_by_label {
     let address = match low.program {
       Some(p) => p.image.symbols[label]
@@ -155,6 +161,20 @@ fn Emitter::emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
 
   if low.program is Some(p) {
     let labels: Map[Int, Array[String]] = Map([])
+    let notes: Map[Int, Array[String]] = Map([])
+    let data_addresses: Set[Int] = Set([])
+    for i, item in p.image.source {
+      if item is Directive(name="db" | "dw", ..) { data_addresses.add(p.image.addresses[i]) }
+    }
+    for i, item in p.image.source {
+      if item is Comment(comment~, is_inline~) {
+        let address = if is_inline && i > 0 { p.image.addresses[i - 1] } else { p.image.addresses[i] }
+        if data_addresses.contains(address) {
+          if !notes.contains(address) { notes[address] = [] }
+          notes[address].push(comment)
+        }
+      }
+    }
     for i, item in p.image.source {
       if item is Label(name) {
         let pc = p.image.addresses[i]
@@ -166,11 +186,14 @@ fn Emitter::emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
     while offset < p.image.bytes.length() {
       let pc = p.image.origin + offset
       if labels.get(pc) is Some(names) { self.emit("// \{names.join(", ")}") }
+      if notes.get(pc) is Some(comments) {
+        for comment in comments { self.emit("// " + comment) }
+      }
       let bytes = []
       for _ in 0..<16 {
         bytes.push("0x" + hex(p.image.bytes[offset]).pad_start(2, '0'))
         offset += 1
-        if offset == p.image.bytes.length() || labels.contains(p.image.origin + offset) { break }
+        if offset == p.image.bytes.length() || labels.contains(p.image.origin + offset) || notes.contains(p.image.origin + offset) { break }
       }
       self.emit(bytes.join(", ") + ",")
     }
@@ -200,6 +223,8 @@ fn Emitter::emit_code_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"apu.h\"")
   self.emit("")
 
+  self.emit("void cpu_reset_entry(void);")
+  self.emit("void cpu_nmi_entry(void);")
   for sub in low.subroutines {
     self.emit("void \{rename_label(sub.name)}(void);")
   }
@@ -400,6 +425,7 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
       }
       Inst(id~, op~, mode~, comment~) => {
         let stmt = match (op, mode) {
+          (PLP, _) => "plp();"
           (TXS, _) => "sp = x;"
           (RTI, _) => "return; // <rti>"
           (CLC, _) => {
@@ -446,7 +472,7 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
                 let cond = show_cond_opcode(op)
 
                 let target = match mode {
-                  Relative(expr) => "\{show_expr(expr)}"
+                  Relative(Ident(name~, ..)) => name
                   _ => abort("unreachable")
                 }
 
@@ -455,7 +481,10 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
               (JMP, _) => {
                 if low.program is Some(p) && p.idle.contains(id) {
                   "cpu_yield(0x\{hex(id)}); return;"
-                } else { self.gen_jump(args, low) }
+                } else {
+                  let target = match mode { Absolute(Ident(name~, ..)) => name; _ => abort("Unresolved jump") }
+                  self.gen_jump(target, low)
+                }
               }
               (JSR, _) => {
                 let target = match mode {
@@ -516,8 +545,14 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
         let comment = match comment { Some(text) => " // " + text; None => "" }
         self.emit("} while (\{show_cond_opcode(cond)});\{comment}")
       }
-      If(cond~, then~, otherwise~, comment~) => {
-        let cond = show_cond_opcode(cond)
+      If(comparison~, cond~, then~, otherwise~, comment~) => {
+        let cond = match comparison {
+          Some((register, operand)) => {
+            let relation = match cond { BEQ => "=="; BNE => "!="; BCC => "<"; BCS => ">="; _ => abort("Invalid comparison") }
+            "\{register} \{relation} \{show_expr(operand)}"
+          }
+          None => show_cond_opcode(cond)
+        }
 
         match comment {
           Some(comment) => {
@@ -629,6 +664,12 @@ fn Emitter::emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
 
   for sub in low.flat_subroutines {
     self.emit_flat_subroutine(sub, low)
+  }
+  if low.program is Some(p) {
+    let base = if p.image.bytes.length() == 16384 { p.image.origin + 0x3ffa } else { 0xfffa }
+    let nmi = try @image.address_name(p.image, p.image.word(base)) catch { _ => abort("Missing NMI vector") }
+    self.emit("void cpu_reset_entry(void) { \{p.roots[0]}(); }")
+    self.emit("void cpu_nmi_entry(void) { \{nmi}(); }")
   }
 }
 
