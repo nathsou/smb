@@ -3,17 +3,27 @@
 // checked. Nonstandard return manipulation is diagnosed, not silently mapped
 // to a C return. The inline-dispatch proof is its own explicit exception.
 pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
-  let entries: Set[Int] = Set([])
-  let reset = self.image.symbols[self.roots[0]]
-  for root in self.roots { entries.add(self.image.symbols[root]) }
+  // The same address can be reached under more than one machine contract.
+  // Keep those contexts separate: being an interrupt vector must not make an
+  // ordinary JSR to that address eligible to return with RTI.
+  let entries: Array[(Int, Int)] = []
+  fn add_entry(entry: Int, kind: Int) {
+    if !entries.contains((entry, kind)) { entries.push((entry, kind)) }
+  }
+  for i, root in self.roots {
+    add_entry(self.image.symbols[root], if i == 0 { 0 } else { 1 })
+  }
   for inst in self.instructions.values() {
     if inst.op == JSR {
       if self.dispatches.get(inst.pc) is Some(dispatch) {
-        for target in dispatch.targets { entries.add(target) }
-      } else { entries.add(inst.arg) }
+        for target in dispatch.targets { add_entry(target, 2) }
+      } else { add_entry(inst.arg, 2) }
     }
   }
-  for entry in entries {
+  for entry_and_kind in entries {
+    let (entry, kind) = entry_and_kind
+    let is_reset = kind == 0
+    let is_interrupt = kind == 1
     let states: Map[(Int, Int), Facts] = Map([])
     let work = [(entry, 0, self.facts[entry])]
     while !work.is_empty() {
@@ -34,21 +44,20 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
         PHA | PHP => next_depth += 1
         PLA | PLP => next_depth -= 1
         TXS => {
-          if entry != reset { raise InvalidImage("Stack-pointer replacement in a called routine at \{pc}") }
+          if !is_reset { raise InvalidImage("Stack-pointer replacement outside reset at \{pc}") }
           next_depth = 0
         }
         _ => ()
       }
       if next_depth < 0 || next_depth > 253 { raise InvalidImage("Return-token access or excessive stack depth at \{pc} from \{address_name(self.image, entry)}") }
-      if inst.op == RTI && (entry == reset || !self.roots.contains(address_name(self.image, entry))) {
-        raise InvalidImage("Interrupt return in an ordinary callable region at \{pc}")
-      }
+      if inst.op == RTI && !is_interrupt { raise InvalidImage("Interrupt return outside an interrupt entry at \{pc}") }
+      if inst.op == RTS && is_interrupt { raise InvalidImage("Subroutine return from an interrupt entry at \{pc}") }
       if inst.op == RTS || inst.op == RTI {
         if depth != 0 { raise InvalidImage("Unbalanced return at \{pc}") }
         continue
       }
       if self.idle.contains(pc) {
-        if entry != reset { raise InvalidImage("A called idle loop requires a resumable continuation at \{pc}") }
+        if !is_reset { raise InvalidImage("An idle loop outside reset requires a resumable continuation at \{pc}") }
         continue
       }
       if self.dispatches.get(pc) is Some(dispatch) {

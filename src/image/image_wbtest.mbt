@@ -97,6 +97,12 @@ test "ordinary callees cannot execute an interrupt return" {
   assert_eq(rejected, true)
 }
 
+test "an interrupt vector also reached by JSR keeps both entry contracts" {
+  let p = discover(fixture(".org $8000\nBoot:\n jsr Tick\nLoop:\n jmp Loop\nTick:\n inc $10\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"))
+  let rejected = try { p.validate_stacks(); false } catch { _ => true }
+  assert_eq(rejected, true)
+}
+
 test "unknown indirect destinations fail closed" {
   let rejected = try {
     let _ = discover(fixture(".org $8000\nBoot:\n jmp ($20)\nNmi:\n rti\n.org $fffa\n.dw Nmi, Boot, Nmi\n"))

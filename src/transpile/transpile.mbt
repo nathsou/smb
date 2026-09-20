@@ -532,7 +532,7 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
             emitted.add(address)
           }
         }
-        self.emit("default: cpu_unresolved_jump(read_word(0x\{hex(dispatch.pointer)})); return;")
+        self.emit("default: cpu_unresolved_jump(read_indirect_word(0x\{hex(dispatch.pointer)})); return;")
         self.indentation -= 1
         self.emit("}")
       }
@@ -656,7 +656,7 @@ fn Emitter::emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
         }
         self.emit_item(@lower.AsmItem::Inst(id=-1, op=inst.op, mode~, comment~), low)
       }
-      self.emit("return read_word(0x\{hex(dispatch.pointer)});")
+      self.emit("return read_indirect_word(0x\{hex(dispatch.pointer)});")
       self.indentation -= 1
       self.emit("}\n")
     }

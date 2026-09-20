@@ -15,7 +15,7 @@ static uint16_t JumpEngine(uint16_t return_address) {
   iny_fzn(); // it will return to the execution before the sub
   lda_indy_fzn(0x4); // that called this routine
   ram[0x7] = a;
-  return read_word(0x6);
+  return read_indirect_word(0x6);
 }
 
 void Start(void) {
@@ -360,7 +360,7 @@ void OperModeExecutionTree(void) {
     case 0xaedc: GameMode(); return;
     case 0x838b: VictoryMode(); return;
     case 0x9218: GameOverMode(); return;
-    default: cpu_unresolved_jump(read_word(0x6)); return;
+    default: cpu_unresolved_jump(read_indirect_word(0x6)); return;
   }
 }
 
@@ -402,7 +402,7 @@ void TitleScreenMode(void) {
     case 0x8567: ScreenRoutines(); return;
     case 0x9061: PrimaryGameSetup(); return;
     case 0x8245: GameMenuRoutine(); return;
-    default: cpu_unresolved_jump(read_word(0x6)); return;
+    default: cpu_unresolved_jump(read_indirect_word(0x6)); return;
   }
 }
 
@@ -606,7 +606,7 @@ void VictoryModeSubroutines(void) {
     case 0x83bd: PlayerVictoryWalk(); return;
     case 0x83f6: PrintVictoryMessages(); return;
     case 0x8461: PlayerEndWorld(); return;
-    default: cpu_unresolved_jump(read_word(0x6)); return;
+    default: cpu_unresolved_jump(read_indirect_word(0x6)); return;
   }
 }
 
@@ -910,7 +910,7 @@ void ScreenRoutines(void) {
     case 0x86ff: DrawTitleScreen(); return;
     case 0x8732: ClearBuffersDrawIcon(); return;
     case 0x8749: WriteTopScore(); return;
-    default: cpu_unresolved_jump(read_word(0x6)); return;
+    default: cpu_unresolved_jump(read_indirect_word(0x6)); return;
   }
 }
 
@@ -2445,7 +2445,7 @@ void GameOverMode(void) {
     case 0x9224: SetupGameOver(); return;
     case 0x8567: ScreenRoutines(); return;
     case 0x9237: RunGameOver(); return;
-    default: cpu_unresolved_jump(read_word(0x6)); return;
+    default: cpu_unresolved_jump(read_indirect_word(0x6)); return;
   }
 }
 
@@ -2579,7 +2579,7 @@ void AreaParserTasks(void) {
     case 0x92db: IncrementColumnPos(); return;
     case 0x88ae: RenderAreaGraphics(); return;
     case 0x93fc: AreaParserCore(); return;
-    default: cpu_unresolved_jump(read_word(0x6)); return;
+    default: cpu_unresolved_jump(read_indirect_word(0x6)); return;
   }
 }
 
@@ -3074,7 +3074,7 @@ StrAObj:
     case 0x972b: AreaFrenzy(); return;
     case 0x9645: LoopCmdE(); return;
     case 0x96c5: AlterAreaAttributes(); return;
-    default: cpu_unresolved_jump(read_word(0x6)); return;
+    default: cpu_unresolved_jump(read_indirect_word(0x6)); return;
   }
 }
 
@@ -3191,7 +3191,7 @@ void AreaStyleObject(void) {
     case 0x974c: TreeLedge(); return;
     case 0x9778: MushroomLedge(); return;
     case 0x9a69: BulletBillCannon(); return;
-    default: cpu_unresolved_jump(read_word(0x6)); return;
+    default: cpu_unresolved_jump(read_indirect_word(0x6)); return;
   }
 }
 
@@ -4194,7 +4194,7 @@ void GameMode(void) {
     case 0x8567: ScreenRoutines(); return;
     case 0x9071: SecondaryGameSetup(); return;
     case 0xaeea: GameCoreRoutine(); return;
-    default: cpu_unresolved_jump(read_word(0x6)); return;
+    default: cpu_unresolved_jump(read_indirect_word(0x6)); return;
   }
 }
 
@@ -4461,7 +4461,7 @@ void GameRoutines(void) {
     case 0xb245: PlayerInjuryBlink(); return;
     case 0xb269: PlayerDeath(); return;
     case 0xb27d: PlayerFireFlower(); return;
-    default: cpu_unresolved_jump(read_word(0x6)); return;
+    default: cpu_unresolved_jump(read_indirect_word(0x6)); return;
   }
 }
 
@@ -5058,7 +5058,7 @@ ProcMove:
     case 0xb376: JumpSwimSub(); return;
     case 0xb36d: FallingSub(); return;
     case 0xb3cf: ClimbingSub(); return;
-    default: cpu_unresolved_jump(read_word(0x6)); return;
+    default: cpu_unresolved_jump(read_indirect_word(0x6)); return;
   }
 }
 
@@ -6880,7 +6880,7 @@ void BumpBlock(void) {
     case 0xbdd8: ExtraLifeMushBlock(); return;
     case 0xbddf: VineBlock(); return;
     case 0xbdd5: StarBlock(); return;
-    default: cpu_unresolved_jump(read_word(0x6)); return;
+    default: cpu_unresolved_jump(read_indirect_word(0x6)); return;
   }
 }
 
@@ -7839,7 +7839,7 @@ RunEnemyObjectsCore:
     case 0xb8ba: JumpspringHandler(); return;
     case 0xb7a4: WarpZoneObject(); return;
     case 0xc8d7: RunRetainerObj(); return;
-    default: cpu_unresolved_jump(read_word(0x6)); return;
+    default: cpu_unresolved_jump(read_indirect_word(0x6)); return;
   }
 }
 
@@ -7930,7 +7930,7 @@ void CheckpointEnemyID(void) {
     case 0xb91e: Setup_Vine(); return;
     case 0xc307: InitRetainerObj(); return;
     case 0xc881: EndOfEnemyInitCode(); return;
-    default: cpu_unresolved_jump(read_word(0x6)); return;
+    default: cpu_unresolved_jump(read_indirect_word(0x6)); return;
   }
 }
 
@@ -8702,7 +8702,7 @@ void InitEnemyFrenzy(void) {
     case 0xc5a3: InitBowserFlame(); return;
     case 0xc63d: InitFireworks(); return;
     case 0xc69c: BulletBillCheepCheep(); return;
-    default: cpu_unresolved_jump(read_word(0x6)); return;
+    default: cpu_unresolved_jump(read_indirect_word(0x6)); return;
   }
 }
 
@@ -9000,7 +9000,7 @@ void EnemyMovementSubs(void) {
     case 0xcb25: MoveFlyGreenPTroopa(); return;
     case 0xcf28: MoveLakitu(); return;
     case 0xcedf: MoveFlyingCheepCheep(); return;
-    default: cpu_unresolved_jump(read_word(0x6)); return;
+    default: cpu_unresolved_jump(read_indirect_word(0x6)); return;
   }
 }
 
@@ -9065,7 +9065,7 @@ void LargePlatformSubroutines(void) {
     case 0xd607: XMovingPlatform(); return;
     case 0xd631: DropPlatform(); return;
     case 0xd63d: RightPlatform(); return;
-    default: cpu_unresolved_jump(read_word(0x6)); return;
+    default: cpu_unresolved_jump(read_indirect_word(0x6)); return;
   }
 }
 
@@ -10713,7 +10713,7 @@ void RunStarFlagObj(void) {
     case 0xd312: AwardGameTimerPoints(); return;
     case 0xd34e: RaiseFlagSetoffFWorks(); return;
     case 0xd3a2: DelayToAreaEnd(); return;
-    default: cpu_unresolved_jump(read_word(0x6)); return;
+    default: cpu_unresolved_jump(read_indirect_word(0x6)); return;
   }
 }
 

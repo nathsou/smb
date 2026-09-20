@@ -5,6 +5,15 @@ fn lower_fixture(source: String) -> AsmLowering raise {
   result
 }
 
+fn analyzed_fixture(source: String) -> AsmLowering raise {
+  let items = @parse.Parser::new(@parse.Lexer::new(source).tokenize()).parse()
+  let program = @image.discover(@image.assemble(items))
+  program.validate_stacks()
+  let result = AsmLowering::new(program.source, program=Some(program))
+  result.lower()
+  result
+}
+
 test "the final instruction and shared returns survive region recovery" {
   let low = lower_fixture("Entry__sub:\n lda #$01\n beq Shared\n jsr Other\n rts\nOther:\n lda #$02\nShared:\n rts\n")
   assert_eq(low.subroutines.length(), 2)
@@ -68,6 +77,12 @@ test "a preserving callee propagates its caller's carry demand" {
 test "a defining callee kills the caller's obsolete carry value" {
   let low = lower_fixture("Root__sub:\n clc\n jsr SetCarry\n bcs Done\n lda #$01\nDone:\n rts\nSetCarry:\n sec\n rts\n")
   assert_eq(low.flag_live_after(0).carry, false)
+}
+
+test "a carry-preserving proven dispatcher preserves its caller's demand" {
+  let low = analyzed_fixture(".org $8000\nBoot:\n ldx #$ff\n txs\n jsr Select\nIdle:\n jmp Idle\nSelect:\n sec\n lda #$00\n jsr Choose\n .dw Handler\nHandler:\n bcc Wrong\n lda #$01\n sta $10\n rts\nWrong:\n lda #$02\n sta $10\n rts\nChoose:\n tay\n pla\n sta $20\n pla\n sta $21\n iny\n lda ($20),y\n sta $22\n iny\n lda ($20),y\n sta $23\n jmp ($22)\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n")
+  let sec = low.program.unwrap().image.symbols["Select"]
+  assert_eq(low.flag_live_after(sec).carry, true)
 }
 
 test "BIT overflow stays live across CMP for BVS" {
