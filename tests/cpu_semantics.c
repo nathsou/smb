@@ -63,5 +63,9 @@ int main(void) {
     assert(indirect_y_addr(0xff) == 0x1236);
     x = 1;
     assert(indirect_x_addr(0xfe) == 0x1234);
+    ram[0xff] = 0x78;
+    ram[0] = 0x56;
+    ram[0x100] = 0x99;
+    assert(read_indirect_word(0x00ff) == 0x5678);
     puts("CPU arithmetic, status, stack, and bus checks passed");
 }

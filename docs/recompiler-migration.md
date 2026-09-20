@@ -135,6 +135,8 @@ post-call demands to callee returns, then propagates callee entry demands to the
 caller. Flag-preserving callees pass those demands through; flag definitions
 kill them. External exits and foreground idle yields preserve observable flags.
 Overflow is included: CMP preserves V, while ADC/SBC/BIT define it.
+Recovered dispatcher helpers use the same per-instruction transfer in reverse,
+so a helper that omits SMB's initial ASL correctly preserves incoming carry.
 
 Adjacent immediate compare/branch pairs become `if (a < value)` or equivalent
 C comparisons only when none of the comparison flags escape the branch. This
@@ -156,6 +158,9 @@ not create a fictitious guest call frame.
 Static per-entry stack checking rejects negative/unbalanced data depth,
 unrecognized return-token pops, stack-pointer replacement in called routines,
 ordinary callees using RTI, and called idle loops needing suspended C frames.
+Entry contracts are keyed by both address and role. If an interrupt handler is
+also reached by JSR, its ordinary-call context is checked separately and RTI is
+rejected there; vector status cannot leak into the ordinary call contract.
 Runtime token checks catch unsupported return-address modifications through RAM.
 This is a checked function-backend contract, not arbitrary continuation support.
 
@@ -245,7 +250,7 @@ make wasm                           # clang with wasm32 and lld support
 ```
 
 The suite checks deterministic checked-in generation, pristine source SHA,
-24 MoonBit tests, an independently authored NROM-128 program compiled in a
+27 MoonBit tests, an independently authored NROM-128 program compiled in a
 temporary directory with the same runtime, and native CPU/bus semantics.
 ADC/SBC tests cover every byte pair and carry input. The optional ROM check
 compares all 32,768 PRG bytes and replays 7,987 frames, with expected cumulative

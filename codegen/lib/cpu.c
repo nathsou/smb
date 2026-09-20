@@ -151,6 +151,12 @@ uint16_t read_word(uint16_t addr) {
     return word;
 }
 
+uint16_t read_indirect_word(uint16_t addr) {
+    // NMOS 6502 JMP (indirect) wraps the high-byte fetch within the page.
+    uint16_t high_addr = (addr & 0xff00) | ((addr + 1) & 0x00ff);
+    return (uint16_t)read_byte(addr) | (uint16_t)((uint16_t)read_byte(high_addr) << 8);
+}
+
 void write_word(uint16_t addr, uint16_t value) {
     dynamic_ram_write(addr, value & 0xff);
     dynamic_ram_write(addr + 1, value >> 8);

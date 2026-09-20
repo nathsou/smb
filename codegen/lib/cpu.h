@@ -27,6 +27,7 @@ uint8_t read_byte(uint16_t addr);
 void dynamic_ram_write(uint16_t addr, uint8_t value);
 
 uint16_t read_word(uint16_t addr);
+uint16_t read_indirect_word(uint16_t addr);
 void write_word(uint16_t addr, uint16_t value);
 
 // controllers

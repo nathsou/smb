@@ -637,9 +637,18 @@ fn AsmLowering::collect_flag_liveness(self: AsmLowering) -> Unit {
             self.flag_liveness[id] = live
             live = flag_reads(op).union(live.subtract(flag_writes(op)))
           }
-          // The proven inline helper writes C/Z/N but preserves V before
-          // transferring to the selected handler. Its emitted setup is exact.
-          JumpEngine(_) => live = { ..FlagLiveness::none(), overflow: live.overflow }
+          // The emitted helper executes the exact setup accepted by the
+          // dispatcher proof. Propagate flag demands through those operations
+          // rather than assuming every accepted helper has SMB's ASL effects.
+          JumpEngine(site~, ..) => {
+            let setup = self.program.unwrap().dispatches[site].setup
+            let mut j = setup.length() - 1
+            while j >= 0 {
+              let op = setup[j].op
+              live = flag_reads(op).union(live.subtract(flag_writes(op)))
+              j -= 1
+            }
+          }
           _ => ()
         }
         i -= 1
