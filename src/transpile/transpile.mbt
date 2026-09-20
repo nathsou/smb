@@ -3,6 +3,9 @@ pub(all) struct Emitter {
   output: StringBuilder
   mut indentation: Int
   mut jsr_return_index: Int
+  local_labels: Set[String]
+  used_labels: Set[String]
+  mut function_name: String
 }
 
 pub fn Emitter::new() -> Emitter {
@@ -10,6 +13,9 @@ pub fn Emitter::new() -> Emitter {
     output: StringBuilder::new(),
     indentation: 0,
     jsr_return_index: 0,
+    local_labels: Set([]),
+    used_labels: Set([]),
+    function_name: "",
   }
 }
 
@@ -79,6 +85,7 @@ fn show_const(base~: @parse.ConstantBase, value~: Int) -> String {
 fn show_expr(expr: @lower.TypedExpr) -> String {
   match expr {
     Const(base~, value~, size=_, ty=_) => show_const(base~, value~)
+    Ident(name~, ty=LabelTy) => "ROM_ADDR_" + name
     Ident(name~, ty=_) => name
     Unary(op~, expr~, ty=_) => {
       let macro_ = match op {
@@ -94,7 +101,7 @@ fn show_expr(expr: @lower.TypedExpr) -> String {
         Sub => "-"
       }
 
-      "\{show_expr(lhs)} \{op} \{show_expr(rhs)}"
+      "(\{show_expr(lhs)} \{op} \{show_expr(rhs)})"
     }
   }
 }
@@ -123,11 +130,22 @@ fn Emitter::emit_data_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"stdint.h\"")
   self.emit("#include \"constants.h\"")
   self.emit("")
-  self.emit("extern const uint8_t data[\{low.table_offset}];")
+  let size = match low.program { Some(p) => p.image.bytes.length(); None => low.table_offset }
+  self.emit("extern const uint8_t data[\{size}];")
+  self.emit("#define PRG_IMAGE_SIZE \{size}")
   self.emit("")
 
+  if low.program is Some(p) {
+    let symbols = p.image.symbols.keys().to_array()
+    symbols.sort()
+    for name in symbols { self.emit("#define ROM_ADDR_\{name} 0x\{hex(p.image.symbols[name])}") }
+  }
   for label, table in low.tables_by_label {
-    self.emit("#define \{label} 0x\{hex(0x8000 + table.offset)}")
+    let address = match low.program {
+      Some(p) => p.image.symbols[label]
+      None => 0x8000 + table.offset
+    }
+    self.emit("#define \{label} 0x\{hex(address)}")
   }
 
   self.emit("")
@@ -141,22 +159,51 @@ fn Emitter::emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("const uint8_t data[] = {")
   self.indentation += 1
 
-  for table in low.tables {
-    self.emit("")
-    self.emit("// \{table.name}")
-
-    for line in table.lines {
-      match line {
-        Data(data~, comment~) => {
-          let data = data.map(show_expr).join(", ")
-
-          match comment.val {
-            "" => self.emit(data + ",")
-            _ => self.emit("\{data}, // \{comment.val}")
-          }
+  if low.program is Some(p) {
+    let labels: Map[Int, Array[String]] = Map([])
+    let notes: Map[Int, Array[String]] = Map([])
+    let data_addresses: Set[Int] = Set([])
+    for i, item in p.image.source {
+      if item is Directive(name="db" | "dw", ..) { data_addresses.add(p.image.addresses[i]) }
+    }
+    for i, item in p.image.source {
+      if item is Comment(comment~, is_inline~) {
+        let address = if is_inline && i > 0 { p.image.addresses[i - 1] } else { p.image.addresses[i] }
+        if data_addresses.contains(address) {
+          if !notes.contains(address) { notes[address] = [] }
+          notes[address].push(comment)
         }
-        Comment(comment) => {
-          self.emit("// \{comment}")
+      }
+    }
+    for i, item in p.image.source {
+      if item is Label(name) {
+        let pc = p.image.addresses[i]
+        if !labels.contains(pc) { labels[pc] = [] }
+        labels[pc].push(name)
+      }
+    }
+    let mut offset = 0
+    while offset < p.image.bytes.length() {
+      let pc = p.image.origin + offset
+      if labels.get(pc) is Some(names) { self.emit("// \{names.join(", ")}") }
+      if notes.get(pc) is Some(comments) {
+        for comment in comments { self.emit("// " + comment) }
+      }
+      let bytes = []
+      for _ in 0..<16 {
+        bytes.push("0x" + hex(p.image.bytes[offset]).pad_start(2, '0'))
+        offset += 1
+        if offset == p.image.bytes.length() || labels.contains(p.image.origin + offset) || notes.contains(p.image.origin + offset) { break }
+      }
+      self.emit(bytes.join(", ") + ",")
+    }
+  } else {
+    for table in low.tables {
+      self.emit("// \{table.name}")
+      for line in table.lines {
+        match line {
+          Data(data~, comment~) => self.emit(data.map(show_expr).join(", ") + ", // " + comment.val)
+          Comment(comment) => self.emit("// " + comment)
         }
       }
     }
@@ -176,6 +223,8 @@ fn Emitter::emit_code_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"apu.h\"")
   self.emit("")
 
+  self.emit("void cpu_reset_entry(void);")
+  self.emit("void cpu_nmi_entry(void);")
   for sub in low.subroutines {
     self.emit("void \{rename_label(sub.name)}(void);")
   }
@@ -193,13 +242,13 @@ fn rename_label(label: String) -> String {
   }
 }
 
-fn gen_jump(target: String, low: @lower.AsmLowering) -> String {
+fn Emitter::gen_jump(self: Emitter, target: String, low: @lower.AsmLowering) -> String {
   let renamed_label = rename_label(target)
 
   match target {
     "__ret__" => "return;"
     _ => {
-      if low.targets.subroutines.contains(target) {
+      if !self.local_labels.contains(target) && low.targets.subroutines.contains(target) {
         "\{renamed_label}(); return;"
       } else {
         "goto \{renamed_label};"
@@ -228,7 +277,7 @@ fn flag_helper_suffix(op: @parse.OpCode, id: Int, low: @lower.AsmLowering) -> St
 
   if writes.is_none() {
     ""
-  } else if live_writes.is_none() {
+  } else if !live_writes.carry && !live_writes.zero && !live_writes.negative {
     ""
   } else {
     let mut suffix = "_f"
@@ -254,6 +303,14 @@ fn is_dead_flag_only_instruction(
   low: @lower.AsmLowering,
 ) -> Bool {
   match (op, mode) {
+    (BIT, Absolute(expr) | ZeroPage(expr)) => {
+      match compute_expr_range(expr, low) {
+        Some({ min, max }) if min == max && ((min >= 0 && max < 0x2000) || (min >= 0x8000 && max < 65536)) => {
+          @lower.flag_writes(op).intersect(low.flag_live_after(id)).is_none()
+        }
+        _ => false
+      }
+    }
     (CMP | CPX | CPY, Immediate(_)) => {
       @lower.flag_writes(op).intersect(low.flag_live_after(id)).is_none()
     }
@@ -269,7 +326,7 @@ impl Add for Range with add(self: Range, other: Range) -> Range {
 }
 
 impl Sub for Range with sub(self: Range, other: Range) -> Range {
-  { min: self.min - other.min, max: self.max - other.max }
+  { min: self.min - other.max, max: self.max - other.min }
 }
 
 fn compute_expr_range(expr: @lower.TypedExpr, low: @lower.AsmLowering) -> Range? {
@@ -314,50 +371,43 @@ fn write_byte(mode: @lower.AsmAddressingMode, target: Reg, low: @lower.AsmLoweri
     Y => "y"
   }
 
-  fn rewrite(addr: @lower.TypedExpr, suffix: String) -> String {
-    match addr {
-      Ident(name="PPU_CTRL_REG1", ..) => "ppu_ctrl = \{target};"
-      Ident(name="PPU_CTRL_REG2", ..) => "ppu_mask = \{target};"
-      Ident(name="PPU_SPR_ADDR", ..) => "oam_addr = \{target};"
-      Ident(name="PPU_SPR_DATA", ..) => "oam[oam_addr++] = \{target};"
-      Ident(name="PPU_SCROLL_REG", ..) => "ppu_write_scroll(\{target});"
-      Ident(name="PPU_ADDRESS", ..) => "ppu_write_address(\{target});"
-      Ident(name="PPU_DATA", ..) => "ppu_write_data(\{target});"
-      Ident(name="SPR_DMA", ..) => "ppu_transfer_oam((uint16_t)(\{target} << 8));"
-      Ident(name="JOYPAD_PORT", ..) => "write_joypad1(\{target});"
-      Ident(name="JOYPAD_PORT2", ..) => "write_joypad2(\{target});"
-      Ident(
-        name=("SND_REGISTER" | "SND_SQUARE1_REG" | "SND_SQUARE2_REG" | "SND_TRIANGLE_REG" |
-        "SND_NOISE_REG" | "SND_DELTA_REG" | "SND_MASTERCTRL_REG") as name,
-        ..
-      ) => {
-        "apu_write(\{name}, \{target});"
-      }
-      _ => {
-        let value = "\{show_expr(addr)}\{suffix}"
-
-        match compute_range(addr, mode, low) {
-          Some({ min: _, max }) => {
-            if max < 0x2000 {
-              return "ram[\{value}] = \{target};"
-            } else if max < 0x4000 {
-              return "ppu_write_register(0x2000 + (\{show_expr(addr)} & 0b111), \{target});"
-            }
+  fn rewrite(addr: @lower.TypedExpr, suffix: String, zero_page: Bool) -> String {
+    let expression = "\{show_expr(addr)}\{suffix}"
+    let address = if zero_page { "(uint8_t)(\{expression})" } else { expression }
+    if zero_page { return "ram[\{address}] = \{target};" }
+    match compute_range(addr, mode, low) {
+      Some({ min, max }) if min >= 0 && max < 0x800 => return "ram[\{address}] = \{target};"
+      Some({ min, max }) if min >= 0 && max < 0x2000 => return "ram[(\{address}) & 0x7ff] = \{target};"
+      Some({ min, max }) if min == max => {
+        if min >= 0x2000 && min < 0x4000 {
+          return match min & 7 {
+            0 => "ppu_ctrl = \{target};"
+            1 => "ppu_mask = \{target};"
+            3 => "oam_addr = \{target};"
+            4 => "oam[oam_addr++] = \{target};"
+            5 => "ppu_write_scroll(\{target});"
+            6 => "ppu_write_address(\{target});"
+            7 => "ppu_write_data(\{target});"
+            _ => "ppu_write_register((uint16_t)(\{address}), \{target});"
           }
-          None => ()
         }
-
-        "dynamic_ram_write(\{value}, \{target});"
+        if min == 0x4014 { return "ppu_transfer_oam((uint16_t)(\{target} << 8));" }
+        if min == 0x4016 { return "write_joypad1(\{target}); write_joypad2(\{target});" }
+        if min >= 0x4000 && min < 0x4020 { return "apu_write(\{address}, \{target});" }
       }
+      _ => ()
     }
+    "dynamic_ram_write((uint16_t)(\{address}), \{target});"
   }
-
   match mode {
-      ZeroPage(addr) | Absolute(addr) => rewrite(addr, "")
-      ZeroPageX(addr) | AbsoluteX(addr) => rewrite(addr, " + x")
-      ZeroPageY(addr) | AbsoluteY(addr) => rewrite(addr, " + y")
-      IndirectIndexed(addr) => "dynamic_ram_write(read_word(\{show_expr(addr)}) + y, \{target});"
-      Implied | Immediate(_) | Relative(_) | Accumulator| Indirect(_) | IndexedIndirect(_) => abort("unreachable")
+    ZeroPage(addr) | Absolute(addr) => rewrite(addr, "", false)
+    ZeroPageX(addr) => rewrite(addr, " + x", true)
+    ZeroPageY(addr) => rewrite(addr, " + y", true)
+    AbsoluteX(addr) => rewrite(addr, " + x", false)
+    AbsoluteY(addr) => rewrite(addr, " + y", false)
+    IndirectIndexed(addr) => "dynamic_ram_write(indirect_y_addr(\{show_expr(addr)}), \{target});"
+    IndexedIndirect(addr) => "dynamic_ram_write(indirect_x_addr(\{show_expr(addr)}), \{target});"
+    _ => abort("Invalid store addressing mode")
   }
 }
 
@@ -365,14 +415,17 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
     match item {
       Label(name) => {
         // do not output labels for subroutines
-        let is_subroutine_label = low.is_subroutine_label(name);
+        let is_subroutine_label = !self.local_labels.contains(name);
 
-        if !is_subroutine_label {
+        if !is_subroutine_label && self.used_labels.contains(name) {
           self.emit("\n\{rename_label(name)}:")
+        } else if name != self.function_name && !name.has_prefix("loc_") {
+          self.emit("// \{rename_label(name)}:")
         }
       }
       Inst(id~, op~, mode~, comment~) => {
         let stmt = match (op, mode) {
+          (PLP, _) => "plp();"
           (TXS, _) => "sp = x;"
           (RTI, _) => "return; // <rti>"
           (CLC, _) => {
@@ -419,14 +472,19 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
                 let cond = show_cond_opcode(op)
 
                 let target = match mode {
-                  Relative(expr) => "\{show_expr(expr)}"
+                  Relative(Ident(name~, ..)) => name
                   _ => abort("unreachable")
                 }
 
-                "if (\{cond}) { \{gen_jump(target, low)} }"
+                "if (\{cond}) { \{self.gen_jump(target, low)} }"
               }
               (JMP, _) => {
-                gen_jump(args, low)
+                if low.program is Some(p) && p.idle.contains(id) {
+                  "cpu_yield(0x\{hex(id)}); return;"
+                } else {
+                  let target = match mode { Absolute(Ident(name~, ..)) => name; _ => abort("Unresolved jump") }
+                  self.gen_jump(target, low)
+                }
               }
               (JSR, _) => {
                 let target = match mode {
@@ -434,7 +492,9 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
                   _ => ""
                 }
 
-                "\{target}();"
+                if id >= 0 && low.program is Some(_) {
+                  "cpu_call_begin(0x\{hex(id + 2)}); \{target}(); cpu_call_end(0x\{hex(id + 2)});"
+                } else { "\{target}();" }
               }
               (RTS, _) => "return;"
               _ => {
@@ -458,19 +518,41 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
 
         self.emit(stmt)
       }
-      JumpEngine(jump_table~) => {
-        self.emit("switch (a) {")
+      JumpEngine(jump_table~, site~) => {
+        let program = low.program.unwrap()
+        let dispatch = program.dispatches[site]
+        let helper = @image.address_name(program.image, dispatch.helper)
+        self.emit("switch (\{helper}(0x\{hex(site + 2)})) {")
         self.indentation += 1
-
+        let emitted: Set[Int] = Set([])
         for idx, label in jump_table {
-          self.emit("case \{idx}: \{gen_jump(label, low)}")
+          let address = dispatch.targets[idx]
+          if !emitted.contains(address) {
+            self.emit("case 0x\{hex(address)}: \{rename_label(label)}(); return;")
+            emitted.add(address)
+          }
         }
-
+        self.emit("default: cpu_unresolved_jump(read_indirect_word(0x\{hex(dispatch.pointer)})); return;")
         self.indentation -= 1
         self.emit("}")
       }
-      If(cond~, then~, otherwise~, comment~) => {
-        let cond = show_cond_opcode(cond)
+
+      DoWhile(cond~, body~, comment~) => {
+        self.emit("do {")
+        self.indentation += 1
+        for child in body { self.emit_item(child, low) }
+        self.indentation -= 1
+        let comment = match comment { Some(text) => " // " + text; None => "" }
+        self.emit("} while (\{show_cond_opcode(cond)});\{comment}")
+      }
+      If(comparison~, cond~, then~, otherwise~, comment~) => {
+        let cond = match comparison {
+          Some((register, operand)) => {
+            let relation = match cond { BEQ => "=="; BNE => "!="; BCC => "<"; BCS => ">="; _ => abort("Invalid comparison") }
+            "\{register} \{relation} \{show_expr(operand)}"
+          }
+          None => show_cond_opcode(cond)
+        }
 
         match comment {
           Some(comment) => {
@@ -499,6 +581,7 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
             }
 
             self.indentation -= 1
+            self.emit("}")
           }
           None => self.emit("}")
         }
@@ -510,6 +593,31 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
 }
 
 fn Emitter::emit_flat_subroutine(self: Emitter, subroutine: @lower.AsmFlatSubroutine, low: @lower.AsmLowering) -> Unit {
+  self.function_name = subroutine.name
+  self.used_labels.clear()
+  fn collect(items: Array[@lower.AsmItem]) {
+    for item in items {
+      match item {
+        Inst(id~, op=JMP | BCC | BCS | BEQ | BNE | BMI | BPL | BVC | BVS,
+          mode=Relative(Ident(name~, ..)) | Absolute(Ident(name~, ..)), ..) => {
+          if !(low.program is Some(p) && p.idle.contains(id)) { self.used_labels.add(name) }
+        }
+        DoWhile(body~, ..) => collect(body)
+        If(then~, otherwise~, ..) => {
+          collect(then)
+          if otherwise is Some(other) { collect(other) }
+        }
+        _ => ()
+      }
+    }
+  }
+  collect(subroutine.items)
+  self.local_labels.clear()
+  for sub in low.subroutines {
+    if sub.name == subroutine.name {
+      for label in sub.internal_labels { self.local_labels.add(label) }
+    }
+  }
   self.indentation = 0
   self.emit("void \{rename_label(subroutine.name)}(void) {")
   self.indentation = 1
@@ -526,8 +634,42 @@ fn Emitter::emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"code.h\"")
   self.emit("")
 
+  if low.program is Some(p) {
+    let helpers: Map[Int, @image.Dispatch] = Map([])
+    for dispatch in p.dispatches.values() { helpers[dispatch.helper] = dispatch }
+    let addresses = helpers.keys().to_array()
+    addresses.sort()
+    for address in addresses {
+      let dispatch = helpers[address]
+      let name = @image.address_name(p.image, address)
+      self.emit("// Return-address indexed dispatch; effects preserved from the original helper.")
+      self.emit("static uint16_t \{name}(uint16_t return_address) {")
+      self.indentation += 1
+      self.emit("cpu_call_begin(return_address);")
+      for inst in dispatch.setup {
+        let mode = try low.lower_mode(@image.source_mode(p.image, inst), op=Some(inst.op)) catch { _ => abort("Invalid dispatcher instruction") }
+        let mut comment: String? = None
+        for i, item in p.image.source {
+          if p.image.addresses[i] == inst.pc && item is Inst(_) {
+            if p.image.source.get(i + 1) is Some(Comment(comment=text, is_inline=true)) { comment = Some(text) }
+          }
+        }
+        self.emit_item(@lower.AsmItem::Inst(id=-1, op=inst.op, mode~, comment~), low)
+      }
+      self.emit("return read_indirect_word(0x\{hex(dispatch.pointer)});")
+      self.indentation -= 1
+      self.emit("}\n")
+    }
+  }
+
   for sub in low.flat_subroutines {
     self.emit_flat_subroutine(sub, low)
+  }
+  if low.program is Some(p) {
+    let base = if p.image.bytes.length() == 16384 { p.image.origin + 0x3ffa } else { 0xfffa }
+    let nmi = try @image.address_name(p.image, p.image.word(base)) catch { _ => abort("Missing NMI vector") }
+    self.emit("void cpu_reset_entry(void) { \{p.roots[0]}(); }")
+    self.emit("void cpu_nmi_entry(void) { \{nmi}(); }")
   }
 }
 

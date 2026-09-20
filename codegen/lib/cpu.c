@@ -12,6 +12,35 @@ uint8_t sp;
 bool carry_flag;
 bool zero_flag;
 bool neg_flag;
+bool overflow_flag;
+bool interrupt_disabled;
+bool decimal_flag;
+uint16_t cpu_resume_pc;
+
+// C calls express normal continuations; the guest stack remains observable to
+// PHA/PLA, TSX, memory accesses, and return-address-based inline dispatchers.
+void cpu_call_begin(uint16_t return_address) {
+    ram[0x100 + sp--] = (uint8_t)(return_address >> 8);
+    ram[0x100 + sp--] = (uint8_t)return_address;
+}
+
+void cpu_call_end(uint16_t expected_return_address) {
+    uint16_t actual = (uint16_t)(ram[0x100 + (uint8_t)(sp + 1)] |
+        (ram[0x100 + (uint8_t)(sp + 2)] << 8));
+    if (actual != expected_return_address) {
+        cpu_unresolved_jump((uint16_t)(actual + 1));
+    }
+    sp = (uint8_t)(sp + 2);
+}
+
+void cpu_yield(uint16_t pc) {
+    cpu_resume_pc = pc;
+}
+
+void cpu_unresolved_jump(uint16_t pc) {
+    cpu_resume_pc = pc;
+    __builtin_trap(); // explicit unsupported transfer, never silent fallthrough
+}
 
 uint8_t ram[2048];
 
@@ -38,6 +67,10 @@ void cpu_init(void) {
     carry_flag = false;
     zero_flag = false;
     neg_flag = false;
+    overflow_flag = false;
+    interrupt_disabled = true;
+    decimal_flag = false;
+    cpu_resume_pc = 0;
 
     // controller
     controller1_state = 0;
@@ -73,7 +106,7 @@ uint8_t read_byte(uint16_t addr) {
     }
 
     if (addr >= 0x8000) {
-        return data[addr - 0x8000];
+        return data[(addr - 0x8000) % PRG_IMAGE_SIZE];
     }
 
     return 0;
@@ -98,6 +131,13 @@ void write_joypad2(uint8_t value) {
 void dynamic_ram_write(uint16_t addr, uint8_t value) {
     if (addr < 0x2000) {
         ram[addr & 0b0000011111111111] = value;
+    } else if (addr < 0x4000) {
+        ppu_write_register(addr, value);
+    } else if (addr == 0x4014) {
+        ppu_transfer_oam((uint16_t)(value << 8));
+    } else if (addr == 0x4016) {
+        write_joypad1(value);
+        write_joypad2(value);
     } else if (addr < 0x4020) {
         apu_write(addr, value);
     }
@@ -109,6 +149,12 @@ uint16_t read_word(uint16_t addr) {
     uint16_t high_byte = (uint16_t)(((uint16_t)read_byte(addr + 1)) << 8);
     uint16_t word = high_byte | low_byte;
     return word;
+}
+
+uint16_t read_indirect_word(uint16_t addr) {
+    // NMOS 6502 JMP (indirect) wraps the high-byte fetch within the page.
+    uint16_t high_addr = (addr & 0xff00) | ((addr + 1) & 0x00ff);
+    return (uint16_t)read_byte(addr) | (uint16_t)((uint16_t)read_byte(high_addr) << 8);
 }
 
 void write_word(uint16_t addr, uint16_t value) {
@@ -165,7 +211,6 @@ inline uint16_t indirect_x_addr(uint8_t addr) {
     uint16_t low_byte = (uint16_t)read_byte(addr1);
     uint16_t high_byte = (uint16_t)(((uint16_t)read_byte(addr2)) << 8);
     return high_byte | low_byte;
-    return read_word(addr1);
 }
 
 inline uint16_t indirect_y_addr(uint8_t addr) {
@@ -184,5 +229,14 @@ inline uint8_t indirect_y_val(uint8_t addr) {
 }
 
 inline void next_frame(void) {
-    NonMaskableInterrupt();
+    // The frame adapter delivers NMI while the foreground is at a proven idle
+    // yield. Hardware saves PC/P, not A/X/Y. Keep those stack bytes observable.
+    uint16_t return_pc = cpu_resume_pc;
+    cpu_call_begin(return_pc);
+    php();
+    ram[0x100 + (uint8_t)(sp + 1)] &= (uint8_t)~0x10; // hardware clears B
+    interrupt_disabled = true;
+    cpu_nmi_entry();
+    plp();
+    cpu_call_end(return_pc);
 }

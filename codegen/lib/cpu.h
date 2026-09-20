@@ -12,7 +12,13 @@ extern uint8_t a, x, y, sp;
 
 // flags
 extern bool carry_flag, zero_flag, neg_flag; 
-// the overflow flag is never used :)
+extern bool overflow_flag, interrupt_disabled, decimal_flag;
+extern uint16_t cpu_resume_pc;
+
+void cpu_call_begin(uint16_t return_address);
+void cpu_call_end(uint16_t expected_return_address);
+void cpu_yield(uint16_t pc);
+void cpu_unresolved_jump(uint16_t pc);
 
 // memory
 extern uint8_t ram[RAM_SIZE];
@@ -21,6 +27,7 @@ uint8_t read_byte(uint16_t addr);
 void dynamic_ram_write(uint16_t addr, uint8_t value);
 
 uint16_t read_word(uint16_t addr);
+uint16_t read_indirect_word(uint16_t addr);
 void write_word(uint16_t addr, uint16_t value);
 
 // controllers

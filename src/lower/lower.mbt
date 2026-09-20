@@ -1,6 +1,7 @@
 
 pub(all) struct AsmLowering {
   items: Array[@parse.SourceItem]
+  program: @image.Program?
   lowered: Array[AsmItem]
   mut next_instruction_id: Int
   defines: Map[String, TypedExpr]
@@ -18,9 +19,10 @@ pub(all) struct AsmLowering {
 
 pub suberror LoweringError { LoweringError(String) } derive(Debug)
 
-pub fn AsmLowering::new(items: Array[@parse.SourceItem]) -> AsmLowering {
+pub fn AsmLowering::new(items: Array[@parse.SourceItem], program~: @image.Program? = None) -> AsmLowering {
   {
     items,
+    program,
     lowered: [],
     next_instruction_id: 0,
     defines: {},
@@ -51,7 +53,7 @@ fn AsmLowering::detect_table(self: AsmLowering, name: String, index: Int) -> Asm
         match elem_size {
           Some(size) => {
             if size != directive_elem_size {
-              raise LoweringError("Inconsistent element size in table")
+              elem_size = Some(Byte)
             }
           }
           None => elem_size = {
@@ -111,31 +113,25 @@ fn AsmLowering::collect_labels_and_tables(self: AsmLowering) -> Unit raise Lower
 
     match item {
       Label(name) => {
-        let is_alias = match name {
-          "GameText" | "AreaAddrOffsets" => true
-          _ => false
+        let aliases = [name]
+        let mut last = idx
+        let mut scan = idx + 1
+        while scan < self.items.length() {
+          match self.items[scan] {
+            Label(alias_) => { aliases.push(alias_); last = scan }
+            Comment(_) => ()
+            _ => break
+          }
+          scan += 1
         }
-
-        match self.detect_table(name, idx + (if is_alias { 1 } else { 0 })) {
+        match self.detect_table(name, last) {
           Some(table) => {
             self.tables.push(table)
             self.table_offset += table.size
-            self.tables_by_label[table.name] = table
-
-            if is_alias {
-              let alias_ = match self.items[idx + 1] {
-                Label(name) => name
-                _ => raise LoweringError("Expected alias label")
-              }
-
-              self.tables_by_label[alias_] = table
-            }
-
-            idx_increment = table.items_count
+            for alias_ in aliases { self.tables_by_label[alias_] = table }
+            idx_increment = last - idx + table.items_count
           }
-          None => {
-            self.jump_target_labels.add(name)
-          }
+          None => { self.jump_target_labels.add(name) }
         }
       }
       _ => ()
@@ -187,6 +183,47 @@ fn AsmLowering::collect_defines(self: AsmLowering) -> Unit raise LoweringError {
   }
 }
 
+pub fn AsmLowering::lower_mode(self: AsmLowering, mode: @parse.SourceAddressingMode, op~: @parse.OpCode? = None) -> AsmAddressingMode raise LoweringError {
+  match mode {
+            Accumulator => Accumulator
+            Implied => Implied
+            Immediate(operand) => Immediate(self.type_expr(operand))
+            Relative(addr~) => Relative(self.type_expr(addr))
+            AbsoluteOrZeroPage(addr~) | AbsoluteOrZeroPageX(addr~) | AbsoluteOrZeroPageY(addr~) => {
+              let numeric = match self.program {
+                Some(p) => try Some(p.image.eval(addr)) catch { _ => None }
+                None => None
+              }
+              let addr = self.type_expr(addr)
+              let size: @parse.ConstantSize = match addr.ty() {
+                ConstTy(size) => size
+                ArrayTy(_) | LabelTy => Word
+              }
+
+              let size = match numeric {
+                Some(v) if v >= 0 && v < 256 => {
+                  let kind = match mode { AbsoluteOrZeroPage(_) => "zp"; AbsoluteOrZeroPageX(_) => "zpx"; _ => "zpy" }
+                  if op is Some(opcode) && @image.encoding(opcode, kind) == None { @parse.Word } else { @parse.Byte }
+                }
+                Some(_) => @parse.Word
+                None => size
+              }
+              match (mode, size) {
+                (AbsoluteOrZeroPage(_), Byte) => ZeroPage(addr)
+                (AbsoluteOrZeroPage(_), Word) => Absolute(addr)
+                (AbsoluteOrZeroPageX(_), Byte) => ZeroPageX(addr)
+                (AbsoluteOrZeroPageX(_), Word) => AbsoluteX(addr)
+                (AbsoluteOrZeroPageY(_), Byte) => ZeroPageY(addr)
+                (AbsoluteOrZeroPageY(_), Word) => AbsoluteY(addr)
+                _ => raise LoweringError("Invalid addressing mode")
+              }
+            }
+            Indirect(addr~) => Indirect(self.type_expr(addr))
+            IndexedIndirect(addr~) => IndexedIndirect(self.type_expr(addr))
+            IndirectIndexed(addr~) => IndirectIndexed(self.type_expr(addr))
+          }
+}
+
 fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringError {
   let mut inside_table = false
   let mut item_idx = 0
@@ -207,7 +244,7 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
         }
       }
       Inst(op~, mode~) => {
-        if op == JSR && (match mode { AbsoluteOrZeroPage(addr=Ident("JumpEngine")) => true; _ => false }) {
+        if op == JSR && (match self.program { Some(p) => p.dispatches.contains(p.addresses[item_idx]); None => false }) {
           let jump_table: Array[String] = []
           inside_table = true
 
@@ -235,41 +272,16 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
             }
           }
 
-          self.lowered.push(JumpEngine(jump_table~))
+          self.lowered.push(JumpEngine(jump_table~, site=self.program.unwrap().addresses[item_idx]))
         } else {
-          let addr_mode: AsmAddressingMode = match mode {
-            Accumulator => Accumulator
-            Implied => Implied
-            Immediate(operand) => Immediate(self.type_expr(operand))
-            Relative(addr~) => Relative(self.type_expr(addr))
-            AbsoluteOrZeroPage(addr~) | AbsoluteOrZeroPageX(addr~) | AbsoluteOrZeroPageY(addr~) => {
-              let addr = self.type_expr(addr)
-              let size: @parse.ConstantSize = match addr.ty() {
-                ConstTy(size) => size
-                ArrayTy(_) | LabelTy => Word
-              }
+          let addr_mode = self.lower_mode(mode, op=Some(op))
 
-              match (mode, size) {
-                (AbsoluteOrZeroPage(_), Byte) => ZeroPage(addr)
-                (AbsoluteOrZeroPage(_), Word) => Absolute(addr)
-                (AbsoluteOrZeroPageX(_), Byte) => ZeroPageX(addr)
-                (AbsoluteOrZeroPageX(_), Word) => AbsoluteX(addr)
-                (AbsoluteOrZeroPageY(_), Byte) => ZeroPageY(addr)
-                (AbsoluteOrZeroPageY(_), Word) => AbsoluteY(addr)
-                _ => raise LoweringError("Invalid addressing mode")
-              }
-            }
-            Indirect(addr~) => Indirect(self.type_expr(addr))
-            IndexedIndirect(addr~) => IndexedIndirect(self.type_expr(addr))
-            IndirectIndexed(addr~) => IndirectIndexed(self.type_expr(addr))
-          }
-
-          let comment = match self.items[item_idx + 1] {
-            Comment(comment~, is_inline=true) => Some(comment)
+          let comment = match self.items.get(item_idx + 1) {
+            Some(Comment(comment~, is_inline=true)) => Some(comment)
             _ => None
           }
 
-          let id = self.next_instruction_id
+          let id = match self.program { Some(p) => p.addresses[item_idx]; None => self.next_instruction_id }
           self.next_instruction_id += 1
           self.lowered.push(Inst(id~, op~, mode=addr_mode, comment~))
         }
@@ -279,9 +291,9 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
           self.lowered.push(Comment(comment))
         }
       }
-      Directive(name="db" | "dw" as name, args~) => {
+      Directive(name="db" | "dw", ..) => {
         if !inside_table {
-          raise LoweringError("Raw data in code detected: \{name} \{Repr(args)}")
+          () // Unlabelled padding is not an executable source instruction.
         }
       }
       _ => ()
@@ -311,7 +323,7 @@ fn AsmLowering::collect_jump_targets(self: AsmLowering) -> Unit {
           self.targets.jump_targets.add(label)
         }
       }
-      JumpEngine(jump_table~) => {
+      JumpEngine(jump_table~, ..) => {
         for label in jump_table {
           self.targets.subroutines.add(label)
         }
@@ -343,19 +355,25 @@ fn AsmLowering::next_non_comment_item_index(self: AsmLowering, start: Int) -> In
 }
 
 fn AsmLowering::collect_basic_block_leaders(self: AsmLowering) -> Array[Int] {
+  if self.program is Some(p) {
+    for root in p.roots { self.targets.subroutines.add(root) }
+  }
   self.collect_jump_targets()
   let leader_indices = []
 
   fn insert_leader_index(idx: Int?) {
     match idx {
-      Some(idx) => {
+      Some(index) => {
+        let mut idx = index
+        while idx > 0 && self.lowered[idx - 1] is Comment(_) { idx -= 1 }
+        // Keep preceding block documentation with its labelled entry.
         // avoid duplicates
         if leader_indices.is_empty() || leader_indices[leader_indices.length() - 1] != idx {
           leader_indices.push(idx)
         }
       }
       None => {
-        leader_indices.push(self.lowered.length() - 1)
+        ()
       }
     }
   }
@@ -382,12 +400,14 @@ fn AsmLowering::collect_basic_block_leaders(self: AsmLowering) -> Array[Int] {
     }
   }
 
+  if !leader_indices.is_empty() {
+    leader_indices.push(self.lowered.length())
+  }
   leader_indices
 }
 
 priv struct ItemInfo {
   item: AsmItem
-  index: Int
 }
 
 fn BasicBlock::last_non_comment_item(self: BasicBlock) -> ItemInfo? {
@@ -396,7 +416,7 @@ fn BasicBlock::last_non_comment_item(self: BasicBlock) -> ItemInfo? {
   while i >= 0 {
     match self.items[i] {
       Comment(_) => ()
-      item => return Some({ item, index: i })
+      item => return Some({ item, })
     }
 
     i -= 1
@@ -478,20 +498,20 @@ fn AsmLowering::collect_basic_blocks(self: AsmLowering) -> Unit raise LoweringEr
             connect(bb, target_bb, false)
           }
           None => {
-            if !label.has_prefix("__") { // allow special labels
+            if label != "__ret__" { // allow special labels
               raise LoweringError("Unknown jump target: \{label}")
             }
           }
         }
       }
-      JumpEngine(jump_table~) => {
+      JumpEngine(jump_table~, ..) => {
         for label in jump_table {
           match self.bb_by_label.get(label) {
             Some(target_bb) => {
               connect(bb, target_bb, false)
             }
             None => {
-              if !label.has_prefix("__") { // allow special labels
+              if label != "__ret__" { // allow special labels
                 raise LoweringError("Unknown jump target: \{label}")
               }
             }
@@ -510,54 +530,30 @@ fn AsmLowering::collect_basic_blocks(self: AsmLowering) -> Unit raise LoweringEr
 
 pub fn flag_reads(op: @parse.OpCode) -> FlagLiveness {
   match op {
-    ADC | SBC | ROL | ROR => { carry: true, zero: false, negative: false }
-    BCC | BCS => { carry: true, zero: false, negative: false }
-    BEQ | BNE => { carry: false, zero: true, negative: false }
-    BMI | BPL => { carry: false, zero: false, negative: true }
-    JSR => FlagLiveness::all()
+    ADC | SBC | ROL | ROR => { carry: true, zero: false, negative: false, overflow: false }
+    BCC | BCS => { carry: true, zero: false, negative: false, overflow: false }
+    BEQ | BNE => { carry: false, zero: true, negative: false, overflow: false }
+    BMI | BPL => { carry: false, zero: false, negative: true, overflow: false }
+    BVC | BVS => { ..FlagLiveness::none(), overflow: true }
+    JSR | PHP => FlagLiveness::all()
     _ => FlagLiveness::none()
   }
 }
 
 pub fn flag_writes(op: @parse.OpCode) -> FlagLiveness {
   match op {
-    ADC | SBC | ASL | LSR | ROL | ROR | CMP | CPX | CPY => FlagLiveness::all()
+    ADC | SBC => FlagLiveness::all()
+    ASL | LSR | ROL | ROR | CMP | CPX | CPY => { ..FlagLiveness::all(), overflow: false }
     LDA | LDX | LDY | AND | ORA | EOR | INC | INX | INY | DEC | DEX | DEY |
-    PLA | BIT | TAX | TAY | TSX | TXA | TYA => {
-      { carry: false, zero: true, negative: true }
+    PLA | TAX | TAY | TSX | TXA | TYA => {
+      { carry: false, zero: true, negative: true, overflow: false }
     }
-    CLC | SEC => { carry: true, zero: false, negative: false }
-    JSR => FlagLiveness::all()
+    CLC | SEC => { carry: true, zero: false, negative: false, overflow: false }
+    BIT => { ..FlagLiveness::all(), carry: false }
+    CLV => { ..FlagLiveness::none(), overflow: true }
+    JSR | PLP => FlagLiveness::all()
     _ => FlagLiveness::none()
   }
-}
-
-priv struct FlagUsage {
-  uses: FlagLiveness
-  defs: FlagLiveness
-}
-
-fn BasicBlock::flag_usage(self: BasicBlock) -> FlagUsage {
-  let mut uses = FlagLiveness::none()
-  let mut defs = FlagLiveness::none()
-
-  for item in self.items {
-    match item {
-      Inst(op~, ..) => {
-        uses = uses.union(flag_reads(op).subtract(defs))
-        defs = defs.union(flag_writes(op))
-      }
-      // JumpEngine dispatches to a subroutine. Keep all flags live across it
-      // until call summaries are available.
-      JumpEngine(_) => {
-        uses = uses.union(FlagLiveness::all().subtract(defs))
-        defs = defs.union(FlagLiveness::all())
-      }
-      _ => ()
-    }
-  }
-
-  { uses, defs }
 }
 
 fn BasicBlock::flags_escape(self: BasicBlock) -> Bool {
@@ -573,75 +569,92 @@ fn BasicBlock::flags_escape(self: BasicBlock) -> Bool {
           Absolute(Ident(name="__ret__", ..)),
         ..
       ),
-      ..
     }) => true
     _ => false
   }
 }
 
+// Matched call/return demands: a callee is analyzed with the union of what
+// its actual callers need at return. No assumption that a call kills every
+// flag, and no unconditional "all flags live" at internal RTS instructions.
 fn AsmLowering::collect_flag_liveness(self: AsmLowering) -> Unit {
-  let usages = self.basic_blocks.map(fn(bb) { bb.flag_usage() })
-  let live_in = self.basic_blocks.map(fn(_) { FlagLiveness::none() })
-  let mut changed = true
-
-  while changed {
-    changed = false
-
-    let mut i = self.basic_blocks.length() - 1
-    while i >= 0 {
-      let bb = self.basic_blocks[i]
-      let mut live_out = FlagLiveness::none()
-
-      if bb.flags_escape() {
-        // Flags are observable at a subroutine return. This conservative
-        // boundary also keeps externally entered code correct.
-        live_out = FlagLiveness::all()
-      } else {
-        for link in bb.successors {
-          live_out = live_out.union(live_in[link.bb.id])
+  let returns: Map[String, Array[Int]] = Map([])
+  for name in self.targets.subroutines {
+    let pending = [self.bb_by_label[name]]
+    let seen: Set[Int] = Set([])
+    let exits = []
+    while !pending.is_empty() {
+      let bb = pending.pop().unwrap()
+      if seen.contains(bb.id) { continue }
+      seen.add(bb.id)
+      let yields = bb.items.iter().any(fn(item) {
+        match (item, self.program) {
+          (Inst(id~, ..), Some(p)) => p.idle.contains(id)
+          _ => false
         }
-      }
-
-      let usage = usages[bb.id]
-      let new_live_in = usage.uses.union(live_out.subtract(usage.defs))
-
-      if new_live_in != live_in[bb.id] {
-        live_in[bb.id] = new_live_in
-        changed = true
-      }
-
-      i -= 1
+      })
+      if bb.flags_escape() || yields { exits.push(bb.id) }
+      for link in bb.successors { pending.push(link.bb) }
+    }
+    returns[name] = exits
+  }
+  let live_in = self.basic_blocks.map(fn(_) { FlagLiveness::none() })
+  let demands = self.basic_blocks.map(fn(_) { FlagLiveness::none() })
+  for name in self.targets.subroutines {
+    let external = match self.program {
+      Some(p) => p.roots.contains(name)
+      None => name.has_suffix("__sub")
+    }
+    if external {
+      for id in returns[name] { demands[id] = FlagLiveness::all() }
     }
   }
-
-  for bb in self.basic_blocks {
-    let mut live_after = FlagLiveness::none()
-
-    if bb.flags_escape() {
-      live_after = FlagLiveness::all()
-    } else {
-      for link in bb.successors {
-        live_after = live_after.union(live_in[link.bb.id])
-      }
-    }
-
-    let mut i = bb.items.length() - 1
-    while i >= 0 {
-      match bb.items[i] {
-        Inst(id~, op~, ..) => {
-          if id >= 0 {
-            self.flag_liveness[id] = live_after
+  let mut changed = true
+  while changed {
+    changed = false
+    let mut index = self.basic_blocks.length() - 1
+    while index >= 0 {
+      let bb = self.basic_blocks[index]
+      let mut live = demands[index]
+      for link in bb.successors { live = live.union(live_in[link.bb.id]) }
+      let mut i = bb.items.length() - 1
+      while i >= 0 {
+        match bb.items[i] {
+          Inst(id~, op=JSR, mode=Absolute(Ident(name~, ..)), ..) => {
+            self.flag_liveness[id] = live
+            match returns.get(name) {
+              Some(exits) => {
+                for exit in exits {
+                  let next = demands[exit].union(live)
+                  if next != demands[exit] { demands[exit] = next; changed = true }
+                }
+                live = live_in[self.bb_by_label[name].id]
+              }
+              None => live = FlagLiveness::all()
+            }
           }
-
-          live_after = flag_reads(op).union(live_after.subtract(flag_writes(op)))
+          Inst(id~, op~, ..) => {
+            self.flag_liveness[id] = live
+            live = flag_reads(op).union(live.subtract(flag_writes(op)))
+          }
+          // The emitted helper executes the exact setup accepted by the
+          // dispatcher proof. Propagate flag demands through those operations
+          // rather than assuming every accepted helper has SMB's ASL effects.
+          JumpEngine(site~, ..) => {
+            let setup = self.program.unwrap().dispatches[site].setup
+            let mut j = setup.length() - 1
+            while j >= 0 {
+              let op = setup[j].op
+              live = flag_reads(op).union(live.subtract(flag_writes(op)))
+              j -= 1
+            }
+          }
+          _ => ()
         }
-        JumpEngine(_) => {
-          live_after = FlagLiveness::all()
-        }
-        _ => ()
+        i -= 1
       }
-
-      i -= 1
+      if live != live_in[index] { live_in[index] = live; changed = true }
+      index -= 1
     }
   }
 }
@@ -653,121 +666,63 @@ pub fn AsmLowering::flag_live_after(self: AsmLowering, id: Int) -> FlagLiveness 
   }
 }
 
-fn AsmLowering::rewrite_bb(self: AsmLowering, bb: BasicBlock, visited: Set[Int]) -> Unit raise LoweringError {
-  if visited.contains(bb.id) {
-    return
-  }
+pub fn AsmLowering::is_subroutine_label(self: AsmLowering, label: String) -> Bool {
+  self.targets.subroutines.contains(label)
+}
 
-  match bb.name {
-    Some(name) => {
-      if self.is_subroutine_label(name) {
-        let sub: AsmSubroutine = {
-          name,
-          blocks: [bb],
-          entry: bb,
-          exit: bb,
-          internal_labels: Set([]),
-        }
-
-        let mut i = bb.id + 1
-
-        while i < self.basic_blocks.length() {
-          let next_bb = self.basic_blocks[i]
-
-          // if this is an exit bb, or if it's a subroutine entry, we're done for this function
-          if next_bb.predecessors.is_empty() || next_bb.is_subroutine_entry {
-            break
-          }
-
-          match next_bb.name {
-            Some(next_name) => {
-              if self.is_subroutine_label(next_name) {
-                // insert fallthrough call to the next subroutine
-                let prev_bb = sub.blocks[sub.blocks.length() - 1]
-                if prev_bb.successors.length() > 0 && prev_bb.has_fallthrough() {
-                  prev_bb.items.push(Inst(id=-1, op=JSR, mode=Absolute(Ident(name=next_name, ty=LabelTy)), comment=Some("<fallthrough>")))
-                  prev_bb.items.push(Inst(id=-1, op=RTS, mode=Implied, comment=None))
-                }
-                break
-              }
-            }
-            None => ()
-          }
-
-          sub.blocks.push(next_bb)
-          visited.add(next_bb.id)
-          i += 1
-        }
-
-        sub.exit = sub.blocks[sub.blocks.length() - 1]
-        self.subroutines.push(sub)
+// A machine block may participate in several callable entry regions. Follow
+// actual edges, not source order; a JSR's callee is not an intraprocedural edge.
+// Shared tails stay local until outlining them is proven safe. This also keeps
+// backedges in one C frame rather than turning loops into host recursion.
+fn AsmLowering::collect_subroutines(self: AsmLowering) -> Unit raise LoweringError {
+  let entries = self.targets.subroutines.to_array()
+  entries.sort_by(fn(a, b) { self.bb_by_label[a].id - self.bb_by_label[b].id })
+  let entry_names: Map[Int, String] = Map([])
+  let reach: Map[Int, Set[Int]] = Map([])
+  for name in entries {
+    let entry = self.bb_by_label[name]
+    entry_names[entry.id] = name
+    let seen: Set[Int] = Set([])
+    let work = [entry]
+    while !work.is_empty() {
+      let bb = work.pop().unwrap()
+      if seen.contains(bb.id) { continue }
+      seen.add(bb.id)
+      match bb.last_non_comment_item() {
+        Some({ item: JumpEngine(_) }) => ()
+        _ => for link in bb.successors { work.push(link.bb) }
       }
     }
-    None => ()
+    reach[entry.id] = seen
   }
-}
-
-pub fn AsmLowering::is_subroutine_label(self: AsmLowering, label: String) -> Bool {
-  self.targets.subroutines.contains(label) || label.has_suffix("__sub")
-}
-
-fn AsmLowering::collect_subroutines(self: AsmLowering) -> Unit raise LoweringError {
-  let components = self.collect_connected_components()
-  let visited = Set([])
-
-  for component in components {
-    for bb in component {
-      let _ = self.rewrite_bb(bb,visited)
-    }
-  }
-}
-
-fn BasicBlock::dfs(self: BasicBlock, visited: Set[Int]) -> Array[BasicBlock] {
-  let stack = [self]
-  let blocks = []
-
-  while !stack.is_empty() {
-    let bb = stack.pop().unwrap()
-
-    if !visited.contains(bb.id) {
+  for name in entries {
+    let entry = self.bb_by_label.get(name).unwrap_or_error(LoweringError("Missing entry: \{name}"))
+    let visited: Set[Int] = Set([])
+    let pending = [entry]
+    let blocks = []
+    let labels: Set[String] = Set([])
+    while !pending.is_empty() {
+      let bb = pending.pop().unwrap()
+      if visited.contains(bb.id) { continue }
       visited.add(bb.id)
       blocks.push(bb)
-
-      for link in bb.successors {
-        stack.push(link.bb)
+      for item in bb.items {
+        if item is Label(label) { labels.add(label) }
+      }
+      match bb.last_non_comment_item() {
+        Some({ item: JumpEngine(_) }) => ()
+        _ => for link in bb.successors {
+          // Outline an existing entry only across an acyclic edge. A transfer
+          // inside an SCC stays local, even if its target is also callable.
+          if entry_names.contains(link.bb.id) && !reach[link.bb.id].contains(bb.id) {
+            continue
+          }
+          pending.push(link.bb)
+        }
       }
     }
-  }
-
-  blocks.sort_by((a, b) => a.id - b.id)
-  blocks
-}
-
-fn AsmLowering::collect_connected_components(self: AsmLowering) -> Array[Array[BasicBlock]] {
-  let components = []
-  let visited = Set([])
-
-  for bb in self.basic_blocks {
-    if !visited.contains(bb.id) {
-      let blocks = bb.dfs(visited)
-      components.push(blocks)
-    }
-  }
-
-  components
-}
-
-fn AsmLowering::remove_unused_rts(self: AsmLowering) -> Unit raise LoweringError {
-  for sub in self.subroutines {
-    let last_bb = sub.exit
-    let last_item = last_bb.last_non_comment_item().unwrap_or_error(LoweringError("Empty basic block"))
-
-    match last_item.item {
-      Inst(op=RTS, ..) => {
-        let _ = sub.exit.items.remove(last_item.index)
-      }
-      _ => ()
-    }
+    blocks.sort_by(fn(a, b) { a.id - b.id })
+    self.subroutines.push({ name, blocks, entry, exit: blocks.last().unwrap(), internal_labels: labels })
   }
 }
 
@@ -794,172 +749,73 @@ fn  AsmLowering::_cfg_dotfile(self: AsmLowering) -> String {
   builder.to_string()
 }
 
-priv struct ControlFlowStackEntry {
-  exit_label: String
-  cond: @parse.OpCode
-  body: Array[AsmItem]
-  comment: String?
+fn AsmLowering::recognize_control_flow(self: AsmLowering, sub: AsmSubroutine) -> AsmFlatSubroutine {
+  let items = []
+  let included: Set[Int] = Set(sub.blocks.map(fn(bb) { bb.id }))
+  for bb in sub.blocks {
+    for item in bb.items { items.push(item) }
+    for link in bb.successors {
+      if link.is_fallthrough && !included.contains(link.bb.id) {
+        for target in link.bb.items {
+          if target is Label(name) && self.targets.subroutines.contains(name) {
+            items.push(Inst(id=-1, op=JSR, mode=Absolute(Ident(name~, ty=LabelTy)), comment=Some("fallthrough")))
+            items.push(Inst(id=-1, op=RTS, mode=Implied, comment=None))
+            break
+          }
+        }
+      }
+    }
+  }
+  if sub.blocks[0].id != sub.entry.id {
+    items.insert(0, Inst(id=-1, op=JMP, mode=Absolute(Ident(name=sub.name, ty=LabelTy)), comment=None))
+  }
+  { name: sub.name, items: self.structure(items) }
 }
 
-fn negate(cond: @parse.OpCode) -> @parse.OpCode raise LoweringError {
-  match cond {
-    BCS => BCC
-    BCC => BCS
-    BEQ => BNE
-    BNE => BEQ
-    BPL => BMI
-    BMI => BPL
-    _ => raise LoweringError("Invalid condition")
+fn AsmLowering::collect_flat_subroutines(self: AsmLowering) -> Unit {
+  for sub in self.subroutines {
+    self.flat_subroutines.push(self.recognize_control_flow(sub))
   }
 }
 
-fn AsmLowering::recognize_control_flow(self: AsmLowering, sub: AsmSubroutine) -> AsmFlatSubroutine raise LoweringError {
-  let items = sub.blocks.map(fn(bb) { bb.items }).flatten()
-  let labels = Set([])
-  let new_items = []
-  let stack: Array[ControlFlowStackEntry] = []
-  let loop_labels = Set([])
-  let unconditional_jump_labels = Set([])
-
-  // detect backward jumps
-  for item in items {
+// Canonicalize return-only destinations before region recovery. The source
+// retains its labels; the internal return marker is never required as input.
+fn AsmLowering::canonicalize_returns(self: AsmLowering) -> Unit {
+  let returns: Set[String] = Set([])
+  let labels = []
+  let first: Map[String, AsmItem] = Map([])
+  for item in self.lowered {
     match item {
-      Label(name) => {
-        labels.add(name)
+      Label(name) => labels.push(name)
+      Comment(_) => ()
+      _ => {
+        for name in labels { first[name] = item }
+        labels.clear()
       }
-      Inst(op=JMP, mode=Relative(Ident(name=label, ..)) | Absolute(Ident(name=label, ..)), ..) => {
-        unconditional_jump_labels.add(label)
+    }
+  }
+  let mut changed = true
+  while changed {
+    changed = false
+    for name, item in first {
+      let is_return = match item {
+        Inst(op=RTS, ..) => true
+        Inst(op=JMP, mode=Absolute(Ident(name=target, ..)), ..) => returns.contains(target)
+        _ => false
       }
-      Inst(
-        op=BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS,
-        mode=Relative(Ident(name=label, ..)) | Absolute(Ident(name=label, ..)),
-        ..
-      ) => {
-        if labels.contains(label) {
-          loop_labels.add(label)
-        }
+      if is_return && !returns.contains(name) { returns.add(name); changed = true }
+    }
+  }
+  for i in 0..<self.lowered.length() {
+    match self.lowered[i] {
+      Inst(id~, op~, mode=Relative(Ident(name=target, ..)), comment~) if returns.contains(target) => {
+        self.lowered[i] = Inst(id~, op~, mode=Relative(Ident(name="__ret__", ty=LabelTy)), comment~)
+      }
+      Inst(id~, op=JMP, mode=Absolute(Ident(name=target, ..)), comment~) if returns.contains(target) => {
+        self.lowered[i] = Inst(id~, op=RTS, mode=Implied, comment~)
       }
       _ => ()
     }
-  }
-
-  fn push_item(item: AsmItem) {
-    match stack.last() {
-      Some(entry) => {
-        entry.body.push(item)
-      }
-      None => {
-        new_items.push(item)
-      }
-    }
-  }
-
-  let mut is_simple_control_flow = true
-  
-  for item in items {
-    match item {
-      Label(name) => {
-        while true {
-          match stack.last() {
-            Some(entry) => {
-              if entry.exit_label == name {
-                let _ = stack.pop()
-
-                push_item(AsmItem::If(
-                  cond=negate(entry.cond),
-                  then=entry.body,
-                  otherwise=None,
-                  comment=entry.comment,
-                ))
-              } else {
-                break
-              }
-            }
-            None => break
-          }
-        }
-
-        // if an old control flow block is closed
-        // before the current one ends
-        // then we failed to recognize the control flow
-        if stack.iter().any(fn(entry) { entry.exit_label == name }) {
-          is_simple_control_flow = false
-          break
-        }
-
-        if loop_labels.contains(name) || unconditional_jump_labels.contains(name) {
-          push_item(item)
-        } else if name != sub.name {
-          push_item(AsmItem::Comment("\{name}:"))
-        }
-      }
-      Inst(
-        id=_,
-        op=BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS as cond,
-        mode=Relative(Ident(name=label, ..)) | Absolute(Ident(name=label, ..)),
-        comment~,
-      ) => {
-        // if this is a subroutine call
-        if self.targets.subroutines.contains(label) {
-          push_item(If(
-            cond=cond,
-            then=[
-              Inst(id=-1, op=JSR, mode=Absolute(Ident(name=label, ty=LabelTy)), comment=None),
-              Inst(id=-1, op=RTS, mode=Implied, comment=None),
-            ],
-            otherwise=None,
-            comment=comment,
-          ))
-        } else if !loop_labels.contains(label) {
-        // if this is not a loop
-          let entry = {
-            exit_label: label,
-            cond,
-            body: [],
-            comment,
-          }
-
-          stack.push(entry)
-        } else {
-          push_item(item)
-        }
-      }
-      _ => {
-        push_item(item)
-      }
-    }
-  }
-
-  if stack.length() < 2 {
-    match stack.last() {
-      Some(entry) => {
-        new_items.push(
-          AsmItem::If(
-            cond=negate(entry.cond),
-            then=entry.body,
-            otherwise=None,
-            comment=None,
-          )
-        )
-        let _ = stack.pop()
-      }
-      None => ()
-    }
-  } else {
-    // some control flow blocks are not closed
-    is_simple_control_flow = false
-  }
-
-  if is_simple_control_flow {
-    { name: sub.name, items: new_items }
-  } else {
-    { name: sub.name, items: items }
-  }
-}
-
-fn AsmLowering::collect_flat_subroutines(self: AsmLowering) -> Unit raise LoweringError {
-  for sub in self.subroutines {
-    self.flat_subroutines.push(self.recognize_control_flow(sub))
   }
 }
 
@@ -967,10 +823,10 @@ pub fn AsmLowering::lower(self: AsmLowering) -> Unit raise LoweringError {
   self.collect_labels_and_tables()
   self.collect_defines()
   self.collect_instructions()
+  self.canonicalize_returns()
   self.collect_basic_blocks()
   self.collect_flag_liveness()
   self.collect_subroutines()
-  self.remove_unused_rts()
   self.collect_flat_subroutines()
 
   // @fs.write_string_to_file(path="cfg.dot", content=self.cfg_dotfile())

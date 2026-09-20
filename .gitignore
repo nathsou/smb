@@ -22,3 +22,4 @@ smb.dSYM
 3ds/*.smdh
 3ds/source/chr_rom.h
 _build/
+codegen/prg.bin
