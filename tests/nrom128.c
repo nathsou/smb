@@ -8,6 +8,7 @@ int main(void) {
     assert(ram[0] == 0x77 && ram[1] == 2 && ram[2] == 3);
     assert(ram[0x7ff] == 0);
     assert(ram[0x10] == 0 && ram[0x11] == 1);
+    assert(ram[0x15] == 0 && ram[0x16] == 1);
     assert(ram[0x12] == 8 && ram[0x13] == 5);
     assert(oam[0x21] == 0x42 && oam_addr == 0x22);
     assert(sp == 0xff);

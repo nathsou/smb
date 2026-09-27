@@ -37,6 +37,16 @@ void cpu_yield(uint16_t pc) {
     cpu_resume_pc = pc;
 }
 
+uint16_t cpu_dispatch_target;
+
+// RTS used as a computed jump: pop the two bytes a dispatcher pushed.
+uint16_t cpu_return_target(void) {
+    uint16_t low = ram[0x100 + (uint8_t)(sp + 1)];
+    uint16_t high = ram[0x100 + (uint8_t)(sp + 2)];
+    sp = (uint8_t)(sp + 2);
+    return (uint16_t)(((high << 8) | low) + 1);
+}
+
 void cpu_unresolved_jump(uint16_t pc) {
     cpu_resume_pc = pc;
     __builtin_trap(); // explicit unsupported transfer, never silent fallthrough

@@ -19,6 +19,14 @@ void cpu_call_begin(uint16_t return_address);
 void cpu_call_end(uint16_t expected_return_address);
 void cpu_yield(uint16_t pc);
 void cpu_unresolved_jump(uint16_t pc);
+uint16_t cpu_return_target(void);
+extern uint16_t cpu_dispatch_target;
+
+// JSR: push the original return address, call the translated routine, then
+// check and pop that address.
+#define CALL(routine, return_address) do { \
+    cpu_call_begin(return_address); routine(); cpu_call_end(return_address); \
+} while (0)
 
 // memory
 extern uint8_t ram[RAM_SIZE];

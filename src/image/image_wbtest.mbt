@@ -39,10 +39,10 @@ test "renamed dispatch with different scratch addresses is proven by execution" 
   let p = discover(image)
   assert_eq(p.dispatches.length(), 1)
   let dispatch = p.dispatches[0x8002]
-  assert_eq(dispatch.pointer, 0x22)
-  assert_eq(dispatch.targets[1], image.symbols["Second"])
+  assert_eq(dispatch.exit, IndirectJump(0x22))
+  assert_eq(dispatch.targets, [image.symbols["First"], image.symbols["Second"]])
   assert_eq(p.instructions.contains(image.symbols["Choose"]), false)
-  assert_eq(dispatch.setup.length(), 12)
+  assert_eq(dispatch.steps.length(), 12)
 }
 
 test "constant branch does not decode adjacent padding" {
@@ -109,4 +109,56 @@ test "unknown indirect destinations fail closed" {
     false
   } catch { _ => true }
   assert_eq(rejected, true)
+}
+
+fn with_vectors(body: String) -> String {
+  ".org $8000\n" + body + "Nmi:\n rti\n.org $fffa\n.dw Nmi, Boot, Nmi\n"
+}
+
+fn rejection(source: String) -> String {
+  try {
+    let p = discover(fixture(source))
+    p.validate_stacks()
+    "accepted"
+  } catch { e => @debug.to_string(e) }
+}
+
+test "dispatch proof does not depend on the helper's instruction sequence" {
+  // X-indexed stores, an unrelated CLC and a branch in the helper.
+  let image = fixture(with_vectors("Boot:\n lda #$01\n jsr Engine\n .dw First, Second\nFirst:\n rts\nSecond:\n rts\nEngine:\n asl\n tay\n iny\n pla\n sta $30\n pla\n sta $31\n clc\n bcc Read\n brk\nRead:\n lda ($30),y\n tax\n iny\n lda ($30),y\n sta $33\n stx $32\n jmp ($0032)\n"))
+  let dispatch = discover(image).dispatches[0x8002]
+  assert_eq(dispatch.targets, [image.symbols["First"], image.symbols["Second"]])
+}
+
+test "byte-encoded tables and RTS-based inline dispatch are proven" {
+  let image = fixture(with_vectors("Boot:\n ldx #$00\n jsr Engine\n .db <(First-1), >(First-1), <(Second-1), >(Second-1)\nFirst:\n rts\nSecond:\n rts\nEngine:\n pla\n sta $00\n pla\n sta $01\n txa\n asl\n tay\n iny\n iny\n lda ($00),y\n pha\n dey\n lda ($00),y\n pha\n rts\n"))
+  let p = discover(image)
+  p.validate_stacks()
+  let dispatch = p.dispatches[0x8002]
+  assert_eq(dispatch.exit, ReturnJump)
+  assert_eq(dispatch.targets, [image.symbols["First"], image.symbols["Second"]])
+}
+
+test "a table ends at the next label, not at the next non-word directive" {
+  let image = fixture(with_vectors("Boot:\n lda #$00\n jsr Choose\n .dw First\nPointers:\n .dw $1234\nFirst:\n rts\nChoose:\n asl\n tay\n pla\n sta $20\n pla\n sta $21\n iny\n lda ($20),y\n sta $22\n iny\n lda ($20),y\n sta $23\n jmp ($22)\n"))
+  assert_eq(discover(image).dispatches[0x8002].targets, [image.symbols["First"]])
+}
+
+test "unsupported computed jumps are rejected with a specific reason" {
+  // Separate lo/hi tables through a RAM pointer.
+  assert_eq(rejection(with_vectors("Boot:\n ldx #$01\n lda Lo,x\n sta $00\n lda Hi,x\n sta $01\n jmp ($0000)\nLo:\n .db <Boot\nHi:\n .db >Boot\n")).contains("Unresolved indirect transfer"), true)
+  // RTS through an address pushed from a separate table.
+  assert_eq(rejection(with_vectors("Boot:\n jsr Go\nIdle:\n jmp Idle\nGo:\n ldx #$00\n lda Table+1,x\n pha\n lda Table,x\n pha\n rts\nTable:\n .dw Idle-1\n")).contains("computed jump"), true)
+  // A call whose helper does not read its inline data is not decoded as code.
+  assert_eq(rejection(with_vectors("Boot:\n jsr Helper\n .dw Boot\nHelper:\n pla\n pla\n jmp ($0010)\n")).contains("not proven to be an inline dispatcher"), true)
+}
+
+test "a loop that only an interrupt can end is rejected" {
+  assert_eq(rejection(with_vectors("Boot:\n lda #$80\n sta $2000\nMain:\n inc $10\nWait:\n lda $15\n beq Wait\n lda #$00\n sta $15\n jmp Main\n")).contains("can only exit through an interrupt"), true)
+  // Two-block wait with an unchanged register consumed each iteration.
+  assert_eq(rejection(with_vectors("Boot:\n ldx #$03\nWait:\n lda $15\n and #$01\n cpx #$03\n beq Wait\n rts\n")).contains("can only exit through an interrupt"), true)
+}
+
+test "counting, I/O polling and idle loops are accepted" {
+  assert_eq(rejection(with_vectors("Boot:\n ldx #$08\nDelay:\n dex\n bne Delay\nPoll:\n lda $2002\n bpl Poll\nIdle:\n jmp Idle\n")), "accepted")
 }

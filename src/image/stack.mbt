@@ -44,24 +44,27 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
         PHA | PHP => next_depth += 1
         PLA | PLP => next_depth -= 1
         TXS => {
-          if !is_reset { raise InvalidImage("Stack-pointer replacement outside reset at \{pc}") }
+          if !is_reset { raise InvalidImage("Stack-pointer replacement outside reset at \{show_pc(pc)}") }
           next_depth = 0
         }
         _ => ()
       }
-      if next_depth < 0 || next_depth > 253 { raise InvalidImage("Return-token access or excessive stack depth at \{pc} from \{address_name(self.image, entry)}") }
-      if inst.op == RTI && !is_interrupt { raise InvalidImage("Interrupt return outside an interrupt entry at \{pc}") }
-      if inst.op == RTS && is_interrupt { raise InvalidImage("Subroutine return from an interrupt entry at \{pc}") }
+      if next_depth < 0 || next_depth > 253 { raise InvalidImage("Return-token access or excessive stack depth at \{show_pc(pc)} from \{address_name(self.image, entry)}") }
+      if inst.op == RTI && !is_interrupt { raise InvalidImage("Interrupt return outside an interrupt entry at \{show_pc(pc)}") }
+      if inst.op == RTS && is_interrupt { raise InvalidImage("Subroutine return from an interrupt entry at \{show_pc(pc)}") }
       if inst.op == RTS || inst.op == RTI {
-        if depth != 0 { raise InvalidImage("Unbalanced return at \{pc}") }
+        if depth > 0 && inst.op == RTS {
+          raise InvalidImage("RTS at \{show_pc(pc)} returns through \{depth} byte(s) pushed by the routine (computed jump); only proven inline dispatchers are supported")
+        }
+        if depth != 0 { raise InvalidImage("Unbalanced return at \{show_pc(pc)}") }
         continue
       }
       if self.idle.contains(pc) {
-        if !is_reset { raise InvalidImage("An idle loop outside reset requires a resumable continuation at \{pc}") }
+        if !is_reset { raise InvalidImage("An idle loop outside reset requires a resumable continuation at \{show_pc(pc)}") }
         continue
       }
       if self.dispatches.get(pc) is Some(dispatch) {
-        if depth != 0 { raise InvalidImage("Inline dispatch with pending data stack at \{pc}") }
+        if depth != 0 { raise InvalidImage("Inline dispatch with pending data stack at \{show_pc(pc)}") }
         // The helper consumes only its own return token; selected handlers
         // return on this entry's incoming token and are checked independently.
         for target in dispatch.targets { work.push((target, depth, self.facts[target])) }
