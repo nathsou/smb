@@ -15,7 +15,7 @@ pub fn Parser::new(tokens: Array[Token]) -> Parser {
 }
 
 fn Parser::peek(self: Parser) -> Token {
-  self.tokens[self.index]
+  self.tokens.get(self.index).unwrap_or(EOF)
 }
 
 fn Parser::advance(self: Parser) -> Unit {
@@ -127,6 +127,7 @@ fn Parser::parse_addressing_mode(
 
         if self.consumes(Comma) {
           if self.consumes(Identifier("x")) {
+            self.expect(RightParen)
             return IndexedIndirect(addr~)
           } else {
             raise Unreachable("Expected 'x' after comma in indexed indirect addressing mode")

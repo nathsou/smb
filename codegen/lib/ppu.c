@@ -85,6 +85,19 @@ void ppu_init(uint8_t* chr) {
 
 bool status_clear = false;
 
+void ppu_write_register(uint16_t addr, uint8_t value) {
+    switch (addr & 7) {
+        case 0: ppu_ctrl = value; break;
+        case 1: ppu_mask = value; break;
+        case 3: oam_addr = value; break;
+        case 4: oam[oam_addr++] = value; break;
+        case 5: ppu_write_scroll(value); break;
+        case 6: ppu_write_address(value); break;
+        case 7: ppu_write_data(value); break;
+        default: break; // PPUSTATUS is read-only
+    }
+}
+
 uint8_t ppu_read_register(uint16_t addr) {
     switch (addr) {
         case 0x2002: {
@@ -313,7 +326,13 @@ void draw_background_tile(
 }
 
 inline bool show_status_bar() {
+    // Optional SMB frame-renderer adapter. The compiler and generic bus do
+    // not depend on this symbol; cycle/scanline rendering is a separate task.
+#ifdef Sprite0HitDetectFlag
     return ram[Sprite0HitDetectFlag];
+#else
+    return false;
+#endif
 }
 
 void render_status_bar(size_t bank_offset) {

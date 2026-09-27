@@ -11,7 +11,23 @@ permissions:
   contents: write
 
 jobs:
+  check-codegen:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tested MoonBit toolchain
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s '0.10.9+6e6c44045'
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+      - name: Resolve MoonBit dependencies
+        run: moon update
+      - name: Check analysis, independent NROM, native semantics, and generated files
+        run: python3 tests/check_codegen.py
+
   build-and-deploy:
+    needs: check-codegen
     runs-on: ubuntu-latest
 
     steps:
@@ -32,6 +48,7 @@ jobs:
           cp -r web/* dist/
           
       - name: Deploy to GitHub Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: JamesIves/github-pages-deploy-action@v4
         with:
           folder: dist
