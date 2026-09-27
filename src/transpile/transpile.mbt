@@ -619,10 +619,17 @@ fn Emitter::emit_flat_subroutine(self: Emitter, subroutine: @lower.AsmFlatSubrou
     }
   }
   self.indentation = 0
+  // Comments preceding the entry label document the routine: keep them
+  // above the C function rather than as its first statements.
+  let mut body = 0
+  while subroutine.items.get(body) is Some(Comment(text)) {
+    self.emit("// \{text}")
+    body += 1
+  }
   self.emit("void \{rename_label(subroutine.name)}(void) {")
   self.indentation = 1
 
-  for item in subroutine.items {
+  for item in subroutine.items[body:] {
     self.emit_item(item, low)
   }
 
@@ -633,6 +640,10 @@ fn Emitter::emit_flat_subroutine(self: Emitter, subroutine: @lower.AsmFlatSubrou
 fn Emitter::emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"code.h\"")
   self.emit("")
+  if !low.preamble.is_empty() {
+    for line in low.preamble { self.emit("// \{line}") }
+    self.emit("")
+  }
 
   if low.program is Some(p) {
     let helpers: Map[Int, @image.Dispatch] = Map([])

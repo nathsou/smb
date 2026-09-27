@@ -45,6 +45,23 @@ test "acyclic tail entry is outlined without absorbing unrelated code" {
   }
 }
 
+test "a tail shared by several routines becomes one function" {
+  let low = lower_fixture("Root__sub:\n jsr First\n jsr Second\n rts\nFirst:\n lda #$01\n jmp Shared\nSecond:\n lda #$02\n jmp Shared\nShared:\n sta $00\nMore:\n inc $01\n rts\n")
+  let names = low.subroutines.map(fn(sub) { sub.name })
+  assert_eq(names.contains("Shared"), true)
+  assert_eq(names.contains("More"), false)
+  for sub in low.subroutines {
+    if sub.name == "First" || sub.name == "Second" {
+      assert_eq(sub.internal_labels.contains("Shared"), false)
+    }
+  }
+}
+
+test "a shared loop header is not outlined into recursion" {
+  let low = lower_fixture("Root__sub:\n jsr First\n jsr Second\n rts\nFirst:\n ldx #$01\n jmp Loop\nSecond:\n ldx #$02\nLoop:\n dex\n bne Loop\n rts\n")
+  assert_eq(low.subroutines.map(fn(sub) { sub.name }).contains("Loop"), false)
+}
+
 test "single-entry loops become do-while regions" {
   let low = lower_fixture("Root__sub:\n ldx #$03\nLoop:\n dex\n bne Loop\n rts\n")
   assert_eq(low.flat_subroutines[0].items.iter().any(fn(item) { item is DoWhile(_) }), true)

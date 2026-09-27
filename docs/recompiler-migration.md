@@ -24,12 +24,15 @@ targets, and proven dispatch targets seed callable entries. Each entry owns its
 reachable region; a machine block can belong to more than one region. A jump
 to another callable entry is outlined only when that entry cannot reach the
 predecessor. This keeps cyclic control flow local instead of converting loops
-to recursive C calls. Shared tails may be duplicated; pure return chains are
-canonicalized to an internal return node. No marker is written into the source.
+to recursive C calls. Pure return chains are canonicalized to an internal
+return node. No marker is written into the source.
 
-For example, both `A: ...; jmp Tail` and `B: ...; jmp Tail` can retain a local
-copy of `Tail` or call its already-established entry when the acyclic condition
-holds. A backedge `Tail -> A` prevents that outlining.
+A labelled block where sharing begins (it is in several regions, and some
+predecessor is in fewer) becomes an entry of its own under the same acyclic
+condition. For example, `A: ...; jmp Tail` and `B: ...; jmp Tail` both end with
+`Tail(); return;`. A backedge `Tail -> A` prevents that outlining, so a shared
+loop is copied into each region instead; in SMB this leaves 40 small copies,
+mostly sound-engine loops.
 
 Implementation: `src/lower/lower.mbt` (`collect_basic_blocks`,
 `collect_subroutines`, `canonicalize_returns`).
@@ -197,20 +200,29 @@ fixture exercises these address distinctions without SMB names.
 The generated C keeps named functions, original block and instruction comments,
 and data-table comments. Comments from inverted branches are explicitly marked
 `Original branch:`. Unneeded source labels remain comments; synthetic labels
-are omitted when no jump uses them. Generic dispatch setup is shared rather
-than repeated at every call site.
+are omitted when no jump uses them. Comments before a routine's entry label
+are placed above its C function; comments before the first routine form the
+file header. Generic dispatch setup is shared rather than repeated at every
+call site.
+
+JSRs are emitted as `CALL(routine, return_address)`, which pushes the original
+return address on the guest stack and checks it on return. Programs that never
+observe return addresses can build with `-DNATIVE_CALLS` (for example
+`make hash EXTRA_CFLAGS=-DNATIVE_CALLS`) to make these plain C calls; SMB
+produces the same replay hash either way.
 
 Compared with the generated C at `2143a91`:
 
 | Measure | Before | After |
 | --- | ---: | ---: |
-| `goto` statements | 977 | 696 |
-| Structured `do` loops | 0 | 108 |
-| Direct register comparisons in `if` | 0 | 295 |
-| Lines in `code.c` | 15,932 | 18,087 |
+| `goto` statements | 977 | 607 |
+| Structured `do` loops | 0 | 105 |
+| Direct register comparisons in `if` | 0 | 291 |
+| C functions | 644 | 537 |
+| Lines in `code.c` | 15,932 | 17,201 |
 
-The larger file includes explicit guest call frames and restored source
-comments. Size alone is not the readability target; review the named functions,
+The larger file includes restored source comments and the copies of shared
+loops. Size alone is not the readability target; review the named functions,
 loops, direct conditions, and comments. The original-address data image also
 contains code bytes, so data output is larger by design.
 
@@ -264,7 +276,7 @@ make wasm                           # clang with wasm32 and lld support
 ```
 
 The suite checks deterministic checked-in generation, pristine source SHA,
-33 MoonBit tests, an independently authored NROM-128 program compiled in a
+35 MoonBit tests, an independently authored NROM-128 program compiled in a
 temporary directory with the same runtime, and native CPU/bus semantics.
 ADC/SBC tests cover every byte pair and carry input. The optional ROM check
 compares all 32,768 PRG bytes and replays 7,987 frames, with expected cumulative

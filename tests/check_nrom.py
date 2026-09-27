@@ -24,6 +24,8 @@ with tempfile.TemporaryDirectory(prefix="smb-nrom-") as directory:
     shutil.copyfile(ROOT / "tests/nrom128.c", output / "main.c")
     sources = ["instructions", "cpu", "code", "data", "ppu", "apu"]
     executable = str(output / "nrom-test")
-    run("cc", "-std=c99", "-O2", "-o", executable, str(output / "main.c"),
-        *(str(output / "lib" / (name + ".c")) for name in sources))
-    run(executable)
+    # Guest-stack calls (default) and plain C calls (-DNATIVE_CALLS).
+    for flags in ([], ["-DNATIVE_CALLS"]):
+        run("cc", "-std=c99", "-O2", *flags, "-o", executable, str(output / "main.c"),
+            *(str(output / "lib" / (name + ".c")) for name in sources))
+        run(executable)

@@ -15,6 +15,7 @@ pub(all) struct AsmLowering {
   subroutines: Array[AsmSubroutine]
   flat_subroutines: Array[AsmFlatSubroutine]
   flag_liveness: Map[Int, FlagLiveness]
+  preamble: Array[String] // source comments before the first code item
 } derive (Debug)
 
 pub suberror LoweringError { LoweringError(String) } derive(Debug)
@@ -36,6 +37,7 @@ pub fn AsmLowering::new(items: Array[@parse.SourceItem], program~: @image.Progra
     subroutines: [],
     flat_subroutines: [],
     flag_liveness: {},
+    preamble: [],
   }
 }
 
@@ -266,7 +268,7 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
       }
       Comment(comment~, is_inline=false) => {
         if !inside_table {
-          self.lowered.push(Comment(comment))
+          if self.lowered.is_empty() { self.preamble.push(comment) } else { self.lowered.push(Comment(comment)) }
         }
       }
       Directive(name="db" | "dw", ..) => {
@@ -650,20 +652,19 @@ pub fn AsmLowering::is_subroutine_label(self: AsmLowering, label: String) -> Boo
 
 // A machine block may participate in several callable entry regions. Follow
 // actual edges, not source order; a JSR's callee is not an intraprocedural edge.
-// Shared tails stay local until outlining them is proven safe. This also keeps
-// backedges in one C frame rather than turning loops into host recursion.
+// An edge to another entry is outlined as a tail call only when that entry
+// cannot reach the predecessor, which keeps loops in one C frame and rules out
+// host recursion. Labelled tails shared by several regions become entries
+// under the same condition instead of being copied into each region.
 fn AsmLowering::collect_subroutines(self: AsmLowering) -> Unit raise LoweringError {
   let entries = self.targets.subroutines.to_array()
   entries.sort_by(fn(a, b) { self.bb_by_label[a].id - self.bb_by_label[b].id })
   let entry_names: Map[Int, String] = Map([])
   let reach: Map[Int, Set[Int]] = Map([])
-  for name in entries {
-    let entry = self.bb_by_label[name]
-    entry_names[entry.id] = name
+  fn reachable(entry: BasicBlock) -> Set[Int] {
     let seen: Set[Int] = Set([])
     let work = [entry]
-    while !work.is_empty() {
-      let bb = work.pop().unwrap()
+    while work.pop() is Some(bb) {
       if seen.contains(bb.id) { continue }
       seen.add(bb.id)
       match bb.last_non_comment_item() {
@@ -671,27 +672,19 @@ fn AsmLowering::collect_subroutines(self: AsmLowering) -> Unit raise LoweringErr
         _ => for link in bb.successors { work.push(link.bb) }
       }
     }
-    reach[entry.id] = seen
+    seen
   }
-  for name in entries {
-    let entry = self.bb_by_label.get(name).unwrap_or_error(LoweringError("Missing entry: \{name}"))
+  fn region(entry: BasicBlock) -> Array[BasicBlock] {
     let visited: Set[Int] = Set([])
     let pending = [entry]
     let blocks = []
-    let labels: Set[String] = Set([])
-    while !pending.is_empty() {
-      let bb = pending.pop().unwrap()
+    while pending.pop() is Some(bb) {
       if visited.contains(bb.id) { continue }
       visited.add(bb.id)
       blocks.push(bb)
-      for item in bb.items {
-        if item is Label(label) { labels.add(label) }
-      }
       match bb.last_non_comment_item() {
         Some({ item: JumpEngine(_) }) => ()
         _ => for link in bb.successors {
-          // Outline an existing entry only across an acyclic edge. A transfer
-          // inside an SCC stays local, even if its target is also callable.
           if entry_names.contains(link.bb.id) && !reach[link.bb.id].contains(bb.id) {
             continue
           }
@@ -700,6 +693,49 @@ fn AsmLowering::collect_subroutines(self: AsmLowering) -> Unit raise LoweringErr
       }
     }
     blocks.sort_by(fn(a, b) { a.id - b.id })
+    blocks
+  }
+  fn add_entry(name: String) {
+    let entry = self.bb_by_label[name]
+    entry_names[entry.id] = name
+    reach[entry.id] = reachable(entry)
+  }
+  for name in entries { add_entry(name) }
+  // Promote the head of each shared tail: a block with one targeted label in several
+  // regions with a predecessor shared by fewer. Repeat until regions settle.
+  while true {
+    let count: Map[Int, Int] = Map([])
+    for name in entries {
+      for bb in region(self.bb_by_label[name]) { count[bb.id] = count.get(bb.id).unwrap_or(0) + 1 }
+    }
+    let heads = []
+    for bb in self.basic_blocks {
+      let shared = count.get(bb.id).unwrap_or(0)
+      // Jump-targeted labels only; an alias would otherwise need its own name.
+      let labels = bb.items.filter(fn(item) { item is Label(name) && self.targets.contains(name) })
+      if shared < 2 || entry_names.contains(bb.id) || labels.length() != 1 { continue }
+      if !bb.predecessors.iter().any(fn(p) { count.get(p.bb.id).unwrap_or(0) < shared }) { continue }
+      let from_head = reachable(bb)
+      if bb.predecessors.iter().any(fn(p) { from_head.contains(p.bb.id) }) { continue }
+      if labels[0] is Label(name) { heads.push(name) }
+    }
+    if heads.is_empty() { break }
+    for name in heads {
+      entries.push(name)
+      self.targets.subroutines.add(name)
+      add_entry(name)
+    }
+  }
+  entries.sort_by(fn(a, b) { self.bb_by_label[a].id - self.bb_by_label[b].id })
+  for name in entries {
+    let entry = self.bb_by_label.get(name).unwrap_or_error(LoweringError("Missing entry: \{name}"))
+    let blocks = region(entry)
+    let labels: Set[String] = Set([])
+    for bb in blocks {
+      for item in bb.items {
+        if item is Label(label) { labels.add(label) }
+      }
+    }
     self.subroutines.push({ name, blocks, entry, exit: blocks.last().unwrap(), internal_labels: labels })
   }
 }
