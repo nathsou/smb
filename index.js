@@ -432,8 +432,6 @@ async function main() {
         const samplesNeeded = Math.floor(timeDelta * audioContext.sampleRate);
         const chunkSize = Math.min(AUDIO_CHUNK_SIZE, samplesNeeded);
 
-        if (chunkSize === 0) return;
-
         fillAPUBuffer(samples.byteOffset, chunkSize);
 
         for (let i = 0; i < chunkSize; i++) {
@@ -446,9 +444,7 @@ async function main() {
             chunkSize,
         });
 
-        // If the elapsed time exceeded one chunk, retain the remainder for
-        // the next call instead of dropping it and creating an audio gap.
-        lastAudioTime += chunkSize / audioContext.sampleRate;
+        lastAudioTime = currentTime;
     };
 
     let shouldSaveState = false;
