@@ -5,6 +5,8 @@
     "nathsou/smb/lower",
     "moonbitlang/x/fs",
     "moonbitlang/core/debug",
-    "nathsou/smb/transpile"
+    "nathsou/smb/transpile",
+    "nathsou/smb/image",
+    "moonbitlang/core/env"
   ]
 }

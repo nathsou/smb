@@ -170,7 +170,7 @@ int main(void) {
         return 1;
     }
 
-    Start();
+    cpu_reset_entry();
 
     SetTargetFPS(60);
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "SMB");
