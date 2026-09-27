@@ -14,6 +14,7 @@ pub(all) enum ConstantSize {
 } derive (Debug, Eq)
 
 enum Token {
+  EOF
   Comment(comment~: String, is_inline~: Bool)
   Identifier(String)
   Label(String)
@@ -57,7 +58,7 @@ pub fn OpCode::is_relative(self: OpCode) -> Bool {
 
 pub fn OpCode::is_unconditional_branch(self: OpCode) -> Bool {
   match self {
-    JMP | JSR | RTS => true
+    JMP | JSR | RTS | RTI | BRK => true
     _ => false
   }
 }

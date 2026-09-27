@@ -5,6 +5,7 @@ CFLAGS += -I./raylib-quickstart/build/external/raylib-master/src
 CFLAGS += -O3 -std=c99
 CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -ferror-limit=0
+CFLAGS += $(EXTRA_CFLAGS) # e.g. EXTRA_CFLAGS=-DNATIVE_CALLS
 
 # Platform-specific flags
 UNAME_S := $(shell uname -s)
@@ -36,7 +37,7 @@ build: clean
 	$(CC) $(CFLAGS) -o smb ${MAIN} $(SOURCES) codegen/lib/common.c $(GC_FLAGS) $(RAYLIB_FLAGS) $(OBJECTS)
 
 wasm: clean
-	$(CC) -O3 -ffunction-sections -fdata-sections --target=wasm32 -nostdlib -Wl,--gc-sections -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined -o web/smb.wasm $(SOURCES)
+	$(CC) -O3 -ffunction-sections -fdata-sections --target=wasm32 -nostdlib -Wl,--gc-sections -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined $(EXTRA_CFLAGS) -o web/smb.wasm $(SOURCES)
 
 hash: clean
 	$(CC) $(CFLAGS) -o hash codegen/hash.c $(SOURCES) codegen/lib/rec.c codegen/lib/common.c $(GC_FLAGS)
