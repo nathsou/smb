@@ -74,6 +74,10 @@ Run `python3 tests/check_codegen.py` for the ROM-free regression suite, or appen
 `--rom` with a local `smb.nes` to compare PRG bytes and replay the recorded 7,987
 frames. These checks do not require Raylib.
 
+Calls are emitted as `CALL(routine, return_address)` and keep the original
+return addresses on the guest stack. Add `EXTRA_CFLAGS=-DNATIVE_CALLS` to any
+`make` target to compile them as plain C calls instead.
+
 To compile another compatible assembly input into a separate directory:
 
 ```bash

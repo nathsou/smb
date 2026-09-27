@@ -41,3 +41,5 @@ if __name__ == "__main__":
         run(executable)
     if args.rom:
         run("./hash")
+        run("make", "hash", "EXTRA_CFLAGS=-DNATIVE_CALLS")
+        run("./hash")
