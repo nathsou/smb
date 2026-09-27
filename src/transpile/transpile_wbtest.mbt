@@ -13,6 +13,8 @@ test "dispatch emission uses the 6502 indirect-jump page wrap" {
   for file in output.files {
     if file.name == "code.c" { code = file.contents }
   }
-  assert_eq(code.contains("return read_indirect_word(0xff);"), true)
-  assert_eq(code.contains("cpu_unresolved_jump(read_indirect_word(0xff))"), true)
+  assert_eq(code.contains("return cpu_dispatch_target = read_indirect_word(0xff);"), true)
+  assert_eq(code.contains("default: cpu_unresolved_jump(cpu_dispatch_target); return;"), true)
+  assert_eq(code.contains("CALL(Select, 0xc005);"), true)
 }
+

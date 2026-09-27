@@ -493,7 +493,7 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
                 }
 
                 if id >= 0 && low.program is Some(_) {
-                  "cpu_call_begin(0x\{hex(id + 2)}); \{target}(); cpu_call_end(0x\{hex(id + 2)});"
+                  "CALL(\{target}, 0x\{hex(id + 2)});"
                 } else { "\{target}();" }
               }
               (RTS, _) => "return;"
@@ -532,7 +532,7 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
             emitted.add(address)
           }
         }
-        self.emit("default: cpu_unresolved_jump(read_indirect_word(0x\{hex(dispatch.pointer)})); return;")
+        self.emit("default: cpu_unresolved_jump(cpu_dispatch_target); return; // index outside the proven table")
         self.indentation -= 1
         self.emit("}")
       }
@@ -642,21 +642,35 @@ fn Emitter::emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
     for address in addresses {
       let dispatch = helpers[address]
       let name = @image.address_name(p.image, address)
-      self.emit("// Return-address indexed dispatch; effects preserved from the original helper.")
+      self.emit("// Inline-table dispatch proven by evaluating \{name}; its effects run here unchanged.")
       self.emit("static uint16_t \{name}(uint16_t return_address) {")
       self.indentation += 1
       self.emit("cpu_call_begin(return_address);")
-      for inst in dispatch.setup {
-        let mode = try low.lower_mode(@image.source_mode(p.image, inst), op=Some(inst.op)) catch { _ => abort("Invalid dispatcher instruction") }
+      for step in dispatch.steps {
+        let inst = step.inst
+        if inst.op == JMP { continue }
+        if inst.mode == "rel" {
+          // Every accepted index took this direction; any other state traps.
+          let cond = show_cond_opcode(inst.op)
+          let other = if step.taken { inst.next } else { @image.branch_target(inst) }
+          let deviates = if step.taken { "!(\{cond})" } else { cond }
+          self.emit("if (\{deviates}) { cpu_unresolved_jump(0x\{hex(other)}); }")
+          continue
+        }
         let mut comment: String? = None
         for i, item in p.image.source {
           if p.image.addresses[i] == inst.pc && item is Inst(_) {
             if p.image.source.get(i + 1) is Some(Comment(comment=text, is_inline=true)) { comment = Some(text) }
           }
         }
+        let mode = try low.lower_mode(@image.source_mode(p.image, inst), op=Some(inst.op)) catch { _ => abort("Invalid dispatcher instruction") }
         self.emit_item(@lower.AsmItem::Inst(id=-1, op=inst.op, mode~, comment~), low)
       }
-      self.emit("return read_indirect_word(0x\{hex(dispatch.pointer)});")
+      let exit = match dispatch.exit {
+        IndirectJump(pointer) => "read_indirect_word(0x\{hex(pointer)})"
+        ReturnJump => "cpu_return_target()"
+      }
+      self.emit("return cpu_dispatch_target = \{exit};")
       self.indentation -= 1
       self.emit("}\n")
     }

@@ -7,6 +7,7 @@ Boot:
     txs
     jsr Fill
     jsr SelectHandler
+    jsr SelectByReturn
     lda #$21
     sta OamAddress
     ldx #$01
@@ -61,6 +62,35 @@ Choose:
     lda ($20),y
     sta $23
     jmp ($22)
+
+; A differently shaped helper: X index, byte table, RTS as the computed jump.
+SelectByReturn:
+    ldx #$01
+    jsr ReturnDispatch
+    .db <(Third-1), >(Third-1), <(Fourth-1), >(Fourth-1)
+Third:
+    inc $15
+    rts
+Fourth:
+    inc $16
+    rts
+
+ReturnDispatch:
+    pla
+    sta $30
+    pla
+    sta $31
+    txa
+    asl
+    tay
+    iny
+    iny
+    lda ($30),y
+    pha
+    dey
+    lda ($30),y
+    pha
+    rts
 
 RawEntry:
     ; LDA #$08; BIT $04A0 overlaps Alternate's LDY #$04.

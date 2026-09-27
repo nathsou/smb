@@ -90,31 +90,35 @@ The original dispatcher pops its caller's return address, reads the inline
 cannot reproduce this stack behavior. Previously the helper was removed from
 the input and the compiler recognized a specific routine name.
 
-The replacement identifies a candidate table immediately after a call, then
-partially executes the called helper for every table index. The incoming return
-address is an explicit token; unrelated registers and RAM start unknown. The
-proof requires exactly two token pops and verifies that every tested index
-resolves to its corresponding table entry. The interpreter understands the
-small instruction subset needed for this proof, rather than matching symbol
-names or hardcoded scratch addresses.
+A call is a dispatch candidate when its return address starts inline data in
+the source. The table extends to the next label, instruction or `.org`; its
+directive type (`.db` or `.dw`) is irrelevant. The helper is then evaluated as
+ordinary 6502 code (all documented instructions except JSR/RTI/BRK/TXS) over a
+partially known machine: the index register, the JSR return token and PRG bytes
+are known; other registers, flags and RAM are unknown. Any branch, address or
+destination that depends on an unknown fails the proof. The index may be passed
+in A, X or Y, and the helper may leave through `JMP (pointer)` or through an RTS
+after consuming the token and pushing a destination.
 
 ```text
-for index in 0 .. table.length:
-    state = unknown_cpu(A=index, stack=return_token(call_pc + 2))
-    result = bounded_execute(helper, state, immutable_prg)
-    require result.return_token_pops == 2
-    require result.indirect_destination == table[index]
+for index in 0 .. 255:
+    state = unknown_cpu(index_register=index, stack=return_token(call_pc + 2))
+    run = evaluate(helper, state, immutable_prg)
+    accept if run consumed the token, read PRG data only inside the table,
+              and took the same path as index 0
 ```
 
-The emitted helper executes the recovered setup, including flag/register/RAM
-side effects, once in a shared C function. Call sites switch on its resulting
-address and call named handlers. All 18 SMB sites are recovered. The independent
-fixture renames the helper and moves its scratch bytes. An out-of-table target
-traps; this is not a proof that every dynamic caller index is in range.
-Immutable ROM-backed indirect jumps are also resolved, including the 6502
-indirect-JMP page-wrap behavior. Other indirect jumps are diagnosed.
+Accepted indices give the handler set. The emitted helper runs the helper's
+path natively; branches on that path become guards that trap if taken the other
+way, and call sites switch on the resulting address. Any other target traps at
+runtime. This does not prove that callers only pass accepted indices. All 18 SMB
+sites are recovered; tests cover X-indexed, byte-table, branching and RTS-based
+helpers. A call that returns into inline data without a proven helper is an
+error rather than a guess. Separate low/high tables and RTS jumps through
+addresses from elsewhere are reported as unsupported computed jumps. Immutable
+ROM-backed indirect jumps are resolved, including the 6502 page-wrap behavior.
 
-Implementation: `src/image/program.mbt`, dispatcher emission in
+Implementation: `src/image/dispatch.mbt`, dispatcher emission in
 `src/transpile/transpile.mbt`.
 
 ### Manual branch simplifications and source-order loop assumptions
@@ -135,8 +139,8 @@ post-call demands to callee returns, then propagates callee entry demands to the
 caller. Flag-preserving callees pass those demands through; flag definitions
 kill them. External exits and foreground idle yields preserve observable flags.
 Overflow is included: CMP preserves V, while ADC/SBC/BIT define it.
-Recovered dispatcher helpers use the same per-instruction transfer in reverse,
-so a helper that omits SMB's initial ASL correctly preserves incoming carry.
+Recovered dispatcher helpers use the same per-instruction transfer in reverse
+over their proven path.
 
 Adjacent immediate compare/branch pairs become `if (a < value)` or equivalent
 C comparisons only when none of the comparison flags escape the branch. This
@@ -163,6 +167,14 @@ also reached by JSR, its ordinary-call context is checked separately and RTI is
 rejected there; vector status cannot leak into the ordinary call contract.
 Runtime token checks catch unsupported return-address modifications through RAM.
 This is a checked function-backend contract, not arbitrary continuation support.
+
+NMI is delivered only at the idle yield, so a loop waiting for an interrupt
+(`Wait: lda flag / beq Wait`) would hang. Discovery rejects any loop that can
+return to an instruction without writing memory, reading I/O or through a
+pointer, using the stack or calls, and without changing a register or flag it
+consumed on the way. Every later iteration would then repeat the same path, so
+only an interrupt could end it. Counting loops and I/O polling are unaffected.
+Implementation: `src/image/loops.mbt`.
 
 Implementation: `src/image/stack.mbt`, generated vector wrappers, and
 `codegen/lib/cpu.c`.
@@ -215,10 +227,12 @@ subtasks extend supported programs or improve output further; they are not
 required to annotate this source:
 
 1. **General computed-target analysis.** Add finite sets/ranges for pointer bytes
-   and memory def-use facts, including split low/high tables and RTS dispatch.
+   and memory def-use facts, including split low/high tables and RTS jumps
+   through separate tables.
    Prove bounds and target sets across callers. Keep unknown targets explicit.
 2. **Continuation fallback.** Add a resumable guest-PC backend for unproven
-   indirect jumps, nonstandard stack use, BRK/IRQ, and non-idle foreground loops.
+   indirect jumps, nonstandard stack use, BRK/IRQ, and wait-for-interrupt
+   foreground loops (currently rejected).
    Integrate it at proven boundaries without turning all generated code into
    one large PC switch. Differential tests must cover fallback/native crossings.
 3. **Broader value recovery.** Build register SSA and memory-effect summaries for
@@ -250,7 +264,7 @@ make wasm                           # clang with wasm32 and lld support
 ```
 
 The suite checks deterministic checked-in generation, pristine source SHA,
-27 MoonBit tests, an independently authored NROM-128 program compiled in a
+33 MoonBit tests, an independently authored NROM-128 program compiled in a
 temporary directory with the same runtime, and native CPU/bus semantics.
 ADC/SBC tests cover every byte pair and carry input. The optional ROM check
 compares all 32,768 PRG bytes and replays 7,987 frames, with expected cumulative

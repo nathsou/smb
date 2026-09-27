@@ -230,7 +230,6 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
 
   while item_idx < self.items.length() {
     let item = self.items[item_idx]
-    let mut idx_increment = 1
 
     match item {
       Label(name) => {
@@ -245,34 +244,13 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
       }
       Inst(op~, mode~) => {
         if op == JSR && (match self.program { Some(p) => p.dispatches.contains(p.addresses[item_idx]); None => false }) {
-          let jump_table: Array[String] = []
+          // Targets come from the dispatch proof, not from the table's
+          // source spelling. The table's data items are skipped below.
+          let p = self.program.unwrap()
+          let site = p.addresses[item_idx]
+          let jump_table = p.dispatches[site].targets.map(fn(t) { @image.address_name(p.image, t) })
           inside_table = true
-
-          for i in (item_idx + 1)..<self.items.length() {
-            match self.items[i] {
-              Directive(name="dw", args~) => {
-                for arg in args {
-                  match arg {
-                    Ident(label) => {
-                      if !self.jump_target_labels.contains(label) {
-                        raise LoweringError("Unknown label in jump table")
-                      }
-
-                      jump_table.push(label)
-                    }
-                    _ => raise LoweringError("Expected label in jump table")
-                  }
-                }
-              }
-              Comment(_) => ()
-              _ => {
-                idx_increment = i - item_idx
-                break
-              }
-            }
-          }
-
-          self.lowered.push(JumpEngine(jump_table~, site=self.program.unwrap().addresses[item_idx]))
+          self.lowered.push(JumpEngine(jump_table~, site~))
         } else {
           let addr_mode = self.lower_mode(mode, op=Some(op))
 
@@ -299,7 +277,7 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
       _ => ()
     }
 
-    item_idx += idx_increment
+    item_idx += 1
   }
 }
 
@@ -641,10 +619,10 @@ fn AsmLowering::collect_flag_liveness(self: AsmLowering) -> Unit {
           // dispatcher proof. Propagate flag demands through those operations
           // rather than assuming every accepted helper has SMB's ASL effects.
           JumpEngine(site~, ..) => {
-            let setup = self.program.unwrap().dispatches[site].setup
-            let mut j = setup.length() - 1
+            let steps = self.program.unwrap().dispatches[site].steps
+            let mut j = steps.length() - 1
             while j >= 0 {
-              let op = setup[j].op
+              let op = steps[j].inst.op
               live = flag_reads(op).union(live.subtract(flag_writes(op)))
               j -= 1
             }
