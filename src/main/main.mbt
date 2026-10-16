@@ -107,11 +107,34 @@ fn transpile() -> @transpile.Transpiler raise PipelineError {
   // --reference: every instruction with all of its effects, unoptimised
   // (the differential test's reference)
   if @env.args().contains("--reference") { program.analyze() |> ignore } else { program.optimize() }
+  let c = try @transpile.Transpiler::transpile(low, program, native~) catch {
+    err => raise TranspileError(err)
+  }
   // --wasm FILE: also emit the WebAssembly module (--wasm-dispatch: with
-  // every function structured as a dispatch loop)
+  // every function structured as a dispatch loop; --wasm-memory-vars: with
+  // registers and flags in memory rather than locals)
   let wasm_path = option("--wasm", "")
   if wasm_path != "" {
-    let output = try @wasm.emit(program, force_dispatch=@env.args().contains("--wasm-dispatch")) catch {
+    let args = @env.args()
+    // --wasm-layout FILE: "name address" lines, the runtime's addresses
+    let layout : Map[String, Int] = Map([])
+    let layout_path = option("--wasm-layout", "")
+    if layout_path != "" {
+      let text = try @fs.read_file_to_string(layout_path) catch { err => raise IOError(Show::to_string(err)) }
+      for line in text.split("\n") {
+        let fields = line.split(" ").filter(fn(f) { !f.is_empty() }).map(fn(f) { f.to_owned() }).to_array()
+        if fields.length() == 2 {
+          layout[fields[0]] = try @string.parse_int(fields[1]) catch { _ => raise IOError("Bad layout line: \{line}") }
+        }
+      }
+    }
+    // The WebAssembly build also inlines small leaf routines; the C keeps
+    // one function per routine.
+    if !args.contains("--reference") && !args.contains("--wasm-no-inline") {
+      program.inline_leaves() |> ignore
+      program.optimize()
+    }
+    let output = try @wasm.emit(program, layout~, force_dispatch=args.contains("--wasm-dispatch"), memory_vars=args.contains("--wasm-memory-vars")) catch {
       err => raise WasmError(err)
     }
     if !output.irreducible.is_empty() {
@@ -119,9 +142,7 @@ fn transpile() -> @transpile.Transpiler raise PipelineError {
     }
     try @fs.write_bytes_to_file(wasm_path, output.bytes) catch { err => raise IOError(Show::to_string(err)) }
   }
-  try @transpile.Transpiler::transpile(low, program, native~) catch {
-    err => raise TranspileError(err)
-  }
+  c
 }
 
 let output_dir: String = option("--output", "codegen")

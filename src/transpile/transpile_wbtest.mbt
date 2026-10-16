@@ -96,8 +96,9 @@ test "a value with one use moves into it" {
   assert_eq(code.contains("ram[0x11] = ram[0x10];"), true)
   let unfolded = code_c(transpile_low(lower_fixture(source), reference=true))
   assert_eq(unfolded.contains("a = ram[0x10];\n  zero_flag = a == 0;\n  neg_flag = (a & 0x80) != 0;\n  ram[0x11] = a;"), true)
-  // X is read by two stores, so it stays
-  assert_eq(code.contains("x = 3;\n  ram[0x12] = x;\n  ram[0x13] = x;"), true)
+  // X is a known constant, so the stores use it and X is dead
+  assert_eq(code.contains("ram[0x12] = 3;\n  ram[0x13] = 3;"), true)
+  assert_eq(code.contains("x = "), false)
 }
 
 test "interfaces count only the routine's own callers" {

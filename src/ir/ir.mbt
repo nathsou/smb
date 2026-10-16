@@ -142,6 +142,7 @@ pub(all) struct Program {
   by_name : Map[String, Int]
   reset : String
   nmi : String
+  prg : Array[Int] // the PRG ROM image, for folding constant reads
   // Filled by `analyze`.
   mut info : Analysis?
 } derive(Debug)
@@ -343,7 +344,7 @@ pub fn Expr::range(self : Expr, temps : Array[Temp]) -> Range {
   match self {
     Const(v) | Sym(_, v) => { lo: v, hi: v }
     Var(v) => if v.is_flag() { { lo: 0, hi: 1 } } else { { lo: 0, hi: 255 } }
-    Temp(t) if t >= temps.length() => unknown
+    Temp(t) if t < 0 || t >= temps.length() => unknown
     Temp(t) =>
       match temps[t].width {
         U8 => { lo: 0, hi: 255 }

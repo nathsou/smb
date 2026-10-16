@@ -134,9 +134,8 @@ void hide_sprites_but_zero(void) {
 
 // in: y; out: y
 void hide_sprites_from(void) {
-  a = 0xf8;
   do {
-    ram[SPRITE_Y + y] = a;
+    ram[SPRITE_Y + y] = 0xf8;
     y = (uint8_t)((uint8_t)(y + 3) + 1);
   } while (y != 0);
   return;
@@ -167,19 +166,17 @@ void title_menu(void) {
     }
     if (ram[WORLD_SELECT_UNLOCKED] == 0) { goto loc_82bb; }
     if (a != 0x40) { goto loc_82bb; }
-    y++;
+    y = 1;
   }
   if (ram[DEMO_TIMER] == 0) { goto loc_82c9; }
   ram[DEMO_TIMER] = 0x18;
   if (ram[SELECT_TIMER] == 0) {
     ram[SELECT_TIMER] = 0x10;
     if (y != 1) {
-      a = ram[PLAYER_COUNT] ^ 1;
-      ram[PLAYER_COUNT] = a;
+      ram[PLAYER_COUNT] ^= 1;
       draw_player_select_icon();
     } else {
-      x = (uint8_t)(ram[WORLD_SELECT] + 1);
-      a = x & 7;
+      a = (uint8_t)(ram[WORLD_SELECT] + 1) & 7;
       ram[WORLD_SELECT] = a;
       start_continue();
       do {
@@ -200,10 +197,9 @@ loc_82c0:
   }
 
 loc_82c9:
-  a = 0;
-  ram[GAME_MODE] = a;
-  ram[GAME_MODE_TASK] = a;
-  ram[STATUS_BAR_SPLIT] = a;
+  ram[GAME_MODE] = 0;
+  ram[GAME_MODE_TASK] = 0;
+  ram[STATUS_BAR_SPLIT] = 0;
   ram[SCREEN_OFF]++;
   return;
 
@@ -219,13 +215,11 @@ loc_82d8:
   ram[RELOAD_TIME_LIMIT]++;
   ram[GAME_MODE]++;
   ram[HARD_MODE] = ram[WORLD_SELECT_UNLOCKED];
-  a = 0;
-  ram[GAME_MODE_TASK] = a;
-  ram[DEMO_TIMER] = a;
+  ram[GAME_MODE_TASK] = 0;
+  ram[DEMO_TIMER] = 0;
   x = 0x17;
-  a = 0;
   do {
-    ram[(PLAYER_SCORE + x) & 0x7ff] = a;
+    ram[(PLAYER_SCORE + x) & 0x7ff] = 0;
     x--;
   } while ((x & 0x80) == 0);
   return;
@@ -236,8 +230,8 @@ void start_continue(void) {
   ram[WORLD_NUMBER] = a;
   ram[OTHER_WORLD_NUMBER] = a;
   x = 0;
-  ram[AREA_NUMBER] = x;
-  ram[OTHER_AREA_NUMBER] = x;
+  ram[AREA_NUMBER] = 0;
+  ram[OTHER_AREA_NUMBER] = 0;
   return;
 }
 
@@ -278,7 +272,7 @@ void victory_mode(void) {
   run_victory_task();
   if (ram[GAME_MODE_TASK] != 0) {
     x = 0;
-    ram[SLOT] = x;
+    ram[SLOT] = 0;
     update_enemies_and_loops();
   }
   player_screen_position();
@@ -305,22 +299,20 @@ void start_victory(void) {
 
 void victory_walk(void) {
   y = 0;
-  ram[VICTORY_WALK_STEP] = y;
+  ram[VICTORY_WALK_STEP] = 0;
   if (ram[PLAYER_PAGE] == ram[TARGET_PAGE]) {
     if (ram[PLAYER_X] >= 0x60) { goto loc_83d0; }
   }
   ram[VICTORY_WALK_STEP]++;
-  y++;
+  y = 1;
 
 loc_83d0:
   a = y;
   drive_player();
   if (ram[SCREEN_LEFT_PAGE] != ram[TARGET_PAGE]) {
     uint16_t sum = (uint16_t)(ram[SCROLL_FRACTION] + 0x80);
-    carry_flag = sum >= 0x100;
     ram[SCROLL_FRACTION] = (uint8_t)sum;
-    a = (uint8_t)(1 + carry_flag);
-    y = a;
+    y = (uint8_t)(1 + (sum >= 0x100));
     scroll_screen();
     update_scroll_column();
     ram[VICTORY_WALK_STEP]++;
@@ -388,10 +380,9 @@ void finish_world(void) {
     return;
   }
   if (ram[WORLD_NUMBER] < 7) {
-    a = 0;
-    ram[AREA_NUMBER] = a;
-    ram[LEVEL_NUMBER] = a;
-    ram[GAME_MODE_TASK] = a;
+    ram[AREA_NUMBER] = 0;
+    ram[LEVEL_NUMBER] = 0;
+    ram[GAME_MODE_TASK] = 0;
     ram[WORLD_NUMBER]++;
     load_area_pointer();
     ram[RELOAD_TIME_LIMIT]++;
@@ -402,8 +393,7 @@ void finish_world(void) {
     return;
   }
   ram[WORLD_SELECT_UNLOCKED] = 1;
-  a = 0xff;
-  ram[LIVES] = a;
+  ram[LIVES] = 0xff;
   end_game();
   return;
 }
@@ -416,7 +406,7 @@ void update_score_popups(void) {
   }
   if (a >= 0xb) {
     a = 0xb;
-    ram[POPUP_KIND + x] = a;
+    ram[POPUP_KIND + x] = 0xb;
   }
   y = a;
   a = ram[POPUP_TIMER + x];
@@ -431,8 +421,7 @@ void update_score_popups(void) {
       ram[PULSE2_SFX_REQUEST] = 0x40;
     }
     x = ROM(POPUP_SCORE_DIGITS + y) >> 1 >> 1 >> 1 >> 1;
-    a = ROM(POPUP_SCORE_DIGITS + y) & 0xf;
-    ram[SCORE_ADD + x] = a;
+    ram[SCORE_ADD + x] = ROM(POPUP_SCORE_DIGITS + y) & 0xf;
     add_score();
   }
   y = ram[ENEMY_SPRITE_SLOT + x];
@@ -466,9 +455,8 @@ loc_852b:
   a = ram[POPUP_X + x];
   ram[SPRITE_X + y] = a;
   ram[SPRITE_X + 4 + y] = (uint8_t)(a + 8);
-  a = 2;
-  ram[SPRITE_ATTR + y] = a;
-  ram[SPRITE_X + 3 + y] = a;
+  ram[SPRITE_ATTR + y] = 2;
+  ram[SPRITE_X + 3 + y] = 2;
   x = (uint8_t)(ram[POPUP_KIND + x] << 1);
   ram[SPRITE_TILE + y] = ROM(POPUP_TILES + x);
   ram[SPRITE_X + 2 + y] = ROM(POPUP_TILES + 1 + x);
@@ -513,8 +501,7 @@ void intermission_setup(void) {
   ram[0x100 + sp] = ram[PLAYER_POWER];
   sp--;
   ram[PLAYER_POWER] = 0;
-  a = 2;
-  ram[BACKGROUND_COLOR] = a;
+  ram[BACKGROUND_COLOR] = 2;
   queue_player_colors();
   sp++;
   ram[PLAYER_POWER] = ram[0x100 + sp];
@@ -808,9 +795,8 @@ void render_column(void) {
   ram[VRAM_LIST2 + 1 + y] = ram[NT_ADDRESS_LOW];
   ram[VRAM_LIST2 + y] = ram[NT_ADDRESS_HIGH];
   ram[VRAM_LIST2 + 2 + y] = 0x9a;
-  a = 0;
-  ram[4] = a;
-  x = a;
+  ram[4] = 0;
+  x = 0;
   do {
     ram[1] = x;
     a = ram[METATILE_COLUMN + x] & 0xc0;
@@ -892,14 +878,12 @@ void render_attributes(void) {
     ram[VRAM_LIST2 + 1 + y] = a;
     ram[1] = a;
     ram[VRAM_LIST2 + 3 + y] = ram[ATTRIBUTE_BUFFER + x];
-    a = 1;
-    ram[VRAM_LIST2 + 2 + y] = a;
-    a = a >> 1;
-    ram[ATTRIBUTE_BUFFER + x] = a;
+    ram[VRAM_LIST2 + 2 + y] = 1;
+    ram[ATTRIBUTE_BUFFER + x] = 0;
     y = (uint8_t)((uint8_t)(y + 3) + 1);
     x++;
   } while (x < 7);
-  ram[VRAM_LIST2 + y] = a;
+  ram[VRAM_LIST2 + y] = 0;
   ram[VRAM_LIST2_LENGTH] = y;
   select_vram_list2(); return;
 }
@@ -979,10 +963,10 @@ void queue_block_tiles(void) {
     y = 0;
     if (a != 0x58) {
       if (a != 0x51) {
-        y++;
+        y = 1;
         if (a != 0x5d) {
           if (a != 0x52) {
-            y++;
+            y = 2;
           }
         }
       }
@@ -1041,9 +1025,8 @@ void queue_metatile_tiles(void) {
   a = ram[5];
   ram[VRAM_LIST1_LENGTH + y] = a;
   ram[VRAM_LIST1 + 4 + y] = a;
-  a = 2;
-  ram[VRAM_LIST1 + 1 + y] = a;
-  ram[VRAM_LIST1 + 6 + y] = a;
+  ram[VRAM_LIST1 + 1 + y] = 2;
+  ram[VRAM_LIST1 + 6 + y] = 2;
   ram[VRAM_LIST1 + 9 + y] = 0;
   x = ram[0];
   return;
@@ -1058,13 +1041,12 @@ void queue_metatile_tiles(void) {
 // It must produce: y.
 
 void read_joypads(void) {
-  a = 1;
-  write_joypad1(a); write_joypad2(a);
-  a = a >> 1;
-  x = a;
-  write_joypad1(a); write_joypad2(a);
+  write_joypad1(1); write_joypad2(1);
+  a = 0;
+  x = 0;
+  write_joypad1(0); write_joypad2(0);
   read_joypad();
-  x++;
+  x = 1;
   read_joypad(); return;
 }
 
@@ -1170,10 +1152,9 @@ loc_8f75:
   if ((x & 0x80) == 0) { goto loc_8f68; }
 
 loc_8f7c:
-  a = 0;
   x = 6;
   do {
-    ram[POPUP_TIMER + 7 + x] = a;
+    ram[POPUP_TIMER + 7 + x] = 0;
     x--;
   } while ((x & 0x80) == 0);
   return;
@@ -1227,8 +1208,7 @@ void start_game(void) {
     ram[(NOISE_MUSIC_POS + y) & 0x7ff] = a;
     y--;
   } while ((y & 0x80) == 0);
-  a = 0x18;
-  ram[DEMO_TIMER] = a;
+  ram[DEMO_TIMER] = 0x18;
   load_area_pointer();
   start_area(); return;
 }
@@ -1238,9 +1218,8 @@ void start_area(void) {
   y = 0x4b;
   clear_memory();
   x = 0x21;
-  a = 0;
   do {
-    ram[(TIMERS + x) & 0x7ff] = a;
+    ram[(TIMERS + x) & 0x7ff] = 0;
     x--;
   } while ((x & 0x80) == 0);
   a = ram[HALFWAY_PAGE];
@@ -1257,15 +1236,13 @@ void start_area(void) {
     y = 0x24;
   }
   ram[NT_ADDRESS_HIGH] = y;
-  y = 0x80;
-  ram[NT_ADDRESS_LOW] = y;
+  ram[NT_ADDRESS_LOW] = 0x80;
   a = (uint8_t)((uint8_t)((uint8_t)((uint8_t)(a << 1) << 1) << 1) << 1);
   ram[BLOCK_COLUMN_POS] = a;
   ram[AREA_OBJ_LENGTH]--;
   ram[AREA_OBJ_LENGTH + 1]--;
   ram[AREA_OBJ_LENGTH + 2]--;
-  a = 0xb;
-  ram[COLUMN_SETS] = a;
+  ram[COLUMN_SETS] = 0xb;
   load_area_data();
   if (ram[HARD_MODE] == 0) {
     a = ram[WORLD_NUMBER];
@@ -1288,32 +1265,27 @@ loc_904a:
 }
 
 void setup_new_game(void) {
-  a = 1;
-  ram[RELOAD_TIME_LIMIT] = a;
-  ram[PLAYER_SMALL] = a;
-  a = 2;
-  ram[LIVES] = a;
-  ram[OTHER_LIVES] = a;
+  ram[RELOAD_TIME_LIMIT] = 1;
+  ram[PLAYER_SMALL] = 1;
+  ram[LIVES] = 2;
+  ram[OTHER_LIVES] = 2;
   setup_area_display(); return;
 }
 
 void setup_area_display(void) {
-  a = 0;
-  ram[SCREEN_OFF] = a;
-  y = a;
+  ram[SCREEN_OFF] = 0;
+  y = 0;
   do {
-    ram[VRAM_LIST1_LENGTH + y] = a;
+    ram[VRAM_LIST1_LENGTH + y] = 0;
     y++;
   } while (y != 0);
-  ram[TIME_UP] = a;
-  ram[SKIP_INTERMISSION] = a;
-  ram[BACKLOADING] = a;
+  ram[TIME_UP] = 0;
+  ram[SKIP_INTERMISSION] = 0;
+  ram[BACKLOADING] = 0;
   ram[BALANCE_ALIGNMENT] = 0xff;
   a = ram[SCREEN_LEFT_PAGE];
   ram[PPU_CTRL_COPY] = ram[PPU_CTRL_COPY] >> 1;
-  a &= 1;
-  carry_flag = (a & 1) != 0;
-  ram[PPU_CTRL_COPY] = (uint8_t)((ram[PPU_CTRL_COPY] << 1) | carry_flag);
+  ram[PPU_CTRL_COPY] = (uint8_t)((ram[PPU_CTRL_COPY] << 1) | ((a & 1 & 1) != 0));
   queue_area_music();
   ram[SHUFFLE_STEPS + 2] = 0x38;
   ram[SHUFFLE_STEPS + 1] = 0x48;
@@ -1340,14 +1312,14 @@ void setup_area_display(void) {
 void clear_memory(void) {
   x = 7;
   a = 0;
-  ram[6] = a;
+  ram[6] = 0;
   do {
     ram[7] = x;
     do {
       if (x == 1) {
         if (y >= 0x60) { goto loc_90de; }
       }
-      dynamic_ram_write(indirect_y_addr(6), a);
+      dynamic_ram_write(indirect_y_addr(6), 0);
 
 loc_90de:
       y--;
@@ -1380,15 +1352,14 @@ loc_9110:
 void place_player(void) {
   ram[PLAYER_PAGE] = ram[SCREEN_LEFT_PAGE];
   ram[GRAVITY_FALLING] = 0x28;
-  a = 1;
-  ram[PLAYER_FACING] = a;
-  ram[PLAYER_Y_PAGE] = a;
+  ram[PLAYER_FACING] = 1;
+  ram[PLAYER_Y_PAGE] = 1;
   ram[PLAYER_STATE] = 0;
   ram[PLAYER_COLLISION]--;
   y = 0;
-  ram[HALFWAY_PAGE] = y;
+  ram[HALFWAY_PAGE] = 0;
   if (ram[AREA_KIND] == 0) {
-    y++;
+    y = 1;
   }
   ram[SWIMMING] = y;
   x = ram[ENTRANCE_KIND];
@@ -1400,28 +1371,23 @@ void place_player(void) {
   }
   ram[PLAYER_X] = ROM(ENTRANCE_X_POSITIONS + y);
   ram[PLAYER_Y] = ROM(ENTRANCE_Y_POSITIONS + x);
-  a = ROM(ENTRANCE_PRIORITIES + x);
-  ram[PLAYER_SPRITE_ATTR] = a;
+  ram[PLAYER_SPRITE_ATTR] = ROM(ENTRANCE_PRIORITIES + x);
   queue_player_colors();
   y = ram[TIME_LIMIT];
   if (y != 0) {
     if (ram[RELOAD_TIME_LIMIT] != 0) {
       ram[TIME_DIGITS] = ROM(TIME_LIMITS + y);
-      a = 1;
-      ram[TIME_DIGITS + 2] = a;
-      a = a >> 1;
-      ram[TIME_DIGITS + 1] = a;
-      ram[RELOAD_TIME_LIMIT] = a;
-      ram[STAR_TIMER] = a;
+      ram[TIME_DIGITS + 2] = 1;
+      ram[TIME_DIGITS + 1] = 0;
+      ram[RELOAD_TIME_LIMIT] = 0;
+      ram[STAR_TIMER] = 0;
     }
   }
   if (ram[JOYPAD_OVERRIDE] != 0) {
-    a = 3;
-    ram[PLAYER_STATE] = a;
+    ram[PLAYER_STATE] = 3;
     x = 0;
     place_block_object();
-    a = 0xf0;
-    ram[BLOCK_Y] = a;
+    ram[BLOCK_Y] = 0xf0;
     x = 5;
     y = 0;
     spawn_vine();
@@ -1474,9 +1440,8 @@ void game_over_mode(void) {
 }
 
 void start_game_over(void) {
-  a = 0;
-  ram[SCREEN_TASK] = a;
-  ram[STATUS_BAR_SPLIT] = a;
+  ram[SCREEN_TASK] = 0;
+  ram[STATUS_BAR_SPLIT] = 0;
   ram[EVENT_MUSIC_REQUEST] = 2;
   ram[SCREEN_OFF]++;
   ram[GAME_MODE_TASK]++;
@@ -1493,17 +1458,15 @@ void game_over_screen(void) {
 }
 
 void end_game(void) {
-  a = 0x80;
-  ram[EVENT_MUSIC_REQUEST] = a;
+  ram[EVENT_MUSIC_REQUEST] = 0x80;
   switch_players();
   if (!carry_flag) {
     continue_game(); return;
   }
   ram[CONTINUE_WORLD] = ram[WORLD_NUMBER];
-  a = 0;
-  ram[GAME_MODE_TASK] = a;
-  ram[SCREEN_TIMER] = a;
-  ram[GAME_MODE] = a;
+  ram[GAME_MODE_TASK] = 0;
+  ram[SCREEN_TIMER] = 0;
+  ram[GAME_MODE] = 0;
   return;
 }
 
@@ -1511,11 +1474,10 @@ void continue_game(void) {
   load_area_pointer();
   ram[PLAYER_SMALL] = 1;
   ram[RELOAD_TIME_LIMIT]++;
-  a = 0;
-  ram[TIMERS_PAUSED] = a;
-  ram[PLAYER_POWER] = a;
-  ram[PLAYER_TASK] = a;
-  ram[GAME_MODE_TASK] = a;
+  ram[TIMERS_PAUSED] = 0;
+  ram[PLAYER_POWER] = 0;
+  ram[PLAYER_TASK] = 0;
+  ram[GAME_MODE_TASK] = 0;
   ram[GAME_MODE] = 1;
   return;
 }
@@ -1556,10 +1518,9 @@ void run_parser_task(void) {
   y = ram[PARSER_TASK];
   if (y == 0) {
     y = 8;
-    ram[PARSER_TASK] = y;
+    ram[PARSER_TASK] = 8;
   }
-  y--;
-  a = y;
+  a = (uint8_t)(y - 1);
   run_parser_subtask();
   ram[PARSER_TASK]--;
   if (ram[PARSER_TASK] != 0) {
@@ -1597,9 +1558,8 @@ void parse_area_column(void) {
     process_area_objects();
   }
   x = 0xc;
-  a = 0;
   do {
-    ram[METATILE_COLUMN + x] = a;
+    ram[METATILE_COLUMN + x] = 0;
     x--;
   } while ((x & 0x80) == 0);
   y = ram[BACKGROUND_SCENERY];
@@ -1863,10 +1823,9 @@ loc_9616:
       return;
     }
     if (ram[BACKLOADING] != 0) {
-      a = 0;
-      ram[BACKLOADING] = a;
-      ram[PARSER_BEHIND] = a;
-      ram[SLOT] = a;
+      ram[BACKLOADING] = 0;
+      ram[PARSER_BEHIND] = 0;
+      ram[SLOT] = 0;
       check_loop_object(); return;
     }
     a = read_byte((uint16_t)((ram[AREA_DATA_PTR] | (ram[AREA_DATA_PTR + 1] << 8)) + ram[AREA_DATA_POS]));
@@ -1876,8 +1835,7 @@ loc_9616:
     }
 
 loc_9656:
-    a = ram[AREA_DATA_POS];
-    ram[(AREA_OBJ_POS + x) & 0x7ff] = a;
+    ram[(AREA_OBJ_POS + x) & 0x7ff] = ram[AREA_DATA_POS];
     next_area_object();
   }
   a = (uint8_t)(ram[0] + ram[7]);
@@ -1957,9 +1915,9 @@ void change_area_attributes(void) {
 void warp_zone_lock(void) {
   x = 4;
   if (ram[WORLD_NUMBER] != 0) {
-    x++;
+    x = 5;
     if ((uint8_t)(ram[AREA_KIND] - 1) == 0) {
-      x++;
+      x = 6;
     }
   }
   a = x;
@@ -1978,11 +1936,10 @@ void lock_scroll(void) {
 // in: a; out: none
 void remove_enemies(void) {
   ram[0] = a;
-  a = 0;
   x = 4;
   do {
     if (ram[(uint8_t)(ENEMY_KIND + x)] == ram[0]) {
-      ram[(uint8_t)(ENEMY_ACTIVE + x)] = a;
+      ram[(uint8_t)(ENEMY_ACTIVE + x)] = 0;
     }
     x--;
   } while ((x & 0x80) == 0);
@@ -2081,9 +2038,9 @@ void draw_pulley_rope(void) {
   get_object_length();
   y = 0;
   if (!carry_flag) {
-    y++;
+    y = 1;
     if (ram[(AREA_OBJ_LENGTH + x) & 0x7ff] == 0) {
-      y++;
+      y = 2;
     }
   }
   ram[METATILE_COLUMN] = ROM(PULLEY_ROPE_METATILES + y);
@@ -2130,9 +2087,8 @@ void draw_castle(void) {
     sp++;
     ram[(uint8_t)(ENEMY_X + x)] = ram[0x100 + sp];
     ram[(uint8_t)(ENEMY_PAGE + x)] = ram[PARSER_PAGE];
-    a = 1;
-    ram[(uint8_t)(ENEMY_Y_PAGE + x)] = a;
-    ram[(uint8_t)(ENEMY_ACTIVE + x)] = a;
+    ram[(uint8_t)(ENEMY_Y_PAGE + x)] = 1;
+    ram[(uint8_t)(ENEMY_ACTIVE + x)] = 1;
     ram[(uint8_t)(ENEMY_Y + x)] = 0x90;
     ram[(uint8_t)(ENEMY_KIND + x)] = 0x31;
     return;
@@ -2213,16 +2169,13 @@ void draw_vertical_pipe(void) {
       if (!carry_flag) {
         get_object_x();
         uint16_t sum = (uint16_t)(a + 8);
-        carry_flag = sum >= 0x100;
         ram[(uint8_t)(ENEMY_X + x)] = (uint8_t)sum;
-        ram[(uint8_t)(ENEMY_PAGE + x)] = (uint8_t)(ram[PARSER_PAGE] + carry_flag);
-        a = 1;
-        ram[(uint8_t)(ENEMY_Y_PAGE + x)] = a;
-        ram[(uint8_t)(ENEMY_ACTIVE + x)] = a;
+        ram[(uint8_t)(ENEMY_PAGE + x)] = (uint8_t)(ram[PARSER_PAGE] + (sum >= 0x100));
+        ram[(uint8_t)(ENEMY_Y_PAGE + x)] = 1;
+        ram[(uint8_t)(ENEMY_ACTIVE + x)] = 1;
         get_object_y();
         ram[(uint8_t)(ENEMY_Y + x)] = a;
-        a = 0xd;
-        ram[(uint8_t)(ENEMY_KIND + x)] = a;
+        ram[(uint8_t)(ENEMY_KIND + x)] = 0xd;
         init_piranha();
       }
     }
@@ -2344,8 +2297,7 @@ void draw_flagpole(void) {
   y = 8;
   a = 0x25;
   fill_column_down();
-  a = 0x61;
-  ram[METATILE_COLUMN + 0xa] = a;
+  ram[METATILE_COLUMN + 0xa] = 0x61;
   get_object_x();
   int diff = a - 8;
   ram[ENEMY_X + 5] = (uint8_t)diff;
@@ -2372,8 +2324,7 @@ void draw_balance_rope(void) {
   a = 0x44;
   fill_column_down();
   sp++;
-  a = ram[0x100 + sp];
-  x = a;
+  x = ram[0x100 + sp];
   get_object_row_size();
   x = 1;
   draw_rope(); return;
@@ -2498,8 +2449,7 @@ void draw_cannon(void) {
   x = ram[CANNON_SLOT];
   get_object_y();
   ram[CANNON_Y + x] = a;
-  a = ram[PARSER_PAGE];
-  ram[CANNON_PAGE + x] = a;
+  ram[CANNON_PAGE + x] = ram[PARSER_PAGE];
   get_object_x();
   ram[CANNON_X + x] = a;
   x++;
@@ -2530,8 +2480,7 @@ void place_spring(void) {
   find_free_enemy_slot();
   get_object_x();
   ram[(uint8_t)(ENEMY_X + x)] = a;
-  a = ram[PARSER_PAGE];
-  ram[(uint8_t)(ENEMY_PAGE + x)] = a;
+  ram[(uint8_t)(ENEMY_PAGE + x)] = ram[PARSER_PAGE];
   get_object_y();
   ram[(uint8_t)(ENEMY_Y + x)] = a;
   ram[(uint8_t)(ENEMY_X_SPEED + x)] = a;
@@ -2579,8 +2528,7 @@ void draw_item_brick(void) {
 
 // in: x, y; out: none
 void draw_block_metatile(void) {
-  a = ROM(BUMPABLE_METATILES + y);
-  ram[0x100 + sp] = a;
+  ram[0x100 + sp] = ROM(BUMPABLE_METATILES + y);
   sp--;
   get_object_row_size();
   draw_row_height1(); return;
@@ -2731,8 +2679,7 @@ void load_area_data(void) {
   y = (uint8_t)(ROM(AREA_LAYOUT_KIND_OFFSETS + ram[AREA_KIND]) + ram[AREA_POINTER_OFFSET]);
   ram[AREA_DATA_PTR] = ROM(AREA_LAYOUTS_LOW + y);
   ram[AREA_DATA_PTR + 1] = ROM(AREA_LAYOUTS_HIGH + y);
-  y = 0;
-  a = read_byte(indirect_y_addr(AREA_DATA_PTR));
+  a = read_byte((uint16_t)(ram[AREA_DATA_PTR] | (ram[AREA_DATA_PTR + 1] << 8)));
   ram[0x100 + sp] = a;
   sp--;
   a &= 7;
@@ -2751,8 +2698,7 @@ void load_area_data(void) {
   a = (uint8_t)(a << 1);
   bool carry2 = (a & 0x80) != 0;
   ram[TIME_LIMIT] = (uint8_t)(((uint8_t)((a << 1) | carry) << 1) | carry2);
-  y++;
-  a = read_byte(indirect_y_addr(AREA_DATA_PTR));
+  a = read_byte((uint16_t)((ram[AREA_DATA_PTR] | (ram[AREA_DATA_PTR + 1] << 8)) + 1));
   ram[0x100 + sp] = a;
   ram[TERRAIN_KIND] = a & 0xf;
   sp = (uint8_t)((uint8_t)(sp - 1) + 1);
@@ -2789,8 +2735,7 @@ void playing_mode(void) {
 
 void run_game_frame(void) {
   x = ram[CURRENT_PLAYER];
-  a = ram[JOYPADS + x];
-  ram[JOYPAD1] = a;
+  ram[JOYPAD1] = ram[JOYPADS + x];
   run_player_task();
   if (ram[GAME_MODE_TASK] < 3) {
     return;
@@ -2808,7 +2753,7 @@ void run_game_frame(void) {
   draw_player();
   update_block_metatiles();
   x = 1;
-  ram[SLOT] = x;
+  ram[SLOT] = 1;
   update_block_objects();
   x--;
   ram[SLOT] = x;
@@ -2892,15 +2837,13 @@ void scroll_screen(void) {
   ram[SCROLL_AMOUNT] = a;
   ram[SCROLLED_32] = (uint8_t)(a + ram[SCROLLED_32]);
   uint16_t sum2 = (uint16_t)(y + ram[SCREEN_LEFT_X]);
-  carry_flag = sum2 >= 0x100;
   a = (uint8_t)sum2;
   ram[SCREEN_LEFT_X] = a;
   ram[SCROLL_X] = a;
-  a = (uint8_t)(ram[SCREEN_LEFT_PAGE] + carry_flag);
+  a = (uint8_t)(ram[SCREEN_LEFT_PAGE] + (sum2 >= 0x100));
   ram[SCREEN_LEFT_PAGE] = a;
   ram[0] = a & 1;
-  a = (ram[PPU_CTRL_COPY] & 0xfe) | ram[0];
-  ram[PPU_CTRL_COPY] = a;
+  ram[PPU_CTRL_COPY] = (ram[PPU_CTRL_COPY] & 0xfe) | ram[0];
   update_screen_edges();
   ram[SCROLL_TIMER] = 8;
   check_player_offscreen(); return;
@@ -2913,7 +2856,7 @@ void check_player_offscreen(void) {
   ram[0] = a;
   y = 0;
   if ((a & 0x80) == 0) {
-    y++;
+    y = 1;
     if ((ram[0] & 0x20) == 0) { goto loc_b02e; }
   }
   int diff = ram[(SCREEN_LEFT_X + y) & 0x7ff] - ROM(SCREEN_EDGE_OFFSETS + y);
@@ -2992,9 +2935,9 @@ void enter_area(void) {
   a = 1;
   if (ram[PLAYER_Y] >= 0x99) {
     ram[PLAYER_STATE] = 3;
-    y++;
+    y = 1;
     a = 8;
-    ram[BLOCK_BUFFER1 + 0xb4] = a;
+    ram[BLOCK_BUFFER1 + 0xb4] = 8;
   }
   ram[COLLISIONS_OFF] = y;
   drive_player();
@@ -3004,12 +2947,10 @@ void enter_area(void) {
 
 loc_b0d3:
   ram[PLAYER_TASK] = 8;
-  a = 1;
-  ram[PLAYER_FACING] = a;
-  a = a >> 1;
-  ram[ALT_ENTRANCE] = a;
-  ram[COLLISIONS_OFF] = a;
-  ram[JOYPAD_OVERRIDE] = a;
+  ram[PLAYER_FACING] = 1;
+  ram[ALT_ENTRANCE] = 0;
+  ram[COLLISIONS_OFF] = 0;
+  ram[JOYPAD_OVERRIDE] = 0;
   return;
 }
 
@@ -3037,9 +2978,8 @@ loc_b104:
     if ((a & 4) != 0) {
       if (ram[PLAYER_STATE] == 0) {
         if (ram[BUTTONS_HORIZONTAL] != 0) {
-          a = 0;
-          ram[BUTTONS_HORIZONTAL] = a;
-          ram[BUTTONS_VERTICAL] = a;
+          ram[BUTTONS_HORIZONTAL] = 0;
+          ram[BUTTONS_VERTICAL] = 0;
         }
       }
     }
@@ -3058,7 +2998,7 @@ loc_b104:
   neg_flag = (y & 0x80) != 0;
   if (y != 0) {
     if (neg_flag) {
-      a = (uint8_t)(a << 1);
+      a = 2;
     }
     ram[PLAYER_DIR] = a;
   }
@@ -3088,7 +3028,7 @@ loc_b104:
   if (ram[TIME_UP] == 0) {
     if (ram[CLOUD_OVERRIDE] != 0) { goto loc_b1aa; }
   }
-  x++;
+  x = 1;
   if (ram[PLAYER_TASK] != 0xb) {
     y = ram[DEATH_MUSIC_QUEUED];
     if (y == 0) {
@@ -3110,8 +3050,7 @@ loc_b1aa:
     ram[PLAYER_TASK] = 6;
     return;
   }
-  a = 0;
-  ram[JOYPAD_OVERRIDE] = a;
+  ram[JOYPAD_OVERRIDE] = 0;
   set_alt_entrance();
   ram[ALT_ENTRANCE]++;
   return;
@@ -3124,7 +3063,7 @@ void vine_climb_in(void) {
     }
   }
   a = 8;
-  ram[JOYPAD_OVERRIDE] = a;
+  ram[JOYPAD_OVERRIDE] = 8;
   ram[PLAYER_STATE] = 3;
   drive_player(); return;
 }
@@ -3142,11 +3081,11 @@ void enter_down_pipe(void) {
   if (ram[WARP_ZONE] != 0) {
     change_area_after_pipe(); return;
   }
-  y++;
+  y = 1;
   if (ram[AREA_KIND] != 3) {
     change_area_after_pipe(); return;
   }
-  y++;
+  y = 2;
   change_area_after_pipe(); return;
 }
 
@@ -3176,8 +3115,8 @@ void change_area_after_pipe(void) {
 void change_area(void) {
   ram[SCREEN_OFF]++;
   a = 0;
-  ram[GAME_MODE_TASK] = a;
-  ram[STATUS_BAR_SPLIT] = a;
+  ram[GAME_MODE_TASK] = 0;
+  ram[STATUS_BAR_SPLIT] = 0;
   return;
 }
 
@@ -3264,7 +3203,7 @@ void slide_down_flagpole(void) {
   if (ram[ENEMY_KIND + 5] == 0x30) {
     ram[PULSE1_SFX_REQUEST] = ram[FLAGPOLE_SOUND];
     a = 0;
-    ram[FLAGPOLE_SOUND] = a;
+    ram[FLAGPOLE_SOUND] = 0;
     if (ram[PLAYER_Y] >= 0x9e) {
       drive_player(); return;
     }
@@ -3408,7 +3347,7 @@ void move_climbing(void) {
   y = 0;
   a = ram[PLAYER_Y_SPEED];
   if ((a & 0x80) != 0) {
-    y--;
+    y = (uint8_t)-0x1;
   }
   ram[0] = y;
   uint16_t sum2 = (uint16_t)(a + ram[PLAYER_Y] + carry_flag);
@@ -3423,7 +3362,7 @@ void move_climbing(void) {
     x = 0;
     y = ram[PLAYER_FACING];
     if ((a & 1) == 0) {
-      x = (uint8_t)((uint8_t)(x + 1) + 1);
+      x = 2;
     }
     if ((uint8_t)(y - 1) != 0) {
       x++;
@@ -3444,9 +3383,9 @@ void player_physics(void) {
     y = 0;
     a = ram[BUTTONS_VERTICAL] & ram[PLAYER_COLLISION];
     if (a != 0) {
-      y++;
+      y = 1;
       if ((a & 8) == 0) {
-        y++;
+        y = 2;
       }
     }
     ram[PLAYER_Y_FORCE] = ROM(CLIMB_FORCES + y);
@@ -3454,7 +3393,7 @@ void player_physics(void) {
     x = ROM(CLIMB_SPEEDS + y);
     ram[PLAYER_Y_SPEED] = x;
     if ((x & 0x80) == 0) {
-      a = a >> 1;
+      a = 4;
     }
     ram[PLAYER_ANIM_PERIOD] = a;
     return;
@@ -3471,20 +3410,20 @@ void player_physics(void) {
         }
         ram[JUMP_SWIM_TIMER] = 0x20;
         y = 0;
-        ram[PLAYER_Y_FRACTION] = y;
-        ram[PLAYER_Y_FORCE] = y;
+        ram[PLAYER_Y_FRACTION] = 0;
+        ram[PLAYER_Y_FORCE] = 0;
         ram[JUMP_ORIGIN_Y_PAGE] = ram[PLAYER_Y_PAGE];
         ram[JUMP_ORIGIN_Y] = ram[PLAYER_Y];
         ram[PLAYER_STATE] = 1;
         a = ram[PLAYER_ABS_SPEED];
         if (a >= 9) {
-          y++;
+          y = 1;
           if (a >= 0x10) {
-            y++;
+            y = 2;
             if (a >= 0x19) {
-              y++;
+              y = 3;
               if (a >= 0x1c) {
-                y++;
+                y = 4;
               }
             }
           }
@@ -3493,7 +3432,7 @@ void player_physics(void) {
         if (ram[SWIMMING] != 0) {
           y = 5;
           if (ram[CANNON_TIMER] != 0) {
-            y++;
+            y = 6;
           }
         }
         ram[GRAVITY] = ROM(JUMP_GRAVITY + y);
@@ -3518,14 +3457,14 @@ void player_physics(void) {
 
 loc_b51c:
   y = 0;
-  ram[0] = y;
+  ram[0] = 0;
   if (ram[PLAYER_STATE] != 0) {
     if (ram[PLAYER_ABS_SPEED] >= 0x19) { goto loc_b55e; }
     goto loc_b545;
   }
-  y++;
+  y = 1;
   if (ram[AREA_KIND] != 0) {
-    y--;
+    y = 0;
     if (ram[BUTTONS_HORIZONTAL] == ram[PLAYER_DIR]) {
       if ((ram[BUTTONS_AB] & 0x40) != 0) { goto loc_b559; }
       if (ram[RUNNING_TIMER] != 0) { goto loc_b55e; }
@@ -3565,9 +3504,9 @@ void set_player_anim_speed(void) {
   y = 0;
   a = ram[PLAYER_ABS_SPEED];
   if (a < 0x1c) {
-    y++;
+    y = 1;
     if (a < 0xe) {
-      y++;
+      y = 2;
     }
     a = ram[JOYPAD1] & 0x7f;
     if (a == 0) { goto loc_b5c5; }
@@ -3580,9 +3519,8 @@ void set_player_anim_speed(void) {
 loc_b5b3:
   if (ram[PLAYER_ABS_SPEED] < 0xb) {
     ram[PLAYER_DIR] = ram[PLAYER_FACING];
-    a = 0;
-    ram[PLAYER_X_SPEED] = a;
-    ram[PLAYER_X_FORCE] = a;
+    ram[PLAYER_X_SPEED] = 0;
+    ram[PLAYER_X_FORCE] = 0;
   }
 
 loc_b5c5:
@@ -3695,8 +3633,7 @@ void update_fireball(void) {
       ram[FIREBALL_BOX_KIND + x] = 7;
       ram[(uint8_t)(FIREBALL_STATE + x)]--;
     }
-    carry_flag = false;
-    x = (uint8_t)(x + 7 + carry_flag);
+    x = (uint8_t)(x + 7);
     ram[0] = 0x50;
     ram[2] = 3;
     a = 0;
@@ -3801,8 +3738,7 @@ void tick_time_limit(void) {
     }
     ram[TICK_TIMER] = 0x18;
     y = 0x23;
-    a = 0xff;
-    ram[SCORE_ADD + 5] = a;
+    ram[SCORE_ADD + 5] = 0xff;
     add_digits();
     a = 0xa4;
     queue_player_counters(); return;
@@ -3877,30 +3813,29 @@ loc_b7f5:
 
 loc_b83b:
   ram[0] = 0x10;
-  a = 1;
-  ram[CANNON_TIMER] = a;
-  ram[2] = a;
-  a = a >> 1;
-  x = a;
+  ram[CANNON_TIMER] = 1;
+  ram[2] = 1;
+  a = 0;
+  x = 0;
   apply_gravity(); return;
 }
 
 // in: none; out: x
 void update_flagpole(void) {
   x = 5;
-  ram[SLOT] = x;
-  if (ram[(uint8_t)(ENEMY_KIND + x)] != 0x30) {
+  ram[SLOT] = 5;
+  if (ram[ENEMY_KIND + 5] != 0x30) {
     return;
   }
   if (ram[PLAYER_TASK] == 4) {
     if (ram[PLAYER_STATE] == 3) {
-      if (ram[(uint8_t)(ENEMY_Y + x)] < 0xaa) {
+      if (ram[ENEMY_Y + 5] < 0xaa) {
         carry_flag = ram[PLAYER_Y] >= 0xa2;
         if (carry_flag) { goto loc_b899; }
-        uint16_t sum = (uint16_t)(ram[ENEMY_Y_FRACTION + x] + 0xff + carry_flag);
-        ram[ENEMY_Y_FRACTION + x] = (uint8_t)sum;
-        a = (uint8_t)(ram[(uint8_t)(ENEMY_Y + x)] + 1 + (sum >= 0x100));
-        ram[(uint8_t)(ENEMY_Y + x)] = a;
+        uint16_t sum = (uint16_t)(ram[ENEMY_Y_FRACTION + 5] + 0xff + carry_flag);
+        ram[ENEMY_Y_FRACTION + 5] = (uint8_t)sum;
+        a = (uint8_t)(ram[ENEMY_Y + 5] + 1 + (sum >= 0x100));
+        ram[ENEMY_Y + 5] = a;
         int diff = ram[FLAG_SCORE_Y_FRACTION] - 0xff;
         ram[FLAG_SCORE_Y_FRACTION] = (uint8_t)diff;
         ram[FLAG_SCORE_Y] = (uint8_t)(ram[FLAG_SCORE_Y] - 1 - (diff < 0));
@@ -3908,9 +3843,7 @@ void update_flagpole(void) {
 
 loc_b899:
         y = ram[FLAG_SCORE_KIND];
-        a = ROM(FLAGPOLE_SCORE_BOUNDS + y);
-        x = ROM(FLAGPOLE_SCORE_DIGITS + y);
-        ram[SCORE_ADD + x] = a;
+        ram[SCORE_ADD + ROM(FLAGPOLE_SCORE_DIGITS + y)] = ROM(FLAGPOLE_SCORE_BOUNDS + y);
         add_score();
         ram[PLAYER_TASK] = 5;
       }
@@ -4054,10 +3987,9 @@ void update_cannons(void) {
       ram[(uint8_t)(ENEMY_PAGE + x)] = ram[CANNON_PAGE + y];
       ram[(uint8_t)(ENEMY_X + x)] = ram[CANNON_X + y];
       ram[(uint8_t)(ENEMY_Y + x)] = (uint8_t)(ram[CANNON_Y + y] - 8);
-      a = 1;
-      ram[(uint8_t)(ENEMY_Y_PAGE + x)] = a;
-      ram[(uint8_t)(ENEMY_ACTIVE + x)] = a;
-      ram[(uint8_t)(ENEMY_STATE + x)] = a >> 1;
+      ram[(uint8_t)(ENEMY_Y_PAGE + x)] = 1;
+      ram[(uint8_t)(ENEMY_ACTIVE + x)] = 1;
+      ram[(uint8_t)(ENEMY_STATE + x)] = 0;
       ram[ENEMY_BOX_KIND + x] = 9;
       ram[(uint8_t)(ENEMY_KIND + x)] = 0x33;
     } else {
@@ -4084,7 +4016,7 @@ void update_bullet(void) {
       y = 1;
       player_enemy_distance();
       if (!neg_flag) {
-        y++;
+        y = 2;
       }
       ram[(uint8_t)(ENEMY_DIR + x)] = y;
       y--;
@@ -4140,8 +4072,7 @@ void update_hammer(void) {
     carry_flag = a >= 2;
     if (a != 2) {
       if (carry_flag) { goto loc_bb09; }
-      carry_flag = false;
-      x = (uint8_t)(x + 0xd + carry_flag);
+      x = (uint8_t)(x + 0xd);
       ram[0] = 0x10;
       ram[1] = 0xf;
       ram[2] = 4;
@@ -4202,10 +4133,9 @@ void spawn_jumping_coin(void) {
 // in: x, y; out: x
 void launch_coin(void) {
   ram[MISC_Y_SPEED + y] = 0xfb;
-  a = 1;
-  ram[MISC_Y_PAGE + y] = a;
-  ram[MISC_STATE + y] = a;
-  ram[PULSE2_SFX_REQUEST] = a;
+  ram[MISC_Y_PAGE + y] = 1;
+  ram[MISC_STATE + y] = 1;
+  ram[PULSE2_SFX_REQUEST] = 1;
   ram[SLOT] = x;
   give_coin();
   ram[COINS_FOR_1UPS]++;
@@ -4246,12 +4176,10 @@ void update_misc_objects(void) {
           ram[(uint8_t)(MISC_STATE + x)] = 0;
           goto loc_bbf4;
         }
-        carry_flag = false;
-        x = (uint8_t)(x + 0xd + carry_flag);
+        x = (uint8_t)(x + 0xd);
         ram[0] = 0x50;
-        a = 6;
-        ram[2] = a;
-        ram[1] = a >> 1;
+        ram[2] = 6;
+        ram[1] = 3;
         a = 0;
         apply_gravity();
         x = ram[SLOT];
@@ -4275,10 +4203,8 @@ loc_bbf4:
 
 // in: none; out: x
 void give_coin(void) {
-  a = 1;
-  ram[SCORE_ADD + 5] = a;
-  x = ram[CURRENT_PLAYER];
-  y = ROM(COIN_DIGIT_OFFSETS + x);
+  ram[SCORE_ADD + 5] = 1;
+  y = ROM(COIN_DIGIT_OFFSETS + ram[CURRENT_PLAYER]);
   add_digits();
   ram[COINS]++;
   if (ram[COINS] == 0x64) {
@@ -4292,8 +4218,7 @@ void give_coin(void) {
 
 // in: none; out: x
 void add_score(void) {
-  x = ram[CURRENT_PLAYER];
-  y = ROM(SCORE_DIGIT_OFFSETS + x);
+  y = ROM(SCORE_DIGIT_OFFSETS + ram[CURRENT_PLAYER]);
   add_digits();
   queue_counters_for_player(); return;
 }
@@ -4316,9 +4241,8 @@ void queue_counters(void) {
 }
 
 void spawn_powerup(void) {
-  a = 1;
-  ram[ENEMY_STATE + 5] = a;
-  ram[ENEMY_ACTIVE + 5] = a;
+  ram[ENEMY_STATE + 5] = 1;
+  ram[ENEMY_ACTIVE + 5] = 1;
   ram[ENEMY_BOX_KIND + 5] = 3;
   if (ram[POWERUP_KIND] < 2) {
     a = ram[PLAYER_POWER];
@@ -4335,7 +4259,7 @@ void spawn_powerup(void) {
 // in: none; out: x
 void update_powerup(void) {
   x = 5;
-  ram[SLOT] = x;
+  ram[SLOT] = 5;
   a = ram[ENEMY_STATE + 5];
   if (a == 0) {
     return;
@@ -4362,13 +4286,10 @@ loc_bcaa:
       a = ram[ENEMY_STATE + 5];
       ram[ENEMY_STATE + 5]++;
       if (a >= 0x11) {
-        ram[(uint8_t)(ENEMY_X_SPEED + x)] = 0x10;
-        a = 0x80;
-        ram[ENEMY_STATE + 5] = a;
-        carry_flag = (a & 0x80) != 0;
-        a = (uint8_t)(a << 1);
-        ram[ENEMY_SPRITE_ATTR + 5] = a;
-        ram[(uint8_t)(ENEMY_DIR + x)] = (uint8_t)((a << 1) | carry_flag);
+        ram[ENEMY_X_SPEED + 5] = 0x10;
+        ram[ENEMY_STATE + 5] = 0x80;
+        ram[ENEMY_SPRITE_ATTR + 5] = 0;
+        ram[ENEMY_DIR + 5] = 1;
       }
     }
     if (ram[ENEMY_STATE + 5] < 6) {
@@ -4398,9 +4319,8 @@ void bump_head(void) {
   x = ram[SPRITE_SLOT_CTRL];
   a = ram[2];
   ram[BLOCK_ORIGIN_Y + x] = a;
-  y = a;
   ram[BLOCK_BUFFER_LOW + x] = ram[6];
-  a = read_byte(indirect_y_addr(6));
+  a = read_byte((uint16_t)((ram[6] | (ram[7] << 8)) + a));
   find_bumped_metatile();
   ram[0] = a;
   y = ram[PLAYER_SMALL];
@@ -4435,7 +4355,7 @@ loc_bd41:
   if (ram[CROUCHING] == 0) {
     if (ram[PLAYER_SMALL] == 0) { goto loc_bd62; }
   }
-  y++;
+  y = 1;
 
 loc_bd62:
   a = (uint8_t)(ram[PLAYER_Y] + ROM(BLOCK_Y_OFFSETS + y)) & 0xf0;
@@ -4463,10 +4383,9 @@ void place_block_object(void) {
 void bump_block(void) {
   collect_coin_above();
   ram[PULSE1_SFX_REQUEST] = 2;
-  a = 0;
-  ram[(uint8_t)(BLOCK_X_SPEED + x)] = a;
-  ram[BLOCK_Y_FORCE + x] = a;
-  ram[PLAYER_Y_SPEED] = a;
+  ram[(uint8_t)(BLOCK_X_SPEED + x)] = 0;
+  ram[BLOCK_Y_FORCE + x] = 0;
+  ram[PLAYER_Y_SPEED] = 0;
   ram[(uint8_t)(BLOCK_Y_SPEED + x)] = 0xfe;
   a = ram[5];
   find_bumped_metatile();
@@ -4551,13 +4470,11 @@ void find_bumped_metatile(void) {
 
 void shatter_brick(void) {
   collect_coin_above();
-  a = 1;
-  ram[BLOCK_REPLACE + x] = a;
-  ram[NOISE_SFX_REQUEST] = a;
+  ram[BLOCK_REPLACE + x] = 1;
+  ram[NOISE_SFX_REQUEST] = 1;
   spawn_brick_chunks();
   ram[PLAYER_Y_SPEED] = 0xfe;
-  a = 5;
-  ram[SCORE_ADD + 5] = a;
+  ram[SCORE_ADD + 5] = 5;
   add_score();
   return;
 }
@@ -4575,8 +4492,7 @@ void collect_coin_above(void) {
   if (read_byte(indirect_y_addr(6)) != 0xc2) {
     return;
   }
-  a = 0;
-  dynamic_ram_write(indirect_y_addr(6), a);
+  dynamic_ram_write(indirect_y_addr(6), 0);
   erase_coin_or_axe();
   x = ram[SPRITE_SLOT_CTRL];
   spawn_jumping_coin();
@@ -4586,14 +4502,12 @@ void collect_coin_above(void) {
 // in: x; out: none
 void spawn_brick_chunks(void) {
   ram[BLOCK_ORIGIN_X + x] = ram[(uint8_t)(BLOCK_X + x)];
-  a = 0xf0;
-  ram[(uint8_t)(BLOCK_X_SPEED + x)] = a;
-  ram[(uint8_t)(BLOCK_X_SPEED + 2 + x)] = a;
+  ram[(uint8_t)(BLOCK_X_SPEED + x)] = 0xf0;
+  ram[(uint8_t)(BLOCK_X_SPEED + 2 + x)] = 0xf0;
   ram[(uint8_t)(BLOCK_Y_SPEED + x)] = 0xfa;
   ram[(uint8_t)(BLOCK_Y_SPEED + 2 + x)] = 0xfc;
-  a = 0;
-  ram[BLOCK_Y_FORCE + x] = a;
-  ram[BLOCK_Y_FORCE + 2 + x] = a;
+  ram[BLOCK_Y_FORCE + x] = 0;
+  ram[BLOCK_Y_FORCE + 2 + x] = 0;
   ram[(uint8_t)(BLOCK_PAGE + 2 + x)] = ram[(uint8_t)(BLOCK_PAGE + x)];
   ram[(uint8_t)(BLOCK_X + 2 + x)] = ram[(uint8_t)(BLOCK_X + x)];
   a = (uint8_t)(ram[(uint8_t)(BLOCK_Y + x)] + 8);
@@ -4613,9 +4527,7 @@ void update_block_objects(void) {
     if ((uint8_t)(a - 1) != 0) {
       apply_gravity_block();
       move_object_x();
-      carry_flag = false;
-      a = (uint8_t)(x + 2 + carry_flag);
-      x = a;
+      x = (uint8_t)(x + 2);
       apply_gravity_block();
       move_object_x();
       x = ram[SLOT];
@@ -4627,9 +4539,8 @@ void update_block_objects(void) {
       if (ram[(uint8_t)(BLOCK_Y_PAGE + x)] == 0) { goto loc_bed1; }
       ram[0x100 + sp] = a;
       sp--;
-      a = 0xf0;
-      if (a < ram[(uint8_t)(BLOCK_Y + 2 + x)]) {
-        ram[(uint8_t)(BLOCK_Y + 2 + x)] = a;
+      if (0xf0 < ram[(uint8_t)(BLOCK_Y + 2 + x)]) {
+        ram[(uint8_t)(BLOCK_Y + 2 + x)] = 0xf0;
       }
       sp++;
       a = ram[0x100 + sp];
@@ -4707,7 +4618,7 @@ void move_object_x(void) {
   ram[0] = a;
   y = 0;
   if ((a & 0x80) != 0) {
-    y--;
+    y = (uint8_t)-0x1;
   }
   ram[2] = y;
   uint16_t sum = (uint16_t)(ram[OBJ_X_FORCE + x] + ram[1]);
@@ -4784,7 +4695,7 @@ void apply_gravity_enemy(void) {
 // in: x; out: none
 void apply_gravity_block(void) {
   ram[0] = 0x50;
-  a = ROM(BLOCK_MAX_SPEEDS + 1);
+  a = 8;
   apply_gravity_object(); return;
 }
 
@@ -4843,7 +4754,7 @@ void apply_gravity(void) {
   y = 0;
   a = ram[(uint8_t)(OBJ_Y_SPEED + x)];
   if ((a & 0x80) != 0) {
-    y--;
+    y = (uint8_t)-0x1;
   }
   ram[7] = y;
   uint16_t sum2 = (uint16_t)(a + ram[(uint8_t)(OBJ_Y + x)] + carry_flag);
@@ -4929,9 +4840,8 @@ loc_c11c:
       kill_all_enemies();
 
 loc_c122:
-      a = 0;
-      ram[LOOP_PASS_COUNT] = a;
-      ram[LOOP_CHECK_COUNT] = a;
+      ram[LOOP_PASS_COUNT] = 0;
+      ram[LOOP_CHECK_COUNT] = 0;
 
 loc_c12a:
       ram[LOOP_COMMAND] = 0;
@@ -4943,9 +4853,8 @@ loc_c12f:
   if (a != 0) {
     ram[(uint8_t)(ENEMY_KIND + x)] = a;
     ram[(uint8_t)(ENEMY_ACTIVE + x)] = 1;
-    a = 0;
-    ram[(uint8_t)(ENEMY_STATE + x)] = a;
-    ram[FRENZY_QUEUE] = a;
+    ram[(uint8_t)(ENEMY_STATE + x)] = 0;
+    ram[FRENZY_QUEUE] = 0;
     spawn_enemy(); return;
   }
   y = ram[ENEMY_DATA_POS];
@@ -5018,8 +4927,7 @@ loc_c12f:
         }
       }
       ram[(uint8_t)(ENEMY_KIND + x)] = a;
-      a = 1;
-      ram[(uint8_t)(ENEMY_ACTIVE + x)] = a;
+      ram[(uint8_t)(ENEMY_ACTIVE + x)] = 1;
       spawn_enemy();
       if (ram[(uint8_t)(ENEMY_ACTIVE + x)] != 0) { goto loc_c25e; }
       return;
@@ -5088,7 +4996,7 @@ loc_c71b:
   y = 2;
   sp++;
   if ((ram[0x100 + sp] & 1) != 0) {
-    y++;
+    y = 3;
   }
   ram[GROUP_ENEMY_COUNT] = y;
   do {
@@ -5102,13 +5010,11 @@ loc_c71b:
     a = ram[3];
     ram[(uint8_t)(ENEMY_X + x)] = a;
     uint16_t sum3 = (uint16_t)(a + 0x18);
-    carry_flag = sum3 >= 0x100;
     ram[3] = (uint8_t)sum3;
-    ram[2] = (uint8_t)(ram[2] + carry_flag);
+    ram[2] = (uint8_t)(ram[2] + (sum3 >= 0x100));
     ram[(uint8_t)(ENEMY_Y + x)] = ram[0];
-    a = 1;
-    ram[(uint8_t)(ENEMY_Y_PAGE + x)] = a;
-    ram[(uint8_t)(ENEMY_ACTIVE + x)] = a;
+    ram[(uint8_t)(ENEMY_Y_PAGE + x)] = 1;
+    ram[(uint8_t)(ENEMY_ACTIVE + x)] = 1;
     init_enemy();
     ram[GROUP_ENEMY_COUNT]--;
   } while (ram[GROUP_ENEMY_COUNT] != 0);
@@ -5148,19 +5054,17 @@ void load_enemies_and_loops(void) {
   ram[SCREEN_LEFT_PAGE] = (uint8_t)(ram[SCREEN_LEFT_PAGE] - 4);
   ram[SCREEN_RIGHT_PAGE] = (uint8_t)(ram[SCREEN_RIGHT_PAGE] - 4);
   ram[AREA_OBJ_PAGE] = (uint8_t)(ram[AREA_OBJ_PAGE] - 4);
-  a = 0;
-  ram[ENEMY_OBJ_PAGE_SET] = a;
-  ram[AREA_OBJ_PAGE_SET] = a;
-  ram[ENEMY_DATA_POS] = a;
-  ram[ENEMY_OBJ_PAGE] = a;
+  ram[ENEMY_OBJ_PAGE_SET] = 0;
+  ram[AREA_OBJ_PAGE_SET] = 0;
+  ram[ENEMY_DATA_POS] = 0;
+  ram[ENEMY_OBJ_PAGE] = 0;
   ram[AREA_DATA_POS] = ROM(LOOP_AREA_OFFSETS + y);
   return;
 }
 
 // in: x; out: x
 void spawn_enemy(void) {
-  a = 0;
-  ram[(uint8_t)(ENEMY_STATE + x)] = a;
+  ram[(uint8_t)(ENEMY_STATE + x)] = 0;
   init_enemy();
   return;
 }
@@ -5224,12 +5128,10 @@ void init_goomba(void) {
 
 // in: x; out: none
 void init_podoboo(void) {
-  a = 2;
-  ram[(uint8_t)(ENEMY_Y_PAGE + x)] = a;
-  ram[(uint8_t)(ENEMY_Y + x)] = a;
-  a = a >> 1;
-  ram[(ENEMY_INTERVAL_TIMER + x) & 0x7ff] = a;
-  ram[(uint8_t)(ENEMY_STATE + x)] = a >> 1;
+  ram[(uint8_t)(ENEMY_Y_PAGE + x)] = 2;
+  ram[(uint8_t)(ENEMY_Y + x)] = 2;
+  ram[(ENEMY_INTERVAL_TIMER + x) & 0x7ff] = 1;
+  ram[(uint8_t)(ENEMY_STATE + x)] = 0;
   set_small_box(); return;
 }
 
@@ -5243,7 +5145,7 @@ void init_retainer(void) {
 void init_walker(void) {
   y = 1;
   if (ram[HARD_MODE] == 0) {
-    y--;
+    y = 0;
   }
   a = ROM(WALK_SPEEDS + y);
   set_enemy_speed(); return;
@@ -5264,9 +5166,8 @@ void init_red_koopa(void) {
 
 // in: x; out: none
 void init_hammer_bro(void) {
-  a = 0;
-  ram[PLATFORM_CONTACT + x] = a;
-  ram[(uint8_t)(ENEMY_X_SPEED + x)] = a;
+  ram[PLATFORM_CONTACT + x] = 0;
+  ram[(uint8_t)(ENEMY_X_SPEED + x)] = 0;
   y = ram[HARD_MODE_LATE];
   ram[(ENEMY_INTERVAL_TIMER + x) & 0x7ff] = ROM(HAMMER_BRO_WALK_TIMES + y);
   a = 0xb;
@@ -5320,8 +5221,8 @@ void set_box_facing_left(void) {
 // in: x; out: a
 void clear_vertical_motion(void) {
   a = 0;
-  ram[(uint8_t)(ENEMY_Y_SPEED + x)] = a;
-  ram[ENEMY_Y_FORCE + x] = a;
+  ram[(uint8_t)(ENEMY_Y_SPEED + x)] = 0;
+  ram[ENEMY_Y_FORCE + x] = 0;
   return;
 }
 
@@ -5348,8 +5249,7 @@ void init_lakitu(void) {
 
 // in: x; out: none
 void setup_lakitu(void) {
-  a = 0;
-  ram[LAKITU_RETURN_TIMER] = a;
+  ram[LAKITU_RETURN_TIMER] = 0;
   init_flyer_or_swimmer();
   set_tall_box_b(); return;
 }
@@ -5381,8 +5281,7 @@ void update_lakitu_spawner(void) {
 
 loc_c3d3:
   ram[(uint8_t)(ENEMY_STATE + x)] = 0;
-  a = 0x11;
-  ram[(uint8_t)(ENEMY_KIND + x)] = a;
+  ram[(uint8_t)(ENEMY_KIND + x)] = 0x11;
   setup_lakitu();
   a = 0x20;
   place_flame();
@@ -5422,7 +5321,7 @@ loc_c3e6:
   y = 2;
   ram[(uint8_t)(ENEMY_X_SPEED + x)] = a;
   if ((a & 0x80) == 0) {
-    y--;
+    y = 1;
   }
   ram[(uint8_t)(ENEMY_DIR + x)] = y;
   ram[(uint8_t)(ENEMY_Y_SPEED + x)] = 0xfd;
@@ -5461,7 +5360,7 @@ void init_flying_fish(void) {
   ram[FRENZY_TIMER] = a;
   y = 3;
   if (ram[HARD_MODE_LATE] != 0) {
-    y++;
+    y = 4;
   }
   ram[0] = y;
   if (x >= ram[0]) {
@@ -5476,7 +5375,7 @@ void init_flying_fish(void) {
   if (y != 0) {
     a = 4;
     if (y >= 0x19) {
-      a = (uint8_t)(a << 1);
+      a = 8;
     }
   }
   ram[0x100 + sp] = a;
@@ -5507,9 +5406,8 @@ void init_flying_fish(void) {
     a = (uint8_t)(ram[PLAYER_PAGE] - (diff < 0));
   }
   ram[(uint8_t)(ENEMY_PAGE + x)] = a;
-  a = 1;
-  ram[(uint8_t)(ENEMY_ACTIVE + x)] = a;
-  ram[(uint8_t)(ENEMY_Y_PAGE + x)] = a;
+  ram[(uint8_t)(ENEMY_ACTIVE + x)] = 1;
+  ram[(uint8_t)(ENEMY_Y_PAGE + x)] = 1;
   ram[(uint8_t)(ENEMY_Y + x)] = 0xf8;
   return;
 }
@@ -5518,19 +5416,15 @@ void init_flying_fish(void) {
 void init_bowser(void) {
   copy_enemy();
   ram[BOWSER_SLOT] = x;
-  a = 0;
-  ram[BOWSER_BODY] = a;
-  ram[BRIDGE_COLLAPSE_POS] = a;
+  ram[BOWSER_BODY] = 0;
+  ram[BRIDGE_COLLAPSE_POS] = 0;
   ram[BOWSER_HOME_X] = ram[(uint8_t)(ENEMY_X + x)];
-  a = 0xdf;
-  ram[BOWSER_BREATH_TIMER] = a;
-  ram[(uint8_t)(ENEMY_DIR + x)] = a;
-  a = 0x20;
-  ram[BOWSER_FEET] = a;
-  ram[(ENEMY_FRAME_TIMER + x) & 0x7ff] = a;
-  a = 5;
-  ram[BOWSER_HEALTH] = a;
-  ram[BOWSER_SPEED] = a >> 1;
+  ram[BOWSER_BREATH_TIMER] = 0xdf;
+  ram[(uint8_t)(ENEMY_DIR + x)] = 0xdf;
+  ram[BOWSER_FEET] = 0x20;
+  ram[(ENEMY_FRAME_TIMER + x) & 0x7ff] = 0x20;
+  ram[BOWSER_HEALTH] = 5;
+  ram[BOWSER_SPEED] = 2;
   return;
 }
 
@@ -5544,9 +5438,8 @@ void copy_enemy(void) {
   ram[ENEMY_ACTIVE + y] = x | 0x80;
   ram[ENEMY_PAGE + y] = ram[(uint8_t)(ENEMY_PAGE + x)];
   ram[ENEMY_X + y] = ram[(uint8_t)(ENEMY_X + x)];
-  a = 1;
-  ram[(uint8_t)(ENEMY_ACTIVE + x)] = a;
-  ram[ENEMY_Y_PAGE + y] = a;
+  ram[(uint8_t)(ENEMY_ACTIVE + x)] = 1;
+  ram[ENEMY_Y_PAGE + y] = 1;
   ram[ENEMY_Y + y] = ram[(uint8_t)(ENEMY_Y + x)];
   return;
 }
@@ -5579,7 +5472,7 @@ void init_bowser_flame(void) {
   ram[ENEMY_Y_FRACTION + x] = a;
   y = 0;
   if (ROM(FLAME_HEIGHTS + a) >= ram[(uint8_t)(ENEMY_Y + x)]) {
-    y++;
+    y = 1;
   }
   ram[ENEMY_Y_FORCE + x] = ROM(FLAME_FORCE_OFFSETS + y);
   ram[FRENZY_ENEMY] = 0;
@@ -5598,12 +5491,11 @@ void place_flame(void) {
 // in: x; out: a
 void finish_flame(void) {
   ram[ENEMY_BOX_KIND + x] = 8;
-  a = 1;
-  ram[(uint8_t)(ENEMY_Y_PAGE + x)] = a;
-  ram[(uint8_t)(ENEMY_ACTIVE + x)] = a;
-  a = a >> 1;
-  ram[ENEMY_X_FORCE + x] = a;
-  ram[(uint8_t)(ENEMY_STATE + x)] = a;
+  ram[(uint8_t)(ENEMY_Y_PAGE + x)] = 1;
+  ram[(uint8_t)(ENEMY_ACTIVE + x)] = 1;
+  a = 0;
+  ram[ENEMY_X_FORCE + x] = 0;
+  ram[(uint8_t)(ENEMY_STATE + x)] = 0;
   return;
 }
 
@@ -5627,10 +5519,9 @@ void init_firework(void) {
   ram[(uint8_t)(ENEMY_X + x)] = (uint8_t)sum2;
   ram[(uint8_t)(ENEMY_PAGE + x)] = (uint8_t)(ram[0] + (sum2 >= 0x100));
   ram[(uint8_t)(ENEMY_Y + x)] = ROM(FIREWORK_Y_OFFSETS + y);
-  a = 1;
-  ram[(uint8_t)(ENEMY_Y_PAGE + x)] = a;
-  ram[(uint8_t)(ENEMY_ACTIVE + x)] = a;
-  ram[(uint8_t)(ENEMY_X_SPEED + x)] = a >> 1;
+  ram[(uint8_t)(ENEMY_Y_PAGE + x)] = 1;
+  ram[(uint8_t)(ENEMY_ACTIVE + x)] = 1;
+  ram[(uint8_t)(ENEMY_X_SPEED + x)] = 0;
   ram[(uint8_t)(ENEMY_Y_SPEED + x)] = 8;
   return;
 }
@@ -5646,7 +5537,7 @@ void spawn_frenzy_enemy(void) {
   }
   y = 0;
   if (ram[(RANDOM + x) & 0x7ff] >= 0xaa) {
-    y++;
+    y = 1;
   }
   if (ram[WORLD_NUMBER] != 1) {
     y++;
@@ -5693,11 +5584,9 @@ loc_c711:
 
 // in: x; out: none
 void init_piranha(void) {
-  a = 1;
-  ram[(uint8_t)(ENEMY_X_SPEED + x)] = a;
-  a = a >> 1;
-  ram[(uint8_t)(ENEMY_STATE + x)] = a;
-  ram[(uint8_t)(ENEMY_Y_SPEED + x)] = a;
+  ram[(uint8_t)(ENEMY_X_SPEED + x)] = 1;
+  ram[(uint8_t)(ENEMY_STATE + x)] = 0;
+  ram[(uint8_t)(ENEMY_Y_SPEED + x)] = 0;
   a = ram[(uint8_t)(ENEMY_Y + x)];
   ram[ENEMY_Y_FORCE + x] = a;
   ram[ENEMY_Y_FRACTION + x] = (uint8_t)(a - 0x18);
@@ -5734,9 +5623,8 @@ void end_frenzy(void) {
     }
     y--;
   } while ((y & 0x80) == 0);
-  a = 0;
-  ram[FRENZY_ENEMY] = a;
-  ram[(uint8_t)(ENEMY_ACTIVE + x)] = a;
+  ram[FRENZY_ENEMY] = 0;
+  ram[(uint8_t)(ENEMY_ACTIVE + x)] = 0;
   return;
 }
 
@@ -5774,9 +5662,8 @@ void init_balance_platform(void) {
     y = x;
   }
   ram[BALANCE_ALIGNMENT] = y;
-  a = 0;
-  ram[(uint8_t)(ENEMY_DIR + x)] = a;
-  y = a;
+  ram[(uint8_t)(ENEMY_DIR + x)] = 0;
+  y = 0;
   offset_platform();
   init_drop_platform(); return;
 }
@@ -5890,8 +5777,7 @@ void run_retainer(void) {
 
 // in: x; out: x
 void run_normal_enemy(void) {
-  a = 0;
-  ram[ENEMY_SPRITE_ATTR + x] = a;
+  ram[ENEMY_SPRITE_ATTR + x] = 0;
   enemy_offscreen_bits();
   enemy_screen_position();
   draw_enemy();
@@ -5990,14 +5876,14 @@ void move_large_platform(void) {
 // in: x; out: a
 void erase_enemy(void) {
   a = 0;
-  ram[(uint8_t)(ENEMY_ACTIVE + x)] = a;
-  ram[(uint8_t)(ENEMY_KIND + x)] = a;
-  ram[(uint8_t)(ENEMY_STATE + x)] = a;
-  ram[POPUP_KIND + x] = a;
-  ram[(ENEMY_INTERVAL_TIMER + x) & 0x7ff] = a;
-  ram[SHELL_CHAIN + x] = a;
-  ram[ENEMY_SPRITE_ATTR + x] = a;
-  ram[(ENEMY_FRAME_TIMER + x) & 0x7ff] = a;
+  ram[(uint8_t)(ENEMY_ACTIVE + x)] = 0;
+  ram[(uint8_t)(ENEMY_KIND + x)] = 0;
+  ram[(uint8_t)(ENEMY_STATE + x)] = 0;
+  ram[POPUP_KIND + x] = 0;
+  ram[(ENEMY_INTERVAL_TIMER + x) & 0x7ff] = 0;
+  ram[SHELL_CHAIN + x] = 0;
+  ram[ENEMY_SPRITE_ATTR + x] = 0;
+  ram[(ENEMY_FRAME_TIMER + x) & 0x7ff] = 0;
   return;
 }
 
@@ -6025,9 +5911,7 @@ void update_hammer_bro(void) {
       hammer_bro_walk(); return;
     }
     if (ram[PLATFORM_CONTACT + x] == 0) {
-      y = ram[HARD_MODE_LATE];
-      a = ROM(HAMMER_THROW_MASKS + y);
-      ram[PLATFORM_CONTACT + x] = a;
+      ram[PLATFORM_CONTACT + x] = ROM(HAMMER_THROW_MASKS + ram[HARD_MODE_LATE]);
       spawn_hammer();
       if (carry_flag) {
         ram[(uint8_t)(ENEMY_STATE + x)] |= 8;
@@ -6084,7 +5968,7 @@ void hammer_bro_walk(void) {
   y = 1;
   player_enemy_distance();
   if (!neg_flag) {
-    y++;
+    y = 2;
     if (ram[(ENEMY_INTERVAL_TIMER + x) & 0x7ff] == 0) {
       ram[(uint8_t)(ENEMY_X_SPEED + x)] = 0xf8;
     }
@@ -6126,9 +6010,7 @@ loc_cab4:
   if ((a & 0x80) != 0) {
     y = (uint8_t)((uint8_t)(y + 1) + 1);
   }
-  carry_flag = false;
-  a = (uint8_t)(a + ROM(WALK_SPEED_ADDERS + y) + carry_flag);
-  ram[(uint8_t)(ENEMY_X_SPEED + x)] = a;
+  ram[(uint8_t)(ENEMY_X_SPEED + x)] = (uint8_t)(a + ROM(WALK_SPEED_ADDERS + y));
   move_enemy_x();
   sp++;
   ram[(uint8_t)(ENEMY_X_SPEED + x)] = ram[0x100 + sp];
@@ -6281,7 +6163,7 @@ void move_blooper(void) {
       y = 2;
       player_enemy_distance();
       if (neg_flag) {
-        y--;
+        y = 1;
       }
     }
     ram[(uint8_t)(ENEMY_DIR + x)] = y;
@@ -6438,8 +6320,7 @@ loc_cd6a:
   a = ram[ENEMY_SCREEN_X];
   ram[SPRITE_X + y] = a;
   ram[6] = a;
-  a = 1;
-  ram[0] = a;
+  ram[0] = 1;
   firebar_ball_collision();
   y = 5;
   if (ram[(uint8_t)(ENEMY_KIND + x)] >= 0x1f) {
@@ -6540,11 +6421,10 @@ loc_ce32:
 loc_ce6f:
       x = 1;
       if (ram[4] < ram[6]) {
-        x++;
+        x = 2;
       }
       ram[ENEMY_DIR] = x;
-      a = ram[0];
-      ram[0x100 + sp] = a;
+      ram[0x100 + sp] = ram[0];
       sp--;
       injure_player();
       sp++;
@@ -6615,9 +6495,8 @@ void move_lakitu(void) {
     move_enemy_down_fast(); return;
   }
   if (ram[(uint8_t)(ENEMY_STATE + x)] != 0) {
-    a = 0;
-    ram[(uint8_t)(ENEMY_Y_SPEED + x)] = a;
-    ram[FRENZY_ENEMY] = a;
+    ram[(uint8_t)(ENEMY_Y_SPEED + x)] = 0;
+    ram[FRENZY_ENEMY] = 0;
     a = 0x10;
   } else {
     ram[FRENZY_ENEMY] = 0x12;
@@ -6633,7 +6512,7 @@ void move_lakitu(void) {
   if ((ram[(uint8_t)(ENEMY_Y_SPEED + x)] & 1) == 0) {
     a = (uint8_t)((ram[(uint8_t)(ENEMY_X_SPEED + x)] ^ 0xff) + 1);
     ram[(uint8_t)(ENEMY_X_SPEED + x)] = a;
-    y++;
+    y = 2;
   }
   ram[(uint8_t)(ENEMY_DIR + x)] = y;
   move_enemy_x(); return;
@@ -6644,7 +6523,7 @@ void lakitu_chase(void) {
   y = 0;
   player_enemy_distance();
   if (neg_flag) {
-    y++;
+    y = 1;
     ram[0] = (uint8_t)((ram[0] ^ 0xff) + 1);
   }
   if (ram[0] >= 0x3c) {
@@ -6666,10 +6545,10 @@ void lakitu_chase(void) {
   y = 0;
   if (ram[PLAYER_X_SPEED] != 0) {
     if (ram[SCROLL_AMOUNT] != 0) {
-      y++;
+      y = 1;
       if (ram[PLAYER_X_SPEED] >= 0x19) {
         if (ram[SCROLL_AMOUNT] >= 2) {
-          y++;
+          y = 2;
         }
       }
       if (ram[(uint8_t)(ENEMY_KIND + x)] == 0x12) {
@@ -6715,8 +6594,7 @@ loc_d015:
   ram[BOWSER_FEET] = 4;
   ram[BOWSER_BODY] ^= 1;
   ram[5] = 0x22;
-  a = ROM(BRIDGE_TILE_COLUMNS + ram[BRIDGE_COLLAPSE_POS]);
-  ram[4] = a;
+  ram[4] = ROM(BRIDGE_TILE_COLUMNS + ram[BRIDGE_COLLAPSE_POS]);
   y = (uint8_t)(ram[VRAM_LIST1_LENGTH] + 1);
   x = 0xc;
   queue_metatile_tiles();
@@ -6762,9 +6640,8 @@ void run_bowser(void) {
         if (neg_flag) {
           ram[(uint8_t)(ENEMY_DIR + x)] = 1;
           ram[BOWSER_SPEED] = 2;
-          a = 0x20;
-          ram[(ENEMY_FRAME_TIMER + x) & 0x7ff] = a;
-          ram[BOWSER_BREATH_TIMER] = a;
+          ram[(ENEMY_FRAME_TIMER + x) & 0x7ff] = 0x20;
+          ram[BOWSER_BREATH_TIMER] = 0x20;
           if (ram[(uint8_t)(ENEMY_X + x)] >= 0xc8) { goto loc_d10f; }
         }
       }
@@ -6855,16 +6732,14 @@ void draw_bowser(void) {
   a = (uint8_t)(y + ram[(uint8_t)(ENEMY_X + x)]);
   y = ram[COPY_SLOT];
   ram[ENEMY_X + y] = a;
-  carry_flag = false;
-  ram[ENEMY_Y + y] = (uint8_t)(ram[(uint8_t)(ENEMY_Y + x)] + 8 + carry_flag);
+  ram[ENEMY_Y + y] = (uint8_t)(ram[(uint8_t)(ENEMY_Y + x)] + 8);
   ram[ENEMY_STATE + y] = ram[(uint8_t)(ENEMY_STATE + x)];
   ram[ENEMY_DIR + y] = ram[(uint8_t)(ENEMY_DIR + x)];
   ram[0x100 + sp] = ram[SLOT];
   sp--;
   x = ram[COPY_SLOT];
   ram[SLOT] = x;
-  a = 0x2d;
-  ram[(uint8_t)(ENEMY_KIND + x)] = a;
+  ram[(uint8_t)(ENEMY_KIND + x)] = 0x2d;
   bowser_half();
   sp++;
   a = ram[0x100 + sp];
@@ -6881,8 +6756,7 @@ void bowser_half(void) {
   if (ram[(uint8_t)(ENEMY_STATE + x)] != 0) {
     return;
   }
-  a = 0xa;
-  ram[ENEMY_BOX_KIND + x] = a;
+  ram[ENEMY_BOX_KIND + x] = 0xa;
   enemy_box();
   player_enemy_collision(); return;
 }
@@ -7046,8 +6920,7 @@ void award_time_points(void) {
     ram[PULSE2_SFX_REQUEST] = 0x10;
   }
   y = 0x23;
-  a = 0xff;
-  ram[SCORE_ADD + 5] = a;
+  ram[SCORE_ADD + 5] = 0xff;
   add_digits();
   ram[SCORE_ADD + 5] = 5;
   award_area_points(); return;
@@ -7182,15 +7055,14 @@ void update_balance_platform(void) {
   y = a;
   ram[0] = ram[PLATFORM_CONTACT + x];
   if (ram[(uint8_t)(ENEMY_DIR + x)] == 0) {
-    a = 0x2d;
-    if (a >= ram[(uint8_t)(ENEMY_Y + x)]) {
+    if (0x2d >= ram[(uint8_t)(ENEMY_Y + x)]) {
       if (y == ram[0]) { goto loc_d598; }
-      ram[(uint8_t)(ENEMY_Y + x)] = (uint8_t)(a + 2);
+      ram[(uint8_t)(ENEMY_Y + x)] = 0x2f;
       stop_balance_platforms(); return;
     }
-    if (a >= ram[ENEMY_Y + y]) {
+    if (0x2d >= ram[ENEMY_Y + y]) {
       if (x == ram[0]) { goto loc_d598; }
-      ram[ENEMY_Y + y] = (uint8_t)(a + 2);
+      ram[ENEMY_Y + y] = 0x2f;
       stop_balance_platforms(); return;
     }
     ram[0x100 + sp] = ram[(uint8_t)(ENEMY_Y + x)];
@@ -7245,9 +7117,8 @@ loc_d4a7:
           ram[VRAM_LIST1 + 3 + x] = 0xa2;
           ram[VRAM_LIST1 + 4 + x] = 0xa3;
         } else {
-          a = 0x24;
-          ram[VRAM_LIST1 + 3 + x] = a;
-          ram[VRAM_LIST1 + 4 + x] = a;
+          ram[VRAM_LIST1 + 3 + x] = 0x24;
+          ram[VRAM_LIST1 + 4 + x] = 0x24;
         }
         y = ram[ENEMY_STATE + y];
         sp++;
@@ -7261,9 +7132,8 @@ loc_d4a7:
           ram[VRAM_LIST1 + 8 + x] = 0xa2;
           ram[VRAM_LIST1 + 9 + x] = 0xa3;
         } else {
-          a = 0x24;
-          ram[VRAM_LIST1 + 8 + x] = a;
-          ram[VRAM_LIST1 + 9 + x] = a;
+          ram[VRAM_LIST1 + 8 + x] = 0x24;
+          ram[VRAM_LIST1 + 9 + x] = 0x24;
         }
         ram[VRAM_LIST1 + 0xa + x] = 0;
         ram[VRAM_LIST1_LENGTH] = (uint8_t)(ram[VRAM_LIST1_LENGTH] + 0xa);
@@ -7273,8 +7143,7 @@ loc_d4a7:
     return;
 
 loc_d598:
-    a = y;
-    x = a;
+    x = y;
     enemy_offscreen_bits();
     a = 6;
     spawn_floating_score();
@@ -7283,13 +7152,11 @@ loc_d598:
     ram[(uint8_t)(ENEMY_DIR + x)] = 1;
     stop_balance_platforms(); return;
   }
-  a = y;
-  ram[0x100 + sp] = a;
+  ram[0x100 + sp] = y;
   sp--;
   move_falling_platform();
   sp++;
-  a = ram[0x100 + sp];
-  x = a;
+  x = ram[0x100 + sp];
   move_falling_platform();
   a = ram[PLATFORM_CONTACT + ram[SLOT]];
   if ((a & 0x80) == 0) {
@@ -7421,8 +7288,7 @@ void right_platform(void) {
   if ((ram[PLATFORM_CONTACT + x] & 0x80) != 0) {
     return;
   }
-  a = 0x10;
-  ram[(uint8_t)(ENEMY_X_SPEED + x)] = a;
+  ram[(uint8_t)(ENEMY_X_SPEED + x)] = 0x10;
   carry_player_horizontally();
   return;
 }
@@ -7531,14 +7397,11 @@ void fireball_enemy_collision(void) {
                 if (ram[(uint8_t)(ENEMY_STATE + x)] >= 2) { goto loc_d72c; }
               }
               if (ram[ENEMY_OFFSCREEN_MASKED + x] == 0) {
-                carry_flag = false;
-                a = (uint8_t)((uint8_t)((uint8_t)(x << 1) << 1) + 4 + carry_flag);
-                x = a;
+                x = (uint8_t)(((uint8_t)(x << 1) << 1) + 4);
                 objects_collide();
                 x = ram[SLOT];
                 if (carry_flag) {
-                  a = 0x80;
-                  ram[(uint8_t)(FIREBALL_STATE + x)] = a;
+                  ram[(uint8_t)(FIREBALL_STATE + x)] = 0x80;
                   x = ram[1];
                   fireball_hit_enemy();
                 }
@@ -7587,7 +7450,7 @@ loc_d75c:
     ram[(uint8_t)(ENEMY_KIND + x)] = ROM(BOWSER_LOOKALIKES + y);
     a = 0x20;
     if (y < 3) {
-      a |= 3;
+      a = 0x23;
     }
     ram[(uint8_t)(ENEMY_STATE + x)] = a;
     ram[PULSE2_SFX_REQUEST] = 0x80;
@@ -7642,9 +7505,7 @@ void player_hammer_collision(void) {
   if ((ram[TIMERS_PAUSED] | ram[MISC_OFFSCREEN]) != 0) {
     return;
   }
-  carry_flag = false;
-  a = (uint8_t)((uint8_t)((uint8_t)(x << 1) << 1) + 0x24 + carry_flag);
-  y = a;
+  y = (uint8_t)(((uint8_t)(x << 1) << 1) + 0x24);
   player_collides();
   x = ram[SLOT];
   if (carry_flag) {
@@ -7681,8 +7542,7 @@ void player_enemy_collision(void) {
     if (a != 1) {
       return;
     }
-    a = 2;
-    ram[PLAYER_POWER] = a;
+    ram[PLAYER_POWER] = 2;
     queue_player_colors();
     a = 0xc;
     goto loc_d847;
@@ -7754,8 +7614,7 @@ player_enemy_collision:
             return;
           }
           ram[PULSE1_SFX_REQUEST] = 8;
-          a = ram[(uint8_t)(ENEMY_STATE + x)] | 0x80;
-          ram[(uint8_t)(ENEMY_STATE + x)] = a;
+          ram[(uint8_t)(ENEMY_STATE + x)] |= 0x80;
           face_player();
           ram[(uint8_t)(ENEMY_X_SPEED + x)] = ROM(KICKED_SHELL_SPEEDS + y);
           a = (uint8_t)(3 + ram[STOMP_CHAIN]);
@@ -7797,11 +7656,11 @@ loc_d969:
     if (a != 8) {
       if (a != 0x33) {
         if (a != 0xc) {
-          y++;
+          y = 1;
           if (a != 5) {
-            y++;
+            y = 2;
             if (a != 0x11) {
-              y++;
+              y = 3;
               if (a != 7) { goto loc_d9b3; }
             }
           }
@@ -7811,14 +7670,12 @@ loc_d969:
   }
   a = ROM(STOMP_POINTS + y);
   spawn_floating_score();
-  a = ram[(uint8_t)(ENEMY_DIR + x)];
-  ram[0x100 + sp] = a;
+  ram[0x100 + sp] = ram[(uint8_t)(ENEMY_DIR + x)];
   sp--;
   stun_enemy();
   sp++;
   ram[(uint8_t)(ENEMY_DIR + x)] = ram[0x100 + sp];
-  a = 0x20;
-  ram[(uint8_t)(ENEMY_STATE + x)] = a;
+  ram[(uint8_t)(ENEMY_STATE + x)] = 0x20;
   clear_vertical_motion();
   ram[(uint8_t)(ENEMY_X_SPEED + x)] = a;
   ram[PLAYER_Y_SPEED] = 0xfd;
@@ -7828,7 +7685,7 @@ loc_d9b3:
   if (a >= 9) {
     ram[(uint8_t)(ENEMY_KIND + x)] = a & 1;
     y = 0;
-    ram[(uint8_t)(ENEMY_STATE + x)] = y;
+    ram[(uint8_t)(ENEMY_STATE + x)] = 0;
     a = 3;
     spawn_floating_score();
     clear_vertical_motion();
@@ -7837,8 +7694,7 @@ loc_d9b3:
   } else {
     ram[(uint8_t)(ENEMY_STATE + x)] = 4;
     ram[STOMP_CHAIN]++;
-    carry_flag = false;
-    a = (uint8_t)(ram[STOMP_CHAIN] + ram[STOMP_TIMER] + carry_flag);
+    a = (uint8_t)(ram[STOMP_CHAIN] + ram[STOMP_TIMER]);
     spawn_floating_score();
     ram[STOMP_TIMER]++;
     ram[(ENEMY_INTERVAL_TIMER + x) & 0x7ff] = ROM(REVIVAL_RATES + ram[HARD_MODE]);
@@ -7868,10 +7724,8 @@ void force_injury(void) {
   x = ram[PLAYER_POWER];
   if (x == 0) { goto loc_d958; }
   ram[PLAYER_POWER] = a;
-  a = 8;
-  ram[INJURY_TIMER] = a;
-  a = (uint8_t)(a << 1);
-  ram[PULSE1_SFX_REQUEST] = a;
+  ram[INJURY_TIMER] = 8;
+  ram[PULSE1_SFX_REQUEST] = 0x10;
   queue_player_colors();
   a = 0xa;
 
@@ -7891,9 +7745,8 @@ loc_d958:
 void set_player_routine(void) {
   ram[PLAYER_TASK] = a;
   ram[PLAYER_STATE] = y;
-  y = 0xff;
-  ram[TIMERS_PAUSED] = y;
-  ram[SCROLL_AMOUNT] = (uint8_t)(y + 1);
+  ram[TIMERS_PAUSED] = 0xff;
+  ram[SCROLL_AMOUNT] = 0;
   end_injury_check(); return;
 }
 
@@ -7908,7 +7761,7 @@ void face_player(void) {
   y = 1;
   player_enemy_distance();
   if (neg_flag) {
-    y++;
+    y = 2;
   }
   ram[(uint8_t)(ENEMY_DIR + x)] = y;
   y--;
@@ -7951,9 +7804,7 @@ void enemy_enemy_collisions(void) {
                   if (a != 0x11) {
                     if (a != 0xd) {
                       if (ram[ENEMY_OFFSCREEN_MASKED + x] == 0) {
-                        carry_flag = false;
-                        a = (uint8_t)((uint8_t)((uint8_t)(x << 1) << 1) + 4 + carry_flag);
-                        x = a;
+                        x = (uint8_t)(((uint8_t)(x << 1) << 1) + 4);
                         objects_collide();
                         x = ram[SLOT];
                         y = ram[1];
@@ -8003,11 +7854,9 @@ void enemy_pair_collision(void) {
       defeat_enemy();
       y = ram[1];
     }
-    a = y;
-    x = a;
+    x = y;
     defeat_enemy();
-    carry_flag = false;
-    a = (uint8_t)(ram[SHELL_CHAIN + ram[SLOT]] + 4 + carry_flag);
+    a = (uint8_t)(ram[SHELL_CHAIN + ram[SLOT]] + 4);
     x = ram[1];
     spawn_floating_score();
     x = ram[SLOT];
@@ -8020,16 +7869,14 @@ void enemy_pair_collision(void) {
     }
     defeat_enemy();
     y = ram[1];
-    carry_flag = false;
-    a = (uint8_t)(ram[SHELL_CHAIN + y] + 4 + carry_flag);
+    a = (uint8_t)(ram[SHELL_CHAIN + y] + 4);
     x = ram[SLOT];
     spawn_floating_score();
     x = ram[1];
     ram[SHELL_CHAIN + x]++;
     return;
   }
-  a = y;
-  x = a;
+  x = y;
   turn_enemy_around();
   x = ram[SLOT];
   turn_enemy_around(); return;
@@ -8077,8 +7924,7 @@ void large_platform_collision(void) {
   if (ram[(uint8_t)(ENEMY_KIND + x)] != 0x24) {
     player_on_large_platform(); return;
   }
-  a = ram[(uint8_t)(ENEMY_STATE + x)];
-  x = a;
+  x = ram[(uint8_t)(ENEMY_STATE + x)];
   player_on_large_platform();
   player_on_large_platform(); return;
 }
@@ -8092,8 +7938,7 @@ void player_on_large_platform(void) {
   a = x;
   enemy_box_offset_for();
   ram[0] = ram[(uint8_t)(ENEMY_Y + x)];
-  a = x;
-  ram[0x100 + sp] = a;
+  ram[0x100 + sp] = x;
   sp--;
   player_collides();
   sp++;
@@ -8201,9 +8046,8 @@ void place_player_on_platform_y(void) {
   int diff = a - 0x20;
   ram[PLAYER_Y] = (uint8_t)diff;
   ram[PLAYER_Y_PAGE] = (uint8_t)(y - (diff < 0));
-  a = 0;
-  ram[PLAYER_Y_SPEED] = a;
-  ram[PLAYER_Y_FORCE] = a;
+  ram[PLAYER_Y_SPEED] = 0;
+  ram[PLAYER_Y_FORCE] = 0;
   return;
 }
 
@@ -8265,9 +8109,9 @@ loc_dc86:
   y = 2;
   if (ram[CROUCHING] == 0) {
     if (ram[PLAYER_SMALL] == 0) {
-      y--;
+      y = 1;
       if (ram[SWIMMING] == 0) {
-        y--;
+        y = 0;
       }
     }
   }
@@ -8334,13 +8178,11 @@ loc_dcf6:
               block_player_side(); return;
             }
             check_spring_landing();
-            a = 0xf0 & ram[PLAYER_Y];
-            ram[PLAYER_Y] = a;
+            ram[PLAYER_Y] = 0xf0 & ram[PLAYER_Y];
             enter_pipe();
-            a = 0;
-            ram[PLAYER_Y_SPEED] = a;
-            ram[PLAYER_Y_FORCE] = a;
-            ram[STOMP_CHAIN] = a;
+            ram[PLAYER_Y_SPEED] = 0;
+            ram[PLAYER_Y_FORCE] = 0;
+            ram[STOMP_CHAIN] = 0;
           }
           ram[PLAYER_STATE] = 0;
         }
@@ -8410,7 +8252,7 @@ loc_dd9c:
         if ((ram[PLAYER_X] & 0xf) != 0) {
           y = 0;
           if (ram[SCREEN_LEFT_PAGE] != 0) {
-            y++;
+            y = 1;
           }
           ram[CHANGE_AREA_TIMER] = ROM(AREA_CHANGE_TIMERS + y);
         }
@@ -8459,9 +8301,8 @@ loc_de2e:
   if (ram[PLAYER_TASK] != 4) {
     a = 0x33;
     remove_enemies();
-    a = 0x80;
-    ram[EVENT_MUSIC_REQUEST] = a;
-    ram[FLAGPOLE_SOUND] = a >> 1;
+    ram[EVENT_MUSIC_REQUEST] = 0x80;
+    ram[FLAGPOLE_SOUND] = 0x40;
     x = 4;
     a = ram[PLAYER_Y];
     ram[FLAGPOLE_CONTACT_Y] = a;
@@ -8485,9 +8326,8 @@ loc_de7a:
 
 loc_de88:
   ram[PLAYER_STATE] = 3;
-  a = 0;
-  ram[PLAYER_X_SPEED] = a;
-  ram[PLAYER_X_FORCE] = a;
+  ram[PLAYER_X_SPEED] = 0;
+  ram[PLAYER_X_FORCE] = 0;
   if ((uint8_t)(ram[PLAYER_X] - ram[SCREEN_LEFT_X]) < 0x10) {
     ram[PLAYER_FACING] = 2;
   }
@@ -8524,9 +8364,8 @@ void check_spring_landing(void) {
   }
   ram[GRAVITY] = 0x70;
   ram[SPRING_FORCE] = 0xf9;
-  a = 3;
-  ram[SPRING_TIMER] = a;
-  ram[SPRING_ANIM_STEP] = a >> 1;
+  ram[SPRING_TIMER] = 3;
+  ram[SPRING_ANIM_STEP] = 1;
   return;
 }
 
@@ -8572,11 +8411,10 @@ void enter_pipe(void) {
   ram[WORLD_NUMBER] = y;
   ram[AREA_POINTER] = ROM(AREAS_WORLD1 + ROM(WORLD_AREA_OFFSETS + y));
   ram[EVENT_MUSIC_REQUEST] = 0x80;
-  a = 0;
-  ram[ENTRANCE_PAGE] = a;
-  ram[AREA_NUMBER] = a;
-  ram[LEVEL_NUMBER] = a;
-  ram[ALT_ENTRANCE] = a;
+  ram[ENTRANCE_PAGE] = 0;
+  ram[AREA_NUMBER] = 0;
+  ram[LEVEL_NUMBER] = 0;
+  ram[ALT_ENTRANCE] = 0;
   ram[HIDDEN_1UP]++;
   ram[RELOAD_TIME_LIMIT]++;
   return;
@@ -8596,9 +8434,9 @@ void block_player_side(void) {
   }
   ram[SIDE_CONTACT_TIMER] = 0x10;
   y = 0;
-  ram[PLAYER_X_SPEED] = y;
+  ram[PLAYER_X_SPEED] = 0;
   if ((a & 0x80) != 0) {
-    y--;
+    y = (uint8_t)-0x1;
   }
   ram[0] = y;
   uint16_t sum = (uint16_t)(a + ram[PLAYER_X]);
@@ -8635,7 +8473,7 @@ void is_coin_metatile(void) {
     }
   }
   a = 1;
-  ram[PULSE2_SFX_REQUEST] = a;
+  ram[PULSE2_SFX_REQUEST] = 1;
   return;
 }
 
@@ -8715,8 +8553,7 @@ void enemy_bg_collision(void) {
                   a = 0;
                 }
                 ram[(ENEMY_INTERVAL_TIMER + x) & 0x7ff] = a;
-                a = 3;
-                ram[(uint8_t)(ENEMY_STATE + x)] = a;
+                ram[(uint8_t)(ENEMY_STATE + x)] = 3;
                 land_enemy();
                 return;
               }
@@ -8731,7 +8568,7 @@ void enemy_bg_collision(void) {
               y = 1;
               player_enemy_distance();
               if (neg_flag) {
-                y++;
+                y = 2;
               }
               if (y == ram[(uint8_t)(ENEMY_DIR + x)]) {
                 enemy_bump();
@@ -8771,8 +8608,7 @@ loc_e0cd:
       kill_enemy_on_block(); return;
     }
     if (ram[(ENEMY_FRAME_TIMER + x) & 0x7ff] == 0) {
-      a = ram[(uint8_t)(ENEMY_STATE + x)] & 0x88;
-      ram[(uint8_t)(ENEMY_STATE + x)] = a;
+      ram[(uint8_t)(ENEMY_STATE + x)] &= 0x88;
       land_enemy();
       enemy_side_check(); return;
     }
@@ -8814,7 +8650,7 @@ loc_e04a:
   y = 1;
   player_enemy_distance();
   if (neg_flag) {
-    y++;
+    y = 2;
   }
   a = ram[(uint8_t)(ENEMY_KIND + x)];
   if (a != 0x33) {
@@ -9034,9 +8870,7 @@ void large_platform_box(void) {
 
 // in: x; out: x
 void enemy_box_core(void) {
-  carry_flag = false;
-  a = (uint8_t)(x + 1 + carry_flag);
-  x = a;
+  x = (uint8_t)(x + 1);
   y = 1;
   compute_box();
   clip_box_to_screen(); return;
@@ -9045,11 +8879,10 @@ void enemy_box_core(void) {
 // in: x; out: none
 void hide_box(void) {
   y = (uint8_t)((uint8_t)(x << 1) << 1);
-  a = 0xff;
-  ram[ENEMY_BOXES + y] = a;
-  ram[ENEMY_BOXES + 1 + y] = a;
-  ram[ENEMY_BOXES + 2 + y] = a;
-  ram[ENEMY_BOXES + 3 + y] = a;
+  ram[ENEMY_BOXES + y] = 0xff;
+  ram[ENEMY_BOXES + 1 + y] = 0xff;
+  ram[ENEMY_BOXES + 2 + y] = 0xff;
+  ram[ENEMY_BOXES + 3 + y] = 0xff;
   return;
 }
 
@@ -9083,11 +8916,10 @@ void clip_box_to_screen(void) {
   carry_flag = (ram[(uint8_t)(OBJ_PAGE + x)] - ram[1] - !carry_flag) >= 0;
   if (carry_flag) {
     if ((ram[BOX_RIGHT + y] & 0x80) == 0) {
-      a = 0xff;
       if ((ram[BOXES + y] & 0x80) == 0) {
-        ram[BOXES + y] = a;
+        ram[BOXES + y] = 0xff;
       }
-      ram[BOX_RIGHT + y] = a;
+      ram[BOX_RIGHT + y] = 0xff;
     }
     x = ram[SLOT];
     return;
@@ -9095,11 +8927,10 @@ void clip_box_to_screen(void) {
   a = ram[BOXES + y];
   if ((a & 0x80) != 0) {
     if (a >= 0xa0) {
-      a = 0;
       if ((ram[BOX_RIGHT + y] & 0x80) != 0) {
-        ram[BOX_RIGHT + y] = a;
+        ram[BOX_RIGHT + y] = 0;
       }
-      ram[BOXES + y] = a;
+      ram[BOXES + y] = 0;
     }
   }
   x = ram[SLOT];
@@ -9245,10 +9076,8 @@ void block_probe(void) {
 // in: y; out: y
 void draw_vine(void) {
   ram[0] = y;
-  carry_flag = false;
-  a = (uint8_t)(ram[ENEMY_SCREEN_Y] + ROM(VINE_Y_OFFSETS + y) + carry_flag);
-  x = ram[VINE_SLOTS + y];
-  y = ram[ENEMY_SPRITE_SLOT + x];
+  a = (uint8_t)(ram[ENEMY_SCREEN_Y] + ROM(VINE_Y_OFFSETS + y));
+  y = ram[ENEMY_SPRITE_SLOT + ram[VINE_SLOTS + y]];
   ram[2] = y;
   stack_six_sprites();
   a = ram[ENEMY_SCREEN_X];
@@ -9259,14 +9088,12 @@ void draw_vine(void) {
   ram[SPRITE_X + 4 + y] = a;
   ram[SPRITE_X + 0xc + y] = a;
   ram[SPRITE_X + 0x14 + y] = a;
-  a = 0x21;
-  ram[SPRITE_ATTR + y] = a;
-  ram[SPRITE_X + 7 + y] = a;
-  ram[SPRITE_X + 0xf + y] = a;
-  a |= 0x40;
-  ram[SPRITE_X + 3 + y] = a;
-  ram[SPRITE_X + 0xb + y] = a;
-  ram[SPRITE_X + 0x13 + y] = a;
+  ram[SPRITE_ATTR + y] = 0x21;
+  ram[SPRITE_X + 7 + y] = 0x21;
+  ram[SPRITE_X + 0xf + y] = 0x21;
+  ram[SPRITE_X + 3 + y] = 0x61;
+  ram[SPRITE_X + 0xb + y] = 0x61;
+  ram[SPRITE_X + 0x13 + y] = 0x61;
   x = 5;
   do {
     ram[SPRITE_TILE + y] = 0xe1;
@@ -9357,19 +9184,16 @@ void draw_flagpole_flag(void) {
   carry_flag = sum3 >= 0x100;
   ram[SPRITE_X + 5 + y] = (uint8_t)sum3;
   ram[2] = ram[FLAG_SCORE_Y];
-  a = 1;
-  ram[3] = a;
-  ram[4] = a;
-  ram[SPRITE_ATTR + y] = a;
-  ram[SPRITE_X + 3 + y] = a;
-  ram[SPRITE_X + 7 + y] = a;
-  a = 0x7e;
-  ram[SPRITE_TILE + y] = a;
-  ram[SPRITE_X + 6 + y] = a;
+  ram[3] = 1;
+  ram[4] = 1;
+  ram[SPRITE_ATTR + y] = 1;
+  ram[SPRITE_X + 3 + y] = 1;
+  ram[SPRITE_X + 7 + y] = 1;
+  ram[SPRITE_TILE + y] = 0x7e;
+  ram[SPRITE_X + 6 + y] = 0x7e;
   ram[SPRITE_X + 2 + y] = 0x7f;
   if (ram[FLAGPOLE_CONTACT_Y] != 0) {
-    carry_flag = false;
-    y = (uint8_t)(y + 0xc + carry_flag);
+    y = (uint8_t)(y + 0xc);
     x = (uint8_t)(ram[FLAG_SCORE_KIND] << 1);
     ram[0] = ROM(FLAGPOLE_SCORE_TILES + x);
     a = ROM(FLAGPOLE_SCORE_TILES + 1 + x);
@@ -9506,9 +9330,8 @@ void draw_coin_or_score(void) {
     a = ram[MISC_SCREEN_X];
     ram[SPRITE_X + y] = a;
     ram[SPRITE_X + 4 + y] = (uint8_t)(a + 8);
-    a = 2;
-    ram[SPRITE_ATTR + y] = a;
-    ram[SPRITE_X + 3 + y] = a;
+    ram[SPRITE_ATTR + y] = 2;
+    ram[SPRITE_X + 3 + y] = 2;
     ram[SPRITE_TILE + y] = 0xf7;
     ram[SPRITE_X + 2 + y] = 0xfb;
     return;
@@ -9546,9 +9369,8 @@ void draw_powerup(void) {
   ram[0x100 + sp] = a;
   sp--;
   x = (uint8_t)((uint8_t)(a << 1) << 1);
-  a = 1;
-  ram[7] = a;
-  ram[3] = a;
+  ram[7] = 1;
+  ram[3] = 1;
   do {
     ram[0] = ROM(POWERUP_TILES + x);
     a = ROM(POWERUP_TILES + 1 + x);
@@ -9605,11 +9427,11 @@ void draw_enemy(void) {
     ram[2]--;
     a = 3;
     if (ram[(ENEMY_FRAME_TIMER + x) & 0x7ff] != 0) {
-      a |= 0x20;
+      a = 0x23;
     }
     ram[4] = a;
     y = 0;
-    ram[ENEMY_DATA_PTR + 4] = y;
+    ram[ENEMY_DATA_PTR + 4] = 0;
     a = 8;
   }
   if (a == 0x32) {
@@ -9628,7 +9450,7 @@ void draw_enemy(void) {
   if (a != 0) {
     y = 0x16;
     if (a != 1) {
-      y++;
+      y = 0x17;
     }
     ram[ENEMY_DATA_PTR + 6] = y;
   }
@@ -9731,14 +9553,13 @@ loc_e94c:
   if (a == 8) { goto loc_ea37; }
   if (a == 0xc) { goto loc_ea37; }
   if (a >= 0x18) { goto loc_ea37; }
-  y = 0;
   if (a == 0x15) {
     if (ram[WORLD_NUMBER] >= 7) { goto loc_ea37; }
     x = 0xa2;
     ram[ENEMY_DATA_PTR + 3] = 3;
     goto loc_ea37;
   }
-  if ((ram[FRAME_COUNT] & ROM(ENEMY_ANIMATION_MASKS + y)) == 0) {
+  if ((ram[FRAME_COUNT] & 8) == 0) {
 
 loc_ea29:
     if (((ram[ENEMY_DATA_PTR + 4] & 0xa0) | ram[TIMERS_PAUSED]) == 0) {
@@ -9749,9 +9570,8 @@ loc_ea29:
 loc_ea37:
   if ((ram[ENEMY_DATA_PTR + 4] & 0x20) != 0) {
     if (ram[ENEMY_DATA_PTR + 6] >= 4) {
-      y = 1;
-      ram[FLIP_VERTICALLY] = y;
-      ram[ENEMY_DATA_PTR + 3] = (uint8_t)(y - 1);
+      ram[FLIP_VERTICALLY] = 1;
+      ram[ENEMY_DATA_PTR + 3] = 0;
     }
   }
 
@@ -9853,12 +9673,10 @@ loc_eb12:
   if (ram[ENEMY_DATA_PTR + 6] < 0x18) {
     clip_enemy_sprites(); return;
   }
-  a = 0x82;
-  ram[SPRITE_X + 7 + y] = a;
-  ram[SPRITE_X + 0xf + y] = a;
-  a |= 0x40;
-  ram[SPRITE_X + 0xb + y] = a;
-  ram[SPRITE_X + 0x13 + y] = a;
+  ram[SPRITE_X + 7 + y] = 0x82;
+  ram[SPRITE_X + 0xf + y] = 0x82;
+  ram[SPRITE_X + 0xb + y] = 0xc2;
+  ram[SPRITE_X + 0x13 + y] = 0xc2;
   clip_enemy_sprites(); return;
 }
 
@@ -9962,9 +9780,7 @@ void hide_enemy_row(void) {
 
 // in: a, x; out: none
 void hide_enemy_column(void) {
-  carry_flag = false;
-  a = (uint8_t)(a + ram[ENEMY_SPRITE_SLOT + x] + carry_flag);
-  y = a;
+  y = (uint8_t)(a + ram[ENEMY_SPRITE_SLOT + x]);
   hide_column();
   ram[SPRITE_X + 0xd + y] = a;
   return;
@@ -9974,9 +9790,8 @@ void hide_enemy_column(void) {
 void draw_block(void) {
   ram[2] = ram[BLOCK_SCREEN_Y];
   ram[5] = ram[BLOCK_SCREEN_X];
-  a = 3;
-  ram[4] = a;
-  ram[3] = a >> 1;
+  ram[4] = 3;
+  ram[3] = 1;
   y = ram[BLOCK_SPRITE_SLOT + x];
   x = 0;
   do {
@@ -9987,9 +9802,8 @@ void draw_block(void) {
   x = ram[SLOT];
   y = ram[BLOCK_SPRITE_SLOT + x];
   if (ram[AREA_KIND] != 1) {
-    a = 0x86;
-    ram[SPRITE_TILE + y] = a;
-    ram[SPRITE_X + 2 + y] = a;
+    ram[SPRITE_TILE + y] = 0x86;
+    ram[SPRITE_X + 2 + y] = 0x86;
   }
   a = ram[BLOCK_METATILE + x];
   carry_flag = a >= 0xc4;
@@ -10000,7 +9814,7 @@ void draw_block(void) {
     y--;
     a = 3;
     if ((uint8_t)(ram[AREA_KIND] - 1) != 0) {
-      a = a >> 1;
+      a = 1;
     }
     x = ram[SLOT];
     ram[SPRITE_ATTR + y] = a;
@@ -10014,9 +9828,8 @@ void draw_block(void) {
   ram[0x100 + sp] = a;
   sp--;
   if ((a & 4) != 0) {
-    a = 0xf8;
-    ram[SPRITE_X + 1 + y] = a;
-    ram[SPRITE_X + 9 + y] = a;
+    ram[SPRITE_X + 1 + y] = 0xf8;
+    ram[SPRITE_X + 9 + y] = 0xf8;
   }
   sp++;
   a = ram[0x100 + sp];
@@ -10032,8 +9845,8 @@ void check_left_column(void) {
 // in: y; out: a
 void hide_column(void) {
   a = 0xf8;
-  ram[SPRITE_Y + y] = a;
-  ram[SPRITE_X + 5 + y] = a;
+  ram[SPRITE_Y + y] = 0xf8;
+  ram[SPRITE_X + 5 + y] = 0xf8;
   return;
 }
 
@@ -10070,8 +9883,8 @@ void draw_brick_chunks(void) {
   ram[SPRITE_X + 8 + y] = ram[BLOCK_SCREEN_X + 1];
   int diff3 = ram[0] - ram[BLOCK_SCREEN_X + 1];
   uint16_t sum3 = (uint16_t)((uint8_t)diff3 + ram[0] + (diff3 >= 0));
-  carry_flag = sum3 >= 0x100;
-  ram[SPRITE_X + 0xc + y] = (uint8_t)((uint8_t)sum3 + 6 + carry_flag);
+  a = (uint8_t)((uint8_t)sum3 + 6 + (sum3 >= 0x100));
+  ram[SPRITE_X + 0xc + y] = a;
   a = ram[BLOCK_OFFSCREEN];
   check_left_column();
   carry_flag = (ram[BLOCK_OFFSCREEN] & 0x80) != 0;
@@ -10085,9 +9898,8 @@ void draw_brick_chunks(void) {
   if (ram[SPRITE_X + y] < ram[SPRITE_X + 4 + y]) {
     return;
   }
-  a = 0xf8;
-  ram[SPRITE_X + 1 + y] = a;
-  ram[SPRITE_X + 9 + y] = a;
+  ram[SPRITE_X + 1 + y] = 0xf8;
+  ram[SPRITE_X + 9 + y] = 0xf8;
   return;
 }
 
@@ -10099,7 +9911,7 @@ void draw_firebar_tile(void) {
   sp = (uint8_t)((uint8_t)(sp - 1) + 1);
   a = 2;
   if (((ram[0x100 + sp] >> 1) & 1) != 0) {
-    a |= 0xc0;
+    a = 0xc2;
   }
   ram[SPRITE_ATTR + y] = a;
   return;
@@ -10171,24 +9983,21 @@ void draw_small_platform(void) {
   ram[0x100 + sp] = a;
   sp--;
   if ((a & 8) != 0) {
-    a = 0xf8;
-    ram[SPRITE_Y + y] = a;
-    ram[SPRITE_X + 9 + y] = a;
+    ram[SPRITE_Y + y] = 0xf8;
+    ram[SPRITE_X + 9 + y] = 0xf8;
   }
   sp++;
   a = ram[0x100 + sp];
   ram[0x100 + sp] = a;
   sp--;
   if ((a & 4) != 0) {
-    a = 0xf8;
-    ram[SPRITE_X + 1 + y] = a;
-    ram[SPRITE_X + 0xd + y] = a;
+    ram[SPRITE_X + 1 + y] = 0xf8;
+    ram[SPRITE_X + 0xd + y] = 0xf8;
   }
   sp++;
   if ((ram[0x100 + sp] & 2) != 0) {
-    a = 0xf8;
-    ram[SPRITE_X + 5 + y] = a;
-    ram[SPRITE_X + 0x11 + y] = a;
+    ram[SPRITE_X + 5 + y] = 0xf8;
+    ram[SPRITE_X + 0x11 + y] = 0xf8;
   }
   x = ram[SLOT];
   return;
@@ -10235,7 +10044,7 @@ void draw_player(void) {
         y = (uint8_t)((uint8_t)(y + 3) + 1);
       }
       if (ram[PLAYER_SMALL] != 0) {
-        if (ram[SPRITE_X + 0x16 + y] == ROM(PLAYER_TILES + 0x9e)) {
+        if (ram[SPRITE_X + 0x16 + y] == 0x48) {
           return;
         }
         x++;
@@ -10246,7 +10055,7 @@ void draw_player(void) {
     animate_size_change();
     draw_player_with_offset(); return;
   }
-  a = ROM(PLAYER_TILE_OFFSETS + 0xe);
+  a = 0xb0;
   draw_player_with_offset(); return;
 }
 
@@ -10267,10 +10076,10 @@ void draw_player_with_offset(void) {
     ram[FIREBALL_THROW_TIMER] = 0;
     if (!carry_flag) {
       ram[FIREBALL_THROW_TIMER] = a;
-      ram[PLAYER_GFX_OFFSET] = ROM(PLAYER_TILE_OFFSETS + 7);
+      ram[PLAYER_GFX_OFFSET] = 0x58;
       y = 4;
       if ((ram[PLAYER_X_SPEED] | ram[BUTTONS_HORIZONTAL]) != 0) {
-        y--;
+        y = 3;
       }
       a = y;
       render_player();
@@ -10348,7 +10157,7 @@ void player_action_offset(void) {
       if ((ram[PLAYER_X_SPEED] | ram[BUTTONS_HORIZONTAL]) != 0) {
         if (ram[PLAYER_ABS_SPEED] < 9) { goto loc_f03c; }
         if ((ram[PLAYER_DIR] & ram[PLAYER_FACING]) != 0) { goto loc_f03c; }
-        y++;
+        y = 3;
       }
     }
   }
@@ -10431,7 +10240,7 @@ void animate_size_change(void) {
     y++;
     if (y >= 0xa) {
       y = 0;
-      ram[PLAYER_CHANGING_SIZE] = y;
+      ram[PLAYER_CHANGING_SIZE] = 0;
     }
     ram[PLAYER_ANIM_FRAME] = y;
   }
@@ -10531,16 +10340,14 @@ void block_screen_position(void) {
   screen_position_at();
   x = (uint8_t)((uint8_t)(x + 1) + 1);
   a = 9;
-  y++;
+  y = 5;
   screen_position_at(); return;
 }
 
 // in: a, x, y; out: a, x, carry
 void screen_position_at(void) {
   ram[0] = x;
-  carry_flag = false;
-  a = (uint8_t)(a + ram[0] + carry_flag);
-  x = a;
+  x = (uint8_t)(a + ram[0]);
   screen_position();
   x = ram[SLOT];
   return;
@@ -10616,8 +10423,7 @@ void offset_slot(void) {
 
 // in: x, y; out: x, y
 void offscreen_bits(void) {
-  a = y;
-  ram[0x100 + sp] = a;
+  ram[0x100 + sp] = y;
   sp--;
   offscreen_bits_parts();
   a = (uint8_t)((uint8_t)((uint8_t)((uint8_t)(a << 1) << 1) << 1) << 1);
@@ -10719,11 +10525,10 @@ void update_sound(void) {
   if (a == 0) { goto loc_f35d; }
   ram[PAUSE_SOUND_PLAYING] = a;
   ram[SOUND_PAUSED] = a;
-  a = 0;
-  apu_write(APU_STATUS, a);
-  ram[PULSE1_SFX_PLAYING] = a;
-  ram[PULSE2_SFX_PLAYING] = a;
-  ram[NOISE_SFX_PLAYING] = a;
+  apu_write(APU_STATUS, 0);
+  ram[PULSE1_SFX_PLAYING] = 0;
+  ram[PULSE2_SFX_PLAYING] = 0;
+  ram[NOISE_SFX_PLAYING] = 0;
   apu_write(APU_STATUS, 0xf);
   ram[PULSE1_SFX_COUNTER] = 0x2a;
 
@@ -10742,7 +10547,6 @@ loc_f316:
 loc_f327:
   x = 0x84;
   y = 0x7f;
-  zero_flag = y == 0;
   play_square1();
 
 loc_f32e:
@@ -10760,16 +10564,14 @@ loc_f34b:
   square2_sfx();
   noise_sfx();
   update_music();
-  a = 0;
-  ram[AREA_MUSIC_REQUEST] = a;
-  ram[EVENT_MUSIC_REQUEST] = a;
+  ram[AREA_MUSIC_REQUEST] = 0;
+  ram[EVENT_MUSIC_REQUEST] = 0;
 
 loc_f35d:
-  a = 0;
-  ram[PULSE1_SFX_REQUEST] = a;
-  ram[PULSE2_SFX_REQUEST] = a;
-  ram[NOISE_SFX_REQUEST] = a;
-  ram[PAUSE_SOUND_REQUEST] = a;
+  ram[PULSE1_SFX_REQUEST] = 0;
+  ram[PULSE2_SFX_REQUEST] = 0;
+  ram[NOISE_SFX_REQUEST] = 0;
+  ram[PAUSE_SOUND_REQUEST] = 0;
   y = ram[DMC_COUNTER];
   if ((ram[AREA_MUSIC_PLAYING] & 3) != 0) {
     ram[DMC_COUNTER]++;
@@ -10864,7 +10666,6 @@ loc_f3d1:
 loc_f3d3:
   x = 0x82;
   y = 0xa7;
-  zero_flag = y == 0;
   play_square1();
   ram[PULSE1_SFX_COUNTER] = 0x28;
 
@@ -10873,7 +10674,6 @@ loc_f3df:
   if (a == 0x25) {
     x = 0x5f;
     y = 0xf6;
-    zero_flag = y == 0;
     goto loc_f3f4;
   }
   if (a != 0x20) { goto loc_f4a2; }
@@ -10881,128 +10681,123 @@ loc_f3df:
 
 loc_f3f2:
   y = 0xbc;
-  zero_flag = y == 0;
 
 loc_f3f4:
   set_square1_regs();
-  if (zero_flag) {
+  goto loc_f4a2;
 
 loc_f3f9:
-    a = 5;
-    y = 0x99;
-    goto loc_f403;
+  a = 5;
+  y = 0x99;
+  goto loc_f403;
 
 loc_f3ff:
-    a = 0xa;
-    y = 0x93;
+  a = 0xa;
+  y = 0x93;
 
 loc_f403:
-    x = 0x9e;
-    ram[PULSE1_SFX_COUNTER] = a;
-    a = 0xc;
-    zero_flag = a == 0;
-    play_square1();
-    do {
+  x = 0x9e;
+  ram[PULSE1_SFX_COUNTER] = a;
+  a = 0xc;
+  play_square1();
+  do {
 
 loc_f40d:
-      a = ram[PULSE1_SFX_COUNTER];
-      if (a != 6) { goto loc_f4a2; }
-      a = 0xbb;
-      apu_write((uint16_t)(APU + 1), a);
-      goto loc_f4a2;
-
-square1_sfx:
-      y = ram[PULSE1_SFX_REQUEST];
-      neg_flag = (y & 0x80) != 0;
-      if (y != 0) {
-        ram[PULSE1_SFX_PLAYING] = y;
-        if (neg_flag) { goto loc_f3cd; }
-        carry_flag = (ram[PULSE1_SFX_REQUEST] & 1) != 0;
-        ram[PULSE1_SFX_REQUEST] = ram[PULSE1_SFX_REQUEST] >> 1;
-        if (carry_flag) { goto loc_f3d1; }
-        carry_flag = (ram[PULSE1_SFX_REQUEST] & 1) != 0;
-        ram[PULSE1_SFX_REQUEST] = ram[PULSE1_SFX_REQUEST] >> 1;
-        if (carry_flag) { goto loc_f3ff; }
-        carry_flag = (ram[PULSE1_SFX_REQUEST] & 1) != 0;
-        ram[PULSE1_SFX_REQUEST] = ram[PULSE1_SFX_REQUEST] >> 1;
-        if (carry_flag) { goto loc_f45b; }
-        carry_flag = (ram[PULSE1_SFX_REQUEST] & 1) != 0;
-        ram[PULSE1_SFX_REQUEST] = ram[PULSE1_SFX_REQUEST] >> 1;
-        if (carry_flag) { goto loc_f47d; }
-        carry_flag = (ram[PULSE1_SFX_REQUEST] & 1) != 0;
-        ram[PULSE1_SFX_REQUEST] = ram[PULSE1_SFX_REQUEST] >> 1;
-        if (carry_flag) { goto loc_f4b6; }
-        carry_flag = (ram[PULSE1_SFX_REQUEST] & 1) != 0;
-        ram[PULSE1_SFX_REQUEST] = ram[PULSE1_SFX_REQUEST] >> 1;
-        if (carry_flag) { goto loc_f3f9; }
-        carry_flag = (ram[PULSE1_SFX_REQUEST] & 1) != 0;
-        ram[PULSE1_SFX_REQUEST] = ram[PULSE1_SFX_REQUEST] >> 1;
-        if (carry_flag) { goto loc_f3bf; }
-      }
-      a = ram[PULSE1_SFX_PLAYING];
-      neg_flag = (a & 0x80) != 0;
-      if (a == 0) {
-        return;
-      }
-      if (neg_flag) { goto loc_f3df; }
-      carry_flag = (a & 1) != 0;
-      a = a >> 1;
-      if (carry_flag) { goto loc_f3df; }
-      carry_flag = (a & 1) != 0;
-      a = a >> 1;
-      if (carry_flag) { goto loc_f40d; }
-      carry_flag = (a & 1) != 0;
-      a = a >> 1;
-      if (carry_flag) { goto loc_f469; }
-      carry_flag = (a & 1) != 0;
-      a = a >> 1;
-      if (carry_flag) { goto loc_f48d; }
-      carry_flag = (a & 1) != 0;
-      a = a >> 1;
-      if (carry_flag) { goto loc_f4bb; }
-      carry_flag = (a & 1) != 0;
-      a = a >> 1;
-    } while (carry_flag);
-    carry_flag = (a & 1) != 0;
-    a = a >> 1;
-    if (carry_flag) { goto loc_f4a2; }
-    return;
-
-loc_f45b:
-    ram[PULSE1_SFX_COUNTER] = 0xe;
-    y = 0x9c;
-    x = 0x9e;
-    a = 0x26;
-    zero_flag = a == 0;
-    play_square1();
-
-loc_f469:
-    y = ram[PULSE1_SFX_COUNTER];
-    a = ROM(SWIM_STOMP_ENVELOPE - 1 + y);
-    apu_write(APU_PULSE1, a);
-    if (y != 6) { goto loc_f4a2; }
-    a = 0x9e;
-    apu_write((uint16_t)(APU + 2), a);
+    a = ram[PULSE1_SFX_COUNTER];
+    if (a != 6) { goto loc_f4a2; }
+    a = 0xbb;
+    apu_write((uint16_t)(APU + 1), 0xbb);
     goto loc_f4a2;
 
+square1_sfx:
+    y = ram[PULSE1_SFX_REQUEST];
+    neg_flag = (y & 0x80) != 0;
+    if (y != 0) {
+      ram[PULSE1_SFX_PLAYING] = y;
+      if (neg_flag) { goto loc_f3cd; }
+      carry_flag = (ram[PULSE1_SFX_REQUEST] & 1) != 0;
+      ram[PULSE1_SFX_REQUEST] = ram[PULSE1_SFX_REQUEST] >> 1;
+      if (carry_flag) { goto loc_f3d1; }
+      carry_flag = (ram[PULSE1_SFX_REQUEST] & 1) != 0;
+      ram[PULSE1_SFX_REQUEST] = ram[PULSE1_SFX_REQUEST] >> 1;
+      if (carry_flag) { goto loc_f3ff; }
+      carry_flag = (ram[PULSE1_SFX_REQUEST] & 1) != 0;
+      ram[PULSE1_SFX_REQUEST] = ram[PULSE1_SFX_REQUEST] >> 1;
+      if (carry_flag) { goto loc_f45b; }
+      carry_flag = (ram[PULSE1_SFX_REQUEST] & 1) != 0;
+      ram[PULSE1_SFX_REQUEST] = ram[PULSE1_SFX_REQUEST] >> 1;
+      if (carry_flag) { goto loc_f47d; }
+      carry_flag = (ram[PULSE1_SFX_REQUEST] & 1) != 0;
+      ram[PULSE1_SFX_REQUEST] = ram[PULSE1_SFX_REQUEST] >> 1;
+      if (carry_flag) { goto loc_f4b6; }
+      carry_flag = (ram[PULSE1_SFX_REQUEST] & 1) != 0;
+      ram[PULSE1_SFX_REQUEST] = ram[PULSE1_SFX_REQUEST] >> 1;
+      if (carry_flag) { goto loc_f3f9; }
+      carry_flag = (ram[PULSE1_SFX_REQUEST] & 1) != 0;
+      ram[PULSE1_SFX_REQUEST] = ram[PULSE1_SFX_REQUEST] >> 1;
+      if (carry_flag) { goto loc_f3bf; }
+    }
+    a = ram[PULSE1_SFX_PLAYING];
+    neg_flag = (a & 0x80) != 0;
+    if (a == 0) {
+      return;
+    }
+    if (neg_flag) { goto loc_f3df; }
+    carry_flag = (a & 1) != 0;
+    a = a >> 1;
+    if (carry_flag) { goto loc_f3df; }
+    carry_flag = (a & 1) != 0;
+    a = a >> 1;
+    if (carry_flag) { goto loc_f40d; }
+    carry_flag = (a & 1) != 0;
+    a = a >> 1;
+    if (carry_flag) { goto loc_f469; }
+    carry_flag = (a & 1) != 0;
+    a = a >> 1;
+    if (carry_flag) { goto loc_f48d; }
+    carry_flag = (a & 1) != 0;
+    a = a >> 1;
+    if (carry_flag) { goto loc_f4bb; }
+    carry_flag = (a & 1) != 0;
+    a = a >> 1;
+  } while (carry_flag);
+  carry_flag = (a & 1) != 0;
+  a = a >> 1;
+  if (carry_flag) { goto loc_f4a2; }
+  return;
+
+loc_f45b:
+  ram[PULSE1_SFX_COUNTER] = 0xe;
+  y = 0x9c;
+  x = 0x9e;
+  a = 0x26;
+  play_square1();
+
+loc_f469:
+  y = ram[PULSE1_SFX_COUNTER];
+  a = ROM(SWIM_STOMP_ENVELOPE - 1 + y);
+  apu_write(APU_PULSE1, a);
+  if (y != 6) { goto loc_f4a2; }
+  a = 0x9e;
+  apu_write((uint16_t)(APU + 2), 0x9e);
+  goto loc_f4a2;
+
 loc_f47d:
-    y = 0xcb;
-    x = 0x9f;
-    ram[PULSE1_SFX_COUNTER] = 0xe;
-    a = 0x28;
-    zero_flag = a == 0;
-    play_square1();
-    if (zero_flag) {
+  y = 0xcb;
+  x = 0x9f;
+  ram[PULSE1_SFX_COUNTER] = 0xe;
+  a = 0x28;
+  play_square1();
+  if (zero_flag) {
 
 loc_f48d:
-      if (ram[PULSE1_SFX_COUNTER] == 8) {
-        apu_write((uint16_t)(APU + 2), 0xa0);
-        a = 0x9f;
-      } else {
-        a = 0x90;
-      }
-      apu_write(APU_PULSE1, a);
+    if (ram[PULSE1_SFX_COUNTER] == 8) {
+      apu_write((uint16_t)(APU + 2), 0xa0);
+      a = 0x9f;
+    } else {
+      a = 0x90;
     }
+    apu_write(APU_PULSE1, a);
   }
 
 loc_f4a2:
@@ -11026,7 +10821,6 @@ loc_f4bb:
   y = 0x91;
   x = 0x9a;
   a = 0x44;
-  zero_flag = a == 0;
   play_square1();
   goto loc_f4a2;
 }
@@ -11036,7 +10830,7 @@ void stop_square1_sfx(void) {
   ram[PULSE1_SFX_PLAYING] = 0;
   apu_write(APU_STATUS, 0xe);
   x = 0xf;
-  apu_write(APU_STATUS, x);
+  apu_write(APU_STATUS, 0xf);
   return;
 }
 
@@ -11044,7 +10838,7 @@ void stop_square1_sfx(void) {
 void stop_square2_sfx(void) {
   apu_write(APU_STATUS, 0xd);
   x = 0xf;
-  apu_write(APU_STATUS, x);
+  apu_write(APU_STATUS, 0xf);
   return;
 }
 
@@ -11071,7 +10865,7 @@ loc_f52c:
   a = ram[PULSE2_SFX_COUNTER];
   if (a != 0x30) { goto loc_f568; }
   a = 0x54;
-  apu_write((uint16_t)(APU + 6), a);
+  apu_write((uint16_t)(APU + 6), 0x54);
   goto loc_f568;
 
 loc_f53a:
@@ -11298,15 +11092,15 @@ loc_f6a4:
   x = ram[AREA_MUSIC_PLAYING];
   ram[AREA_MUSIC_SAVED] = x;
   y = 0;
-  ram[NOTE_LENGTH_ADD] = y;
-  ram[AREA_MUSIC_PLAYING] = y;
+  ram[NOTE_LENGTH_ADD] = 0;
+  ram[AREA_MUSIC_PLAYING] = 0;
   if (a != 0x40) { goto loc_f6f1; }
   x = 8;
-  ram[NOTE_LENGTH_ADD] = x;
+  ram[NOTE_LENGTH_ADD] = 8;
   goto loc_f6f1;
 
 loc_f6d1:
-  ram[GROUND_MUSIC_HEADER] = y;
+  ram[GROUND_MUSIC_HEADER] = 0x11;
 
 loc_f6d4:
   ram[EVENT_MUSIC_PLAYING] = 0;
@@ -11315,11 +11109,10 @@ loc_f6d4:
     ram[GROUND_MUSIC_HEADER]++;
     y = ram[GROUND_MUSIC_HEADER];
     if (y != 0x32) { goto loc_f6f5; }
-    y = 0x11;
     goto loc_f6d1;
   }
   y = 8;
-  ram[PULSE2_MUSIC_POS] = y;
+  ram[PULSE2_MUSIC_POS] = 8;
   do {
 
 loc_f6f1:
@@ -11338,14 +11131,12 @@ loc_f6f5:
   a = ROM(SONG_HEADER_OFFSETS + 5 + y);
   ram[NOISE_MUSIC_POS] = a;
   ram[NOISE_LOOP_POS] = a;
-  a = 1;
-  ram[PULSE2_NOTE_COUNTER] = a;
-  ram[PULSE1_NOTE_COUNTER] = a;
-  ram[TRIANGLE_NOTE_COUNTER] = a;
-  ram[NOISE_BEAT_COUNTER] = a;
-  a = 0;
-  ram[PULSE2_MUSIC_POS] = a;
-  ram[ALT_REGISTERS] = a;
+  ram[PULSE2_NOTE_COUNTER] = 1;
+  ram[PULSE1_NOTE_COUNTER] = 1;
+  ram[TRIANGLE_NOTE_COUNTER] = 1;
+  ram[NOISE_BEAT_COUNTER] = 1;
+  ram[PULSE2_MUSIC_POS] = 0;
+  ram[ALT_REGISTERS] = 0;
   apu_write(APU_STATUS, 0xb);
   apu_write(APU_STATUS, 0xf);
 
@@ -11369,13 +11160,11 @@ loc_f73a:
     if (a != 0) { goto loc_f6a4; }
     a = ram[AREA_MUSIC_PLAYING] & 0x5f;
     if (a != 0) { goto loc_f6d4; }
-    a = 0;
-    ram[AREA_MUSIC_PLAYING] = a;
-    ram[EVENT_MUSIC_PLAYING] = a;
-    apu_write(APU_TRIANGLE, a);
-    a = 0x90;
-    apu_write(APU_PULSE1, a);
-    apu_write(APU_PULSE2, a);
+    ram[AREA_MUSIC_PLAYING] = 0;
+    ram[EVENT_MUSIC_PLAYING] = 0;
+    apu_write(APU_TRIANGLE, 0);
+    apu_write(APU_PULSE1, 0x90);
+    apu_write(APU_PULSE2, 0x90);
     return;
 
 loc_f77a:
@@ -11406,7 +11195,7 @@ loc_f786:
       load_envelope_entry();
       apu_write(APU_PULSE2, a);
       x = 0x7f;
-      apu_write((uint16_t)(APU + 5), x);
+      apu_write((uint16_t)(APU + 5), 0x7f);
     }
   }
   if (ram[PULSE1_MUSIC_POS] != 0) {
@@ -11419,9 +11208,8 @@ loc_f7c5:
       a = read_byte(indirect_y_addr(MUSIC_PTR));
       if (a == 0) {
         apu_write(APU_PULSE1, 0x83);
-        a = 0x94;
-        apu_write((uint16_t)(APU + 1), a);
-        ram[ALT_REGISTERS] = a;
+        apu_write((uint16_t)(APU + 1), 0x94);
+        ram[ALT_REGISTERS] = 0x94;
         goto loc_f7c5;
       }
       alternate_length();
@@ -11557,11 +11345,11 @@ loc_f6a4:
   x = ram[AREA_MUSIC_PLAYING];
   ram[AREA_MUSIC_SAVED] = x;
   y = 0;
-  ram[NOTE_LENGTH_ADD] = y;
-  ram[AREA_MUSIC_PLAYING] = y;
+  ram[NOTE_LENGTH_ADD] = 0;
+  ram[AREA_MUSIC_PLAYING] = 0;
   if (a != 0x40) { goto loc_f6f1; }
   x = 8;
-  ram[NOTE_LENGTH_ADD] = x;
+  ram[NOTE_LENGTH_ADD] = 8;
   goto loc_f6f1;
 
 loc_f6c8:
@@ -11584,7 +11372,7 @@ loc_f6d4:
     goto loc_f6d1;
   }
   y = 8;
-  ram[PULSE2_MUSIC_POS] = y;
+  ram[PULSE2_MUSIC_POS] = 8;
   do {
 
 loc_f6f1:
@@ -11603,14 +11391,12 @@ loc_f6f5:
   a = ROM(SONG_HEADER_OFFSETS + 5 + y);
   ram[NOISE_MUSIC_POS] = a;
   ram[NOISE_LOOP_POS] = a;
-  a = 1;
-  ram[PULSE2_NOTE_COUNTER] = a;
-  ram[PULSE1_NOTE_COUNTER] = a;
-  ram[TRIANGLE_NOTE_COUNTER] = a;
-  ram[NOISE_BEAT_COUNTER] = a;
-  a = 0;
-  ram[PULSE2_MUSIC_POS] = a;
-  ram[ALT_REGISTERS] = a;
+  ram[PULSE2_NOTE_COUNTER] = 1;
+  ram[PULSE1_NOTE_COUNTER] = 1;
+  ram[TRIANGLE_NOTE_COUNTER] = 1;
+  ram[NOISE_BEAT_COUNTER] = 1;
+  ram[PULSE2_MUSIC_POS] = 0;
+  ram[ALT_REGISTERS] = 0;
   apu_write(APU_STATUS, 0xb);
   apu_write(APU_STATUS, 0xf);
   ram[PULSE2_NOTE_COUNTER]--;
@@ -11632,13 +11418,11 @@ loc_f6f5:
     if (a != 0) { goto loc_f6a4; }
     a = ram[AREA_MUSIC_PLAYING] & 0x5f;
     if (a != 0) { goto loc_f6d4; }
-    a = 0;
-    ram[AREA_MUSIC_PLAYING] = a;
-    ram[EVENT_MUSIC_PLAYING] = a;
-    apu_write(APU_TRIANGLE, a);
-    a = 0x90;
-    apu_write(APU_PULSE1, a);
-    apu_write(APU_PULSE2, a);
+    ram[AREA_MUSIC_PLAYING] = 0;
+    ram[EVENT_MUSIC_PLAYING] = 0;
+    apu_write(APU_TRIANGLE, 0);
+    apu_write(APU_PULSE1, 0x90);
+    apu_write(APU_PULSE2, 0x90);
     return;
 
 loc_f77a:
@@ -11669,7 +11453,7 @@ loc_f786:
       load_envelope_entry();
       apu_write(APU_PULSE2, a);
       x = 0x7f;
-      apu_write((uint16_t)(APU + 5), x);
+      apu_write((uint16_t)(APU + 5), 0x7f);
     }
   }
   if (ram[PULSE1_MUSIC_POS] != 0) {
@@ -11682,9 +11466,8 @@ loc_f7c5:
       a = read_byte(indirect_y_addr(MUSIC_PTR));
       if (a == 0) {
         apu_write(APU_PULSE1, 0x83);
-        a = 0x94;
-        apu_write((uint16_t)(APU + 1), a);
-        ram[ALT_REGISTERS] = a;
+        apu_write((uint16_t)(APU + 1), 0x94);
+        ram[ALT_REGISTERS] = 0x94;
         goto loc_f7c5;
       }
       alternate_length();
@@ -11822,7 +11605,7 @@ void note_length(void) {
   return;
 }
 
-// in: none; out: a, x, y, zero
+// in: none; out: a, x, y
 void load_square_envelope(void) {
   if ((ram[EVENT_MUSIC_PLAYING] & 8) != 0) {
     a = 4;
@@ -11835,7 +11618,6 @@ void load_square_envelope(void) {
   }
   x = 0x82;
   y = 0x7f;
-  zero_flag = y == 0;
   return;
 }
 

@@ -9,6 +9,7 @@
     "nathsou/smb/image",
     "nathsou/smb/ir",
     "nathsou/smb/wasm",
-    "moonbitlang/core/env"
+    "moonbitlang/core/env",
+    "moonbitlang/core/string"
   ]
 }

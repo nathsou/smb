@@ -648,5 +648,5 @@ pub fn build(low : @lower.AsmLowering, native~ : Set[String]) -> Program raise B
   let nmi = try @image.address_name(program.image, program.image.word(base)) catch {
     _ => raise BuildError("Missing NMI vector")
   }
-  { functions, by_name, reset: rename(program.roots[0]), nmi: rename(nmi), info: None }
+  { functions, by_name, reset: rename(program.roots[0]), nmi: rename(nmi), prg: program.image.bytes, info: None }
 }

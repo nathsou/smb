@@ -9,6 +9,8 @@
 // trampolines to the game module's exports, instantiated right after.
 // The ROM's PRG banks are copied into the runtime's PRG buffer.
 
+// `gameBytes` may be a function of the runtime's layout, to build the game
+// module once the runtime's addresses are known.
 export async function link(runtimeBytes, gameBytes, rom, pages = 20) {
     const memory = new WebAssembly.Memory({ initial: pages });
     const bytes = () => new Uint8Array(memory.buffer);
@@ -26,8 +28,10 @@ export async function link(runtimeBytes, gameBytes, rom, pages = 20) {
         }
     }
     const runtime = (await WebAssembly.instantiate(runtimeModule, { env })).exports;
+    if (gameBytes === null) return { memory, runtime, game: null };
 
-    const gameModule = await WebAssembly.compile(gameBytes);
+    const bytes_ = typeof gameBytes === 'function' ? await gameBytes(runtimeLayout(runtime)) : gameBytes;
+    const gameModule = await WebAssembly.compile(bytes_);
     const gameEnv = { memory };
     for (const { name, kind } of WebAssembly.Module.imports(gameModule)) {
         if (kind === 'memory') continue;
@@ -38,6 +42,16 @@ export async function link(runtimeBytes, gameBytes, rom, pages = 20) {
 
     if (rom) loadPrg(memory, runtime.data.value, rom);
     return { memory, runtime, game };
+}
+
+// Addresses of the objects the game module reads and writes directly.
+export const MACHINE_STATE = [
+    'ram', 'data', 'a', 'x', 'y', 'sp', 'carry_flag', 'zero_flag', 'neg_flag',
+    'overflow_flag', 'interrupt_disabled', 'decimal_flag',
+];
+
+export function runtimeLayout(runtime) {
+    return Object.fromEntries(MACHINE_STATE.map(name => [name, runtime[name].value]));
 }
 
 // iNES with mapper 0: 16 or 32 KiB of PRG ROM after the header (and a

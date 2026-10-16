@@ -4,7 +4,8 @@
 //   unused temporaries; reads with effects stay as `Eval`;
 // - forwarding: a value with one use later in the same block moves into
 //   that use (loads stored elsewhere, flags folded into branches);
-// - local simplification of every expression.
+// - local simplification of every expression;
+// - constant propagation and dead stores (constprop.mbt).
 
 // Expressions larger than this are not grown further by forwarding.
 let forward_limit : Int = 14
@@ -157,7 +158,13 @@ fn forward(info : Analysis, f : Function) -> Bool {
             let mut k = at + 1
             while k < stmts.length() {
               let s = stmts[k]
-              if count_in(name, s.exprs()) > 0 || s is Call(_) { dead = false; break }
+              if count_in(name, s.exprs()) > 0 { dead = false; break }
+              // a call reads what is live into the callee, and nothing
+              // else of the caller's survives it unread
+              if s is Call(g) {
+                if (info.get_in(g) & v.bit()) != 0 { dead = false } else { redefined = true }
+                break
+              }
               if (s.defs() & v.bit()) != 0 { redefined = true; break }
               k += 1
             }
@@ -228,11 +235,63 @@ pub fn Program::optimize(self : Program) -> Unit {
     let info = self.analyze()
     let mut changed = false
     for f in self.functions {
+      if self.const_prop(info, f) {
+        changed = true
+        prune(f)
+        thread_jumps(f)
+      }
       if dead_code(info, f) { changed = true }
+      if dead_stores(f) { changed = true }
       if forward(info, f) { changed = true }
     }
     if !changed { break }
     rounds += 1
   }
   self.analyze() |> ignore
+}
+
+// Inlines small leaf routines: one block of at most `limit` statements,
+// no calls, ending in a return. Their temporaries become the caller's.
+pub fn Program::inline_leaves(self : Program, limit~ : Int = 12) -> Int {
+  let leaves : Map[String, Function] = Map([])
+  for f in self.functions {
+    if f.native || f.helper || f.blocks.length() != 1 { continue }
+    let block = f.blocks[0]
+    if block.term != Return || block.stmts.length() > limit { continue }
+    if block.stmts.iter().any(fn(s) { s is Call(_) }) { continue }
+    leaves[f.name] = f
+  }
+  let mut count = 0
+  for f in self.functions {
+    if f.native { continue }
+    for block in f.blocks {
+      if !block.stmts.iter().any(fn(s) { s is Call(g) && leaves.contains(g) }) { continue }
+      let out = []
+      for s in block.stmts {
+        match s {
+          Call(g) if leaves.get(g) is Some(leaf) && g != f.name => {
+            let temps = leaf.temps.map(fn(t) { f.new_temp(t.hint, t.width) })
+            let remap = fn(e : Expr) -> Expr {
+              let mut e = e
+              for k, t in temps { e = e.replace_temp(k, Temp(-100 - t)) }
+              for t in temps { e = e.replace_temp(-100 - t, Temp(t)) }
+              e
+            }
+            for inner in leaf.blocks[0].stmts {
+              out.push(
+                match inner {
+                  Let(t, e) => Let(temps[t], remap(e))
+                  other => other.map_exprs(remap)
+                },
+              )
+            }
+            count += 1
+          }
+          other => out.push(other)
+        }
+      }
+      block.stmts = out
+    }
+  }
+  count
 }

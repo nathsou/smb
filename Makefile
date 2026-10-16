@@ -57,8 +57,10 @@ RUNTIME_SOURCES = codegen/lib/cpu.c codegen/lib/video.c codegen/lib/render.c cod
 runtime-wasm:
 	$(CC) -O3 -ffunction-sections -fdata-sections --target=wasm32 -nostdlib -Wl,--gc-sections -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined $(EXTRA_CFLAGS) -o web/runtime.wasm $(RUNTIME_SOURCES)
 
-game-wasm:
-	moon run src/main -- --rom $(ROM) --map maps/smb.map --native codegen/native/routines.txt --wasm web/game.wasm
+# Bakes the runtime's addresses into the game module (as the page does).
+game-wasm: runtime-wasm
+	node web/layout.mjs web/runtime.wasm > web/layout.txt
+	moon run src/main -- --rom $(ROM) --map maps/smb.map --native codegen/native/routines.txt --wasm web/game.wasm --wasm-layout web/layout.txt
 
 hash: clean
 	$(CC) $(CFLAGS) -o hash codegen/hash.c $(SOURCES) codegen/lib/rec.c codegen/lib/common.c $(GC_FLAGS)

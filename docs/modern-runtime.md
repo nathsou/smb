@@ -142,6 +142,14 @@ flags the routine may change that its callers read after it returns.
 - local simplification (`!(a == b)` to `a != b`, nested byte truncations,
   constant offsets).
 
+- constant propagation across blocks: registers and flags with a known
+  value on every path become constants (a call makes what the callee may
+  write unknown); reads of PRG ROM at known addresses become the byte read,
+  at recompile time; branches on known conditions become jumps and blocks
+  no longer reached are dropped;
+- dead stores: RAM stores overwritten in the same block before anything
+  could read them.
+
 Forwarding subsumes the earlier load/store fusion and compare/branch folding,
 and also folds flag computations into the branches that read them:
 
@@ -196,8 +204,22 @@ engine's `update_music`, has irreducible control flow; it runs as a loop over
 a `br_table` on a block number. `--wasm-dispatch` builds every function that
 way, to check the fallback.
 
+Registers and flags live in WebAssembly locals: a function loads those live
+on entry, writes back the ones it changed only where a callee, its caller or
+the idle loop reads them (from the IR's liveness), and reloads after a call
+what the callee may change. When the runtime's addresses are known before
+the game module is built (as in the page, which instantiates the runtime
+first; `--wasm-layout` from the command line), they are constants in memory
+offsets rather than imported globals. Bus reads test for ROM and RAM inline
+and call the runtime only for I/O. The WebAssembly build also inlines small
+leaf routines (one block, no calls); the C keeps one function per routine.
+
 `node tests/web/replay_split.mjs` replays the recording with the two modules
-(either structuring) and matches the golden trace on every frame.
+and matches the golden trace on every frame, with either structuring and
+with registers in locals or in memory. Game logic for the 7,987 frames
+takes about 28 ms in Node (V8), against 37 ms with registers in memory and
+imported addresses, and 14 ms for the clang-compiled C (which inlines
+across routines and has no calls between modules).
 
 ## Hand-written routines
 

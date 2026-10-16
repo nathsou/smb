@@ -59,6 +59,45 @@ priv struct Gen {
   code : Buf
   scratch : Int // an extra local
   state : Int // block-number local for the dispatch loop
+  // Machine variables in locals (see `emit`): the first local of the ten,
+  // or -1 to access them in memory.
+  vars : Int
+  layout : Map[String, Int]
+  info : @ir.Analysis
+  block_in : Array[Int]
+  assigned : Int
+  read : Int
+}
+
+fn var_slot(v : @ir.Var) -> Int {
+  match v {
+    A => 0; X => 1; Y => 2; SP => 3
+    C => 4; Z => 5; N => 6; V => 7; I => 8; D => 9
+  }
+}
+
+// Writes back the variables in `mask` that this function changed.
+fn Gen::spill(self : Gen, mask : Int) -> Unit raise WasmError {
+  if self.vars < 0 { return }
+  for v in @ir.vars_of(mask & self.assigned) {
+    let offset = self.base(v.c_name(), None)
+    self.local_get(self.vars + var_slot(v))
+    self.store8(offset)
+  }
+}
+
+// Loads the variables in `mask` this function reads or changes.
+fn Gen::reload(self : Gen, mask : Int) -> Unit raise WasmError {
+  if self.vars < 0 { return }
+  for v in @ir.vars_of(mask & (self.read | self.assigned)) {
+    let offset = self.base(v.c_name(), None)
+    self.load8(offset)
+    self.local_set(self.vars + var_slot(v))
+  }
+}
+
+fn Gen::live_in(self : Gen, name : String) -> Int {
+  self.info.live_in.get(name).unwrap_or(1023)
 }
 
 fn Gen::op(self : Gen, op : Int) -> Unit {
@@ -117,35 +156,44 @@ fn split_offset(addr : @ir.Expr) -> (@ir.Expr?, Int) {
   }
 }
 
+// Pushes the address of the runtime object `name` plus `index`; returns the
+// memory offset to add. With a layout the object's address is a constant
+// and goes into the offset.
+fn Gen::base(self : Gen, name : String, index : @ir.Expr?) -> Int raise WasmError {
+  match self.layout.get(name) {
+    Some(address) => {
+      match index {
+        Some(e) => self.expr(e)
+        None => self.const_(0)
+      }
+      address
+    }
+    None => {
+      self.global(name)
+      if index is Some(e) {
+        self.expr(e)
+        self.op(I32_ADD)
+      }
+      0
+    }
+  }
+}
+
 // Pushes the address of a RAM byte; returns the memory offset to use.
 fn Gen::ram_address(self : Gen, addr : @ir.Expr) -> Int raise WasmError {
-  self.global("ram")
   let (rest, offset) = split_offset(addr)
-  if rest is Some(e) {
-    self.expr(e)
-    self.op(I32_ADD)
-  }
-  offset
+  self.base("ram", rest) + offset
 }
 
 fn Gen::rom_address(self : Gen, addr : @ir.Expr) -> Int raise WasmError {
-  self.global("data")
   let r = addr.range(self.f.temps)
   let (rest, offset) = split_offset(addr)
   if r.lo >= 0x8000 && r.hi <= 0xffff && offset >= 0x8000 {
-    if rest is Some(e) {
-      self.expr(e)
-      self.op(I32_ADD)
-    }
-    offset - 0x8000
+    self.base("data", rest) + offset - 0x8000
   } else {
     // like the C build's ROM(): (address - $8000) modulo 32 KiB; a 16 KiB
     // image is mirrored in the buffer
-    self.expr(addr)
-    self.const_(0x7fff)
-    self.op(I32_AND)
-    self.op(I32_ADD)
-    0
+    self.base("data", Some(Binary(And, addr, Const(0x7fff))))
   }
 }
 
@@ -161,10 +209,14 @@ fn Gen::masked(self : Gen, e : @ir.Expr, hi : Int) -> Unit raise WasmError {
 fn Gen::expr(self : Gen, e : @ir.Expr) -> Unit raise WasmError {
   match e {
     Const(v) | Sym(_, v) => self.const_(v)
-    Var(v) => {
-      self.global(v.c_name())
-      self.load8(0)
-    }
+    Var(v) =>
+      if self.vars >= 0 {
+        self.local_get(self.vars + var_slot(v))
+      } else {
+        let offset = self.base(v.c_name(), None)
+        self.load8(offset)
+      }
+    Temp(-1) => self.local_get(self.scratch) // the scratch local
     Temp(t) => {
       self.code.byte(LOCAL_GET)
       self.code.u32(t + (if self.f.helper { 1 } else { 0 }))
@@ -182,8 +234,30 @@ fn Gen::expr(self : Gen, e : @ir.Expr) -> Unit raise WasmError {
       self.load8(offset)
     }
     Load(Bus, a) => {
+      // ROM and RAM directly (pointers mostly read ROM tables); the
+      // runtime's read_byte for everything else
       self.masked(a, 0xffff)
+      self.code.byte(LOCAL_TEE)
+      self.code.u32(self.scratch)
+      self.const_(0x8000)
+      self.op(I32_GE_S)
+      self.op(IF)
+      self.code.byte(I32)
+      let rom = self.base("data", Some(Binary(And, Temp(-1), Const(0x7fff))))
+      self.load8(rom)
+      self.op(ELSE)
+      self.local_get(self.scratch)
+      self.const_(0x2000)
+      self.op(I32_LT_S)
+      self.op(IF)
+      self.code.byte(I32)
+      let ram = self.base("ram", Some(Binary(And, Temp(-1), Const(0x7ff))))
+      self.load8(ram)
+      self.op(ELSE)
+      self.local_get(self.scratch)
       self.call("read_byte")
+      self.op(END)
+      self.op(END)
     }
     Unary(Not, a) => {
       self.expr(a)
@@ -231,11 +305,15 @@ fn Gen::local_get(self : Gen, index : Int) -> Unit {
 
 fn Gen::stmt(self : Gen, s : @ir.Stmt) -> Unit raise WasmError {
   match s {
-    Assign(v, e) => {
-      self.global(v.c_name())
-      self.expr(e)
-      self.store8(0)
-    }
+    Assign(v, e) =>
+      if self.vars >= 0 {
+        self.expr(v.width().wrap(e, self.f.temps))
+        self.local_set(self.vars + var_slot(v))
+      } else {
+        let offset = self.base(v.c_name(), None)
+        self.expr(e)
+        self.store8(offset)
+      }
     Let(t, e) => {
       let hi = match self.f.temps[t].width {
         U8 => 0xff
@@ -281,12 +359,25 @@ fn Gen::stmt(self : Gen, s : @ir.Stmt) -> Unit raise WasmError {
       self.expr(e)
       self.op(DROP)
     }
-    Call(name) => self.call(name)
+    Call(name) => {
+      self.spill(self.live_in(name))
+      self.call(name)
+      self.reload(self.info.may_write.get(name).unwrap_or(1023))
+    }
   }
 }
 
 // Terminators that leave the function.
 fn Gen::exit(self : Gen, term : @ir.Term) -> Unit raise WasmError {
+  // what the caller, the callee or the idle loop reads from here
+  match term {
+    Dispatch(helper, _, cases) => {
+      let mut mask = self.live_in(helper)
+      for c in cases { mask = mask | self.live_in(c.1) }
+      self.spill(mask)
+    }
+    _ => self.spill(self.info.term_live(self.f, term, self.block_in))
+  }
   match term {
     Return => self.op(RETURN)
     ReturnValue(e) => {
@@ -543,9 +634,26 @@ pub(all) struct Output {
   irreducible : Array[String]
 }
 
-// `force_dispatch` structures every function with the dispatch loop (to test
-// that path).
-pub fn emit(program : @ir.Program, force_dispatch~ : Bool = false) -> Output raise WasmError {
+// Registers and flags live in locals: a function loads those live on entry,
+// writes back the ones it changed where a callee, its caller or the idle
+// loop reads them, and reloads after a call what the callee may change.
+// `memory_vars` keeps them in memory instead, and `force_dispatch`
+// structures every function with the dispatch loop (both to test those paths).
+//
+// `layout` gives the runtime's addresses of `ram`, `data` and the machine
+// variables when they are known (the module is built after the runtime is
+// instantiated); they become constants in memory offsets instead of
+// imported globals.
+pub fn emit(
+  program : @ir.Program,
+  layout~ : Map[String, Int] = Map([]),
+  force_dispatch~ : Bool = false,
+  memory_vars~ : Bool = false,
+) -> Output raise WasmError {
+  let info = match program.info {
+    Some(i) => i
+    None => program.analyze()
+  }
   let generated = program.functions.filter(fn(f) { !f.native })
   // Runtime functions and natives the code calls.
   let imports : Imports = {
@@ -554,13 +662,13 @@ pub fn emit(program : @ir.Program, force_dispatch~ : Bool = false) -> Output rai
     funcs: [],
     func_index: Map([]),
   }
-  for name in ["ram", "data"] {
-    imports.global_index[name] = imports.globals.length()
-    imports.globals.push(name)
-  }
-  for v in @ir.all_vars {
-    imports.global_index[v.c_name()] = imports.globals.length()
-    imports.globals.push(v.c_name())
+  let objects = ["ram", "data"]
+  for v in @ir.all_vars { objects.push(v.c_name()) }
+  for name in objects {
+    if !layout.contains(name) {
+      imports.global_index[name] = imports.globals.length()
+      imports.globals.push(name)
+    }
   }
   let wanted : Array[String] = ["read_byte", "dynamic_ram_write", "cpu_yield", "cpu_unresolved_jump"]
   for f in generated {
@@ -671,7 +779,16 @@ pub fn emit(program : @ir.Program, force_dispatch~ : Bool = false) -> Output rai
   section.u32(generated.length())
   for f in generated {
     let params = if f.helper { 1 } else { 0 }
-    let locals = f.temps.length() + 2
+    let locals = f.temps.length() + 2 + (if memory_vars { 0 } else { 10 })
+    let mut assigned = 0
+    let mut read = 0
+    for block in f.blocks {
+      for s in block.stmts {
+        assigned = assigned | s.defs()
+        read = read | s.uses()
+      }
+      for e in block.term.exprs() { read = read | e.vars() }
+    }
     let gen : Gen = {
       imports,
       defined,
@@ -679,7 +796,15 @@ pub fn emit(program : @ir.Program, force_dispatch~ : Bool = false) -> Output rai
       code: Buf::new(),
       scratch: params + f.temps.length(),
       state: params + f.temps.length() + 1,
+      vars: if memory_vars { -1 } else { params + f.temps.length() + 2 },
+      layout,
+      info,
+      block_in: info.blocks_live(f),
+      assigned,
+      read,
     }
+    // the variables live on entry start in their locals
+    gen.reload(gen.block_in[f.entry])
     match (if force_dispatch { None } else { shape(f) }) {
       Some(sh) => gen.do_tree(sh, f.entry, @list.empty())
       None => {

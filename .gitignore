@@ -22,3 +22,4 @@ codegen/prg.bin
 __pycache__/
 web/game.wasm
 web/runtime.wasm
+web/layout.txt

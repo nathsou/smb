@@ -4,5 +4,6 @@
     "nathsou/smb/parse",
     "nathsou/smb/lower",
     "nathsou/smb/image"
-  ]
+  ],
+  "test-import": []
 }
