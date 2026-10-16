@@ -377,11 +377,16 @@ fn compute_range(expr: @lower.TypedExpr, mode: @lower.AsmAddressingMode, low: @l
 }
 
 fn write_byte(mode: @lower.AsmAddressingMode, target: Reg, low: @lower.AsmLowering) -> String {
-  let target = match target {
+  let value = match target {
     A => "a"
     X => "x"
     Y => "y"
   }
+  write_value(mode, value, low)
+}
+
+// A store of `target` (a C expression) through an addressing mode.
+fn write_value(mode: @lower.AsmAddressingMode, target: String, low: @lower.AsmLowering) -> String {
 
   fn rewrite(addr: @lower.TypedExpr, suffix: String, zero_page: Bool) -> String {
     let expression = "\{show_expr(addr)}\{suffix}"
@@ -612,6 +617,62 @@ fn native_instruction(
   Some(block())
 }
 
+// The register and value of an instruction that only loads a register and
+// whose flags are dead afterwards: LDA/LDX/LDY and the transfers.
+fn plain_load(item: @lower.AsmItem, low: @lower.AsmLowering) -> (String, String)? {
+  guard item is Inst(id~, op~, mode~, ..) && id >= 0 else { return None }
+  let live = low.flag_live_after(id)
+  if live.zero || live.negative { return None }
+  match op {
+    LDA | LDX | LDY => match operand(mode, low) {
+      Some(source) => Some((register_name(op), source.read()))
+      None => None
+    }
+    TAX => Some(("x", "a"))
+    TAY => Some(("y", "a"))
+    TXA => Some(("a", "x"))
+    TYA => Some(("a", "y"))
+    _ => None
+  }
+}
+
+// `load R; store R` where R is dead after the store: store the value itself.
+fn fused_store(load: @lower.AsmItem, store: @lower.AsmItem, low: @lower.AsmLowering) -> String? {
+  guard plain_load(load, low) is Some((register, value)) else { return None }
+  guard store is Inst(id~, op=STA | STX | STY as op, mode~, ..) && id >= 0 else { return None }
+  let stored = match op { STA => "a"; STX => "x"; _ => "y" }
+  if stored != register { return None }
+  let dead = match register {
+    "a" => !low.register_live_after(id).a
+    "x" => !low.register_live_after(id).x
+    _ => !low.register_live_after(id).y
+  }
+  if dead { Some(write_value(mode, value, low)) } else { None }
+}
+
+fn item_comment(item: @lower.AsmItem) -> String? {
+  match item {
+    Inst(comment~, ..) => comment
+    _ => None
+  }
+}
+
+fn Emitter::emit_items(self: Emitter, items: ArrayView[@lower.AsmItem], low: @lower.AsmLowering) -> Unit {
+  let mut i = 0
+  while i < items.length() {
+    if !self.instruction_helpers && i + 1 < items.length() {
+      if fused_store(items[i], items[i + 1], low) is Some(code) {
+        let comments = [item_comment(items[i]), item_comment(items[i + 1])].filter_map(fn(c) { c })
+        self.emit(if comments.is_empty() { code } else { "\{code} // \{comments.join("; ")}" })
+        i += 2
+        continue
+      }
+    }
+    self.emit_item(items[i], low)
+    i += 1
+  }
+}
+
 fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering) -> Unit {
     match item {
       Label(name) => {
@@ -744,7 +805,7 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
       DoWhile(cond~, body~, comment~) => {
         self.emit("do {")
         self.indentation += 1
-        for child in body { self.emit_item(child, low) }
+        self.emit_items(body[:], low)
         self.indentation -= 1
         let comment = match comment { Some(text) => " // " + text; None => "" }
         self.emit("} while (\{show_cond_opcode(cond)});\{comment}")
@@ -769,9 +830,7 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
 
         self.indentation += 1
 
-        for item in then {
-          self.emit_item(item, low)
-        }
+        self.emit_items(then[:], low)
 
         self.indentation -= 1
         
@@ -780,9 +839,7 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
             self.emit("} else {")
             self.indentation += 1
 
-            for item in otherwise {
-              self.emit_item(item, low)
-            }
+            self.emit_items(otherwise[:], low)
 
             self.indentation -= 1
             self.emit("}")
@@ -834,9 +891,7 @@ fn Emitter::emit_flat_subroutine(self: Emitter, subroutine: @lower.AsmFlatSubrou
   self.emit("void \{rename_label(subroutine.name)}(void) {")
   self.indentation = 1
 
-  for item in subroutine.items[body:] {
-    self.emit_item(item, low)
-  }
+  self.emit_items(subroutine.items[body:], low)
 
   self.indentation = 0
   self.emit("}\n")

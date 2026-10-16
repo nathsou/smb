@@ -24,7 +24,7 @@ def run(*args, **kwargs):
 
 
 def routines(code):
-    """Generated routine names with the flags their callers read."""
+    """Generated routine names with the registers and flags their callers read."""
     found, outputs = [], set()
     for line in code.splitlines():
         interface = INTERFACE.match(line)
@@ -53,7 +53,7 @@ def main():
         entries = []
         for name, outputs in routines((LIB / "code.c").read_text()):
             flags = ", ".join("true" if f in outputs else "false"
-                              for f in ("carry", "zero", "negative", "overflow"))
+                              for f in ("a", "x", "y", "carry", "zero", "negative", "overflow"))
             entries.append(f'    {{"{name}", {name}, ref_{name}, {flags}}},\n')
         declarations = "".join(f"void ref_{name}(void);\n" for name, _ in routines(reference))
         (tmp / "routines.h").write_text(

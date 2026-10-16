@@ -83,3 +83,20 @@ test "instructions become C that updates only live flags" {
   let helpers = code_c(Transpiler::transpile(lower_fixture(source), instruction_helpers=true))
   assert_eq(helpers.contains("adc_imm_fc(0x5);"), true)
 }
+
+test "a load and store of a dead register become one assignment" {
+  let source = ".org $c000\nBoot:\n lda $10\n sta $11\n ldx #$03\n stx $12\n stx $13\n lda #$00\n clc\n clv\nIdle:\n jmp Idle\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let code = code_c(Transpiler::transpile(lower_fixture(source)))
+  assert_eq(code.contains("ram[0x11] = ram[0x10];"), true)
+  // X is still read by the second store, so the first pair is kept
+  assert_eq(code.contains("x = 0x3;\n  ram[0x12] = x;\n  ram[0x13] = x;"), true)
+}
+
+test "interfaces count only the routine's own callers" {
+  // Tail and Other share Tail's RTS; only Other's caller reads A afterwards.
+  let source = ".org $c000\nBoot:\n jsr Tail\n jsr Other\n sta $10\n lda #$00\n clc\n clv\nIdle:\n jmp Idle\nOther:\n lda #$05\n jmp Tail\nTail:\n inc $20\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let code = code_c(Transpiler::transpile(lower_fixture(source)))
+  assert_eq(code.contains("// in: none; out: a\nvoid Other(void) {"), true)
+  assert_eq(code.contains("void Tail(void) {"), true)
+  assert_eq(code.contains("out: a\nvoid Tail(void) {"), false)
+}

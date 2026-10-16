@@ -190,6 +190,49 @@ fn AsmLowering::collect_register_liveness(self: AsmLowering) -> Unit {
     if self.is_root(name) { root_demand = root_demand.union(self.routine_inputs(name)) }
   }
   self.collect_live_registers(returns, root_demand)
+  self.collect_caller_demands(bodies)
+}
+
+// What the callers of each routine read after it returns: the registers and
+// flags live after each JSR to it, plus the demands of every routine that
+// reaches it by a jump or fallthrough (it then returns to their callers).
+// Unlike the demand at exit blocks, this is not widened by other routines
+// that happen to share those exits.
+fn AsmLowering::collect_caller_demands(self: AsmLowering, bodies: Map[String, Array[BasicBlock]]) -> Unit {
+  let entries: Map[Int, String] = Map([])
+  for name, _ in bodies {
+    entries[self.bb_by_label[name].id] = name
+    self.caller_register_demands[name] = Registers::none()
+    self.caller_flag_demands[name] = FlagLiveness::none()
+  }
+  for bb in self.basic_blocks {
+    for item in bb.items {
+      if item is Inst(id~, op=JSR, mode=Absolute(Ident(name~, ..)), ..) && bodies.contains(name) {
+        self.caller_register_demands[name] = self.caller_register_demands[name].union(self.register_live_after(id))
+        self.caller_flag_demands[name] = self.caller_flag_demands[name].union(self.flag_live_after(id))
+      }
+    }
+  }
+  let mut changed = true
+  while changed {
+    changed = false
+    for name, blocks in bodies {
+      for bb in blocks {
+        match entries.get(bb.id) {
+          Some(other) if other != name => {
+            let regs = self.caller_register_demands[other].union(self.caller_register_demands[name])
+            let flags = self.caller_flag_demands[other].union(self.caller_flag_demands[name])
+            if regs != self.caller_register_demands[other] || flags != self.caller_flag_demands[other] {
+              self.caller_register_demands[other] = regs
+              self.caller_flag_demands[other] = flags
+              changed = true
+            }
+          }
+          _ => ()
+        }
+      }
+    }
+  }
 }
 
 
@@ -421,11 +464,20 @@ pub fn AsmLowering::routine_inputs(self: AsmLowering, name: String) -> Registers
 
 // Registers a routine may modify that some caller reads after it returns.
 pub fn AsmLowering::routine_register_outputs(self: AsmLowering, name: String) -> Registers {
-  let demand = self.return_register_demands.get(name).unwrap_or(Registers::all())
+  let demand = if self.is_root(name) {
+    Registers::none() // roots return only to the idle loop
+  } else {
+    self.caller_register_demands.get(name).unwrap_or(Registers::all())
+  }
   demand.intersect(self.routine_register_writes.get(name).unwrap_or(Registers::all()))
 }
 
 // Flags a routine may modify that some caller reads after it returns.
 pub fn AsmLowering::routine_flag_outputs(self: AsmLowering, name: String) -> FlagLiveness {
-  self.return_flag_demand(name).intersect(self.routine_flag_writes.get(name).unwrap_or(FlagLiveness::all()))
+  let demand = if self.is_root(name) {
+    FlagLiveness::none()
+  } else {
+    self.caller_flag_demands.get(name).unwrap_or(FlagLiveness::all())
+  }
+  demand.intersect(self.routine_flag_writes.get(name).unwrap_or(FlagLiveness::all()))
 }

@@ -1,7 +1,8 @@
 // Routine-level differential test: every generated routine is run twice
 // from the same machine state, once as currently generated and once as the
 // reference build (renamed ref_*, see check_routines.py), and the results are
-// compared. States come from the replay (real RAM and display contents) with
+// compared (registers and flags only where the routine's callers read them).
+// States come from the replay (real RAM and display contents) with
 // randomised registers and flags, and every other state also randomises some
 // RAM, so paths the replay never takes are exercised too.
 #include "lib/common.h"
@@ -25,6 +26,7 @@ typedef struct {
     const char *name;
     void (*current)(void);
     void (*reference)(void);
+    bool a, x, y; // registers callers read afterwards
     bool carry, zero, negative, overflow; // flags callers read afterwards
 } Routine;
 
@@ -95,9 +97,10 @@ static uint8_t random_byte(void) {
 static const char *difference(const Routine *r, const Machine *ref, const Machine *cur) {
     if (ref->outcome != cur->outcome) return "outcome (return/trap/timeout)";
     if (ref->outcome != 0) return NULL; // both stopped; state is partial
-    if (ref->a != cur->a) return "a";
-    if (ref->x != cur->x) return "x";
-    if (ref->y != cur->y) return "y";
+    // Registers and flags no caller reads may differ (dead values).
+    if (r->a && ref->a != cur->a) return "a";
+    if (r->x && ref->x != cur->x) return "x";
+    if (r->y && ref->y != cur->y) return "y";
     if (ref->sp != cur->sp) return "sp";
     if (memcmp(ref->ram, cur->ram, RAM_SIZE) != 0) return "ram";
     if (memcmp(&ref->video, &cur->video, sizeof(Video)) != 0) return "video";

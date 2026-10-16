@@ -24,6 +24,8 @@ pub(all) struct AsmLowering {
   entry_register_reads: Map[String, Registers]
   routine_register_writes: Map[String, Registers]
   routine_flag_writes: Map[String, FlagLiveness]
+  caller_register_demands: Map[String, Registers]
+  caller_flag_demands: Map[String, FlagLiveness]
   preamble: Array[String] // source comments before the first code item
 } derive (Debug)
 
@@ -53,6 +55,8 @@ pub fn AsmLowering::new(items: Array[@parse.SourceItem], program~: @image.Progra
     entry_register_reads: {},
     routine_register_writes: {},
     routine_flag_writes: {},
+    caller_register_demands: {},
+    caller_flag_demands: {},
     preamble: [],
   }
 }
