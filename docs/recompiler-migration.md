@@ -255,9 +255,10 @@ required to annotate this source:
    Such execution currently reports an error. Add that support and test another
    independently licensed whole game, not only this authored fixture.
 5. **Timing and rendering.** Replace the frame adapter with resumable foreground
-   execution and scheduled PPU/NMI/IRQ events. The PPU still has an optional SMB
-   status-bar adapter; cycle accuracy, RMW bus timing, cartridge RAM, and general
-   mapper support are outside this PR. Compiler portability alone does not make
+   execution and scheduled PPU/NMI/IRQ events. SMB's display code now writes
+   the display state directly (see [modern-runtime.md](modern-runtime.md)) and
+   the renderer splits the status bar from that state; cycle accuracy, RMW bus
+   timing, cartridge RAM, and general mapper support are outside this PR. Compiler portability alone does not make
    the current renderer a general NES implementation.
 6. **Differential semantic coverage.** Extend independent instruction tests to
    randomized blocks and compare complete CPU/memory state against a trusted

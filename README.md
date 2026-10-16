@@ -23,8 +23,14 @@ Static recompilation of Super Mario Bros. using [doppelganger's disassembly](htt
 - [x] Convert subroutines to C functions
 - [x] Convert most gotos to if statements
 - [x] Remove unused flag updates
-- [ ] Replace PPU with direct draw calls
+- [x] Replace PPU with direct draw calls (display state written directly, GPU renderer)
+- [x] Emit instructions as C instead of instruction-emulation helpers
+- [x] Infer routine interfaces (registers and flags read and produced)
+- [ ] Registers as C locals and parameters
 - [ ] Manually rewrite portions of the code to higher level C
+
+See [toward a modern C program](docs/modern-runtime.md) for how these steps are
+done and checked.
 
 ## Building
 
@@ -43,14 +49,19 @@ $ make build
 ```
 
 4. Place a legally obtained dump/ROM of SMB called `smb.nes` in the root folder to extract graphics data from
-5. You can now run `./smb`
+   (without it, the game runs with generated debug tiles)
+5. You can now run `./smb` from the root folder (it loads `web/video.frag`, the GPU
+   renderer's shader; `./smb --software` uses the software renderer)
 
 ## WebAssembly
 
 1. Install a recent version of `clang` with support for the `wasm32` target
 2. Run `make wasm`
 3. Run an HTTP server in the `web/` folder and open `index.html` in your browser
-4. Select a legally obtained dump/ROM of SMB to extract graphics data from
+4. Select a legally obtained dump/ROM of SMB to extract graphics data from, or use the debug tiles
+
+The page draws with WebGL2 when available; add `?software` to the URL for the
+software renderer.
 
 ## Codegen
 
@@ -70,9 +81,18 @@ and emits structured C with the source comments. See the
 [analysis and migration notes](docs/recompiler-migration.md) for techniques,
 validation, and current NROM limitations.
 
-Run `python3 tests/check_codegen.py` for the ROM-free regression suite, or append
-`--rom` with a local `smb.nes` to compare PRG bytes and replay the recorded 7,987
-frames. These checks do not require Raylib.
+Run `python3 tests/check_codegen.py` for the ROM-free regression suite: generator
+tests, the NROM fixture, a replay of the recorded 7,987 frames with generated
+debug tiles checked frame by frame against `tests/golden/warpless.trace`, and a
+differential test of every generated routine (`tests/check_routines.py`). Append
+`--rom` with a local `smb.nes` to also compare PRG bytes and the original
+framebuffer hash. These checks do not require Raylib. After `make wasm`,
+`node tests/web/replay.mjs` replays the WebAssembly build the same way.
+
+The GPU renderers can be compared with the software renderer pixel for pixel:
+`make gpu-check && xvfb-run ./gpu_check --debug-chr` (desktop) and
+`NODE_PATH=$(npm root -g) node tests/web/gpu_check.cjs` (WebGL2 in headless
+Chromium, needs Playwright).
 
 Calls are emitted as `CALL(routine, return_address)` and keep the original
 return addresses on the guest stack. Add `EXTRA_CFLAGS=-DNATIVE_CALLS` to any
