@@ -12,7 +12,7 @@
 #define PPU_SCROLL 0x2005
 #define PPU_ADDRESS 0x2006
 #define PPU_DATA 0x2007
-#define APU 0x4000
+#define APU 0x4000 // APU registers, indexed by channel
 #define APU_PULSE1 0x4000
 #define APU_PULSE2 0x4004
 #define APU_TRIANGLE 0x4008
@@ -23,13 +23,13 @@
 #define JOYPAD_PORTS 0x4016
 #define JOYPAD1_PORT 0x4016
 #define JOYPAD2_PORT 0x4017
-#define SLOT 0x8
+#define SLOT 0x8 // object slot being processed
 #define FRAME_COUNT 0x9
-#define BUTTONS_AB 0xa
+#define BUTTONS_AB 0xa // A and B, as joypad bits
 #define BUTTONS_VERTICAL 0xb
 #define BUTTONS_HORIZONTAL 0xc
 #define BUTTONS_AB_PREVIOUS 0xd
-#define PLAYER_TASK 0xe
+#define PLAYER_TASK 0xe // which player routine runs this frame
 #define ENEMY_ACTIVE 0xf
 #define ENEMY_KIND 0x16
 #define OBJ_STATE 0x1d
@@ -87,8 +87,8 @@
 #define BLOCK_Y 0xd7
 #define MISC_Y 0xdb
 #define BUBBLE_Y 0xe4
-#define AREA_DATA_PTR 0xe7
-#define ENEMY_DATA_PTR 0xe9
+#define AREA_DATA_PTR 0xe7 // level layout being decoded
+#define ENEMY_DATA_PTR 0xe9 // enemy list being decoded
 #define NOTE_LENGTH_OFFSET 0xf0
 #define PULSE1_SFX_PLAYING 0xf1
 #define PULSE2_SFX_PLAYING 0xf2
@@ -108,12 +108,12 @@
 #define FLAG_SCORE_Y 0x10d
 #define FLAG_SCORE_Y_FRACTION 0x10e
 #define FLAG_SCORE_KIND 0x10f
-#define POPUP_KIND 0x110
+#define POPUP_KIND 0x110 // floating score numbers
 #define POPUP_X 0x117
 #define POPUP_Y 0x11e
 #define SHELL_CHAIN 0x125
 #define POPUP_TIMER 0x12c
-#define SCORE_ADD 0x134
+#define SCORE_ADD 0x134 // digits added to a score
 #define SPRITE_Y 0x200
 #define SPRITE_TILE 0x201
 #define SPRITE_ATTR 0x202
@@ -199,13 +199,13 @@
 #define ENEMY_BOX_KIND 0x49a
 #define FIREBALL_BOX_KIND 0x4a0
 #define MISC_BOX_KIND 0x4a2
-#define BOXES 0x4ac
+#define BOXES 0x4ac // bounding boxes: left, top, right, bottom
 #define BOX_LEFT 0x4ac
 #define BOX_TOP 0x4ad
 #define BOX_RIGHT 0x4ae
 #define BOX_BOTTOM 0x4af
 #define ENEMY_BOXES 0x4b0
-#define BLOCK_BUFFER1 0x500
+#define BLOCK_BUFFER1 0x500 // metatiles of the two screens around the player
 #define BLOCK_BUFFER2 0x5d0
 #define BLOCK_COLUMN_POS 0x6a0
 #define METATILE_COLUMN 0x6a1
@@ -232,7 +232,7 @@
 #define CHANGE_AREA_TIMER 0x6de
 #define SHUFFLE_POS 0x6e0
 #define SHUFFLE_STEPS 0x6e1
-#define SPRITE_SLOTS 0x6e4
+#define SPRITE_SLOTS 0x6e4 // first OAM entry of each object's sprites
 #define PLAYER_SPRITE_SLOT 0x6e4
 #define ENEMY_SPRITE_SLOT 0x6e5
 #define BLOCK_SPRITE_SLOT 0x6ec
@@ -318,11 +318,11 @@
 #define CURRENT_PLAYER 0x753
 #define PLAYER_SMALL 0x754
 #define PLAYER_SCROLL_POS 0x755
-#define PLAYER_POWER 0x756
+#define PLAYER_POWER 0x756 // 0 small, 1 big, 2 fiery
 #define RELOAD_TIME_LIMIT 0x757
 #define JOYPAD_OVERRIDE 0x758
 #define TIME_UP 0x759
-#define PLAYER_INFO 0x75a
+#define PLAYER_INFO 0x75a // lives, halfway page, level, hidden 1-up, coins, world, area
 #define LIVES 0x75a
 #define HALFWAY_PAGE 0x75b
 #define LEVEL_NUMBER 0x75c
@@ -342,7 +342,7 @@
 #define SKIP_INTERMISSION 0x769
 #define HARD_MODE 0x76a
 #define WORLD_SELECT 0x76b
-#define GAME_MODE 0x770
+#define GAME_MODE 0x770 // title, playing, victory, game over
 #define GAME_MODE_TASK 0x772
 #define VRAM_LIST_SELECT 0x773
 #define SCREEN_OFF 0x774

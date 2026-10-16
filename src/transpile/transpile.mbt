@@ -105,8 +105,15 @@ fn Emitter::emit_constants_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#define LOW_BYTE(x) ((x) & 0xff)")
   self.emit("")
 
-  for name, val in low.defines {
-    self.emit("#define \{name} \{show_expr(val)}")
+  // in source order, with the comment that follows each definition
+  for i, item in low.items {
+    if item is Define(name~, ..) && low.defines.get(name) is Some(val) {
+      let comment = match low.items.get(i + 1) {
+        Some(Comment(comment~, is_inline=true)) => " // " + comment
+        _ => ""
+      }
+      self.emit("#define \{name} \{show_expr(val)}\{comment}")
+    }
   }
 
   self.emit("\n#endif")

@@ -1,0 +1,96 @@
+// The recompiler as a library, independent of the file system: the command
+// line (src/main) and the page (src/web) both use it.
+
+pub suberror PipelineError { PipelineError(String) } derive(Debug)
+
+fn fail(stage : String, err : Error) -> PipelineError {
+  PipelineError("\{stage}: \{@debug.to_string(err)}")
+}
+
+// A program discovered from an iNES image and a map.
+pub fn from_rom(rom : Bytes, map_text : String) -> @image.Program raise PipelineError {
+  try {
+    let map = @image.parse_map(map_text)
+    @image.discover_rom(@image.rom_image(@image.load_ines(rom), map), map)
+  } catch {
+    err => raise fail("ROM", err)
+  }
+}
+
+// A program discovered from assembly source.
+pub fn from_assembly(text : String) -> @image.Program raise PipelineError {
+  let tokens = @parse.Lexer::new(text).tokenize() catch { err => raise fail("Lexer", err) }
+  let items = @parse.Parser::new(tokens).parse() catch { err => raise fail("Parser", err) }
+  @image.discover(@image.assemble(items)) catch { err => raise fail("Image", err) }
+}
+
+pub(all) struct Options {
+  native : Array[String] // routines supplied by hand-written C
+  reference : Bool // unoptimised IR (the differential test's reference)
+  wasm : Bool
+  layout : Map[String, Int] // runtime addresses for the WebAssembly module
+  force_dispatch : Bool
+  memory_vars : Bool
+  inline : Bool
+}
+
+pub fn Options::default() -> Options {
+  {
+    native: [],
+    reference: false,
+    wasm: false,
+    layout: Map([]),
+    force_dispatch: false,
+    memory_vars: false,
+    inline: true,
+  }
+}
+
+pub(all) struct Output {
+  files : Array[@transpile.File] // the C program
+  wasm : Bytes?
+  irreducible : Array[String] // functions structured as dispatch loops
+}
+
+pub fn recompile(program : @image.Program, options : Options) -> Output raise PipelineError {
+  program.validate_stacks() catch { err => raise fail("Stack", err) }
+  let low = @lower.AsmLowering::new(program.source, program=Some(program))
+  low.lower() catch { err => raise fail("Lowering", err) }
+  let ir = @ir.build(low, native=Set::from_array(options.native)) catch {
+    err => raise fail("IR", err)
+  }
+  if options.reference { ir.analyze() |> ignore } else { ir.optimize() }
+  let c = @transpile.Transpiler::transpile(low, ir, native=options.native) catch {
+    err => raise fail("C", err)
+  }
+  if !options.wasm { return { files: c.files, wasm: None, irreducible: [] } }
+  // The WebAssembly build also inlines small leaf routines; the C keeps one
+  // function per routine.
+  if !options.reference && options.inline {
+    ir.inline_leaves() |> ignore
+    ir.optimize()
+  }
+  let output = @wasm.emit(
+    ir,
+    layout=options.layout,
+    force_dispatch=options.force_dispatch,
+    memory_vars=options.memory_vars,
+  ) catch {
+    err => raise fail("WebAssembly", err)
+  }
+  { files: c.files, wasm: Some(output.bytes), irreducible: output.irreducible }
+}
+
+// Routine names, one per line, `#` comments.
+pub fn parse_names(text : String) -> Array[String] {
+  let names = []
+  for line in text.split("\n") {
+    let line = match line.find("#") {
+      Some(i) => line.view(end_offset=i)
+      None => line
+    }
+    let name = line.trim().to_owned()
+    if name != "" { names.push(name) }
+  }
+  names
+}

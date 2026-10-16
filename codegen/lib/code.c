@@ -1,32 +1,15 @@
 #include "code.h"
 
-// APU registers, indexed by channel
-// object slot being processed
-// A and B, as joypad bits
-// which player routine runs this frame
-// level layout being decoded
-// enemy list being decoded
-// floating score numbers
-// digits added to a score
-// bounding boxes: left, top, right, bottom
-// metatiles of the two screens around the player
-// first OAM entry of each object's sprites
-// 0 small, 1 big, 2 fiery
-// lives, halfway page, level, hidden 1-up, coins, world, area
-// title, playing, victory, game over
-// power-on and reset: clear memory, set up the display, then idle
-
 // Inline-table dispatch proven by evaluating dispatch; its effects run here unchanged.
 static uint16_t dispatch(uint16_t return_address) {
   ram[0x100 + sp] = HIGH_BYTE(return_address);
   sp--;
   ram[0x100 + sp] = LOW_BYTE(return_address);
   carry_flag = (a & 0x80) != 0;
-  sp = (uint8_t)((uint8_t)(sp - 1) + 1);
   ram[4] = ram[0x100 + sp];
   sp++;
   ram[5] = ram[0x100 + sp];
-  y = (uint8_t)((uint8_t)(a << 1) + 1);
+  y = (uint8_t)((a << 1) + 1);
   ram[6] = read_byte(indirect_y_addr(4));
   y++;
   ram[7] = read_byte(indirect_y_addr(4));
@@ -103,7 +86,7 @@ void shuffle_sprite_slots(void) {
     a = (uint8_t)(a + 8);
     ram[FIREBALL_SPRITE_SLOT + 1 + x] = a;
     ram[MISC_SPRITE_SLOT + x] = (uint8_t)(a + 8);
-    x = (uint8_t)((uint8_t)(x - 2) - 1);
+    x = (uint8_t)(x - 3);
     y--;
   } while ((y & 0x80) == 0);
   return;
@@ -136,7 +119,7 @@ void hide_sprites_but_zero(void) {
 void hide_sprites_from(void) {
   do {
     ram[SPRITE_Y + y] = 0xf8;
-    y = (uint8_t)((uint8_t)(y + 3) + 1);
+    y = (uint8_t)(y + 4);
   } while (y != 0);
   return;
 }
@@ -152,6 +135,7 @@ void title_mode(void) {
   }
 }
 
+// title screen input: start, world select, demo
 void title_menu(void) {
   y = 0;
   a = ram[JOYPAD1] | ram[JOYPAD2];
@@ -249,6 +233,7 @@ void draw_player_select_icon(void) {
   return;
 }
 
+// feed recorded buttons to the player in attract mode
 // in: none; out: carry
 void play_demo(void) {
   x = ram[DEMO_ACTION];
@@ -398,6 +383,7 @@ void finish_world(void) {
   return;
 }
 
+// floating score numbers after defeating enemies
 // in: x; out: x
 void update_score_popups(void) {
   a = ram[POPUP_KIND + x];
@@ -699,6 +685,7 @@ void next_game_mode_task_b(void) {
   return;
 }
 
+// copy one of the text lists into the VRAM update list
 // in: a; out: none
 void queue_text(void) {
   ram[0x100 + sp] = a;
@@ -766,7 +753,7 @@ loc_882e:
   do {
     ram[VRAM_LIST1 + 0x1b + y] = ROM(TEXT_WARP_NUMBERS + x);
     x++;
-    y = (uint8_t)((uint8_t)(y + 3) + 1);
+    y = (uint8_t)(y + 4);
   } while (y < 0xc);
   a = 0x2c;
   set_vram_list1_length(); return;
@@ -809,8 +796,7 @@ void render_column(void) {
     ram[7] = ROM(METATILE_SETS_HIGH + y);
     ram[2] = (uint8_t)((uint8_t)(ram[METATILE_COLUMN + x] << 1) << 1);
     a = (ram[PARSER_TASK] & 1) ^ 1;
-    carry_flag = (a & 0x80) != 0;
-    y = (uint8_t)((uint8_t)(a << 1) + ram[2] + carry_flag);
+    y = (uint8_t)((uint8_t)(a << 1) + ram[2] + ((a & 0x80) != 0));
     x = ram[0];
     a = read_byte(indirect_y_addr(6));
     ram[VRAM_LIST2 + 3 + x] = a;
@@ -847,7 +833,7 @@ loc_8930:
     ram[0]++;
     x = (uint8_t)(ram[1] + 1);
   } while (x < 0xd);
-  y = (uint8_t)((uint8_t)(ram[0] + 2) + 1);
+  y = (uint8_t)(ram[0] + 3);
   ram[VRAM_LIST2 + y] = 0;
   ram[VRAM_LIST2_LENGTH] = y;
   ram[NT_ADDRESS_LOW]++;
@@ -880,7 +866,7 @@ void render_attributes(void) {
     ram[VRAM_LIST2 + 3 + y] = ram[ATTRIBUTE_BUFFER + x];
     ram[VRAM_LIST2 + 2 + y] = 1;
     ram[ATTRIBUTE_BUFFER + x] = 0;
-    y = (uint8_t)((uint8_t)(y + 3) + 1);
+    y = (uint8_t)(y + 4);
     x++;
   } while (x < 7);
   ram[VRAM_LIST2 + y] = 0;
@@ -893,6 +879,7 @@ void select_vram_list2(void) {
   return;
 }
 
+// animate the question-block palette every eighth frame
 // in: none; out: x
 void cycle_palette(void) {
   a = ram[FRAME_COUNT] & 7;
@@ -1058,7 +1045,6 @@ void read_joypad(void) {
     a = read_byte((uint16_t)(JOYPAD_PORTS + x));
     ram[0] = a;
     carry_flag = (((a >> 1) | ram[0]) & 1) != 0;
-    sp = (uint8_t)((uint8_t)(sp - 1) + 1);
     a = (uint8_t)((ram[0x100 + sp] << 1) | carry_flag);
     y--;
   } while (y != 0);
@@ -1129,7 +1115,7 @@ void queue_counter_digits(void) {
     ram[3]--;
   } while (ram[3] != 0);
   ram[VRAM_LIST1 + 3 + x] = 0;
-  x = (uint8_t)((uint8_t)(x + 2) + 1);
+  x = (uint8_t)(x + 3);
   ram[VRAM_LIST1_LENGTH] = x;
   return;
 }
@@ -1200,6 +1186,7 @@ void check_top_score(void) {
   return;
 }
 
+// clear game memory and enter the first area
 void start_game(void) {
   y = 0x6f;
   clear_memory();
@@ -1349,6 +1336,7 @@ loc_9110:
   return;
 }
 
+// entrance kind, starting position and time limit
 void place_player(void) {
   ram[PLAYER_PAGE] = ram[SCREEN_LEFT_PAGE];
   ram[GRAVITY_FALLING] = 0x28;
@@ -1496,7 +1484,6 @@ void switch_players(void) {
   do {
     ram[0x100 + sp] = ram[(PLAYER_INFO + x) & 0x7ff];
     ram[(PLAYER_INFO + x) & 0x7ff] = ram[(OTHER_PLAYER_INFO + x) & 0x7ff];
-    sp = (uint8_t)((uint8_t)(sp - 1) + 1);
     ram[(OTHER_PLAYER_INFO + x) & 0x7ff] = ram[0x100 + sp];
     x--;
   } while ((x & 0x80) == 0);
@@ -1552,6 +1539,7 @@ void advance_column(void) {
   return;
 }
 
+// decode the level layout for one metatile column
 // in: none; out: x
 void parse_area_column(void) {
   if (ram[BACKLOADING] != 0) {
@@ -1579,9 +1567,7 @@ loc_941f:
       ram[0x100 + sp] = a;
       a = (uint8_t)((a & 0xf) - 1);
       ram[0] = a;
-      carry_flag = (a & 0x80) != 0;
-      x = (uint8_t)((uint8_t)(a << 1) + ram[0] + carry_flag);
-      sp = (uint8_t)((uint8_t)(sp - 1) + 1);
+      x = (uint8_t)((uint8_t)(a << 1) + ram[0] + ((a & 0x80) != 0));
       y = ram[0x100 + sp] >> 1 >> 1 >> 1 >> 1;
       ram[0] = 3;
       do {
@@ -1897,7 +1883,6 @@ void change_area_attributes(void) {
     a = ram[0x100 + sp];
     ram[0x100 + sp] = a;
     ram[TERRAIN_KIND] = a & 0xf;
-    sp = (uint8_t)((uint8_t)(sp - 1) + 1);
     a = (ram[0x100 + sp] & 0x30) >> 1 >> 1 >> 1;
     ram[BACKGROUND_SCENERY] = a >> 1;
     return;
@@ -2062,7 +2047,7 @@ void draw_castle(void) {
     ram[METATILE_COLUMN + x] = ROM(CASTLE_METATILES + y);
     x++;
     if (ram[6] != 0) {
-      y = (uint8_t)((uint8_t)(y + 4) + 1);
+      y = (uint8_t)(y + 5);
       ram[6]--;
     }
   } while (x != 0xb);
@@ -2154,11 +2139,12 @@ void draw_side_pipe(void) {
   return;
 }
 
+// may also spawn a piranha plant
 // in: x; out: none
 void draw_vertical_pipe(void) {
   get_pipe_height();
   if (ram[0] != 0) {
-    y = (uint8_t)((uint8_t)(y + 3) + 1);
+    y = (uint8_t)(y + 4);
   }
   ram[0x100 + sp] = y;
   sp--;
@@ -2540,6 +2526,7 @@ void get_area_object_kind(void) {
   return;
 }
 
+// also sets up whirlpools in water areas
 // in: x; out: none
 void draw_hole(void) {
   get_object_length();
@@ -2638,7 +2625,6 @@ void get_block_buffer_address(void) {
   ram[0x100 + sp] = a;
   y = a >> 1 >> 1 >> 1 >> 1;
   ram[7] = ROM(BLOCK_BUFFER_ADDRESSES + 2 + y);
-  sp = (uint8_t)((uint8_t)(sp - 1) + 1);
   ram[6] = (uint8_t)((ram[0x100 + sp] & 0xf) + ROM(BLOCK_BUFFER_ADDRESSES + y));
   return;
 }
@@ -2692,7 +2678,6 @@ void load_area_data(void) {
   a = ram[0x100 + sp];
   ram[0x100 + sp] = a;
   ram[ENTRANCE_KIND] = (a & 0x38) >> 1 >> 1 >> 1;
-  sp = (uint8_t)((uint8_t)(sp - 1) + 1);
   a = ram[0x100 + sp] & 0xc0;
   bool carry = (a & 0x80) != 0;
   a = (uint8_t)(a << 1);
@@ -2701,11 +2686,9 @@ void load_area_data(void) {
   a = read_byte((uint16_t)((ram[AREA_DATA_PTR] | (ram[AREA_DATA_PTR + 1] << 8)) + 1));
   ram[0x100 + sp] = a;
   ram[TERRAIN_KIND] = a & 0xf;
-  sp = (uint8_t)((uint8_t)(sp - 1) + 1);
   a = ram[0x100 + sp];
   ram[0x100 + sp] = a;
   ram[BACKGROUND_SCENERY] = (a & 0x30) >> 1 >> 1 >> 1 >> 1;
-  sp = (uint8_t)((uint8_t)(sp - 1) + 1);
   a = ram[0x100 + sp] & 0xc0;
   bool carry4 = (a & 0x80) != 0;
   a = (uint8_t)(a << 1);
@@ -2733,6 +2716,7 @@ void playing_mode(void) {
   }
 }
 
+// one frame of play: player, enemies, objects, scrolling, drawing
 void run_game_frame(void) {
   x = ram[CURRENT_PLAYER];
   ram[JOYPAD1] = ram[JOYPADS + x];
@@ -2900,6 +2884,7 @@ void run_player_task(void) {
   }
 }
 
+// walk in, come up a pipe or climb a vine
 void enter_area(void) {
   if (ram[ALT_ENTRANCE] != 2) {
     a = 0;
@@ -3377,6 +3362,7 @@ void move_climbing(void) {
   return;
 }
 
+// jumping, swimming, climbing and walking speeds
 // in: none; out: x
 void player_physics(void) {
   if (ram[PLAYER_STATE] == 3) {
@@ -4124,9 +4110,8 @@ void spawn_jumping_coin(void) {
   find_free_misc_slot();
   ram[MISC_PAGE + y] = ram[BLOCK_PAGE2 + x];
   a = (uint8_t)((uint8_t)((uint8_t)(ram[6] << 1) << 1) << 1);
-  carry_flag = (a & 0x80) != 0;
   ram[MISC_X + y] = (uint8_t)(a << 1) | 5;
-  ram[MISC_Y + y] = (uint8_t)(ram[2] + 0x20 + carry_flag);
+  ram[MISC_Y + y] = (uint8_t)(ram[2] + 0x20 + ((a & 0x80) != 0));
   launch_coin(); return;
 }
 
@@ -4305,6 +4290,7 @@ loc_bcaa:
   return;
 }
 
+// the player hit a block from below
 // in: a; out: none
 void bump_head(void) {
   ram[0x100 + sp] = a;
@@ -4630,7 +4616,6 @@ void move_object_x(void) {
   ram[(uint8_t)(OBJ_X + x)] = (uint8_t)sum2;
   a = (uint8_t)(ram[(uint8_t)(OBJ_PAGE + x)] + ram[2] + (sum2 >= 0x100));
   ram[(uint8_t)(OBJ_PAGE + x)] = a;
-  sp = (uint8_t)((uint8_t)(sp - 1) + 1);
   a = (uint8_t)(ram[0x100 + sp] + ram[0]);
   return;
 }
@@ -4944,7 +4929,7 @@ loc_c12f:
   spawn_enemy(); return;
 
 loc_c231:
-  y = (uint8_t)((uint8_t)(y + 1) + 1);
+  y = (uint8_t)(y + 2);
   a = read_byte(indirect_y_addr(ENEMY_DATA_PTR));
   a = a >> 1 >> 1 >> 1 >> 1 >> 1;
   if (a != ram[WORLD_NUMBER]) { goto loc_c25b; }
@@ -5047,6 +5032,7 @@ loc_c882:
   }
 }
 
+// loop commands and spawning enemies from the enemy list
 // in: y; out: none
 void load_enemies_and_loops(void) {
   ram[PLAYER_PAGE] = (uint8_t)(ram[PLAYER_PAGE] - 4);
@@ -5254,6 +5240,7 @@ void setup_lakitu(void) {
   set_tall_box_b(); return;
 }
 
+// bring Lakitu back and throw spinies
 // in: x; out: x
 void update_lakitu_spawner(void) {
   if (ram[FRENZY_TIMER] != 0) {
@@ -5305,7 +5292,7 @@ loc_c3e6:
   x = 2;
   do {
     ram[(uint8_t)(1 + x)] = ROM(LAKITU_AIM_OFFSETS + y);
-    y = (uint8_t)((uint8_t)(y + 3) + 1);
+    y = (uint8_t)(y + 4);
     x--;
   } while ((x & 0x80) == 0);
   x = ram[SLOT];
@@ -5514,7 +5501,6 @@ void init_firework(void) {
   ram[0x100 + sp] = (uint8_t)diff;
   ram[0] = (uint8_t)(ram[ENEMY_PAGE + y] - (diff < 0));
   y = (uint8_t)(ram[FIREWORKS_COUNT] + ram[ENEMY_STATE + y]);
-  sp = (uint8_t)((uint8_t)(sp - 1) + 1);
   uint16_t sum2 = (uint16_t)(ram[0x100 + sp] + ROM(FIREWORK_X_OFFSETS + y));
   ram[(uint8_t)(ENEMY_X + x)] = (uint8_t)sum2;
   ram[(uint8_t)(ENEMY_PAGE + x)] = (uint8_t)(ram[0] + (sum2 >= 0x100));
@@ -5526,6 +5512,7 @@ void init_firework(void) {
   return;
 }
 
+// bullet bills or cheep cheeps arriving from the side
 // in: x; out: x
 void spawn_frenzy_enemy(void) {
   if (ram[FRENZY_TIMER] != 0) {
@@ -6008,7 +5995,7 @@ loc_cab4:
   ram[0x100 + sp] = a;
   sp--;
   if ((a & 0x80) != 0) {
-    y = (uint8_t)((uint8_t)(y + 1) + 1);
+    y = (uint8_t)(y + 2);
   }
   ram[(uint8_t)(ENEMY_X_SPEED + x)] = (uint8_t)(a + ROM(WALK_SPEED_ADDERS + y));
   move_enemy_x();
@@ -6024,7 +6011,7 @@ loc_cac8:
     ram[(uint8_t)(ENEMY_DIR + x)] = y;
     y--;
     if (ram[HARD_MODE] != 0) {
-      y = (uint8_t)((uint8_t)(y + 1) + 1);
+      y = (uint8_t)(y + 2);
     }
     ram[(uint8_t)(ENEMY_X_SPEED + x)] = ROM(REVIVED_SPEEDS + y);
     return;
@@ -6809,7 +6796,7 @@ void update_bowser_flame(void) {
     a = ram[ENEMY_SCREEN_X];
     ram[SPRITE_X + y] = a;
     ram[ENEMY_SCREEN_X] = (uint8_t)(a + 8);
-    y = (uint8_t)((uint8_t)(y + 3) + 1);
+    y = (uint8_t)(y + 4);
     x++;
   } while (x < 3);
   x = ram[SLOT];
@@ -6967,7 +6954,7 @@ void draw_star_flag(void) {
     ram[SPRITE_TILE + y] = ROM(STAR_FLAG_TILES + x);
     ram[SPRITE_ATTR + y] = 0x22;
     ram[SPRITE_X + y] = (uint8_t)(ram[ENEMY_SCREEN_X] + ROM(STAR_FLAG_X_OFFSETS + x));
-    y = (uint8_t)((uint8_t)(y + 3) + 1);
+    y = (uint8_t)(y + 4);
     x--;
   } while ((x & 0x80) == 0);
   x = ram[SLOT];
@@ -7181,7 +7168,6 @@ void draw_platform_rope(void) {
   }
   ram[0x100 + sp] = a;
   ram[2] = (uint8_t)(ram[ENEMY_PAGE + y] + carry_flag);
-  sp = (uint8_t)((uint8_t)(sp - 1) + 1);
   ram[0] = (ram[0x100 + sp] & 0xf0) >> 1 >> 1 >> 1;
   x = ram[(uint8_t)(ENEMY_Y + y)];
   sp++;
@@ -7197,7 +7183,6 @@ void draw_platform_rope(void) {
   ram[0x100 + sp] = a;
   ram[1] = ((uint8_t)((a << 1) | carry) & 3) | 0x20;
   ram[1] = (uint8_t)(((ram[2] & 1) << 1 << 1) | ram[1]);
-  sp = (uint8_t)((uint8_t)(sp - 1) + 1);
   ram[0] = (uint8_t)((ram[0x100 + sp] & 0xe0) + ram[0]);
   if (ram[ENEMY_Y + y] < 0xe8) {
     return;
@@ -8191,7 +8176,7 @@ loc_dcf6:
   }
 
 loc_dd5e:
-  y = (uint8_t)((uint8_t)(ram[ENEMY_DATA_PTR + 2] + 1) + 1);
+  y = (uint8_t)(ram[ENEMY_DATA_PTR + 2] + 2);
   ram[0] = 2;
   do {
     y++;
@@ -8870,7 +8855,7 @@ void large_platform_box(void) {
 
 // in: x; out: x
 void enemy_box_core(void) {
-  x = (uint8_t)(x + 1);
+  x++;
   y = 1;
   compute_box();
   clip_box_to_screen(); return;
@@ -8901,7 +8886,6 @@ void compute_box(void) {
   y++;
   ram[BOXES + y] = (uint8_t)(ram[2] + ROM(BOX_SIZES + x));
   ram[BOX_RIGHT + y] = (uint8_t)(ram[2] + ROM(BOX_SIZES + 2 + x));
-  sp = (uint8_t)((uint8_t)(sp - 1) + 1);
   y = ram[0x100 + sp];
   x = ram[0];
   return;
@@ -8997,8 +8981,7 @@ loc_e37e:
 // in: a, x, y; out: a, x, y, zero
 void enemy_block_check(void) {
   ram[0x100 + sp] = a;
-  x = (uint8_t)(x + 1);
-  sp = (uint8_t)((uint8_t)(sp - 1) + 1);
+  x++;
   a = ram[0x100 + sp];
   block_check_common(); return;
 }
@@ -9097,7 +9080,7 @@ void draw_vine(void) {
   x = 5;
   do {
     ram[SPRITE_TILE + y] = 0xe1;
-    y = (uint8_t)((uint8_t)(y + 3) + 1);
+    y = (uint8_t)(y + 4);
     x--;
   } while ((x & 0x80) == 0);
   y = ram[2];
@@ -9109,7 +9092,7 @@ void draw_vine(void) {
     if ((uint8_t)(ram[VINE_START_Y] - ram[SPRITE_Y + y]) >= 0x64) {
       ram[SPRITE_Y + y] = 0xf8;
     }
-    y = (uint8_t)((uint8_t)(y + 3) + 1);
+    y = (uint8_t)(y + 4);
     x++;
   } while (x != 6);
   y = ram[0];
@@ -9124,7 +9107,7 @@ void stack_six_sprites(void) {
     uint16_t sum = (uint16_t)(a + 8);
     carry_flag = sum >= 0x100;
     a = (uint8_t)sum;
-    y = (uint8_t)((uint8_t)(y + 3) + 1);
+    y = (uint8_t)(y + 4);
     x--;
   } while (x != 0);
   y = ram[2];
@@ -9241,7 +9224,7 @@ void fill_two_sprites(void) {
 void draw_large_platform(void) {
   y = ram[ENEMY_SPRITE_SLOT + x];
   ram[2] = y;
-  y = (uint8_t)((uint8_t)(y + 2) + 1);
+  y = (uint8_t)(y + 3);
   a = ram[ENEMY_SCREEN_X];
   stack_six_sprites();
   x = ram[SLOT];
@@ -9589,9 +9572,9 @@ loc_ea4b:
   }
   if (ram[FLIP_VERTICALLY] != 0) {
     a = ram[SPRITE_ATTR + y] | 0x80;
-    y = (uint8_t)((uint8_t)(y + 1) + 1);
+    y = (uint8_t)(y + 2);
     fill_six_sprites();
-    y = (uint8_t)((uint8_t)(y - 1) - 1);
+    y = (uint8_t)(y - 2);
     x = y;
     a = ram[ENEMY_DATA_PTR + 6];
     if (a != 5) {
@@ -9606,7 +9589,6 @@ loc_ea4b:
     ram[0x100 + sp] = ram[SPRITE_X + 2 + x];
     ram[SPRITE_TILE + x] = ram[SPRITE_X + 0xe + y];
     ram[SPRITE_X + 2 + x] = ram[SPRITE_X + 0x12 + y];
-    sp = (uint8_t)((uint8_t)(sp - 1) + 1);
     ram[SPRITE_X + 0x12 + y] = ram[0x100 + sp];
     sp++;
     ram[SPRITE_X + 0xe + y] = ram[0x100 + sp];
@@ -9765,7 +9747,7 @@ void draw_sprite_row(void) {
   uint16_t sum3 = (uint16_t)(y + 8);
   carry_flag = sum3 >= 0x100;
   y = (uint8_t)sum3;
-  x = (uint8_t)((uint8_t)(x + 1) + 1);
+  x = (uint8_t)(x + 2);
   return;
 }
 
@@ -9867,7 +9849,7 @@ void draw_brick_chunks(void) {
   a = ((uint8_t)(a << 1) & 0xc0) | ram[0];
   y++;
   fill_four_sprites();
-  y = (uint8_t)((uint8_t)(y - 1) - 1);
+  y = (uint8_t)(y - 2);
   a = ram[BLOCK_SCREEN_Y];
   fill_two_sprites();
   ram[SPRITE_X + y] = ram[BLOCK_SCREEN_X];
@@ -9908,7 +9890,6 @@ void draw_firebar_tile(void) {
   a = ram[FRAME_COUNT] >> 1 >> 1;
   ram[0x100 + sp] = a;
   ram[SPRITE_TILE + y] = (a & 1) ^ 0x64;
-  sp = (uint8_t)((uint8_t)(sp - 1) + 1);
   a = 2;
   if (((ram[0x100 + sp] >> 1) & 1) != 0) {
     a = 0xc2;
@@ -9952,7 +9933,7 @@ void draw_small_platform(void) {
   y++;
   a = 2;
   fill_six_sprites();
-  y = (uint8_t)((uint8_t)(y - 1) - 1);
+  y = (uint8_t)(y - 2);
   a = ram[ENEMY_SCREEN_X];
   ram[SPRITE_X + y] = a;
   ram[SPRITE_X + 0xc + y] = a;
@@ -10041,7 +10022,7 @@ void draw_player(void) {
       x = a;
       y = ram[PLAYER_SPRITE_SLOT];
       if ((ram[PLAYER_FACING] & 1) == 0) {
-        y = (uint8_t)((uint8_t)(y + 3) + 1);
+        y = (uint8_t)(y + 4);
       }
       if (ram[PLAYER_SMALL] != 0) {
         if (ram[SPRITE_X + 0x16 + y] == 0x48) {
@@ -10338,7 +10319,7 @@ void block_screen_position(void) {
   a = 9;
   y = 4;
   screen_position_at();
-  x = (uint8_t)((uint8_t)(x + 1) + 1);
+  x = (uint8_t)(x + 2);
   a = 9;
   y = 5;
   screen_position_at(); return;

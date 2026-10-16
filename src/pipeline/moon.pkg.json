@@ -1,0 +1,12 @@
+{
+  "is-main": false,
+  "import": [
+    "nathsou/smb/parse",
+    "nathsou/smb/lower",
+    "nathsou/smb/image",
+    "nathsou/smb/ir",
+    "nathsou/smb/transpile",
+    "nathsou/smb/wasm",
+    "moonbitlang/core/debug"
+  ]
+}

@@ -185,7 +185,7 @@ fn forward(info : Analysis, f : Function) -> Bool {
       if at == stmts.length() {
         block.term = block.term.map_exprs(fn(x) { simplify(name.replace(x, e)) })
       } else {
-        stmts[at] = stmts[at].map_exprs(fn(x) { simplify(name.replace(x, e)) })
+        stmts[at] = simplify_stmt(stmts[at].map_exprs(fn(x) { name.replace(x, e) }))
       }
       stmts.remove(i) |> ignore
       changed = true
@@ -194,9 +194,26 @@ fn forward(info : Analysis, f : Function) -> Bool {
   changed
 }
 
+// A value stored in a byte needs no byte truncation of its own, and
+// truncations inside sums go with it: (uint8_t)((uint8_t)(x - 1) + 1) is x.
+fn stored_byte(e : Expr) -> Expr {
+  match simplify(Unary(Byte, e)) {
+    Unary(Byte, inner) => inner
+    other => other
+  }
+}
+
+fn simplify_stmt(s : Stmt) -> Stmt {
+  match s.map_exprs(simplify) {
+    Assign(v, e) if !v.is_flag() => Assign(v, stored_byte(e))
+    Store(m, a, e) => Store(m, a, stored_byte(e))
+    other => other
+  }
+}
+
 fn simplify_all(f : Function) -> Unit {
   for block in f.blocks {
-    block.stmts = block.stmts.map(fn(s) { s.map_exprs(simplify) })
+    block.stmts = block.stmts.map(simplify_stmt)
     block.term = block.term.map_exprs(simplify)
   }
 }

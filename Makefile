@@ -33,7 +33,7 @@ SOURCES += codegen/lib/state.c
 SOURCES += codegen/lib/debug_chr.c
 MAIN = codegen/main.c
 
-.PHONY: codegen clean gpu-check runtime-wasm game-wasm
+.PHONY: codegen clean gpu-check runtime-wasm game-wasm web
 
 codegen:
 	moon run src/main -- --rom $(ROM) --map maps/smb.map --native codegen/native/routines.txt
@@ -61,6 +61,15 @@ runtime-wasm:
 game-wasm: runtime-wasm
 	node web/layout.mjs web/runtime.wasm > web/layout.txt
 	moon run src/main -- --rom $(ROM) --map maps/smb.map --native codegen/native/routines.txt --wasm web/game.wasm --wasm-layout web/layout.txt
+
+# The page: the C runtime, the recompiler compiled to JavaScript, and the
+# inputs it recompiles the player's ROM with. Serve web/ over HTTP.
+web: runtime-wasm
+	moon build --target js --release
+	cp _build/js/release/build/web/web.js web/recompiler.js
+	cp maps/smb.map web/smb.map
+	cp codegen/native/routines.txt web/routines.txt
+	cp codegen/native/display.c web/display.c
 
 hash: clean
 	$(CC) $(CFLAGS) -o hash codegen/hash.c $(SOURCES) codegen/lib/rec.c codegen/lib/common.c $(GC_FLAGS)

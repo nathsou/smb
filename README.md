@@ -55,13 +55,17 @@ $ make build
 
 ## WebAssembly
 
-1. Install a recent version of `clang` with support for the `wasm32` target
-2. Run `make wasm`
-3. Run an HTTP server in the `web/` folder and open `index.html` in your browser
-4. Select a legally obtained dump/ROM of SMB to extract graphics data from, or use the debug tiles
+The page recompiles your ROM in the browser: the recompiler (MoonBit compiled
+to JavaScript) turns it into a WebAssembly module and C, which a code viewer
+shows next to the game (SHOW CODE; the map tab is editable and recompiles).
 
-The page draws with WebGL2 when available; add `?software` to the URL for the
-software renderer.
+1. Install a recent `clang` with the `wasm32` target and MoonBit (see Codegen)
+2. Run `make web`
+3. Serve the `web/` folder over HTTP and open `index.html`
+4. Load a legally obtained dump of SMB; it stays in your browser
+
+DEBUG TILES draws with generated placeholder tiles instead of the ROM's, and
+`?software` in the URL selects the software renderer instead of WebGL2.
 
 ## Codegen
 

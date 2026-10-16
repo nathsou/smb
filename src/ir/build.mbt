@@ -454,11 +454,12 @@ fn build_routine(
   blocks.sort_by(fn(a, b) { a.id - b.id })
   let index : Map[Int, Int] = Map([])
   for i, bb in blocks { index[bb.id] = i }
-  // Comments before the entry label document the routine.
+  // Comments before the entry's first instruction document the routine.
   let doc = []
   for item in sub.entry.items {
     match item {
       Comment(text) => doc.push(text)
+      Label(_) => ()
       _ => break
     }
   }

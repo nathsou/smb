@@ -23,3 +23,7 @@ __pycache__/
 web/game.wasm
 web/runtime.wasm
 web/layout.txt
+web/recompiler.js
+web/smb.map
+web/routines.txt
+web/display.c

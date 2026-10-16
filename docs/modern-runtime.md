@@ -221,6 +221,29 @@ takes about 28 ms in Node (V8), against 37 ms with registers in memory and
 imported addresses, and 14 ms for the clang-compiled C (which inlines
 across routines and has no calls between modules).
 
+## In the browser
+
+The page recompiles the player's ROM itself. `src/pipeline` is the
+recompiler as a library (no file system); `src/web` exports it to
+JavaScript (`moon build --target js`, copied to `web/recompiler.js` by
+`make web`). On a ROM upload (kept in IndexedDB, never sent anywhere) the
+page:
+
+1. instantiates `web/runtime.wasm` and reads its machine-state addresses;
+2. runs the recompiler in a Web Worker (`web/recompiler-worker.js`) on the
+   ROM, `smb.map`, the native routine list and that layout, which takes
+   2-3 s and yields the game module and the C program;
+3. caches both in IndexedDB under a SHA-256 of all the inputs and of the
+   recompiler itself, so later visits start at once;
+4. links the modules (`web/link.js`) and runs the frame loop.
+
+`web/viewer.js` is a small hand-written code viewer with tabs: the
+generated `code.c`, headers and `data.c` (read-only, virtualised so only the
+visible lines are in the DOM, syntax-highlighted, searchable with Ctrl+F,
+routine names link to their definitions), the hand-written `display.c`, and
+the map, which is editable: Recompile regenerates the game and the C with the
+edited names and restarts the game.
+
 ## Hand-written routines
 
 `--native FILE` (for SMB, `codegen/native/routines.txt`) lists routines whose

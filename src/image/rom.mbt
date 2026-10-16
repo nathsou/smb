@@ -229,8 +229,8 @@ pub fn discover_rom(image: Image, map: RomMap) -> Program raise ImageError {
   }
   for entry in map.entries {
     if entry.kind == Var || entry.kind == Io {
-      if entry.description != "" { append(Comment(comment=entry.description, is_inline=false), 0) }
       append(Define(name=entry.name, rhs=byte_const(entry.address)), 0)
+      if entry.description != "" { append(Comment(comment=entry.description, is_inline=true), 0) }
     }
   }
   let routines: Map[Int, Array[MapEntry]] = Map([])
@@ -253,9 +253,10 @@ pub fn discover_rom(image: Image, map: RomMap) -> Program raise ImageError {
   order.sort()
   for pc in order {
     if routines.get(pc) is Some(entries) {
+      // the description follows the label, documenting the routine
       for entry in entries {
-        if entry.description != "" { append(Comment(comment=entry.description, is_inline=false), pc) }
         append(Label(entry.name), pc)
+        if entry.description != "" { append(Comment(comment=entry.description, is_inline=false), pc) }
       }
     }
     if tables.get(pc) is Some(entries) {
