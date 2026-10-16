@@ -86,6 +86,17 @@ frame. The ROM-free suite replays both call conventions, and
 
 The replay executes about 66% of the generated code.
 
+### Audio
+
+`tests/golden/warpless.audio` holds two hashes per frame of the replay: the
+APU register writes the game made (address and value, in order) and the
+samples rendered from them at 48 kHz, one frame's worth. `./hash
+--audio-trace tests/golden/warpless.audio` reports the first frame where
+either differs; `tests/web/replay_split.mjs` checks the WebAssembly build the
+same way. The game never reads the APU, so the write hash pins down
+everything the game asks of the sound hardware, independently of how it is
+synthesised.
+
 ### Routine-level differential test
 
 `tests/check_routines.py` generates the program a second time from the

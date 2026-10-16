@@ -5,7 +5,7 @@ Without a ROM (as in CI): the analysis tests, the independent fixtures
 through the C and WebAssembly backends, the map header, and the runtime
 module. With --rom (smb.nes in the root): recompile the game, replay the
 recording natively against tests/golden/warpless.trace (debug and ROM
-tiles), the routine-level differential test, and the replay of the split
+tiles) and tests/golden/warpless.audio (APU writes and samples), the routine-level differential test, and the replay of the split
 WebAssembly build."""
 import argparse
 import pathlib
@@ -31,7 +31,8 @@ if __name__ == "__main__":
     if args.rom:
         run("make", "codegen")
         run("make", "hash")
-        run("./hash", "--debug-chr", "--trace", "tests/golden/warpless.trace")
+        run("./hash", "--debug-chr", "--trace", "tests/golden/warpless.trace",
+            "--audio-trace", "tests/golden/warpless.audio")
         run("./hash")
         # Every generated routine against the unoptimised IR.
         run("python3", "tests/check_routines.py")

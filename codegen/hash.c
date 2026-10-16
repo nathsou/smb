@@ -16,6 +16,10 @@
 //                      divergent frame
 //   --write-trace FILE record per-frame state hashes
 //   --dump N[,N...]    write those frames as frame_N.ppm
+//   --audio-trace FILE compare per-frame audio hashes: the APU register
+//                      writes the game made, and the samples rendered from
+//                      them at 48 kHz (one frame's worth, 800 samples)
+//   --write-audio-trace FILE  record them
 
 #define ROM_PATH "smb.nes"
 #define REC_FILE "rec/warpless.rec"
@@ -25,6 +29,7 @@
 #define EXPECTED_ROM_FRAME_HASH 1633679932u
 #define EXPECTED_DEBUG_FRAME_HASH 508916200u
 #define EXPECTED_DEBUG_STATE_HASH 1794530440u
+#define AUDIO_SAMPLE_RATE 48000
 
 // The guest stack grows down from $01FF and never reaches below $01E0 in the
 // replay; SMB keeps variables in $0100-$013F. Between frames the stack is
@@ -101,8 +106,11 @@ int main(int argc, char **argv) {
     const char *trace_path = option(argc, argv, "--trace");
     const char *write_trace_path = option(argc, argv, "--write-trace");
     const char *dump = option(argc, argv, "--dump");
+    const char *audio_trace_path = option(argc, argv, "--audio-trace");
+    const char *write_audio_trace_path = option(argc, argv, "--write-audio-trace");
 
     cpu_init();
+    apu_init(AUDIO_SAMPLE_RATE);
 
     if (debug_chr) {
         uint8_t chr[DEBUG_CHR_SIZE];
@@ -120,7 +128,10 @@ int main(int argc, char **argv) {
 
     FILE *trace = trace_path ? fopen(trace_path, "r") : NULL;
     FILE *write_trace = write_trace_path ? fopen(write_trace_path, "w") : NULL;
-    if ((trace_path && !trace) || (write_trace_path && !write_trace)) {
+    FILE *audio_trace = audio_trace_path ? fopen(audio_trace_path, "r") : NULL;
+    FILE *write_audio_trace = write_audio_trace_path ? fopen(write_audio_trace_path, "w") : NULL;
+    if ((trace_path && !trace) || (write_trace_path && !write_trace) ||
+        (audio_trace_path && !audio_trace) || (write_audio_trace_path && !write_audio_trace)) {
         fprintf(stderr, "Error: Could not open trace file\n");
         return 1;
     }
@@ -130,11 +141,28 @@ int main(int argc, char **argv) {
     uint32_t frame_hash = HASH_OFFSET_BASIS;
     uint32_t state_hash = HASH_OFFSET_BASIS;
     long first_divergence = -1;
+    long first_audio_divergence = -1;
 
     for (uint32_t i = 0; i < RECORDING_FRAME_COUNT; i++) {
         update_controller1(rec_state_at_frame(&recording, i));
+        apu_write_hash = APU_WRITE_HASH_RESET;
         next_frame();
         render_frame();
+        uint32_t writes = apu_write_hash;
+        apu_step_frame();
+        uint32_t samples = hash_bytes(HASH_OFFSET_BASIS, audio_buffer, audio_buffer_index);
+        audio_buffer_index = 0;
+        if (write_audio_trace) fprintf(write_audio_trace, "%08x %08x\n", writes, samples);
+        if (audio_trace && first_audio_divergence < 0) {
+            unsigned expected_writes, expected_samples;
+            if (fscanf(audio_trace, "%x %x", &expected_writes, &expected_samples) != 2 ||
+                expected_writes != writes || expected_samples != samples) {
+                first_audio_divergence = (long)i;
+                printf("Audio diverges at frame %u: writes %s, samples %s\n", i,
+                       expected_writes == writes ? "match" : "differ",
+                       expected_samples == samples ? "match" : "differ");
+            }
+        }
 
         uint32_t frame_state = hash_state();
         frame_hash = (frame_hash ^ hash_bytes(HASH_OFFSET_BASIS, frame, SCREEN_WIDTH * SCREEN_HEIGHT * 3)) * HASH_PRIME;
@@ -153,6 +181,8 @@ int main(int argc, char **argv) {
     rec_close(&recording);
     if (trace) fclose(trace);
     if (write_trace) fclose(write_trace);
+    if (audio_trace) fclose(audio_trace);
+    if (write_audio_trace) fclose(write_audio_trace);
 
     bool ok = true;
     if (debug_chr) {
@@ -170,6 +200,14 @@ int main(int argc, char **argv) {
             ok = false;
         } else {
             printf("Per-frame state matches %s\n", trace_path);
+        }
+    }
+
+    if (audio_trace_path) {
+        if (first_audio_divergence >= 0) {
+            ok = false;
+        } else {
+            printf("Per-frame audio matches %s\n", audio_trace_path);
         }
     }
 

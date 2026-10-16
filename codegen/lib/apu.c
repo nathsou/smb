@@ -699,7 +699,12 @@ uint8_t apu_get_sample(void) {
     return (uint8_t)(255.0f * sample);
 }
 
+uint32_t apu_write_hash = APU_WRITE_HASH_RESET;
+
 void apu_write(uint16_t addr, uint8_t value) {
+    apu_write_hash = (apu_write_hash ^ (addr & 0xff)) * 16777619u;
+    apu_write_hash = (apu_write_hash ^ (addr >> 8)) * 16777619u;
+    apu_write_hash = (apu_write_hash ^ value) * 16777619u;
     switch (addr) {
         // Pulse 1
         case 0x4000: {
