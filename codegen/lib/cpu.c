@@ -251,6 +251,23 @@ inline uint8_t indirect_y_val(uint8_t addr) {
     return read_byte(indirect_y_addr(addr));
 }
 
+// PHP/PLP: the status register packed into one byte on the guest stack.
+void php(void) {
+    ram[0x100 + sp--] = (uint8_t)(0x30 | carry_flag | (zero_flag << 1) |
+        (interrupt_disabled << 2) | (decimal_flag << 3) |
+        (overflow_flag << 6) | (neg_flag << 7));
+}
+
+void plp(void) {
+    uint8_t p = ram[0x100 + ++sp];
+    carry_flag = (p & 1) != 0;
+    zero_flag = (p & 2) != 0;
+    interrupt_disabled = (p & 4) != 0;
+    decimal_flag = (p & 8) != 0;
+    overflow_flag = (p & 0x40) != 0;
+    neg_flag = (p & 0x80) != 0;
+}
+
 inline void next_frame(void) {
     // The frame adapter delivers NMI while the foreground is at a proven idle
     // yield. Hardware saves PC/P, not A/X/Y. Keep those stack bytes observable.

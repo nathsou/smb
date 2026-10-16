@@ -244,8 +244,14 @@ fn AsmLowering::collect_live_registers(
   }
   for name, exits in returns {
     let mut demand = Registers::none()
-    for exit in exits { demand = demand.union(demands[exit]) }
+    let mut flags = FlagLiveness::none()
+    for exit in exits {
+      demand = demand.union(demands[exit])
+      flags = flags.union(self.block_flag_demands[exit])
+    }
     self.return_register_demands[name] = demand
+    // Computed here, after shared tails became entries, so they have one too.
+    self.return_flag_demands[name] = flags
   }
 }
 

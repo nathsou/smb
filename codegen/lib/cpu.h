@@ -20,6 +20,10 @@ void cpu_call_end(uint16_t expected_return_address);
 void cpu_yield(uint16_t pc);
 void cpu_unresolved_jump(uint16_t pc);
 void cpu_unsupported_io(uint16_t addr);
+
+// PHP/PLP
+void php(void);
+void plp(void);
 uint16_t cpu_return_target(void);
 extern uint16_t cpu_dispatch_target;
 

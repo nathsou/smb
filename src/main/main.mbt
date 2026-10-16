@@ -81,7 +81,8 @@ fn native_routines() -> Array[String] raise PipelineError {
 fn transpile() -> @transpile.Transpiler raise PipelineError {
   let native = native_routines()
   let low = lower()
-  try @transpile.Transpiler::transpile(low, native~) catch {
+  let instruction_helpers = @env.args().contains("--instruction-helpers")
+  try @transpile.Transpiler::transpile(low, native~, instruction_helpers~) catch {
     err => raise TranspileError(err)
   }
 }

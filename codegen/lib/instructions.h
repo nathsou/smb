@@ -6,8 +6,6 @@
 void cli(void);
 void clv(void);
 void nop(void);
-void php(void);
-void plp(void);
 
 // Instruction helpers are an implementation detail of generated code. Keeping
 // them hidden prevents --export-all WebAssembly builds from retaining every

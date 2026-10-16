@@ -19,7 +19,6 @@ endif
 
 OBJECTS = raylib-quickstart/bin/Debug/libraylib.a
 
-SOURCES += codegen/lib/instructions.c
 SOURCES += codegen/lib/code.c
 SOURCES += codegen/lib/data.c
 SOURCES += codegen/lib/cpu.c

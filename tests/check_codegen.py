@@ -37,6 +37,8 @@ if __name__ == "__main__":
     for flags in ([], ["EXTRA_CFLAGS=-DNATIVE_CALLS"]):
         run("make", "hash", *flags)
         run("./hash", "--debug-chr", "--trace", trace)
+    # Every generated routine against the --instruction-helpers reference.
+    run("python3", "tests/check_routines.py")
     with tempfile.TemporaryDirectory(prefix="smb-semantics-") as tmp:
         executable = str(pathlib.Path(tmp) / "cpu-semantics")
         sources = ["instructions", "cpu", "code", "data", "video", "ppu_bus", "apu"]

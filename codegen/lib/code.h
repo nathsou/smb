@@ -6,6 +6,9 @@
 #include "ppu_bus.h"
 #include "apu.h"
 
+// PRG ROM read; images smaller than 32 KiB are mirrored.
+#define ROM(addr) data[((addr) - 0x8000) % PRG_IMAGE_SIZE]
+
 void cpu_reset_entry(void);
 void cpu_nmi_entry(void);
 void Start(void);

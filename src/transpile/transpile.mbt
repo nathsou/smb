@@ -1,6 +1,7 @@
 
 pub(all) struct Emitter {
   output: StringBuilder
+  mut instruction_helpers: Bool // emit calls to instructions.c instead of C
   mut indentation: Int
   mut jsr_return_index: Int
   local_labels: Set[String]
@@ -11,6 +12,7 @@ pub(all) struct Emitter {
 pub fn Emitter::new() -> Emitter {
   {
     output: StringBuilder::new(),
+    instruction_helpers: false,
     indentation: 0,
     jsr_return_index: 0,
     local_labels: Set([]),
@@ -223,6 +225,9 @@ fn Emitter::emit_code_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"apu.h\"")
   self.emit("")
 
+  self.emit("// PRG ROM read; images smaller than 32 KiB are mirrored.")
+  self.emit("#define ROM(addr) data[((addr) - 0x8000) % PRG_IMAGE_SIZE]")
+  self.emit("")
   self.emit("void cpu_reset_entry(void);")
   self.emit("void cpu_nmi_entry(void);")
   for sub in low.subroutines {
@@ -334,7 +339,14 @@ fn compute_expr_range(expr: @lower.TypedExpr, low: @lower.AsmLowering) -> Range?
     Const(value~, ..) => Some({ min: value, max: value })
     Ident(name~, ..) => match low.defines.get(name) {
       Some(expr) => compute_expr_range(expr, low)
-      None => None
+      // labels (code and data tables) resolve to their assembled address
+      None => match low.program {
+        Some(p) => match p.image.symbols.get(name) {
+          Some(address) => Some({ min: address, max: address })
+          None => None
+        }
+        None => None
+      }
     }
     Binary(op~, lhs~, rhs~, ..) => {
       let lhs_range = compute_expr_range(lhs, low)
@@ -400,6 +412,204 @@ fn write_byte(mode: @lower.AsmAddressingMode, target: Reg, low: @lower.AsmLoweri
     IndexedIndirect(addr) => "dynamic_ram_write(indirect_x_addr(\{show_expr(addr)}), \{target});"
     _ => abort("Invalid store addressing mode")
   }
+}
+
+// Where an instruction's operand lives, proven from its address range.
+priv enum Operand {
+  Value(String) // immediate
+  Ram(String) // a ram[] lvalue
+  Rom(String) // a PRG ROM read
+  Bus(String) // an address that needs the bus (I/O, pointers, unknown)
+}
+
+fn operand(mode: @lower.AsmAddressingMode, low: @lower.AsmLowering) -> Operand? {
+  fn absolute(expr: @lower.TypedExpr, index: String) -> Operand {
+    let base = show_expr(expr)
+    let address = if index == "" { base } else { "\{base} + \{index}" }
+    match compute_range(expr, mode, low) {
+      Some({ min, max }) if min >= 0 && max < 0x800 => Ram("ram[\{address}]")
+      Some({ min, max }) if min >= 0 && max < 0x2000 => Ram("ram[(\{address}) & 0x7ff]")
+      Some({ min, max }) if min >= 0x8000 && max < 0x10000 => Rom("ROM(\{address})")
+      _ => Bus(if index == "" { address } else { "(uint16_t)(\{address})" })
+    }
+  }
+  match mode {
+    Immediate(expr) => Some(Value(show_expr(expr)))
+    ZeroPage(expr) => Some(Ram("ram[\{show_expr(expr)}]"))
+    ZeroPageX(expr) => Some(Ram("ram[(uint8_t)(\{show_expr(expr)} + x)]"))
+    ZeroPageY(expr) => Some(Ram("ram[(uint8_t)(\{show_expr(expr)} + y)]"))
+    Absolute(expr) => Some(absolute(expr, ""))
+    AbsoluteX(expr) => Some(absolute(expr, "x"))
+    AbsoluteY(expr) => Some(absolute(expr, "y"))
+    IndirectIndexed(expr) => Some(Bus("indirect_y_addr(\{show_expr(expr)})"))
+    IndexedIndirect(expr) => Some(Bus("indirect_x_addr(\{show_expr(expr)})"))
+    _ => None
+  }
+}
+
+fn Operand::read(self: Operand) -> String {
+  match self {
+    Value(text) | Ram(text) | Rom(text) => text
+    Bus(address) => "read_byte(\{address})"
+  }
+}
+
+// Reading a bus address can have side effects (I/O), so it happens once.
+fn Operand::is_pure(self: Operand) -> Bool {
+  !(self is Bus(_))
+}
+
+fn zn_updates(value: String, live: @lower.FlagLiveness) -> Array[String] {
+  let out = []
+  if live.zero { out.push("zero_flag = \{value} == 0;") }
+  if live.negative { out.push("neg_flag = (\{value} & 0x80) != 0;") }
+  out
+}
+
+fn register_name(op: @parse.OpCode) -> String {
+  match op {
+    LDX | CPX | INX | DEX | TAX | TSX => "x"
+    LDY | CPY | INY | DEY | TAY => "y"
+    _ => "a"
+  }
+}
+
+// Plain C for one instruction over the register and flag variables, updating
+// only the flags that are live afterwards. None keeps the instruction helper
+// (read-modify-write outside proven RAM, and PHP/PLP).
+fn native_instruction(
+  op: @parse.OpCode,
+  mode: @lower.AsmAddressingMode,
+  id: Int,
+  low: @lower.AsmLowering,
+) -> String? {
+  let live = low.flag_live_after(id)
+  let out: Array[String] = []
+  // Binds the operand to `m` when it is read more than once or is impure.
+  fn bind(operand: Operand, uses: Int) -> String {
+    if uses > 1 || (uses == 1 && !operand.is_pure()) {
+      out.push("uint8_t m = \{operand.read()};")
+      "m"
+    } else {
+      operand.read()
+    }
+  }
+  // Statements that declare a temporary get their own scope.
+  fn block() -> String {
+    let declares = out.iter().any(fn(s) {
+      s.has_prefix("uint8_t ") || s.has_prefix("uint16_t ") || s.has_prefix("bool ")
+    })
+    if declares { "{ " + out.join(" ") + " }" } else { out.join(" ") }
+  }
+  match op {
+    LDA | LDX | LDY => {
+      let r = register_name(op)
+      let source = match operand(mode, low) { Some(o) => o; None => return None }
+      out.push("\{r} = \{source.read()};")
+      out.append(zn_updates(r, live))
+    }
+    AND | ORA | EOR => {
+      let source = match operand(mode, low) { Some(o) => o; None => return None }
+      let symbol = match op { AND => "&"; ORA => "|"; _ => "^" }
+      out.push("a \{symbol}= \{source.read()};")
+      out.append(zn_updates("a", live))
+    }
+    ADC => {
+      let source = match operand(mode, low) { Some(o) => o; None => return None }
+      if !live.carry && !live.overflow {
+        out.push("a = (uint8_t)(a + \{source.read()} + carry_flag);")
+      } else {
+        let m = bind(source, if live.overflow { 2 } else { 1 })
+        out.push("uint16_t sum = a + \{m} + carry_flag;")
+        if live.overflow { out.push("overflow_flag = (~(a ^ \{m}) & (a ^ sum) & 0x80) != 0;") }
+        if live.carry { out.push("carry_flag = sum > 0xff;") }
+        out.push("a = (uint8_t)sum;")
+      }
+      out.append(zn_updates("a", live))
+    }
+    SBC => {
+      let source = match operand(mode, low) { Some(o) => o; None => return None }
+      if !live.carry && !live.overflow {
+        out.push("a = (uint8_t)(a - \{source.read()} - !carry_flag);")
+      } else {
+        let m = bind(source, if live.overflow { 2 } else { 1 })
+        out.push("uint16_t diff = (uint16_t)(a - \{m} - !carry_flag);")
+        if live.overflow { out.push("overflow_flag = ((a ^ \{m}) & (a ^ diff) & 0x80) != 0;") }
+        if live.carry { out.push("carry_flag = diff <= 0xff;") }
+        out.push("a = (uint8_t)diff;")
+      }
+      out.append(zn_updates("a", live))
+    }
+    CMP | CPX | CPY => {
+      let r = register_name(op)
+      let source = match operand(mode, low) { Some(o) => o; None => return None }
+      let uses = (if live.carry { 1 } else { 0 }) + (if live.zero { 1 } else { 0 }) + (if live.negative { 1 } else { 0 })
+      if uses == 0 {
+        if !source.is_pure() { out.push("(void)\{source.read()};") }
+      } else {
+        let m = bind(source, uses)
+        if live.carry { out.push("carry_flag = \{r} >= \{m};") }
+        if live.zero { out.push("zero_flag = \{r} == \{m};") }
+        if live.negative { out.push("neg_flag = ((\{r} - \{m}) & 0x80) != 0;") }
+      }
+    }
+    BIT => {
+      let source = match operand(mode, low) { Some(o) => o; None => return None }
+      let uses = (if live.zero { 1 } else { 0 }) + (if live.negative { 1 } else { 0 }) + (if live.overflow { 1 } else { 0 })
+      if uses == 0 {
+        if !source.is_pure() { out.push("(void)\{source.read()};") }
+      } else {
+        let m = bind(source, uses)
+        if live.zero { out.push("zero_flag = (a & \{m}) == 0;") }
+        if live.negative { out.push("neg_flag = (\{m} & 0x80) != 0;") }
+        if live.overflow { out.push("overflow_flag = (\{m} & 0x40) != 0;") }
+      }
+    }
+    TAX | TAY => { out.push("\{register_name(op)} = a;"); out.append(zn_updates(register_name(op), live)) }
+    TXA => { out.push("a = x;"); out.append(zn_updates("a", live)) }
+    TYA => { out.push("a = y;"); out.append(zn_updates("a", live)) }
+    TSX => { out.push("x = sp;"); out.append(zn_updates("x", live)) }
+    INX | INY => { out.push("\{register_name(op)}++;"); out.append(zn_updates(register_name(op), live)) }
+    DEX | DEY => { out.push("\{register_name(op)}--;"); out.append(zn_updates(register_name(op), live)) }
+    INC | DEC => {
+      let target = match operand(mode, low) { Some(Ram(lvalue)) => lvalue; _ => return None }
+      out.push(if op == INC { "\{target}++;" } else { "\{target}--;" })
+      out.append(zn_updates(target, live))
+    }
+    ASL | LSR | ROL | ROR => {
+      let target = match mode {
+        Accumulator => "a"
+        _ => match operand(mode, low) { Some(Ram(lvalue)) => lvalue; _ => return None }
+      }
+      let carry_out = if op == ASL || op == ROL { "(\{target} & 0x80) != 0" } else { "(\{target} & 1) != 0" }
+      let shifted = match op {
+        ASL => "(uint8_t)(\{target} << 1)"
+        LSR => "\{target} >> 1"
+        ROL => "(uint8_t)(\{target} << 1 | carry_flag)"
+        _ => "(uint8_t)(\{target} >> 1 | carry_flag << 7)"
+      }
+      let rotates = op == ROL || op == ROR
+      if live.carry && rotates {
+        out.push("bool carry = \{carry_out};")
+        out.push("\{target} = \{shifted};")
+        out.push("carry_flag = carry;")
+      } else {
+        if live.carry { out.push("carry_flag = \{carry_out};") }
+        out.push("\{target} = \{shifted};")
+      }
+      out.append(zn_updates(target, live))
+    }
+    PHA => out.push("ram[0x100 + sp--] = a;")
+    PLA => { out.push("a = ram[0x100 + ++sp];"); out.append(zn_updates("a", live)) }
+    CLD => out.push("decimal_flag = false;")
+    SED => out.push("decimal_flag = true;")
+    CLI => out.push("interrupt_disabled = false;")
+    SEI => out.push("interrupt_disabled = true;")
+    CLV => if live.overflow { out.push("overflow_flag = false;") }
+    NOP => ()
+    _ => return None
+  }
+  Some(block())
 }
 
 fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLowering) -> Unit {
@@ -489,7 +699,10 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
               }
               (RTS, _) => "return;"
               _ => {
-                if is_dead_flag_only_instruction(op, mode, id, low) {
+                let native = if self.instruction_helpers { None } else { native_instruction(op, mode, id, low) }
+                if native is Some(code) {
+                  code
+                } else if is_dead_flag_only_instruction(op, mode, id, low) {
                   ""
                 } else {
                   let helper = "\{@debug.to_string(op).to_lower()}\{mode.suffix()}\{flag_helper_suffix(op, id, low)}"
@@ -733,9 +946,12 @@ pub(all) suberror TranspileError { UnknownNativeRoutine(String) } derive(Debug)
 
 // `native` lists routines whose bodies are supplied by hand-written C; only
 // their prototypes are generated.
+// `instruction_helpers` emits calls into instructions.c instead of plain C
+// (the previous output style, kept as a reference for differential tests).
 pub fn Transpiler::transpile(
   low: @lower.AsmLowering,
   native~: Array[String] = [],
+  instruction_helpers~: Bool = false,
 ) -> Transpiler raise TranspileError {
   let routines: Set[String] = Set([])
   for sub in low.flat_subroutines { routines.add(rename_label(sub.name)) }
@@ -787,6 +1003,7 @@ pub fn Transpiler::transpile(
     name: "code.c",
     contents: {
       let emitter = Emitter::new()
+      emitter.instruction_helpers = instruction_helpers
       emitter.emit_code_c(low, native)
       emitter.output.to_string()
     },

@@ -72,3 +72,14 @@ test "a BIT hiding a second entry does not read A when its flags are dead" {
   let code = code_c(Transpiler::transpile(lower_fixture(source)))
   assert_eq(code.contains("// in: a"), false)
 }
+
+test "instructions become C that updates only live flags" {
+  // ADC's carry feeds the BCS; its Z/N/V are dead. LDA's flags are dead.
+  let source = ".org $c000\nBoot:\n lda $10\n clc\n adc #$05\n bcs Done\n sta $11\nDone:\n lda #$00\n clc\n clv\nIdle:\n jmp Idle\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let code = code_c(Transpiler::transpile(lower_fixture(source)))
+  assert_eq(code.contains("a = ram[0x10];\n"), true)
+  assert_eq(code.contains("{ uint16_t sum = a + 0x5 + carry_flag; carry_flag = sum > 0xff; a = (uint8_t)sum; }"), true)
+  assert_eq(code.contains("adc_imm"), false)
+  let helpers = code_c(Transpiler::transpile(lower_fixture(source), instruction_helpers=true))
+  assert_eq(helpers.contains("adc_imm_fc(0x5);"), true)
+}

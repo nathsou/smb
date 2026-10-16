@@ -478,19 +478,3 @@ DEFINE_READ_VARIANTS(sbc_indy, uint8_t, indirect_y_val(arg), sbc_value, FLAGS_CN
 void cli(void) { interrupt_disabled = false; }
 void clv(void) { overflow_flag = false; }
 void nop(void) {}
-
-void php(void) {
-    ram[0x100 + sp--] = (uint8_t)(0x30 | carry_flag | (zero_flag << 1) |
-        (interrupt_disabled << 2) | (decimal_flag << 3) |
-        (overflow_flag << 6) | (neg_flag << 7));
-}
-
-void plp(void) {
-    uint8_t p = ram[0x100 + ++sp];
-    carry_flag = (p & 1) != 0;
-    zero_flag = (p & 2) != 0;
-    interrupt_disabled = (p & 4) != 0;
-    decimal_flag = (p & 8) != 0;
-    overflow_flag = (p & 0x40) != 0;
-    neg_flag = (p & 0x80) != 0;
-}

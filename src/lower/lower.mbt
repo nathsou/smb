@@ -15,6 +15,8 @@ pub(all) struct AsmLowering {
   subroutines: Array[AsmSubroutine]
   flat_subroutines: Array[AsmFlatSubroutine]
   flag_liveness: Map[Int, FlagLiveness]
+  // Flags read after each exit block by the callers of its routines.
+  mut block_flag_demands: Array[FlagLiveness]
   // Union of the flags any caller reads after the routine returns.
   return_flag_demands: Map[String, FlagLiveness]
   register_liveness: Map[Int, Registers] // registers live after each instruction
@@ -44,6 +46,7 @@ pub fn AsmLowering::new(items: Array[@parse.SourceItem], program~: @image.Progra
     subroutines: [],
     flat_subroutines: [],
     flag_liveness: {},
+    block_flag_demands: [],
     return_flag_demands: {},
     register_liveness: {},
     return_register_demands: {},
@@ -641,11 +644,7 @@ fn AsmLowering::collect_flag_liveness(self: AsmLowering) -> Unit {
     if entry == root_demand { break }
     root_demand = entry
   }
-  for name, exits in returns {
-    let mut demand = FlagLiveness::none()
-    for exit in exits { demand = demand.union(demands[exit]) }
-    self.return_flag_demands[name] = demand
-  }
+  self.block_flag_demands = demands
 }
 
 // Flags that callers of `name` read after it returns (all, when unknown).
