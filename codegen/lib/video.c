@@ -1,8 +1,16 @@
 #include "video.h"
 #include "external.h"
+#include <stddef.h>
 
 Video video;
 uint8_t chr_rom[CHR_ROM_SIZE];
+
+// Byte offsets of the Video fields, for hosts that read it from memory (web).
+const uint32_t video_layout[] = {
+    offsetof(Video, nametable), offsetof(Video, palette), offsetof(Video, oam),
+    offsetof(Video, ctrl), offsetof(Video, mask), offsetof(Video, scroll_x),
+    offsetof(Video, status_bar),
+};
 
 void video_init(const uint8_t *chr) {
     memcpy(chr_rom, chr, CHR_ROM_SIZE);

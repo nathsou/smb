@@ -342,11 +342,14 @@ async function main() {
             abort(_msg, _file, line, column) {
                 console.error(`[abort] at ${line}:${column} in ${_file}: ${_msg}`);
             },
+            // like C's, these return the destination: compiled code reuses it
             memset: (ptr, value, num) => {
                 uint8View.fill(value, ptr, ptr + num);
+                return ptr;
             },
             memcpy: (dest, src, num) => {
                 uint8View.copyWithin(dest, src, src + num);
+                return dest;
             },
         },
     });

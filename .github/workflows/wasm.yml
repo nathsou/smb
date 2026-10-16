@@ -42,6 +42,9 @@ jobs:
       - name: Build WASM
         run: make wasm
 
+      - name: Replay the recording with the WASM build
+        run: node tests/web/replay.mjs
+
       - name: Prepare deployment
         run: |
           mkdir -p dist

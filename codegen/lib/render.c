@@ -112,7 +112,7 @@ Tile* get_cached_background_tile(size_t n, size_t bank_offset, size_t palette_of
 
             uint8_t palette_idx;
             bool is_universal_bg_color = color_index == 0;
-            palette_mask |= (uint32_t)(0xff << (color_index * 8));
+            palette_mask |= (uint32_t)0xff << (color_index * 8);
 
             if (is_universal_bg_color) {
                 palette_idx = video.palette.u8[0];
@@ -279,9 +279,13 @@ void draw_sprite_tile(
                 size_t screen_x = x + flipped_x;
                 size_t screen_y = y + flipped_y;
 
+                if (screen_x >= SCREEN_WIDTH || screen_y >= SCREEN_HEIGHT) {
+                    continue;
+                }
+
                 bool is_hidden = behind_bg && opaque_bg_mask[screen_y * SCREEN_WIDTH + screen_x];
 
-                if (!is_hidden && screen_x < SCREEN_WIDTH) {
+                if (!is_hidden) {
                     set_pixel(screen_x, screen_y, palette_offset);
                 }
             }
