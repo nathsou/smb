@@ -33,6 +33,7 @@ browser and shows the generated C next to the game.
 - [x] Recompile from the ROM with our own names (no disassembly in the repository)
 - [x] An IR shared by a C and a WebAssembly backend, with optimisation passes
 - [x] Recompile in the browser, with a code viewer
+- [x] Synthesise sound on the audio thread, band-limited, from per-frame register writes
 - [ ] Registers as C locals and parameters
 - [ ] Manually rewrite portions of the code to higher level C
 

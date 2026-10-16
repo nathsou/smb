@@ -155,7 +155,7 @@ void reset(void) {
     }
     clear_memory(); // clears RAM below the offset in Y, leaves A = 0
 
-    apu_write(APU_DMC + 1, a);
+    apu_write(APU_DMC_LEVEL, a);
     ram[GAME_MODE] = a;
     ram[WARM_BOOT_MARKER] = 0xa5;
     ram[RANDOM] = 0xa5; // random seed

@@ -21,16 +21,29 @@ io $2005 ppu_scroll
 io $2006 ppu_address
 io $2007 ppu_data
 io $4000 apu 22                ; APU registers, indexed by channel
-io $4000 apu_pulse1
-io $4004 apu_pulse2
-io $4008 apu_triangle
-io $400c apu_noise
-io $4010 apu_dmc
+io $4000 apu_pulse1_control    ; duty, length halt, envelope
+io $4001 apu_pulse1_sweep
+io $4002 apu_pulse1_period_low
+io $4003 apu_pulse1_period_high ; and length; restarts the note
+io $4004 apu_pulse2_control
+io $4005 apu_pulse2_sweep
+io $4006 apu_pulse2_period_low
+io $4007 apu_pulse2_period_high
+io $4008 apu_triangle_control  ; length halt, linear counter
+io $400a apu_triangle_period_low
+io $400b apu_triangle_period_high
+io $400c apu_noise_control     ; length halt, envelope
+io $400e apu_noise_period      ; mode and period
+io $400f apu_noise_length      ; restarts the envelope
+io $4010 apu_dmc_control
+io $4011 apu_dmc_level
+io $4012 apu_dmc_address
+io $4013 apu_dmc_length
 io $4014 oam_dma
-io $4015 apu_status
+io $4015 apu_status            ; channel enables
 io $4016 joypad_ports 2
 io $4016 joypad1_port
-io $4017 joypad2_port
+io $4017 apu_frame_counter     ; written: sequencer mode and reset; read: joypad 2
 
 # Zero page
 var $0008 slot                  ; object slot being processed
