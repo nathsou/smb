@@ -1,7 +1,7 @@
 #include "cpu.h"
 #include "data.h"
 #include "code.h"
-#include "ppu.h"
+#include "ppu_bus.h"
 #include "apu.h"
 
 uint8_t a;
@@ -52,6 +52,13 @@ void cpu_unresolved_jump(uint16_t pc) {
     __builtin_trap(); // explicit unsupported transfer, never silent fallthrough
 }
 
+// A computed access reached hardware this build does not model at the
+// register level (SMB writes its display state directly; see video.h).
+void cpu_unsupported_io(uint16_t addr) {
+    (void)addr;
+    __builtin_trap();
+}
+
 uint8_t ram[2048];
 
 uint8_t controller1_state;
@@ -94,7 +101,11 @@ uint8_t read_byte(uint16_t addr) {
     }
 
     if (addr < 0x4000) {
-        return ppu_read_register(0x2000 + (addr & 0b111));
+#ifdef PPU_BUS
+        return ppu_bus_read(addr);
+#else
+        cpu_unsupported_io(addr);
+#endif
     }
 
     if (addr == 0x4016) {
@@ -141,10 +152,12 @@ void write_joypad2(uint8_t value) {
 void dynamic_ram_write(uint16_t addr, uint8_t value) {
     if (addr < 0x2000) {
         ram[addr & 0b0000011111111111] = value;
-    } else if (addr < 0x4000) {
-        ppu_write_register(addr, value);
-    } else if (addr == 0x4014) {
-        ppu_transfer_oam((uint16_t)(value << 8));
+    } else if (addr < 0x4000 || addr == 0x4014) {
+#ifdef PPU_BUS
+        if (addr == 0x4014) ppu_bus_oam_dma(value); else ppu_bus_write(addr, value);
+#else
+        cpu_unsupported_io(addr);
+#endif
     } else if (addr == 0x4016) {
         write_joypad1(value);
         write_joypad2(value);

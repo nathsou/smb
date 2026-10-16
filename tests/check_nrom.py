@@ -22,10 +22,11 @@ with tempfile.TemporaryDirectory(prefix="smb-nrom-") as directory:
         if path.name not in generated and path.suffix in {".h", ".c"}:
             shutil.copyfile(path, output / "lib" / path.name)
     shutil.copyfile(ROOT / "tests/nrom128.c", output / "main.c")
-    sources = ["instructions", "cpu", "code", "data", "ppu", "apu"]
+    # Generic programs reach the PPU through its register interface.
+    sources = ["instructions", "cpu", "code", "data", "video", "ppu_bus", "apu"]
     executable = str(output / "nrom-test")
     # Guest-stack calls (default) and plain C calls (-DNATIVE_CALLS).
     for flags in ([], ["-DNATIVE_CALLS"]):
-        run("cc", "-std=c99", "-O2", *flags, "-o", executable, str(output / "main.c"),
+        run("cc", "-std=c99", "-O2", "-DPPU_BUS", *flags, "-o", executable, str(output / "main.c"),
             *(str(output / "lib" / (name + ".c")) for name in sources))
         run(executable)

@@ -51,13 +51,13 @@ static uint32_t hash_state(void) {
     uint32_t hash = HASH_OFFSET_BASIS;
     hash = hash_bytes(hash, ram, STACK_SCRATCH_START);
     hash = hash_bytes(hash, ram + STACK_SCRATCH_END, RAM_SIZE - STACK_SCRATCH_END);
-    hash = hash_bytes(hash, nametable, NAMETABLE_SIZE);
-    hash = hash_bytes(hash, palette.u8, PALETTE_SIZE);
-    hash = hash_bytes(hash, oam, OAM_SIZE);
-    hash = hash_byte(hash, ppu_ctrl);
-    hash = hash_byte(hash, ppu_mask);
-    hash = hash_byte(hash, ppu_scroll_x);
-    hash = hash_byte(hash, ppu_scroll_y);
+    hash = hash_bytes(hash, video.nametable, NAMETABLE_SIZE);
+    hash = hash_bytes(hash, video.palette.u8, PALETTE_SIZE);
+    hash = hash_bytes(hash, video.oam, OAM_SIZE);
+    hash = hash_byte(hash, video.ctrl);
+    hash = hash_byte(hash, video.mask);
+    hash = hash_byte(hash, video.scroll_x);
+    hash = hash_byte(hash, video.scroll_y);
     return hash;
 }
 
@@ -107,7 +107,8 @@ int main(int argc, char **argv) {
     if (debug_chr) {
         uint8_t chr[DEBUG_CHR_SIZE];
         debug_chr_generate(chr);
-        ppu_init(chr);
+        video_init(chr);
+        render_init();
     } else if (read_chr_rom(ROM_PATH)) {
         return 1;
     }
@@ -133,7 +134,7 @@ int main(int argc, char **argv) {
     for (uint32_t i = 0; i < RECORDING_FRAME_COUNT; i++) {
         update_controller1(rec_state_at_frame(&recording, i));
         next_frame();
-        ppu_render();
+        render_frame();
 
         uint32_t frame_state = hash_state();
         frame_hash = (frame_hash ^ hash_bytes(HASH_OFFSET_BASIS, frame, SCREEN_WIDTH * SCREEN_HEIGHT * 3)) * HASH_PRIME;

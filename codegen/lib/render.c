@@ -1,35 +1,13 @@
-#include "ppu.h"
-#include "cpu.h"
-#include "constants.h"
+#include "render.h"
 #include "external.h"
+
+// Software reference renderer: draws one frame from the Video state.
 
 #define SPRITES_PALETTES_OFFSET 0x11
 #define BYTES_PER_PALETTE 4
 #define TILES_PER_ROW 32
 #define TILES_PER_COLUMN 30
 
-uint8_t chr_rom[8192];
-uint8_t nametable[2048];
-Palette palette;
-
-uint8_t oam[256];
-
-uint16_t ppu_v;
-uint8_t ppu_w;
-uint8_t ppu_f;
-
-uint8_t ppu_ctrl;
-uint8_t ppu_mask;
-uint8_t ppu_status;
-uint8_t oam_addr;
-uint8_t ppu_scroll_x;
-uint8_t ppu_scroll_y;
-
-uint16_t vram_addr;
-uint8_t vram_internal_buffer;
-uint8_t oam_dma;
-
-#define FRAME_BUFFER_SIZE (SCREEN_WIDTH * SCREEN_HEIGHT * 3)
 
 uint8_t frame[FRAME_BUFFER_SIZE];
 bool opaque_bg_mask[SCREEN_WIDTH * SCREEN_HEIGHT];
@@ -70,127 +48,13 @@ void clear_bg_mask(void) {
     memset(opaque_bg_mask, false, SCREEN_WIDTH * SCREEN_HEIGHT);
 }
 
-void ppu_init(uint8_t* chr) {
-    // copy CHR ROM
-    memcpy(chr_rom, chr, 8192);
+void render_init(void) {
     clear_frame();
 
-    // init tiles
     for (int i = 0; i < 256; i++) {
         for (int j = 0; j < 4; j++) {
             bg_cached_tiles[i][j].is_ready = false;
         }
-    }
-}
-
-bool status_clear = false;
-
-void ppu_write_register(uint16_t addr, uint8_t value) {
-    switch (addr & 7) {
-        case 0: ppu_ctrl = value; break;
-        case 1: ppu_mask = value; break;
-        case 3: oam_addr = value; break;
-        case 4: oam[oam_addr++] = value; break;
-        case 5: ppu_write_scroll(value); break;
-        case 6: ppu_write_address(value); break;
-        case 7: ppu_write_data(value); break;
-        default: break; // PPUSTATUS is read-only
-    }
-}
-
-uint8_t ppu_read_register(uint16_t addr) {
-    switch (addr) {
-        case 0x2002: {
-            // in SMB, the status register is only used to:
-            // 1. clear the write flip flop (ppu_w)
-            // 2. detect vblank
-            // 3. detect sprite 0 hit
-
-            // items 2 and 3 are used for timing purposes
-            // since we're rendering the entire frame at once, we can ignore them
-            // however, we can't always return the same value
-            // as some loops wait for a flag to be set or cleared
-
-            status_clear = !status_clear;
-
-            ppu_w = 0;
-            // vblank and sprite 0 hit
-            return status_clear ? 0 : 0b11000000;
-        }
-        case 0x2004: {
-            return oam[oam_addr];
-        }
-        case 0x2007: {
-            uint8_t value = vram_internal_buffer;
-            vram_internal_buffer = ppu_read(vram_addr);
-            uint16_t increment = ppu_ctrl & 0b100 ? 32 : 1;
-            vram_addr += increment;
-            return value;
-        }
-        default: return 0;
-    }
-}
-
-void ppu_transfer_oam(uint16_t start_addr) {
-    memcpy(oam, ram + start_addr, 256);
-}
-
-void ppu_write_scroll(uint8_t value) {
-    if (!ppu_w) {
-        ppu_scroll_x = value;
-        ppu_w = 1;
-    } else {
-        ppu_scroll_y = value;
-        ppu_w = 0;
-    }
-}
-
-void ppu_write_address(uint8_t value) {
-    if (ppu_w) {
-        // low byte
-        vram_addr = (vram_addr & 0xff00) | value;
-        ppu_w = 0;
-    } else {
-        // high byte
-        vram_addr = ((((uint16_t)value) << 8) & 0xff00) | (vram_addr & 0xff);
-        ppu_w = 1;
-    }
-}
-
-void ppu_write_data(uint8_t value) {
-    ppu_write(vram_addr, value);
-    uint16_t increment = ppu_ctrl & 0b100 ? 32 : 1;
-    vram_addr += increment;
-}
-
-// https://www.nesdev.org/wiki/PPU_memory_map
-uint8_t ppu_read(uint16_t addr) {
-    if (addr < 0x2000) {
-        return chr_rom[addr];
-    }
-
-    if (addr < 0x3f00) {
-        return nametable[addr - 0x2000];
-    }
-
-    if (addr == 0x3f10 || addr == 0x3f14 || addr == 0x3f18 || addr == 0x3f1c) {
-        return palette.u8[addr - 0x3f10];
-    }
-
-    if (addr < 0x4000) {
-        return palette.u8[(addr - 0x3f00) & 31];
-    }
-
-    return 0;
-}
-
-void ppu_write(uint16_t addr, uint8_t value) {
-    if (addr >= 0x2000 && addr < 0x3f00) {
-        nametable[addr - 0x2000] = value;
-    } else if (addr == 0x3f10 || addr == 0x3f14 || addr == 0x3f18 || addr == 0x3f1c) {
-        palette.u8[addr - 0x3f10] = value;
-    } else if (addr < 0x4000) {
-        palette.u8[(addr - 0x3f00) & 31] = value;
     }
 }
 
@@ -212,7 +76,7 @@ void set_pixel(size_t x, size_t y, uint8_t palette_color) {
 size_t get_background_palette_index(size_t tile_col, size_t tile_row, size_t nametable_offset) {
     size_t attr_table_index = (tile_row / 4) * 8 + (tile_col / 4);
     // the attribute table is stored after the nametable (960 bytes)
-    size_t attr_table_byte = nametable[nametable_offset + 960 + attr_table_index];
+    size_t attr_table_byte = video.nametable[nametable_offset + 960 + attr_table_index];
     size_t block_x = (tile_col & 3) / 2;
     size_t block_y = (tile_row & 3) / 2;
     size_t shift = block_y * 4 + block_x * 2;
@@ -226,8 +90,8 @@ Tile* get_cached_background_tile(size_t n, size_t bank_offset, size_t palette_of
 
     if (
         tile->is_ready &&
-        tile->universal_color == palette.u8[0] &&
-        tile->palette == (palette.u32[palette_idx] & tile->palette_mask)
+        tile->universal_color == video.palette.u8[0] &&
+        tile->palette == (video.palette.u32[palette_idx] & tile->palette_mask)
     ) {
         return tile;
     }
@@ -251,9 +115,9 @@ Tile* get_cached_background_tile(size_t n, size_t bank_offset, size_t palette_of
             palette_mask |= (uint32_t)(0xff << (color_index * 8));
 
             if (is_universal_bg_color) {
-                palette_idx = palette.u8[0];
+                palette_idx = video.palette.u8[0];
             } else {
-                palette_idx = palette.u8[palette_offset + color_index];
+                palette_idx = video.palette.u8[palette_offset + color_index];
             }
 
             size_t palette_offset = palette_idx * 3;
@@ -273,8 +137,8 @@ Tile* get_cached_background_tile(size_t n, size_t bank_offset, size_t palette_of
     }
 
     tile->palette_mask = palette_mask;
-    tile->palette = palette.u32[palette_idx] & palette_mask;
-    tile->universal_color = palette.u8[0];
+    tile->palette = video.palette.u32[palette_idx] & palette_mask;
+    tile->universal_color = video.palette.u8[0];
     tile->is_ready = true;
 
     return tile;
@@ -325,22 +189,12 @@ void draw_background_tile(
     }
 }
 
-inline bool show_status_bar() {
-    // Optional SMB frame-renderer adapter. The compiler and generic bus do
-    // not depend on this symbol; cycle/scanline rendering is a separate task.
-#ifdef Sprite0HitDetectFlag
-    return ram[Sprite0HitDetectFlag];
-#else
-    return false;
-#endif
-}
-
 void render_status_bar(size_t bank_offset) {
     for (size_t tile_y = 0; tile_y < 4; ++tile_y) {
         for (size_t tile_x = 0; tile_x < TILES_PER_ROW; ++tile_x) {
             size_t i = tile_y * TILES_PER_ROW + tile_x;
 
-            uint8_t tile = nametable[i]; 
+            uint8_t tile = video.nametable[i]; 
             size_t palette_index = get_background_palette_index(tile_x, tile_y, 0);
 
             size_t screen_x = tile_x * 8;
@@ -352,7 +206,7 @@ void render_status_bar(size_t bank_offset) {
 }
 
 void render_nametable(size_t nametable_offset, size_t bank_offset, int shift_x, int min_x, int max_x, size_t min_tile_y) {
-    bool draw_leftmost_tile = ppu_mask & 0b10;
+    bool draw_leftmost_tile = video.mask & 0b10;
 
     for (size_t tile_y = min_tile_y; tile_y < TILES_PER_COLUMN; ++tile_y) {
         for (size_t tile_x = 0; tile_x < TILES_PER_ROW; ++tile_x) {
@@ -361,7 +215,7 @@ void render_nametable(size_t nametable_offset, size_t bank_offset, int shift_x, 
             }
 
             size_t i = tile_y * TILES_PER_ROW + tile_x;
-            uint8_t tile = nametable[nametable_offset + i];
+            uint8_t tile = video.nametable[nametable_offset + i];
             size_t palette_index = get_background_palette_index(tile_x, tile_y, nametable_offset);
 
             size_t screen_x = tile_x << 3;
@@ -374,13 +228,13 @@ void render_nametable(size_t nametable_offset, size_t bank_offset, int shift_x, 
 
 void render_background(void) {
     // https://austinmorlan.com/posts/nes_rendering_overview/
-    size_t bank_offset = ppu_ctrl & 0b10000 ? 0x1000 : 0;
+    size_t bank_offset = video.ctrl & 0b10000 ? 0x1000 : 0;
     size_t nametable1_offset, nametable2_offset;
-    bool status_bar_visible = show_status_bar();
+    bool status_bar_visible = video.status_bar;
     size_t min_tile_y = status_bar_visible ? 4 : 0;
 
     // vertical mirroring
-    if (ppu_ctrl & 0b1) {
+    if (video.ctrl & 0b1) {
         nametable1_offset = 0x400;
         nametable2_offset = 0x000;
     } else {
@@ -388,8 +242,8 @@ void render_background(void) {
         nametable2_offset = 0x400;
     }
 
-    render_nametable(nametable1_offset, bank_offset, -((int)ppu_scroll_x), ppu_scroll_x, SCREEN_WIDTH, min_tile_y);
-    render_nametable(nametable2_offset, bank_offset, SCREEN_WIDTH - (int)ppu_scroll_x, 0, ppu_scroll_x, min_tile_y);
+    render_nametable(nametable1_offset, bank_offset, -((int)video.scroll_x), video.scroll_x, SCREEN_WIDTH, min_tile_y);
+    render_nametable(nametable2_offset, bank_offset, SCREEN_WIDTH - (int)video.scroll_x, 0, video.scroll_x, min_tile_y);
 
     if (status_bar_visible) {
         render_status_bar(bank_offset);
@@ -419,7 +273,7 @@ void draw_sprite_tile(
             plane2 >>= 1;
 
             if (color_index != 0) {
-                uint8_t palette_offset = palette.u8[palette_idx + color_index - 1];
+                uint8_t palette_offset = video.palette.u8[palette_idx + color_index - 1];
                 uint8_t flipped_x = (uint8_t)(flip_x ? tile_x : 7 - tile_x);
                 uint8_t flipped_y = (uint8_t)(flip_y ? 7 - tile_y : tile_y);
                 size_t screen_x = x + flipped_x;
@@ -437,20 +291,20 @@ void draw_sprite_tile(
 
 void render_sprites(void) {
     // https://www.nesdev.org/wiki/PPU_OAM
-    size_t bank_offset = ppu_ctrl & 0b1000 ? 0x1000 : 0;
-    bool draw_leftmost_tile = ppu_mask & 0b100;
+    size_t bank_offset = video.ctrl & 0b1000 ? 0x1000 : 0;
+    bool draw_leftmost_tile = video.mask & 0b100;
 
     // sprites with lower OAM indices are drawn in front
     for (int i = 252; i >= 0; i -= 4) {
-        uint8_t x = oam[i + 3];
-        uint8_t y = oam[i] + 1;
+        uint8_t x = video.oam[i + 3];
+        uint8_t y = video.oam[i] + 1;
 
         if (!draw_leftmost_tile && x == 0) {
             continue;
         }
 
-        uint8_t tile = oam[i + 1];
-        uint8_t attr = oam[i + 2];
+        uint8_t tile = video.oam[i + 1];
+        uint8_t attr = video.oam[i + 2];
 
         bool flip_x = attr & 0b01000000;
         bool flip_y = attr & 0b10000000;
@@ -461,11 +315,9 @@ void render_sprites(void) {
     }
 }
 
-void ppu_render(void) {
-    oam_addr = 0; // reset OAM address
-
-    bool render_bg = ppu_mask & 0b00001000;
-    bool render_sp = ppu_mask & 0b00010000;
+void render_frame(void) {
+    bool render_bg = video.mask & 0b00001000;
+    bool render_sp = video.mask & 0b00010000;
 
     clear_bg_mask();
 

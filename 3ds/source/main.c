@@ -123,7 +123,8 @@ int main(int argc, char* argv[]) {
     printf("Initializing Emulator...\n");
 
     cpu_init();
-    ppu_init(______smb_nes);
+    video_init(______smb_nes);
+    render_init();
     apu_init(AUDIO_SAMPLE_RATE);
 
     printf("Initializing Audio...\n");
@@ -190,7 +191,7 @@ int main(int argc, char* argv[]) {
         u64 end_nmi = svcGetSystemTick();
 
         u64 start_ppu = svcGetSystemTick();
-        ppu_render();
+        render_frame();
         u8* fb = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
         update_top_screen(fb);
         u64 end_ppu = svcGetSystemTick();

@@ -39,9 +39,9 @@ if __name__ == "__main__":
         run("./hash", "--debug-chr", "--trace", trace)
     with tempfile.TemporaryDirectory(prefix="smb-semantics-") as tmp:
         executable = str(pathlib.Path(tmp) / "cpu-semantics")
-        sources = ["instructions", "cpu", "code", "data", "ppu", "apu"]
-        run("cc", "-std=c99", "-O2", "-o", executable, "tests/cpu_semantics.c",
-            *(f"codegen/lib/{name}.c" for name in sources))
+        sources = ["instructions", "cpu", "code", "data", "video", "ppu_bus", "apu"]
+        run("cc", "-std=c99", "-O2", "-DPPU_BUS", "-o", executable, "tests/cpu_semantics.c",
+            "codegen/native/display.c", *(f"codegen/lib/{name}.c" for name in sources))
         run(executable)
     if args.rom:
         for flags in ([], ["EXTRA_CFLAGS=-DNATIVE_CALLS"]):

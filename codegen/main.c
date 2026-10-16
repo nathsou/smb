@@ -171,7 +171,8 @@ int main(void) {
         fprintf(stderr, "Using generated debug tiles instead\n");
         uint8_t chr[DEBUG_CHR_SIZE];
         debug_chr_generate(chr);
-        ppu_init(chr);
+        video_init(chr);
+        render_init();
     }
 
     cpu_reset_entry();
@@ -216,7 +217,7 @@ int main(void) {
         
         handle_inputs(gamepad, mapping);
         next_frame();
-        ppu_render();
+        render_frame();
         apu_step_frame();
         UpdateTexture(texture, frame);
 

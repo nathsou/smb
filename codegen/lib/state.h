@@ -3,7 +3,7 @@
 
 #include "external.h"
 #include "cpu.h"
-#include "ppu.h"
+#include "video.h"
 #include "apu.h"
 #include <stdint.h>
 

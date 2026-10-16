@@ -219,7 +219,7 @@ fn Emitter::emit_code_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("")
   self.emit("#include \"data.h\"")
   self.emit("#include \"instructions.h\"")
-  self.emit("#include \"ppu.h\"")
+  self.emit("#include \"ppu_bus.h\"")
   self.emit("#include \"apu.h\"")
   self.emit("")
 
@@ -380,18 +380,9 @@ fn write_byte(mode: @lower.AsmAddressingMode, target: Reg, low: @lower.AsmLoweri
       Some({ min, max }) if min >= 0 && max < 0x2000 => return "ram[(\{address}) & 0x7ff] = \{target};"
       Some({ min, max }) if min == max => {
         if min >= 0x2000 && min < 0x4000 {
-          return match min & 7 {
-            0 => "ppu_ctrl = \{target};"
-            1 => "ppu_mask = \{target};"
-            3 => "oam_addr = \{target};"
-            4 => "oam[oam_addr++] = \{target};"
-            5 => "ppu_write_scroll(\{target});"
-            6 => "ppu_write_address(\{target});"
-            7 => "ppu_write_data(\{target});"
-            _ => "ppu_write_register((uint16_t)(\{address}), \{target});"
-          }
+          return "ppu_bus_write(0x\{hex(0x2000 + (min & 7))}, \{target});"
         }
-        if min == 0x4014 { return "ppu_transfer_oam((uint16_t)(\{target} << 8));" }
+        if min == 0x4014 { return "ppu_bus_oam_dma(\{target});" }
         if min == 0x4016 { return "write_joypad1(\{target}); write_joypad2(\{target});" }
         if min >= 0x4000 && min < 0x4020 { return "apu_write(\{address}, \{target});" }
       }

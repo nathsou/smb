@@ -1,5 +1,5 @@
 #include "../codegen/lib/instructions.h"
-#include "../codegen/lib/ppu.h"
+#include "../codegen/lib/ppu_bus.h"
 #include <assert.h>
 #include <stdio.h>
 
@@ -56,7 +56,7 @@ int main(void) {
     dynamic_ram_write(0x3ffb, 0x21); // mirrored OAMADDR
     assert(oam_addr == 0x21);
     dynamic_ram_write(0x2004, 0x42);
-    assert(oam[0x21] == 0x42 && oam_addr == 0x22);
+    assert(video.oam[0x21] == 0x42 && oam_addr == 0x22);
     ram[0xff] = 0x34;
     ram[0] = 0x12;
     y = 2;

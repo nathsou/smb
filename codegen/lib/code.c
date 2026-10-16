@@ -47,203 +47,13 @@ static uint16_t JumpEngine(uint16_t return_address) {
   return cpu_dispatch_target = read_indirect_word(0x6);
 }
 
-void Start(void) {
-  sei(); // pretty standard 6502 type init here
-  cld();
-  lda_imm(0b00010000); // init PPU control register 1 
-  ppu_ctrl = a;
-  ldx_imm(0xff); // reset stack pointer
-  sp = x;
-  do {
-    // VBlank1:
-    lda_abs_fn(PPU_STATUS); // wait two frames
-  } while (!neg_flag);
-  do {
-    // VBlank2:
-    lda_abs_fn(PPU_STATUS);
-  } while (!neg_flag);
-  ldy_imm(ColdBootOffset); // load default cold boot pointer
-  ldx_imm(0x5); // this is where we check for a warm boot
-  do {
-    // WBootCheck:
-    lda_absx(TopScoreDisplay); // check each score digit in the top score
-    cmp_imm_fc(10); // to see if we have a valid digit
-    if (carry_flag) { goto ColdBoot; } // if not, give up and proceed with cold boot
-    dex_fn();
-  } while (!neg_flag);
-  lda_abs(WarmBootValidation); // second checkpoint, check to see if 
-  // another location has a specific value
-  if (a == 0xa5) {
-    ldy_imm(WarmBootOffset); // if passed both, load warm boot pointer
-  }
-  
-ColdBoot:
-  CALL(InitializeMemory, 0x802d); // clear memory using pointer in Y
-  apu_write((SND_DELTA_REG + 1), a); // reset delta counter load register
-  ram[OperMode] = a; // reset primary mode of operation
-  lda_imm(0xa5); // set warm boot flag
-  ram[WarmBootValidation] = a;
-  ram[PseudoRandomBitReg] = a; // set seed for pseudorandom register
-  lda_imm(0b00001111);
-  apu_write(SND_MASTERCTRL_REG, a); // enable all sound channels except dmc
-  lda_imm(0b00000110);
-  ppu_mask = a; // turn off clipping for OAM and background
-  CALL(MoveAllSpritesOffscreen, 0x8048);
-  CALL(InitializeNameTables, 0x804b); // initialize both name tables
-  inc_abs(DisableScreenFlag); // set flag to disable screen output
-  lda_abs(Mirror_PPU_CTRL_REG1);
-  ora_imm(0b10000000); // enable NMIs
-  CALL(WritePPUReg1, 0x8056);
-  // EndlessLoop:
-  cpu_yield(0x8057); return; // endless loop, need I say more?
-}
+// Start: native implementation, not generated.
+// It may read: none.
+// It must produce: none.
 
-// -------------------------------------------------------------------------------------
-// $00 - vram buffer address table low, also used for pseudorandom bit
-// $01 - vram buffer address table high
-void NonMaskableInterrupt(void) {
-  lda_abs(Mirror_PPU_CTRL_REG1); // disable NMIs in mirror reg
-  and_imm(0b01111111); // save all other bits
-  ram[Mirror_PPU_CTRL_REG1] = a;
-  and_imm(0b01111110); // alter name table address to be $2800
-  ppu_ctrl = a; // (essentially $2000) but save other bits
-  lda_abs(Mirror_PPU_CTRL_REG2); // disable OAM and background display by default
-  and_imm(0b11100110);
-  ldy_abs_fz(DisableScreenFlag); // get screen disable flag
-  // Original branch: if set, used bits as-is
-  if (zero_flag) {
-    lda_abs(Mirror_PPU_CTRL_REG2); // otherwise reenable bits and save them
-    ora_imm(0b00011110);
-  }
-  // ScreenOff:
-  ram[Mirror_PPU_CTRL_REG2] = a; // save bits for later but not in register at the moment
-  and_imm(0b11100111); // disable screen for now
-  ppu_mask = a;
-  ldx_abs(PPU_STATUS); // reset flip-flop and reset scroll registers to zero
-  lda_imm(0x0);
-  CALL(InitScroll, 0x80ad);
-  oam_addr = a; // reset spr-ram address register
-  lda_imm(0x2); // perform spr-ram DMA access on $0200-$02ff
-  ppu_transfer_oam((uint16_t)(a << 8));
-  ldx_abs(VRAM_Buffer_AddrCtrl); // load control for pointer to buffer contents
-  lda_absx(VRAM_AddrTable_Low); // set indirect at $00 to pointer
-  ram[0x0] = a;
-  lda_absx(VRAM_AddrTable_High);
-  ram[0x1] = a;
-  CALL(UpdateScreen, 0x80c5); // update screen with buffer contents
-  ldy_imm(0x0);
-  ldx_abs(VRAM_Buffer_AddrCtrl); // check for usage of $0341
-  cpx_imm_fcz(0x6);
-  if (zero_flag) {
-    iny(); // get offset based on usage
-  }
-  // InitBuffer:
-  ldx_absy(VRAM_Buffer_Offset);
-  lda_imm(0x0); // clear buffer header at last location
-  ram[VRAM_Buffer1_Offset + x] = a;
-  ram[VRAM_Buffer1 + x] = a;
-  ram[VRAM_Buffer_AddrCtrl] = a; // reinit address control to $0301
-  lda_abs(Mirror_PPU_CTRL_REG2); // copy mirror of $2001 to register
-  ppu_mask = a;
-  CALL(SoundEngine, 0x80e6); // play sound
-  CALL(ReadJoypads, 0x80e9); // read joypads
-  CALL(PauseRoutine, 0x80ec); // handle pause
-  CALL(UpdateTopScore, 0x80ef);
-  lda_abs(GamePauseStatus); // check for pause status
-  lsr_acc_fc();
-  if (!carry_flag) {
-    lda_abs_fz(TimerControl); // if master timer control not set, decrement
-    // Original branch: all frame and interval timers
-    if (!zero_flag) {
-      dec_abs_fz(TimerControl);
-      if (!zero_flag) { goto NoDecTimers; }
-    }
-    // DecTimers:
-    ldx_imm(0x14); // load end offset for end of frame timers
-    dec_abs_fn(IntervalTimerControl); // decrement interval timer control,
-    // Original branch: if not expired, only frame timers will decrement
-    if (neg_flag) {
-      lda_imm(0x14);
-      ram[IntervalTimerControl] = a; // if control for interval timers expired,
-      ldx_imm(0x23); // interval timers will decrement along with frame timers
-    }
-    do {
-      // DecTimersLoop:
-      lda_absx_fz(Timers); // check current timer
-      // Original branch: if current timer expired, branch to skip,
-      if (!zero_flag) {
-        dec_absx(Timers); // otherwise decrement the current timer
-      }
-      // SkipExpTimer:
-      dex_fn(); // move onto next timer
-    } while (!neg_flag); // do this until all timers are dealt with
-    
-NoDecTimers:
-    inc_zp(FrameCounter); // increment frame counter
-  }
-  // PauseSkip:
-  ldx_imm(0x0);
-  ldy_imm(0x7);
-  lda_abs(PseudoRandomBitReg); // get first memory location of LSFR bytes
-  and_imm(0b00000010); // mask out all but d1
-  ram[0x0] = a; // save here
-  lda_abs((PseudoRandomBitReg + 1)); // get second memory location
-  and_imm(0b00000010); // mask out all but d1
-  eor_zp_fz(0x0); // perform exclusive-OR on d1 from first and second bytes
-  carry_flag = false; // if neither or both are set, carry will be clear
-  if (!zero_flag) {
-    carry_flag = true; // if one or the other is set, carry will be set
-  }
-  do {
-    // RotPRandomBit:
-    ror_absx_fc(PseudoRandomBitReg); // rotate carry into d7, and rotate last bit into carry
-    inx(); // increment to next byte
-    dey_fz(); // decrement for loop
-  } while (!zero_flag);
-  lda_abs_fz(Sprite0HitDetectFlag); // check for flag here
-  if (!zero_flag) {
-    do {
-      // Sprite0Clr:
-      lda_abs(PPU_STATUS); // wait for sprite 0 flag to clear, which will
-      and_imm_fz(0b01000000); // not happen until vblank has ended
-    } while (!zero_flag);
-    lda_abs(GamePauseStatus); // if in pause mode, do not bother with sprites at all
-    lsr_acc_fc();
-    if (!carry_flag) {
-      CALL(MoveSpritesOffscreen, 0x814c);
-      CALL(SpriteShuffler, 0x814f);
-    }
-    do {
-      // Sprite0Hit:
-      lda_abs(PPU_STATUS); // do sprite #0 hit detection
-      and_imm_fz(0b01000000);
-    } while (zero_flag);
-    ldy_imm(0x14); // small delay, to wait until we hit horizontal blank time
-    do {
-      // HBlankDelay:
-      dey_fz();
-    } while (!zero_flag);
-  }
-  // SkipSprite0:
-  lda_abs(HorizontalScroll); // set scroll registers from variables
-  ppu_write_scroll(a);
-  lda_abs(VerticalScroll);
-  ppu_write_scroll(a);
-  lda_abs(Mirror_PPU_CTRL_REG1); // load saved mirror of $2000
-  pha();
-  ppu_ctrl = a;
-  lda_abs(GamePauseStatus); // if in pause mode, do not perform operation mode stuff
-  lsr_acc_fc();
-  if (!carry_flag) {
-    CALL(OperModeExecutionTree, 0x8177); // otherwise do one of many, many possible subroutines
-  }
-  // SkipMainOper:
-  lda_abs(PPU_STATUS); // reset flip-flop
-  pla();
-  ora_imm(0b10000000); // reactivate NMIs
-  ppu_ctrl = a;
-  return; // <rti> // we are done until the next frame!
-}
+// NonMaskableInterrupt: native implementation, not generated.
+// It may read: none.
+// It must produce: none.
 
 // -------------------------------------------------------------------------------------
 void PauseRoutine(void) {
@@ -1178,44 +988,9 @@ void AreaParserTaskControl(void) {
   return;
 }
 
-// -------------------------------------------------------------------------------------
-// $00 - vram buffer address table low
-// $01 - vram buffer address table high
-void DrawTitleScreen(void) {
-  lda_abs_fz(OperMode); // are we in title screen mode?
-  // if not, exit
-  if (!zero_flag) {
-    IncModeTask_B();
-    return;
-  }
-  lda_imm(HIGH_BYTE(TitleScreenDataOffset)); // load address $1ec0 into
-  ppu_write_address(a); // the vram address register
-  lda_imm(LOW_BYTE(TitleScreenDataOffset));
-  ppu_write_address(a);
-  lda_imm(0x3); // put address $0300 into
-  ram[0x1] = a; // the indirect at $00
-  ldy_imm(0x0);
-  ram[0x0] = y;
-  lda_abs(PPU_DATA); // do one garbage read
-  do {
-    
-OutputTScr:
-    lda_abs(PPU_DATA); // get title screen from chr-rom
-    dynamic_ram_write(indirect_y_addr(0x0), a); // store 256 bytes into buffer
-    iny_fz();
-    // Original branch: if not past 256 bytes, do not increment
-    if (zero_flag) {
-      inc_zp(0x1); // otherwise increment high byte of indirect
-    }
-    // ChkHiByte:
-    lda_zp(0x1); // check high byte?
-    cmp_imm_fz(0x4); // at $0400?
-    if (!zero_flag) { goto OutputTScr; } // if not, loop back and do another
-    cpy_imm_fc(0x3a); // check if offset points past end of data
-  } while (!carry_flag); // if not, loop back and do another
-  lda_imm(0x5); // set buffer transfer control to $0300,
-  SetVRAMAddr_B(); return; // increment task and exit
-}
+// DrawTitleScreen: native implementation, not generated.
+// It may read: none.
+// It must produce: none.
 
 // -------------------------------------------------------------------------------------
 void ClearBuffersDrawIcon(void) {
@@ -1766,51 +1541,13 @@ void RemBridge(void) {
   return; // and leave
 }
 
-// -------------------------------------------------------------------------------------
-// METATILE GRAPHICS TABLE
-// in: none; out: a, y
-void InitializeNameTables(void) {
-  lda_abs(PPU_STATUS); // reset flip-flop
-  lda_abs(Mirror_PPU_CTRL_REG1); // load mirror of ppu reg $2000
-  ora_imm(0b00010000); // set sprites for first 4k and background for second 4k
-  and_imm(0b11110000); // clear rest of lower nybble, leave higher alone
-  CALL(WritePPUReg1, 0x8e25);
-  lda_imm(0x24); // set vram address to start of name table 1
-  CALL(WriteNTAddr, 0x8e2a);
-  lda_imm(0x20); // and then set it to name table 0
-  WriteNTAddr(); // fallthrough
-  return;
-}
+// InitializeNameTables: native implementation, not generated.
+// It may read: none.
+// It must produce: a, y.
 
-// in: a; out: a, y
-void WriteNTAddr(void) {
-  ppu_write_address(a);
-  lda_imm(0x0);
-  ppu_write_address(a);
-  ldx_imm(0x4); // clear name table with blank tile #24
-  ldy_imm(0xc0);
-  lda_imm(0x24);
-  do {
-    
-InitNTLoop:
-    ppu_write_data(a); // count out exactly 768 tiles
-    dey_fz();
-    if (!zero_flag) { goto InitNTLoop; }
-    dex_fz();
-  } while (!zero_flag);
-  ldy_imm(64); // now to clear the attribute table (with zero this time)
-  txa();
-  ram[VRAM_Buffer1_Offset] = a; // init vram buffer 1 offset
-  ram[VRAM_Buffer1] = a; // init vram buffer 1
-  do {
-    // InitATLoop:
-    ppu_write_data(a);
-    dey_fz();
-  } while (!zero_flag);
-  ram[HorizontalScroll] = a; // reset scroll variables
-  ram[VerticalScroll] = a;
-  InitScroll(); return; // initialize scroll registers to zero
-}
+// WriteNTAddr: native implementation, not generated.
+// It may read: a.
+// It must produce: a, y.
 
 // -------------------------------------------------------------------------------------
 // $00 - temp joypad bit
@@ -1859,89 +1596,17 @@ void ReadPortBits(void) {
   return;
 }
 
-// in: none; out: a, y
-void UpdateScreen(void) {
-  goto UpdateScreen;
-  // -------------------------------------------------------------------------------------
-  // $00 - vram buffer address table low
-  // $01 - vram buffer address table high
-  
-WriteBufferToScreen:
-  ppu_write_address(a); // store high byte of vram address
-  iny();
-  lda_indy(0x0); // load next byte (second)
-  ppu_write_address(a); // store low byte of vram address
-  iny();
-  lda_indy(0x0); // load next byte (third)
-  asl_acc_fc(); // shift to left and save in stack
-  pha();
-  lda_abs(Mirror_PPU_CTRL_REG1); // load mirror of $2000,
-  ora_imm(0b00000100); // set ppu to increment by 32 by default
-  // Original branch: if d7 of third byte was clear, ppu will
-  if (!carry_flag) {
-    and_imm(0b11111011); // only increment by 1
-  }
-  // SetupWrites:
-  CALL(WritePPUReg1, 0x8eab); // write to register
-  pla(); // pull from stack and shift to left again
-  asl_acc_fc();
-  // Original branch: if d6 of third byte was clear, do not repeat byte
-  if (carry_flag) {
-    ora_imm(0b00000010); // otherwise set d1 and increment Y
-    iny();
-  }
-  // GetLength:
-  lsr_acc(); // shift back to the right to get proper length
-  lsr_acc_fc(); // note that d1 will now be in carry
-  tax();
-  do {
-    // OutputToVRAM:
-    // Original branch: if carry set, repeat loading the same byte
-    if (!carry_flag) {
-      iny(); // otherwise increment Y to load next byte
-    }
-    // RepeatByte:
-    lda_indy(0x0); // load more data from buffer and write to vram
-    ppu_write_data(a);
-    dex_fz(); // done writing?
-  } while (!zero_flag);
-  carry_flag = true;
-  tya();
-  adc_zp_fc(0x0); // add end length plus one to the indirect at $00
-  ram[0x0] = a; // to allow this routine to read another set of updates
-  lda_imm(0x0);
-  adc_zp(0x1);
-  ram[0x1] = a;
-  lda_imm(0x3f); // sets vram address to $3f00
-  ppu_write_address(a);
-  lda_imm(0x0);
-  ppu_write_address(a);
-  ppu_write_address(a); // then reinitializes it for some reason
-  ppu_write_address(a);
-  
-UpdateScreen:
-  ldx_abs(PPU_STATUS); // reset flip-flop
-  ldy_imm(0x0); // load first byte from indirect as a pointer
-  lda_indy_fz(0x0);
-  if (!zero_flag) { goto WriteBufferToScreen; } // if byte is zero we have no further updates to make here
-  InitScroll(); // fallthrough
-  return;
-}
+// UpdateScreen: native implementation, not generated.
+// It may read: none.
+// It must produce: a, y.
 
-// in: a; out: none
-void InitScroll(void) {
-  ppu_write_scroll(a); // store contents of A into scroll registers
-  ppu_write_scroll(a); // and end whatever subroutine led us here
-  return;
-}
+// InitScroll: native implementation, not generated.
+// It may read: a.
+// It must produce: none.
 
-// -------------------------------------------------------------------------------------
-// in: a; out: none
-void WritePPUReg1(void) {
-  ppu_ctrl = a; // write contents of A to PPU register 1
-  ram[Mirror_PPU_CTRL_REG1] = a; // and its mirror
-  return;
-}
+// WritePPUReg1: native implementation, not generated.
+// It may read: a.
+// It must produce: none.
 
 // -------------------------------------------------------------------------------------
 // $00 - used to store status bar nybbles

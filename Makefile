@@ -23,7 +23,9 @@ SOURCES += codegen/lib/instructions.c
 SOURCES += codegen/lib/code.c
 SOURCES += codegen/lib/data.c
 SOURCES += codegen/lib/cpu.c
-SOURCES += codegen/lib/ppu.c
+SOURCES += codegen/lib/video.c
+SOURCES += codegen/lib/render.c
+SOURCES += codegen/native/display.c
 SOURCES += codegen/lib/apu.c
 SOURCES += codegen/lib/state.c
 SOURCES += codegen/lib/debug_chr.c
@@ -32,7 +34,7 @@ MAIN = codegen/main.c
 .PHONY: codegen clean
 
 codegen:
-	moon run src/main
+	moon run src/main -- --native codegen/native/routines.txt
 
 build: clean
 	$(CC) $(CFLAGS) -o smb ${MAIN} $(SOURCES) codegen/lib/common.c $(GC_FLAGS) $(RAYLIB_FLAGS) $(OBJECTS)

@@ -353,10 +353,11 @@ async function main() {
 
     const {
         cpu_init: initCPU,
-        ppu_init: initPPU,
+        video_init: initVideo,
+        render_init: initRenderer,
         apu_init: initAPU,
         Start: start,
-        ppu_render: renderPPU,
+        render_frame: renderVideo,
         frame: framePtr,
         update_controller1: updateController1,
         apu_fill_buffer: fillAPUBuffer,
@@ -484,7 +485,8 @@ async function main() {
     );
 
     initCPU();
-    initPPU(chrRomPtr);
+    initVideo(chrRomPtr);
+    initRenderer();
     initAPU(audioContext.sampleRate);
 
     start();
@@ -509,7 +511,7 @@ async function main() {
                 processAudio();
             }
 
-            renderPPU();
+            renderVideo();
             renderFrame();
             lastFrameTime = currentTime;
             currentFrameTime = currentFrameTime - targetFrameTime;

@@ -3,7 +3,7 @@
 
 #include "data.h"
 #include "instructions.h"
-#include "ppu.h"
+#include "ppu_bus.h"
 #include "apu.h"
 
 void cpu_reset_entry(void);
