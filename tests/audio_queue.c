@@ -10,7 +10,7 @@
 #define RATE 48000
 #define FRAME (RATE / 60)
 
-static uint8_t out[FRAME];
+static float out[FRAME];
 
 static void render_frames(int frames) {
     for (int i = 0; i < frames; i++) apu_render(out, FRAME);

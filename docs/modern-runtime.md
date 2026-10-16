@@ -292,6 +292,37 @@ queue join the next frame rather than being dropped.
   the last value of every register and the worklet starts from them, so the
   channels the game enabled at power-on are not lost.
 
+The synthesizer (`codegen/lib/apu.c`) follows the NESdev descriptions of
+the channels, the frame sequencer and the mixer:
+
+- channels are event-driven: each timer is scheduled at its next step in
+  CPU cycles, so the cost follows the notes (about 0.4 ms per second of
+  audio, against 6.9 ms when every CPU cycle was stepped);
+- whenever the mixed output changes, a band-limited step (a
+  Blackman-windowed sinc, 64 phases of 16 taps) is added at that exact time;
+  integrating gives samples without the aliasing of point sampling. On
+  sustained notes the energy outside the harmonics is 50-56 dB below them,
+  against 10-37 dB before (the higher the note, the worse it was);
+- the NES's output filters (high passes at 90 and 440 Hz, a low pass at
+  14 kHz) follow, and samples are floats in [-1, 1];
+- the frame sequencer is the hardware's, with 4- and 5-step modes and the
+  reset on $4017 writes (SMB writes $FF there at the start of every sound
+  update, which re-synchronises it with each frame).
+
+Rewriting it fixed several faults of the previous model: the pulse channels,
+SMB's melody and harmony, played an octave too high (their timers count APU
+cycles, two CPU cycles each); the noise length counter loaded `value >> 3`
+instead of the length table, and halting it cleared it; the triangle dropped
+to 0 when stopped instead of holding its level (a pop); and the mixer's
+lookup table could be read past its end for DMC levels above 2. Only the
+DMC's output level is kept, as SMB plays no samples.
+
+The new output was checked against the previous one over the recording:
+per-frame loudness correlates at 0.965, and pitch classes (octave-invariant,
+since the pulses moved down an octave) agree with a median cosine similarity
+of 0.96. The register writes in the audio oracle are unchanged on every
+frame; the sample hashes were recorded again from the new synthesizer.
+
 `tests/web/worklet.mjs` runs the worklet processor in Node on the recorded
 game and matches the golden samples at the browsers' 128-sample quantum;
 `./hash --audio-chunk N` checks other chunk sizes natively, and

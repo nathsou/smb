@@ -19,6 +19,7 @@ class APUProcessor extends AudioWorkletProcessor {
         const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm), {
             env: {
                 memcpy: (dest, src, num) => (bytes().copyWithin(dest, src, src + num), dest),
+                memset: (ptr, value, num) => (bytes().fill(value, ptr, ptr + num), ptr),
             },
         });
         this.apu = instance.exports;
@@ -59,8 +60,7 @@ class APUProcessor extends AudioWorkletProcessor {
         const channel = outputs[0][0];
         const address = this.apu.apu_output.value;
         this.apu.apu_render(address, channel.length);
-        const samples = new Uint8Array(this.memory.buffer, address, channel.length);
-        for (let i = 0; i < channel.length; i++) channel[i] = (samples[i] / 255) * 2 - 1;
+        channel.set(new Float32Array(this.memory.buffer, address, channel.length));
         return true;
     }
 }

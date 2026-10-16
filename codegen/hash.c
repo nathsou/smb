@@ -18,8 +18,10 @@
 //   --dump N[,N...]    write those frames as frame_N.ppm
 //   --audio-trace FILE compare per-frame audio hashes: the APU register
 //                      writes the game made, and the samples rendered from
-//                      them at 48 kHz (one frame's worth, 800 samples)
+//                      them at 48 kHz (one frame's worth, 800 samples, as
+//                      16-bit values)
 //   --write-audio-trace FILE  record them
+//   --dump-audio FILE  write the samples as raw 32-bit floats (48 kHz, mono)
 //   --audio-chunk N    render in calls of N samples (the synthesizer must
 //                      resume anywhere, as audio callbacks ask for)
 
@@ -112,6 +114,8 @@ int main(int argc, char **argv) {
     const char *audio_trace_path = option(argc, argv, "--audio-trace");
     const char *write_audio_trace_path = option(argc, argv, "--write-audio-trace");
     const char *chunk_option = option(argc, argv, "--audio-chunk");
+    const char *dump_audio_path = option(argc, argv, "--dump-audio");
+    FILE *dump_audio = dump_audio_path ? fopen(dump_audio_path, "wb") : NULL;
     size_t audio_chunk = chunk_option ? (size_t)strtoul(chunk_option, NULL, 10) : AUDIO_FRAME_SAMPLES;
     if (audio_chunk == 0) audio_chunk = AUDIO_FRAME_SAMPLES;
 
@@ -156,12 +160,21 @@ int main(int argc, char **argv) {
         render_frame();
         uint32_t writes = apu_write_hash;
         sound_end_frame();
-        uint8_t audio[AUDIO_FRAME_SAMPLES];
+        float audio[AUDIO_FRAME_SAMPLES];
         for (size_t done = 0; done < AUDIO_FRAME_SAMPLES; done += audio_chunk) {
             size_t left = AUDIO_FRAME_SAMPLES - done;
             apu_render(audio + done, left < audio_chunk ? left : audio_chunk);
         }
-        uint32_t samples = hash_bytes(HASH_OFFSET_BASIS, audio, AUDIO_FRAME_SAMPLES);
+        if (dump_audio) fwrite(audio, sizeof(float), AUDIO_FRAME_SAMPLES, dump_audio);
+        // as 16-bit samples (computed in double, the same in JavaScript)
+        uint32_t samples = HASH_OFFSET_BASIS;
+        for (size_t s = 0; s < AUDIO_FRAME_SAMPLES; s++) {
+            double scaled = (double)audio[s] * 32767.0 + 0.5;
+            int value = (int)scaled;
+            if ((double)value > scaled) value--; // floor
+
+            samples = hash_byte(hash_byte(samples, (uint8_t)(value & 0xff)), (uint8_t)((value >> 8) & 0xff));
+        }
         if (write_audio_trace) fprintf(write_audio_trace, "%08x %08x\n", writes, samples);
         if (audio_trace && first_audio_divergence < 0) {
             unsigned expected_writes, expected_samples;
@@ -193,6 +206,7 @@ int main(int argc, char **argv) {
     if (write_trace) fclose(write_trace);
     if (audio_trace) fclose(audio_trace);
     if (write_audio_trace) fclose(write_audio_trace);
+    if (dump_audio) fclose(dump_audio);
 
     bool ok = true;
     if (debug_chr) {

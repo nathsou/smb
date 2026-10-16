@@ -1,145 +1,25 @@
+// The NES sound hardware (APU) as a synthesizer, following
+// https://www.nesdev.org/wiki/APU: two pulse channels, a triangle and a
+// noise channel (SMB uses only the DMC's output level). See apu.h for how it
+// is fed.
+//
+// Channels are event-driven: each timer is scheduled at its next step in CPU
+// cycles, so the cost follows the notes, not the clock. Whenever the mixed
+// output changes, a band-limited step (a windowed sinc) is added at that
+// exact time to a "blip" buffer; integrating it gives samples without the
+// aliasing of point sampling. The NES's own output filters follow.
 #include "apu.h"
 #include "external.h"
-#define PI 3.141592653f
 
-#define CPU_FREQUENCY 1789773
+#define CPU_HZ 1789773
 #define FRAME_RATE 60
+#define NEVER INT64_MAX
 
-// Length Counter
-
-const uint8_t LENGTH_LOOKUP[] = {
+static const uint8_t LENGTH_TABLE[32] = {
     10, 254, 20, 2, 40, 4, 80, 6,
     160, 8, 60, 10, 14, 12, 26, 14,
     12, 16, 24, 18, 48, 20, 96, 22,
     192, 24, 72, 26, 16, 28, 32, 30,
-};
-
-typedef struct {
-    bool enabled;
-    uint8_t counter;
-} LengthCounter;
-
-void length_counter_init(LengthCounter* lc) {
-    lc->enabled = false;
-    lc->counter = 0;
-}
-
-inline void length_counter_reset_to_zero(LengthCounter* lc) {
-    lc->counter = 0;
-}
-
-inline void length_counter_step(LengthCounter* lc) {
-    if (lc->enabled && lc->counter > 0) {
-        lc->counter--;
-    }
-}
-
-inline void length_counter_set(LengthCounter* lc, uint8_t val) {
-    lc->counter = LENGTH_LOOKUP[val];
-}
-
-// Set enabled status
-inline void length_counter_set_enabled(LengthCounter* lc, bool enabled) {
-    lc->enabled = enabled;
-}
-
-// Check if counter is zero
-inline bool length_counter_is_zero(const LengthCounter* lc) {
-    return lc->counter == 0;
-}
-
-// Timer
-
-typedef struct {
-    uint16_t counter;
-    uint16_t period;
-} Timer;
-
-void timer_init(Timer* self) {
-    self->counter = 0;
-    self->period = 0;
-}
-
-inline bool timer_step(Timer* self) {
-    if (self->counter == 0) {
-        self->counter = self->period;
-        return true;
-    } else {
-        self->counter -= 1;
-        return false;
-    }
-}
-
-// Envelope
-
-typedef struct {
-    bool constant_mode;
-    bool looping;
-    bool start;
-    uint8_t constant_volume;
-    uint8_t period;
-    uint8_t divider;
-    uint8_t decay;
-} Envelope;
-
-void envelope_init(Envelope* self) {
-    self->constant_mode = false;
-    self->looping = false;
-    self->start = false;
-    self->constant_volume = 0;
-    self->period = 0;
-    self->divider = 0;
-    self->decay = 0;
-}
-
-void envelope_step(Envelope* self) {
-    if (self->start) {
-        self->start = false;
-        self->decay = 15;
-        self->divider = self->period;
-    } else if (self->divider == 0) {
-        if (self->decay > 0) {
-            self->decay -= 1;
-        } else if (self->looping) {
-            self->decay = 15;
-        }
-        self->divider = self->period;
-    } else {
-        self->divider -= 1;
-    }
-}
-
-inline uint8_t envelope_output(const Envelope* self) {
-    return self->constant_mode ? self->constant_volume : self->decay;
-}
-
-// Pulse
-
-typedef struct {
-    bool enabled;
-    uint8_t duty_mode;
-    uint8_t duty_cycle;
-    Timer timer;
-    LengthCounter length_counter;
-    Envelope envelope;
-    bool sweep_enabled;
-    uint8_t sweep_period;
-    bool sweep_negate;
-    uint8_t sweep_shift;
-    bool sweep_reload;
-    uint8_t sweep_divider;
-    bool sweep_mute;
-} Pulse;
-
-static const float PULSE_MIXER_LOOKUP[] = {
-    0.0f, 0.011609139f, 0.02293948f, 0.034000948f,
-    0.044803f, 0.05535466f, 0.06566453f, 0.07574082f,
-    0.0855914f, 0.09522375f, 0.10464504f, 0.11386215f,
-    0.12288164f, 0.1317098f, 0.14035264f, 0.14881596f,
-    0.15710525f, 0.16522588f, 0.17318292f, 0.18098126f,
-    0.18862559f, 0.19612046f, 0.20347017f, 0.21067894f,
-    0.21775076f, 0.2246895f, 0.23149887f, 0.23818247f,
-    0.24474378f, 0.25118607f, 0.25751257f, 0.26372638f,
 };
 
 static const uint8_t PULSE_DUTY_TABLE[][8] = {
@@ -149,511 +29,384 @@ static const uint8_t PULSE_DUTY_TABLE[][8] = {
     { 1, 0, 0, 1, 1, 1, 1, 1 },
 };
 
-void pulse_init(Pulse* self) {
-    self->enabled = false;
-    self->duty_mode = 0;
-    self->duty_cycle = 0;
-    timer_init(&self->timer);
-    length_counter_init(&self->length_counter);
-    envelope_init(&self->envelope);
-    self->sweep_enabled = false;
-    self->sweep_period = 0;
-    self->sweep_negate = false;
-    self->sweep_shift = 0;
-    self->sweep_reload = false;
-    self->sweep_divider = 0;
-    self->sweep_mute = false;
-}
-
-void pulse_set_enabled(Pulse* self, bool enabled) {
-    self->enabled = enabled;
-
-    if (!enabled) {
-        length_counter_reset_to_zero(&self->length_counter);
-    }
-}
-
-void pulse_step_timer(Pulse* self) {
-    if (timer_step(&self->timer)) {
-        self->duty_cycle = (self->duty_cycle + 1) & 7;
-    }
-}
-
-inline void pulse_step_length_counter(Pulse* self) {
-    length_counter_step(&self->length_counter);
-}
-
-inline void pulse_step_envelope(Pulse* self) {
-    envelope_step(&self->envelope);
-}
-
-void pulse_write_control(Pulse* self, uint8_t value) {
-    self->duty_mode = (value >> 6) & 0b11;
-    bool halt_length_counter = (value & 0b00100000) != 0;
-    length_counter_set_enabled(&self->length_counter, !halt_length_counter);
-    self->envelope.looping = halt_length_counter;
-    self->envelope.constant_mode = (value & 0b00010000) != 0;
-    self->envelope.period = value & 0b1111;
-    self->envelope.constant_volume = value & 0b1111;
-    self->envelope.start = true;
-}
-
-void pulse_write_reload_low(Pulse* self, uint8_t value) {
-    self->timer.period = (uint16_t)((self->timer.period & 0xff00) | ((uint16_t)value));
-}
-
-void pulse_write_reload_high(Pulse* self, uint8_t value) {
-    self->timer.period = (uint16_t)((self->timer.period & 0x00ff) | (((uint16_t)(value & 7)) << 8));
-    self->duty_cycle = 0;
-    self->envelope.start = true;
-    length_counter_set(&self->length_counter, value >> 3);
-}
-
-void pulse_write_sweep(Pulse* self, uint8_t value) {
-    self->sweep_enabled = (value & 0b10000000) != 0;
-    self->sweep_period = (value >> 4) & 0b111;
-    self->sweep_negate = (value & 0b1000) != 0;
-    self->sweep_shift = value & 0b111;
-    self->sweep_reload = true;
-}
-
-uint16_t pulse_sweep_target_period(Pulse* self) {
-    uint16_t change_amount = self->timer.period >> self->sweep_shift;
-
-    if (self->sweep_negate) {
-        if (change_amount > self->timer.period) {
-            return 0;
-        } else {
-            return self->timer.period - change_amount;
-        }
-    } else {
-        return self->timer.period + change_amount;
-    }
-}
-
-void pulse_step_sweep(Pulse* self) {
-    uint16_t target_period = pulse_sweep_target_period(self);
-    self->sweep_mute = self->timer.period < 8 || target_period > 0x7ff;
-
-    if (self->sweep_divider == 0 && self->sweep_enabled && !self->sweep_mute) {
-        self->timer.period = target_period;
-    }
-
-    if (self->sweep_divider == 0 || self->sweep_reload) {
-        self->sweep_divider = self->sweep_period;
-        self->sweep_reload = false;
-    } else {
-        self->sweep_divider--;
-    }
-}
-
-uint8_t pulse_output(Pulse* self) {
-    if (
-        !self->enabled ||
-        self->sweep_mute ||
-        length_counter_is_zero(&self->length_counter) ||
-        PULSE_DUTY_TABLE[self->duty_mode][self->duty_cycle] == 0
-    ) {
-        return 0;
-    }
-
-    return envelope_output(&self->envelope);
-}
-
-// Triangle
-
-static const uint8_t SEQUENCER_LOOKUP[32] = {
+static const uint8_t TRIANGLE_SEQUENCE[32] = {
     15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
 };
 
-static const float TRIANGLE_MIXER_LOOKUP[] = {
-    0.0f, 0.006699824f, 0.01334502f, 0.019936256f, 0.02647418f, 0.032959443f, 0.039392676f, 0.0457745f,
-    0.052105535f, 0.05838638f, 0.064617634f, 0.07079987f, 0.07693369f, 0.08301962f, 0.08905826f, 0.095050134f,
-    0.100995794f, 0.10689577f, 0.11275058f, 0.118560754f, 0.12432679f, 0.13004918f, 0.13572845f, 0.14136505f,
-    0.1469595f, 0.15251222f, 0.1580237f, 0.1634944f, 0.16892476f, 0.17431524f, 0.17966628f, 0.1849783f,
-    0.19025174f, 0.19548698f, 0.20068447f, 0.20584463f, 0.21096781f, 0.21605444f, 0.22110492f, 0.2261196f,
-    0.23109888f, 0.23604311f, 0.24095272f, 0.245828f, 0.25066936f, 0.2554771f, 0.26025164f, 0.26499328f,
-    0.26970237f, 0.27437922f, 0.27902418f, 0.28363758f, 0.28821972f, 0.29277095f, 0.29729152f, 0.3017818f,
-    0.3062421f, 0.31067267f, 0.31507385f, 0.31944588f, 0.32378912f, 0.32810378f, 0.3323902f, 0.3366486f,
-    0.3408793f, 0.34508255f, 0.34925863f, 0.35340777f, 0.35753027f, 0.36162636f, 0.36569634f, 0.36974037f,
-    0.37375876f, 0.37775174f, 0.38171956f, 0.38566244f, 0.38958064f, 0.39347437f, 0.39734384f, 0.4011893f,
-    0.405011f, 0.40880907f, 0.41258383f, 0.41633546f, 0.42006415f, 0.42377013f, 0.4274536f, 0.43111476f,
-    0.43475384f, 0.43837097f, 0.44196644f, 0.4455404f, 0.449093f, 0.45262453f, 0.45613506f, 0.4596249f,
-    0.46309412f, 0.46654293f, 0.46997157f, 0.47338015f, 0.47676894f, 0.48013794f, 0.48348752f, 0.4868177f,
-    0.49012873f, 0.4934207f, 0.49669388f, 0.49994832f, 0.50318426f, 0.50640184f, 0.5096012f, 0.51278245f,
-    0.51594585f, 0.5190914f, 0.5222195f, 0.52533007f, 0.52842325f, 0.5314993f, 0.53455836f, 0.5376005f,
-    0.54062593f, 0.5436348f, 0.54662704f, 0.54960304f, 0.55256283f, 0.55550647f, 0.5584343f, 0.56134623f,
-    0.5642425f, 0.56712323f, 0.5699885f, 0.5728384f, 0.5756732f, 0.57849294f, 0.5812977f, 0.5840876f,
-    0.5868628f, 0.58962345f, 0.59236956f, 0.59510136f, 0.5978189f, 0.6005223f, 0.6032116f, 0.605887f,
-    0.60854864f, 0.6111966f, 0.6138308f, 0.61645156f, 0.619059f, 0.62165314f, 0.624234f, 0.62680185f,
-    0.6293567f, 0.63189864f, 0.6344277f, 0.6369442f, 0.63944805f, 0.64193934f, 0.64441824f, 0.64688486f,
-    0.6493392f, 0.6517814f, 0.6542115f, 0.65662974f, 0.65903604f, 0.6614306f, 0.6638134f, 0.66618466f,
-    0.66854435f, 0.6708926f, 0.67322946f, 0.67555505f, 0.67786944f, 0.68017274f, 0.68246496f, 0.6847462f,
-    0.6870166f, 0.6892762f, 0.69152504f, 0.6937633f, 0.6959909f, 0.69820803f, 0.7004148f, 0.7026111f,
-    0.7047972f, 0.7069731f, 0.7091388f, 0.7112945f, 0.7134401f, 0.7155759f, 0.7177018f, 0.7198179f,
-    0.72192425f, 0.72402096f, 0.726108f, 0.72818565f, 0.7302538f, 0.73231256f, 0.73436195f, 0.7364021f,
-};
-
-typedef struct {
-    bool enabled;
-    bool control_flag;
-    uint8_t counter_reload;
-    Timer timer;
-    LengthCounter length_counter;
-    uint8_t linear_counter;
-    bool linear_counter_reload;
-    uint8_t duty_cycle;
-} Triangle;
-
-void triangle_init(Triangle* tc) {
-    tc->enabled = false;
-    tc->control_flag = false;
-    tc->counter_reload = 0;
-    timer_init(&tc->timer);
-    length_counter_init(&tc->length_counter);
-    tc->linear_counter = 0;
-    tc->linear_counter_reload = false;
-    tc->duty_cycle = 0;
-}
-
-void triangle_write_setup(Triangle* tc, uint8_t val) {
-    tc->control_flag = (val & 0x80) != 0;
-    tc->counter_reload = val & 0x7F;
-}
-
-void triangle_write_timer_low(Triangle* tc, uint8_t val) {
-    tc->timer.period = (tc->timer.period & 0xFF00) | val;
-}
-
-void triangle_write_timer_high(Triangle* tc, uint8_t val) {
-    tc->timer.period = (tc->timer.period & 0x00FF) | (uint16_t)((uint16_t)(val & 0x07) << 8);
-    tc->timer.counter = tc->timer.period;
-    length_counter_set(&tc->length_counter, val >> 3);
-    tc->linear_counter_reload = true;
-}
-
-void triangle_step_linear_counter(Triangle* tc) {
-    if (tc->linear_counter_reload) {
-        tc->linear_counter = tc->counter_reload;
-    } else if (tc->linear_counter > 0) {
-        tc->linear_counter--;
-    }
-
-    if (!tc->control_flag) {
-        tc->linear_counter_reload = false;
-    }
-}
-
-inline void triangle_step_length_counter(Triangle* tc) {
-    length_counter_step(&tc->length_counter);
-}
-
-void triangle_step_timer(Triangle* tc) {
-    if (timer_step(&tc->timer) && tc->linear_counter > 0 && !length_counter_is_zero(&tc->length_counter)) {
-        tc->duty_cycle = (tc->duty_cycle + 1) & 31;
-    }
-}
-
-void triangle_set_enabled(Triangle* tc, bool enabled) {
-    tc->enabled = enabled;
-    if (!enabled) {
-        length_counter_reset_to_zero(&tc->length_counter);
-    }
-}
-
-uint8_t triangle_output(const Triangle* tc) {
-    if (!tc->enabled ||
-        length_counter_is_zero(&tc->length_counter) ||
-        tc->linear_counter == 0 ||
-        tc->timer.period <= 2) {
-        return 0;
-    }
-    return SEQUENCER_LOOKUP[tc->duty_cycle & 0x1F];
-}
-
-// Noise
-
+// in CPU cycles
 static const uint16_t NOISE_PERIOD_TABLE[16] = {
     4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068
 };
 
+// Envelope and length counter (https://www.nesdev.org/wiki/APU_Envelope,
+// https://www.nesdev.org/wiki/APU_Length_Counter)
+
 typedef struct {
-    bool enabled;
-    LengthCounter length_counter;
+    bool start, loop, constant;
+    uint8_t volume;  // constant volume, or the divider period
+    uint8_t divider, decay;
+} Envelope;
+
+static void envelope_clock(Envelope *e) {
+    if (e->start) {
+        e->start = false;
+        e->decay = 15;
+        e->divider = e->volume;
+    } else if (e->divider == 0) {
+        e->divider = e->volume;
+        if (e->decay > 0) e->decay--;
+        else if (e->loop) e->decay = 15;
+    } else {
+        e->divider--;
+    }
+}
+
+static uint8_t envelope_level(const Envelope *e) {
+    return e->constant ? e->volume : e->decay;
+}
+
+// Pulse (https://www.nesdev.org/wiki/APU_Pulse): the timer counts APU
+// cycles, two CPU cycles each.
+
+typedef struct {
+    bool enabled, halt;
+    uint8_t duty, step, length;
+    uint16_t period;
     Envelope envelope;
-    Timer timer;
-    uint16_t shift_register;
-    bool mode;
+    bool sweep_enabled, sweep_negate, sweep_reload;
+    uint8_t sweep_period, sweep_shift, sweep_divider;
+    bool ones_complement; // pulse 1 negates with one's complement
+    int64_t next;         // CPU cycle of the next sequencer step
+} Pulse;
+
+static uint16_t sweep_target(const Pulse *p) {
+    int change = p->period >> p->sweep_shift;
+    if (p->sweep_negate) change = -change - (p->ones_complement ? 1 : 0);
+    int target = p->period + change;
+    return (uint16_t)(target < 0 ? 0 : target);
+}
+
+static bool pulse_muted(const Pulse *p) {
+    return p->period < 8 || sweep_target(p) > 0x7ff;
+}
+
+static uint8_t pulse_level(const Pulse *p) {
+    if (!p->enabled || p->length == 0 || pulse_muted(p) || !PULSE_DUTY_TABLE[p->duty][p->step]) return 0;
+    return envelope_level(&p->envelope);
+}
+
+static void pulse_schedule(Pulse *p, int64_t now) {
+    // Inaudible periods are parked rather than stepped (they are muted).
+    p->next = p->period < 8 ? NEVER : now + 2 * ((int64_t)p->period + 1);
+}
+
+static void pulse_clock_sweep(Pulse *p) {
+    if (p->sweep_divider == 0 && p->sweep_enabled && p->sweep_shift > 0 && !pulse_muted(p)) {
+        p->period = sweep_target(p);
+    }
+    if (p->sweep_divider == 0 || p->sweep_reload) {
+        p->sweep_divider = p->sweep_period;
+        p->sweep_reload = false;
+    } else {
+        p->sweep_divider--;
+    }
+}
+
+// Triangle (https://www.nesdev.org/wiki/APU_Triangle): the timer counts CPU
+// cycles; when stopped the output holds its level.
+
+typedef struct {
+    bool enabled, control, reload;
+    uint8_t linear_period, linear, length, step;
+    uint16_t period;
+    int64_t next;
+} Triangle;
+
+static void triangle_schedule(Triangle *t, int64_t now) {
+    // Periods below 2 are ultrasonic: hold the level instead of stepping.
+    t->next = t->period < 2 ? NEVER : now + (int64_t)t->period + 1;
+}
+
+// Noise (https://www.nesdev.org/wiki/APU_Noise)
+
+typedef struct {
+    bool enabled, halt, mode;
+    uint8_t length;
+    uint16_t period, shift;
+    Envelope envelope;
+    int64_t next;
 } Noise;
 
-void noise_init(Noise* self) {
-    self->enabled = false;
-    self->length_counter.counter = 0;
-    self->envelope.constant_mode = false;
-    self->envelope.looping = false;
-    self->envelope.start = false;
-    self->envelope.constant_volume = 0;
-    self->envelope.period = 0;
-    self->envelope.divider = 0;
-    self->envelope.decay = 0;
-    self->timer.counter = 0;
-    self->timer.period = 0;
-    self->shift_register = 1;
-    self->mode = false;
+static uint8_t noise_level(const Noise *n) {
+    if (!n->enabled || n->length == 0 || (n->shift & 1)) return 0;
+    return envelope_level(&n->envelope);
 }
 
-void noise_set_enabled(Noise* self, bool enabled) {
-    self->enabled = enabled;
-    if (!enabled) {
-        self->length_counter.counter = 0;
+// Band-limited synthesis: a step of height d at time t (in samples) adds
+// d * kernel[phase(t)][k] to sample floor(t) + k. The kernel is a
+// Blackman-windowed sinc impulse with its cutoff just below the Nyquist
+// frequency, so the integrated buffer holds band-limited steps, delayed by
+// half the kernel.
+
+#define BLIP_PHASES 64
+#define BLIP_TAPS 16
+#define BLIP_SIZE 1024 // a power of two, more than a render chunk plus the taps
+#define PI 3.14159265358979323846
+
+static float kernel[BLIP_PHASES][BLIP_TAPS];
+static float blip[BLIP_SIZE];
+
+// floor, sin and cos without libm (the WebAssembly build has none); sine is
+// accurate to about 1e-9 after reduction to [-pi/2, pi/2].
+static double floor_(double v) {
+    double t = (double)(int64_t)v;
+    return t > v ? t - 1 : t;
+}
+
+static double sine(double x) {
+    double turns = floor_(x / (2 * PI) + 0.5);
+    x -= turns * 2 * PI; // [-pi, pi]
+    if (x > PI / 2) x = PI - x;
+    if (x < -PI / 2) x = -PI - x;
+    double x2 = x * x, term = x, sum = x;
+    for (int k = 1; k <= 7; k++) {
+        term *= -x2 / ((2 * k) * (2 * k + 1));
+        sum += term;
+    }
+    return sum;
+}
+
+static double cosine(double x) {
+    return sine(x + PI / 2);
+}
+
+static void kernel_init(double cutoff) { // cutoff as a fraction of the sample rate
+    for (int phase = 0; phase < BLIP_PHASES; phase++) {
+        double total = 0;
+        double taps[BLIP_TAPS];
+        for (int k = 0; k < BLIP_TAPS; k++) {
+            // distance from the step, in samples
+            double x = k - BLIP_TAPS / 2 + 1 - (double)phase / BLIP_PHASES;
+            double sinc = x == 0 ? 2 * cutoff : sine(2 * PI * cutoff * x) / (PI * x);
+            double w = (x + BLIP_TAPS / 2.0) / BLIP_TAPS; // window position, 0..1
+            double window = 0.42 - 0.5 * cosine(2 * PI * w) + 0.08 * cosine(4 * PI * w);
+            taps[k] = sinc * window;
+            total += taps[k];
+        }
+        for (int k = 0; k < BLIP_TAPS; k++) kernel[phase][k] = (float)(taps[k] / total);
     }
 }
 
-void noise_step_timer(Noise* self) {
-    if (timer_step(&self->timer)) {
-        uint8_t bit = self->mode ? 6 : 1;
-        uint16_t bit0 = self->shift_register & 1;
-        uint16_t other_bit = (self->shift_register >> bit) & 1;
-        uint16_t feedback = bit0 ^ other_bit;
-        self->shift_register >>= 1;
-        self->shift_register |= feedback << 14;
-    }
-}
-
-void noise_step_length_counter(Noise* self) {
-    if (self->length_counter.counter > 0) {
-        self->length_counter.counter--;
-    }
-}
-
-void noise_step_envelope(Noise* self) {
-    envelope_step(&self->envelope);
-}
-
-void noise_write_control(Noise* self, uint8_t val) {
-    bool halt_length_counter = (val & 0x20) != 0;
-    self->length_counter.counter = halt_length_counter ? 0 : self->length_counter.counter;
-    self->envelope.looping = halt_length_counter;
-    self->envelope.constant_mode = (val & 0x10) != 0;
-    self->envelope.period = val & 0x0F;
-    self->envelope.constant_volume = val & 0x0F;
-}
-
-void noise_write_period(Noise* self, uint8_t val) {
-    self->mode = (val & 0x80) != 0;
-    self->timer.period = NOISE_PERIOD_TABLE[val & 0x0F];
-}
-
-void noise_write_length(Noise* self, uint8_t val) {
-    self->length_counter.counter = val >> 3;
-    self->envelope.start = true;
-}
-
-uint8_t noise_output(const Noise* self) {
-    if ((self->shift_register & 1) == 1 || self->length_counter.counter == 0) {
-        return 0;
-    } else {
-        return envelope_output(&self->envelope);
-    }
-}
-
-// DMC
-
-static const uint16_t DELTA_MODULATION_RATES[] = {
-    428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 84, 72, 54,
-};
+// Output filters (https://www.nesdev.org/wiki/APU_Mixer): first-order high
+// passes at 90 Hz and 440 Hz and a low pass at 14 kHz.
 
 typedef struct {
-    bool enabled;
-    bool interrupt_flag;
-    bool loop_flag;
-    Timer timer;
-    uint8_t output_level;
-    uint16_t sample_addr;
-    uint16_t sample_len;
-    uint16_t current_addr;
-    uint16_t bytes_remaining;
-    uint8_t shift_register;
-    bool silence_flag;
-    uint8_t output_bits_remaining;
-    bool irq_enabled;
-    uint32_t cpu_stall;
-    uint16_t memory_read_request;
-    bool has_memory_request;
-} DeltaModulationChannel;
-
-void dmc_init(DeltaModulationChannel* dmc) {
-    dmc->enabled = false;
-    dmc->interrupt_flag = false;
-    dmc->loop_flag = false;
-    timer_init(&dmc->timer);
-    dmc->output_level = 0;
-    dmc->sample_addr = 0;
-    dmc->sample_len = 0;
-    dmc->current_addr = 0;
-    dmc->bytes_remaining = 0;
-    dmc->shift_register = 0;
-    dmc->silence_flag = false;
-    dmc->output_bits_remaining = 0;
-    dmc->irq_enabled = false;
-    dmc->cpu_stall = 0;
-    dmc->has_memory_request = false;
-}
-
-void dmc_restart(DeltaModulationChannel* dmc) {
-    dmc->current_addr = dmc->sample_addr;
-    dmc->bytes_remaining = dmc->sample_len;
-}
-
-void dmc_step_shifter(DeltaModulationChannel* dmc) {
-    if (dmc->output_bits_remaining != 0) {
-        if (!dmc->silence_flag) {
-            if (dmc->shift_register & 1) {
-                if (dmc->output_level <= 125) {
-                    dmc->output_level += 2;
-                }
-            } else {
-                if (dmc->output_level >= 2) {
-                    dmc->output_level -= 2;
-                }
-            }
-        }
-        dmc->shift_register >>= 1;
-        dmc->output_bits_remaining--;
-    }
-}
-
-void dmc_step_reader(DeltaModulationChannel* dmc) {
-    if (dmc->output_bits_remaining == 0 && dmc->bytes_remaining > 0) {
-        dmc->cpu_stall += 4;
-        dmc->memory_read_request = dmc->current_addr;
-        dmc->has_memory_request = true;
-        dmc->output_bits_remaining = 8;
-
-        dmc->current_addr = (dmc->current_addr == 0xFFFF) ? 0x8000 : dmc->current_addr + 1;
-        dmc->bytes_remaining--;
-
-        if (dmc->bytes_remaining == 0) {
-            if (dmc->loop_flag) {
-                dmc_restart(dmc);
-            } else if (dmc->irq_enabled) {
-                dmc->interrupt_flag = true;
-            }
-        }
-    }
-}
-
-void dmc_step_timer(DeltaModulationChannel* dmc) {
-    if (dmc->enabled) {
-        dmc_step_reader(dmc);
-
-        if (!dmc->has_memory_request && timer_step(&dmc->timer)) {
-            dmc_step_shifter(dmc);
-        }
-    }
-}
-
-void dmc_write_control(DeltaModulationChannel* dmc, uint8_t val) {
-    dmc->irq_enabled = (val & 0x80) != 0;
-    dmc->loop_flag = (val & 0x40) != 0;
-    dmc->timer.period = DELTA_MODULATION_RATES[val & 0x0F];
-}
-
-inline void dmc_write_output(DeltaModulationChannel* dmc, uint8_t val) {
-    dmc->output_level = val & 0x7F;
-}
-
-inline void dmc_write_sample_addr(DeltaModulationChannel* dmc, uint8_t val) {
-    dmc->sample_addr = 0xC000 | (uint16_t)((uint16_t)val << 6);
-}
-
-inline void dmc_write_sample_len(DeltaModulationChannel* dmc, uint8_t val) {
-    dmc->sample_len = (uint16_t)((uint16_t)val << 4) | 1;
-}
-
-inline void dmc_set_memory_read_response(DeltaModulationChannel* dmc, uint8_t val) {
-    dmc->shift_register = val;
-    dmc->has_memory_request = false;
-    if (timer_step(&dmc->timer)) {
-        dmc_step_shifter(dmc);
-    }
-}
-
-inline bool dmc_is_active(const DeltaModulationChannel* dmc) {
-    return dmc->bytes_remaining > 0;
-}
-
-inline void dmc_clear_interrupt_flag(DeltaModulationChannel* dmc) {
-    dmc->interrupt_flag = false;
-}
-
-void dmc_set_enabled(DeltaModulationChannel* dmc, bool enabled) {
-    dmc->enabled = enabled;
-    if (!enabled) {
-        dmc->bytes_remaining = 0;
-    } else if (dmc->bytes_remaining == 0) {
-        dmc_restart(dmc);
-    }
-}
-
-inline uint8_t dmc_output(const DeltaModulationChannel* dmc) {
-    return dmc->output_level;
-}
-
-// Filters
-
-typedef struct {
-    float b0;
-    float b1;
-    float a1;
-    float prev_x;
-    float prev_y;
+    float b0, b1, a1, x, y;
 } Filter;
 
-void filter_init_low_pass(Filter* f, size_t sample_rate, float cutoff) {
-    float c = (float)sample_rate / (cutoff * PI);
-    float a0 = 1.0f / (1.0f + c);
-
-    f->b0 = a0;
-    f->b1 = a0;
-    f->a1 = (1.0f - c) * a0;
-    f->prev_x = 0.0f;
-    f->prev_y = 0.0f;
+static void high_pass(Filter *f, double rate, double cutoff) {
+    double c = rate / (cutoff * PI);
+    double a0 = 1 / (1 + c);
+    *f = (Filter){(float)(c * a0), (float)(-c * a0), (float)((1 - c) * a0), 0, 0};
 }
 
-void filter_init_high_pass(Filter* f, size_t sample_rate, float cutoff) {
-    float c = (float)sample_rate / (cutoff * PI);
-    float a0 = 1.0f / (1.0f + c);
-
-    f->b0 = c * a0;
-    f->b1 = -c * a0;
-    f->a1 = (1.0f - c) * a0;
-    f->prev_x = 0.0f;
-    f->prev_y = 0.0f;
+static void low_pass(Filter *f, double rate, double cutoff) {
+    double c = rate / (cutoff * PI);
+    double a0 = 1 / (1 + c);
+    *f = (Filter){(float)a0, (float)a0, (float)((1 - c) * a0), 0, 0};
 }
 
-float filter_output(Filter* f, float x) {
-    float y = f->b0 * x + f->b1 * f->prev_x - f->a1 * f->prev_y;
-    f->prev_x = x;
-    f->prev_y = y;
-
+static float filter(Filter *f, float x) {
+    float y = f->b0 * x + f->b1 * f->x - f->a1 * f->y;
+    f->x = x;
+    f->y = y;
     return y;
 }
 
-// APU
+// The APU
 
-static size_t sample_rate;
-static Pulse pulse1, pulse2;
+static Pulse pulse[2];
 static Triangle triangle;
 static Noise noise;
-static DeltaModulationChannel dmc;
-static Filter filter1, filter2, filter3;
-static size_t frame_counter;
+static uint8_t dmc_level;
+static Filter filters[3];
+static uint32_t rate;
+static int64_t now;             // CPU cycles since apu_init
+static int64_t sample_count;    // samples rendered since apu_init
+static float mixed;             // the mixer's output at `now`
+static float integrator;
+// The frame sequencer (https://www.nesdev.org/wiki/APU_Frame_Counter).
+static bool five_step;
+static int64_t sequence_start;
+static int sequence_step;
+static int64_t next_sequence;
+// Frames of register writes (apu.h) are taken every rate / 60 samples.
+static int64_t frame_index;
+static int64_t next_frame;
 
-// The frames of register writes waiting for the synthesizer: a single
-// producer (the game, once per frame) and a single consumer (apu_render, on
-// the audio thread natively, or in the AudioWorklet on the web).
+static const int64_t SEQUENCE_STEPS[5] = {7457, 14913, 22371, 29829, 37281};
+
+static int64_t sample_cycle(int64_t sample) {
+    return sample * CPU_HZ / rate;
+}
+
+static void schedule_sequence(void) {
+    next_sequence = sequence_start + SEQUENCE_STEPS[sequence_step];
+}
+
+static void clock_quarter(void) {
+    envelope_clock(&pulse[0].envelope);
+    envelope_clock(&pulse[1].envelope);
+    envelope_clock(&noise.envelope);
+    if (triangle.reload) triangle.linear = triangle.linear_period;
+    else if (triangle.linear > 0) triangle.linear--;
+    if (!triangle.control) triangle.reload = false;
+}
+
+static void clock_half(void) {
+    for (int i = 0; i < 2; i++) {
+        if (!pulse[i].halt && pulse[i].length > 0) pulse[i].length--;
+        pulse_clock_sweep(&pulse[i]);
+    }
+    if (!triangle.control && triangle.length > 0) triangle.length--;
+    if (!noise.halt && noise.length > 0) noise.length--;
+}
+
+static void sequence_clock(void) {
+    // 4-step: E, EL, E, EL; 5-step: E, EL, E, -, EL (E: envelopes and the
+    // triangle's linear counter; L: lengths and sweeps)
+    int last = five_step ? 4 : 3;
+    bool quarter = sequence_step != 3 || !five_step;
+    bool half = sequence_step == 1 || sequence_step == last;
+    if (quarter) clock_quarter();
+    if (half) clock_half();
+    if (sequence_step == last) {
+        sequence_start += SEQUENCE_STEPS[last] + 1;
+        sequence_step = 0;
+    } else {
+        sequence_step++;
+    }
+    schedule_sequence();
+}
+
+static void write_register(uint8_t reg, uint8_t value) {
+    if (reg < 8) {
+        Pulse *p = &pulse[reg >> 2];
+        switch (reg & 3) {
+            case 0:
+                p->duty = value >> 6;
+                p->halt = p->envelope.loop = (value & 0x20) != 0;
+                p->envelope.constant = (value & 0x10) != 0;
+                p->envelope.volume = value & 0x0f;
+                break;
+            case 1:
+                p->sweep_enabled = (value & 0x80) != 0;
+                p->sweep_period = (value >> 4) & 7;
+                p->sweep_negate = (value & 0x08) != 0;
+                p->sweep_shift = value & 7;
+                p->sweep_reload = true;
+                break;
+            case 2:
+                p->period = (uint16_t)((p->period & 0x700) | value);
+                if (p->next == NEVER) pulse_schedule(p, now);
+                break;
+            case 3:
+                p->period = (uint16_t)((p->period & 0xff) | ((value & 7) << 8));
+                if (p->enabled) p->length = LENGTH_TABLE[value >> 3];
+                p->step = 0;
+                p->envelope.start = true;
+                if (p->next == NEVER) pulse_schedule(p, now);
+                break;
+        }
+        return;
+    }
+    switch (reg) {
+        case 0x08:
+            triangle.control = (value & 0x80) != 0;
+            triangle.linear_period = value & 0x7f;
+            break;
+        case 0x0a:
+            triangle.period = (uint16_t)((triangle.period & 0x700) | value);
+            if (triangle.next == NEVER) triangle_schedule(&triangle, now);
+            break;
+        case 0x0b:
+            triangle.period = (uint16_t)((triangle.period & 0xff) | ((value & 7) << 8));
+            if (triangle.enabled) triangle.length = LENGTH_TABLE[value >> 3];
+            triangle.reload = true;
+            if (triangle.next == NEVER) triangle_schedule(&triangle, now);
+            break;
+        case 0x0c:
+            noise.halt = noise.envelope.loop = (value & 0x20) != 0;
+            noise.envelope.constant = (value & 0x10) != 0;
+            noise.envelope.volume = value & 0x0f;
+            break;
+        case 0x0e:
+            noise.mode = (value & 0x80) != 0;
+            noise.period = NOISE_PERIOD_TABLE[value & 0x0f];
+            break;
+        case 0x0f:
+            if (noise.enabled) noise.length = LENGTH_TABLE[value >> 3];
+            noise.envelope.start = true;
+            break;
+        case 0x11:
+            dmc_level = value & 0x7f;
+            break;
+        case 0x15:
+            pulse[0].enabled = (value & 1) != 0;
+            pulse[1].enabled = (value & 2) != 0;
+            triangle.enabled = (value & 4) != 0;
+            noise.enabled = (value & 8) != 0;
+            if (!pulse[0].enabled) pulse[0].length = 0;
+            if (!pulse[1].enabled) pulse[1].length = 0;
+            if (!triangle.enabled) triangle.length = 0;
+            if (!noise.enabled) noise.length = 0;
+            break;
+        case 0x17:
+            // resets the sequencer; 5-step mode clocks everything at once
+            five_step = (value & 0x80) != 0;
+            sequence_start = now;
+            sequence_step = 0;
+            schedule_sequence();
+            if (five_step) {
+                clock_quarter();
+                clock_half();
+            }
+            break;
+        default:
+            break; // the DMC's sample playback ($4010, $4012-$4013) is unused
+    }
+}
+
+// The non-linear mixer (https://www.nesdev.org/wiki/APU_Mixer).
+static float mix(void) {
+    float pulses = (float)(pulse_level(&pulse[0]) + pulse_level(&pulse[1]));
+    float pulse_out = pulses == 0 ? 0 : 95.88f / (8128.0f / pulses + 100.0f);
+    float t = TRIANGLE_SEQUENCE[triangle.step] / 8227.0f;
+    float n = noise_level(&noise) / 12241.0f;
+    float d = dmc_level / 22638.0f;
+    float tnd = t + n + d;
+    float tnd_out = tnd == 0 ? 0 : 159.79f / (1.0f / tnd + 100.0f);
+    return pulse_out + tnd_out;
+}
+
+// After any change: a band-limited step to the new level at `now`.
+static void update_output(void) {
+    float level = mix();
+    float delta = level - mixed;
+    if (delta == 0) return;
+    mixed = level;
+    double position = (double)now * rate / CPU_HZ; // in samples
+    int64_t index = (int64_t)floor_(position);
+    int phase = (int)((position - (double)index) * BLIP_PHASES);
+    const float *k = kernel[phase];
+    // one sample later: a cycle at the start of a render can map to the
+    // previous sample, which was already output
+    for (int i = 0; i < BLIP_TAPS; i++) blip[(index + 1 + i) & (BLIP_SIZE - 1)] += delta * k[i];
+}
+
+// The queue of frames of register writes (apu.h): a single producer (the
+// game, once per frame) and a single consumer (apu_render).
 #define QUEUE_FRAMES 8
 #define MAX_LATENCY_FRAMES 3
 
@@ -669,152 +422,7 @@ static uint32_t queue_tail; // next slot the consumer reads
 // frame that fits, so no write is ever dropped.
 static QueuedFrame pending;
 
-void apu_init(size_t frequency) {
-    pulse_init(&pulse1);
-    pulse_init(&pulse2);
-    triangle_init(&triangle);
-    noise_init(&noise);
-    dmc_init(&dmc);
-
-    sample_rate = frequency;
-    frame_counter = 0;
-    queue_head = queue_tail = 0;
-    pending.count = 0;
-
-    filter_init_high_pass(&filter1, sample_rate, 90.0f);
-    filter_init_high_pass(&filter2, sample_rate, 440.0f);
-    filter_init_low_pass(&filter3, sample_rate, 14000.0f);
-}
-
-static inline float clamp(float d, float min, float max) {
-  const float t = d < min ? min : d;
-  return t > max ? max : t;
-}
-
-uint8_t apu_get_sample(void) {
-    // https://www.nesdev.org/wiki/APU_Mixer
-    uint8_t p1 = pulse_output(&pulse1);
-    uint8_t p2 = pulse_output(&pulse2);
-    uint8_t t = triangle_output(&triangle);
-    uint8_t n = noise_output(&noise);
-    uint8_t d = dmc_output(&dmc);
-
-    float pulse_out = PULSE_MIXER_LOOKUP[p1 + p2];
-    float triangle_out = TRIANGLE_MIXER_LOOKUP[3 * t + 2 * n + d];
-    float sample = pulse_out + triangle_out;
-
-    sample = filter_output(&filter1, sample);
-    sample = filter_output(&filter2, sample);
-    sample = filter_output(&filter3, sample);
-
-    // normalize to [0, 1] (constants found by running the game and measuring the output)
-    sample = clamp((sample + 0.325022f) * 1.5792998016399449f, 0.0f, 1.0f);
-
-    return (uint8_t)(255.0f * sample);
-}
-
-// A register write, applied to the synthesizer.
-static void apu_apply(uint16_t addr, uint8_t value) {
-    switch (addr) {
-        // Pulse 1
-        case 0x4000: {
-            pulse_write_control(&pulse1, value);
-            break;
-        }
-        case 0x4001: {
-            pulse_write_sweep(&pulse1, value);
-            break;
-        }
-        case 0x4002: {
-            pulse_write_reload_low(&pulse1, value);
-            break;
-        }
-        case 0x4003: {
-            pulse_write_reload_high(&pulse1, value);
-            break;
-        }
-        // Pulse 2
-        case 0x4004: {
-            pulse_write_control(&pulse2, value);
-            break;
-        }
-        case 0x4005: {
-            pulse_write_sweep(&pulse2, value);
-            break;
-        }
-        case 0x4006: {
-            pulse_write_reload_low(&pulse2, value);
-            break;
-        }
-        case 0x4007: {
-            pulse_write_reload_high(&pulse2, value);
-            break;
-        }
-        // Triangle
-        case 0x4008: {
-            triangle_write_setup(&triangle, value);
-            break;
-        }
-        case 0x4009: {
-            break;
-        }
-        case 0x400A: {
-            triangle_write_timer_low(&triangle, value);
-            break;
-        }
-        case 0x400B: {
-            triangle_write_timer_high(&triangle, value);
-            break;
-        }
-        // Noise
-        case 0x400C: {
-            noise_write_control(&noise, value);
-            break;
-        }
-        case 0x400E: {
-            noise_write_period(&noise, value);
-            break;
-        }
-        case 0x400F: {
-            noise_write_length(&noise, value);
-            break;
-        }
-        case 0x400D: {
-            break;
-        }
-        // DMC
-        case 0x4010: {
-            dmc_write_control(&dmc, value);
-            break;
-        }
-        case 0x4011: {
-            dmc_write_output(&dmc, value);
-            break;
-        }
-        case 0x4012: {
-            dmc_write_sample_addr(&dmc, value);
-            break;
-        }
-        case 0x4013: {
-            dmc_write_sample_len(&dmc, value);
-            break;
-        }
-        // Control
-        case 0x4015: {
-            pulse_set_enabled(&pulse1, (value & 1) != 0);
-            pulse_set_enabled(&pulse2, (value & 2) != 0);
-            triangle_set_enabled(&triangle, (value & 4) != 0);
-            noise_set_enabled(&noise, (value & 8) != 0);
-            dmc_set_enabled(&dmc, (value & 16) != 0);
-            dmc_clear_interrupt_flag(&dmc);
-            break;
-        }
-        // Frame counter
-        case 0x4017: {
-            break;
-        }
-    }
-}
+uint32_t apu_applied_writes; // for tests
 
 void apu_push_frame(const uint8_t *events, size_t count) {
     for (size_t i = 0; i < count && pending.count < APU_FRAME_EVENTS_MAX; i++) {
@@ -832,12 +440,10 @@ void apu_push_frame(const uint8_t *events, size_t count) {
     __atomic_store_n(&queue_head, head + 1, __ATOMIC_RELEASE);
 }
 
-uint32_t apu_applied_writes; // for tests
-
 static void apply_frame(const QueuedFrame *frame) {
     apu_applied_writes += frame->count;
     for (uint16_t i = 0; i < frame->count; i++) {
-        apu_apply((uint16_t)(0x4000 + frame->events[2 * i]), frame->events[2 * i + 1]);
+        write_register(frame->events[2 * i], frame->events[2 * i + 1]);
     }
 }
 
@@ -856,80 +462,96 @@ static void take_frame(void) {
     __atomic_store_n(&queue_tail, tail + 1, __ATOMIC_RELEASE);
 }
 
-void apu_step_timer(void) {
-    pulse_step_timer(&pulse1);
-    pulse_step_timer(&pulse2);
-    triangle_step_timer(&triangle);
-    noise_step_timer(&noise);
-    dmc_step_timer(&dmc);
+void apu_init(size_t sample_rate) {
+    memset(pulse, 0, sizeof pulse);
+    memset(&triangle, 0, sizeof triangle);
+    memset(&noise, 0, sizeof noise);
+    memset(blip, 0, sizeof blip);
+    pulse[0].ones_complement = true;
+    pulse[0].next = pulse[1].next = triangle.next = noise.next = NEVER;
+    noise.shift = 1;
+    noise.period = NOISE_PERIOD_TABLE[0];
+    dmc_level = 0;
+    rate = (uint32_t)sample_rate;
+    now = 0;
+    sample_count = 0;
+    mixed = 0;
+    integrator = 0;
+    five_step = false;
+    sequence_start = 0;
+    sequence_step = 0;
+    schedule_sequence();
+    frame_index = 0;
+    next_frame = 0;
+    queue_head = queue_tail = 0;
+    pending.count = 0;
+    kernel_init(0.45);
+    high_pass(&filters[0], rate, 90);
+    high_pass(&filters[1], rate, 440);
+    low_pass(&filters[2], rate, 14000);
 }
 
-void apu_step_envelope(void) {
-    pulse_step_envelope(&pulse1);
-    pulse_step_envelope(&pulse2);
-    triangle_step_linear_counter(&triangle);
+static void noise_schedule(int64_t t) {
+    // The shift register only matters while the channel sounds.
+    noise.next = noise.enabled && noise.length > 0 ? t + noise.period : NEVER;
 }
 
-void apu_step_length_counter(void) {
-    pulse_step_length_counter(&pulse1);
-    pulse_step_length_counter(&pulse2);
-    triangle_step_length_counter(&triangle);
-    noise_step_length_counter(&noise);
-}
-
-void apu_step_sweep(void) {
-    pulse_step_sweep(&pulse1);
-    pulse_step_sweep(&pulse2);
-}
-
-#define CYCLES_PER_QUARTER (CPU_FREQUENCY / FRAME_RATE / 4)
-
-// The frame sequencer (https://www.nesdev.org/wiki/APU_Frame_Counter),
-// clocked four times per frame.
-static void apu_step_sequencer(void) {
-    frame_counter = (frame_counter + 1) % 5;  // TODO: confirm 4-step never used
-    if (frame_counter & 1) {
-        apu_step_envelope();
-    } else {
-        apu_step_length_counter();
-        apu_step_envelope();
-        apu_step_sweep();
+// Everything that happens before CPU cycle `end`, in order.
+static void run_until(int64_t end) {
+    for (;;) {
+        int64_t t = next_frame;
+        if (next_sequence < t) t = next_sequence;
+        if (pulse[0].next < t) t = pulse[0].next;
+        if (pulse[1].next < t) t = pulse[1].next;
+        if (triangle.next < t) t = triangle.next;
+        if (noise.next < t) t = noise.next;
+        if (t >= end) return;
+        now = t;
+        if (t == next_frame) {
+            take_frame();
+            frame_index++;
+            next_frame = sample_cycle(frame_index * rate / FRAME_RATE);
+        }
+        if (t == next_sequence) sequence_clock();
+        for (int i = 0; i < 2; i++) {
+            if (pulse[i].next == t) {
+                pulse[i].step = (pulse[i].step + 1) & 7;
+                pulse_schedule(&pulse[i], t);
+            }
+        }
+        if (triangle.next == t) {
+            if (triangle.linear > 0 && triangle.length > 0) triangle.step = (triangle.step + 1) & 31;
+            triangle_schedule(&triangle, t);
+        }
+        if (noise.next == t) {
+            uint16_t feedback = (noise.shift ^ (noise.shift >> (noise.mode ? 6 : 1))) & 1;
+            noise.shift = (uint16_t)((noise.shift >> 1) | (feedback << 14));
+            noise_schedule(t);
+        }
+        if (noise.next == NEVER && noise.enabled && noise.length > 0) noise_schedule(t);
+        update_output();
     }
 }
 
-// Rendering resumes where the previous call stopped: within a quarter frame,
-// the channel timers advance at the CPU clock and every
-// CYCLES_PER_QUARTER / samples_this_quarter cycles a sample is taken.
-static uint32_t quarter;      // 0-3 within the frame
-static size_t quarter_cycle;  // cycles done in this quarter
-static size_t quarter_acc;
-static size_t quarter_samples;
-static bool in_quarter;
+#define CHUNK 512
+// About the previous output's loudness; the replay peaks at 0.85.
+#define GAIN 3.2f
 
-void apu_render(uint8_t *out, size_t count) {
-    size_t produced = 0;
-    while (produced < count) {
-        if (!in_quarter) {
-            if (quarter == 0) take_frame();
-            apu_step_sequencer();
-            size_t per_quarter = sample_rate / (4 * FRAME_RATE);
-            quarter_samples = quarter == 3 ? sample_rate / FRAME_RATE - 3 * per_quarter : per_quarter;
-            quarter_cycle = 0;
-            quarter_acc = 0;
-            in_quarter = true;
+void apu_render(float *out, size_t count) {
+    while (count > 0) {
+        size_t chunk = count < CHUNK ? count : CHUNK;
+        run_until(sample_cycle(sample_count + (int64_t)chunk));
+        for (size_t i = 0; i < chunk; i++) {
+            size_t slot = (size_t)(sample_count + (int64_t)i) & (BLIP_SIZE - 1);
+            integrator += blip[slot];
+            blip[slot] = 0;
+            float s = integrator;
+            for (int f = 0; f < 3; f++) s = filter(&filters[f], s);
+            s *= GAIN;
+            out[i] = s > 1 ? 1 : s < -1 ? -1 : s;
         }
-        while (quarter_cycle < CYCLES_PER_QUARTER && produced < count) {
-            quarter_acc += quarter_samples;
-            if (quarter_acc >= CYCLES_PER_QUARTER) {
-                quarter_acc -= CYCLES_PER_QUARTER;
-                out[produced++] = apu_get_sample();
-            }
-            apu_step_timer();
-            quarter_cycle++;
-        }
-        if (quarter_cycle == CYCLES_PER_QUARTER) {
-            in_quarter = false;
-            quarter = (quarter + 1) & 3;
-        }
+        sample_count += (int64_t)chunk;
+        out += chunk;
+        count -= chunk;
     }
 }

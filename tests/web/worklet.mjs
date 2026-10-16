@@ -33,6 +33,7 @@ const scope = {
     sampleRate: RATE,
     WebAssembly,
     Uint8Array,
+    Float32Array,
 };
 vm.runInNewContext(fs.readFileSync(path.join(root, 'web/audio-worklet.js'), 'utf8'), scope);
 const processor = new Processor({
@@ -74,7 +75,7 @@ function fnv(hash, values) {
     return hash;
 }
 
-const samples = new Uint8Array(FRAMES * FRAME_SAMPLES + QUANTUM);
+const samples = new Int16Array(FRAMES * FRAME_SAMPLES + QUANTUM);
 let rendered = 0;
 const output = [[new Float32Array(QUANTUM)]];
 gameFrame(0);
@@ -82,10 +83,10 @@ for (let frame = 0; frame < FRAMES; frame++) {
     if (frame + 1 < FRAMES) gameFrame(frame + 1);
     while (rendered < (frame + 1) * FRAME_SAMPLES) {
         processor.process([], output);
-        // the processor maps byte b to b / 255 * 2 - 1
-        for (const value of output[0][0]) samples[rendered++] = Math.round((value + 1) / 2 * 255);
+        // as 16-bit values, like ./hash
+        for (const value of output[0][0]) samples[rendered++] = Math.floor(value * 32767 + 0.5);
     }
-    const hash = fnv(2166136261, samples.subarray(frame * FRAME_SAMPLES, (frame + 1) * FRAME_SAMPLES));
+    const hash = fnv(2166136261, new Uint8Array(samples.buffer, frame * FRAME_SAMPLES * 2, FRAME_SAMPLES * 2));
     if (hash.toString(16).padStart(8, '0') !== expected[frame].split(' ')[1]) {
         console.log(`AudioWorklet samples diverge from tests/golden/warpless.audio at frame ${frame}`);
         process.exit(1);

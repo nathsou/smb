@@ -69,7 +69,9 @@ function audioHashes() {
     const writes = u32(wasm.apu_write_hash.value);
     wasm.sound_end_frame();
     wasm.apu_render(wasm.apu_output.value, FRAME_SAMPLES);
-    const samples = fnv(2166136261, view().subarray(wasm.apu_output.value, wasm.apu_output.value + FRAME_SAMPLES));
+    const quantised = Int16Array.from(new Float32Array(memory.buffer, wasm.apu_output.value, FRAME_SAMPLES),
+        value => Math.floor(value * 32767 + 0.5));
+    const samples = fnv(2166136261, new Uint8Array(quantised.buffer));
     return `${writes.toString(16).padStart(8, '0')} ${samples.toString(16).padStart(8, '0')}`;
 }
 

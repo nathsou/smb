@@ -4,4 +4,4 @@
 #include "apu.h"
 
 uint8_t apu_input[APU_FRAME_EVENTS_MAX * 2];
-uint8_t apu_output[4096];
+float apu_output[4096];

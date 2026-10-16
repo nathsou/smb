@@ -21,8 +21,8 @@
 void apu_init(size_t sample_rate);
 // events: (register - $4000, value) pairs
 void apu_push_frame(const uint8_t *events, size_t count);
-// 8-bit unsigned samples, centred on 128
-void apu_render(uint8_t *out, size_t count);
+// Samples in [-1, 1].
+void apu_render(float *out, size_t count);
 // Register writes applied so far (tests).
 extern uint32_t apu_applied_writes;
 
