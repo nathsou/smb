@@ -70,7 +70,9 @@ shows next to the game (SHOW CODE; the map tab is editable and recompiles).
 1. Install a recent `clang` with the `wasm32` target and MoonBit (see Codegen)
 2. Run `make web`
 3. Serve the `web/` folder over HTTP and open `index.html`
-4. Load a legally obtained dump of SMB; it stays in your browser
+4. Load a legally obtained dump of SMB, an iNES file or a raw dump of the
+   cartridge; it stays in your browser. An unrecognised dump (by SHA-256)
+   still loads, with a warning
 
 DEBUG TILES draws with generated placeholder tiles instead of the ROM's, and
 `?software` in the URL selects the software renderer instead of WebGL2.
@@ -84,7 +86,8 @@ $ curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s '0.10.9+6e6c4
 ```
 
 2. Place your `smb.nes` in the root folder and run `make codegen`; the C goes
-   to `codegen/game/` (not in the repository)
+   to `codegen/game/` (not in the repository). A raw dump of the cartridge
+   (no iNES header) works too: `make codegen ROM=smb.bin`
 
 The game is recompiled from the ROM image and `maps/smb.map`, which gives the
 routines, tables and variables this project's own names (see

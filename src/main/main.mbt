@@ -35,7 +35,9 @@ fn run() -> Unit raise Error {
   let program = if rom_path != "" {
     let map_path = option("--map", "")
     if map_path == "" { fail("--rom needs --map") }
-    @pipeline.from_rom(@fs.read_file_to_bytes(rom_path), @fs.read_file_to_string(map_path))
+    let (program, warning) = @pipeline.from_rom(@fs.read_file_to_bytes(rom_path), @fs.read_file_to_string(map_path))
+    if warning is Some(text) { println("Warning: \{text}") }
+    program
   } else {
     let input = option("--input", "")
     if input == "" { fail("Give --rom and --map, or --input") }

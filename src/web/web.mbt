@@ -3,10 +3,12 @@
 // once the outputs are ready to read with the other functions.
 
 let last : Ref[@pipeline.Output?] = Ref(None)
+let last_warning : Ref[String] = Ref("")
 
 // `layout`: "name address" lines, the runtime module's addresses.
 pub fn recompile(rom : Bytes, map : String, native : String, layout : String) -> String {
   last.val = None
+  last_warning.val = ""
   let addresses : Map[String, Int] = Map([])
   for line in layout.split("\n") {
     let fields = line.split(" ").filter(fn(f) { !f.is_empty() }).map(fn(f) { f.to_owned() }).to_array()
@@ -15,13 +17,19 @@ pub fn recompile(rom : Bytes, map : String, native : String, layout : String) ->
     }
   }
   try {
-    let program = @pipeline.from_rom(rom, map)
+    let (program, warning) = @pipeline.from_rom(rom, map)
+    last_warning.val = warning.unwrap_or("")
     let options = { ..@pipeline.Options::default(), native: @pipeline.parse_names(native), wasm: true, layout: addresses }
     last.val = Some(@pipeline.recompile(program, options))
     ""
   } catch {
     @pipeline.PipelineError(message) => message
   }
+}
+
+// "" when the ROM is one the map was written for (or the map names none).
+pub fn warning() -> String {
+  last_warning.val
 }
 
 pub fn wasm() -> Bytes {

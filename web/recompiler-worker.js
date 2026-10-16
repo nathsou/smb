@@ -2,7 +2,7 @@
 // `moon build --target js`) off the main thread.
 //
 // Message in:  { rom: Uint8Array, map, native, layout } (strings)
-// Message out: { wasm: Uint8Array, files: [{ name, contents }], ms }
+// Message out: { wasm: Uint8Array, files: [{ name, contents }], warning, ms }
 //          or: { error }
 import * as recompiler from './recompiler.js';
 
@@ -18,5 +18,6 @@ self.onmessage = ({ data: { rom, map, native, layout } }) => {
         files.push({ name: recompiler.file_name(i), contents: recompiler.file_contents(i) });
     }
     const wasm = recompiler.wasm().slice();
-    self.postMessage({ wasm, files, ms: performance.now() - start }, [wasm.buffer]);
+    const warning = recompiler.warning();
+    self.postMessage({ wasm, files, warning, ms: performance.now() - start }, [wasm.buffer]);
 };

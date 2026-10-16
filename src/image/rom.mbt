@@ -30,8 +30,18 @@ pub(all) struct MapEntry {
   description: String
 } derive(Debug)
 
+// A dump the map was written for, identified by the SHA-256 of its PRG
+// and CHR ROM (without any iNES header, so headered and raw dumps agree).
+pub(all) struct KnownRom {
+  sha256: String
+  prg: Int // bytes
+  chr: Int
+  label: String
+} derive(Debug)
+
 pub(all) struct RomMap {
   entries: Array[MapEntry]
+  roms: Array[KnownRom]
 } derive(Debug)
 
 fn parse_number(text: String) -> Int raise ImageError {
@@ -42,6 +52,7 @@ fn parse_number(text: String) -> Int raise ImageError {
 
 pub fn parse_map(text: String) -> RomMap raise ImageError {
   let entries = []
+  let roms = []
   let names: Set[String] = Set([])
   for raw_line in text.split("\n") {
     let line = raw_line.to_owned()
@@ -52,6 +63,12 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
     let body = match body.find("#") { Some(i) => body.view(end_offset=i).to_owned(); None => body }
     let fields = body.split(" ").filter(fn(f) { !f.is_empty() }).map(fn(f) { f.trim().to_owned() }).to_array()
     if fields.is_empty() { continue }
+    // rom SHA256 PRG_BYTES CHR_BYTES ; label
+    if fields[0] == "rom" {
+      if fields.length() != 4 || fields[1].length() != 64 { raise InvalidImage("Map rom line needs a SHA-256 and the PRG and CHR sizes: \{line}") }
+      roms.push({ sha256: fields[1].to_lower(), prg: parse_number(fields[2]), chr: parse_number(fields[3]), label: description })
+      continue
+    }
     if fields.length() < 3 { raise InvalidImage("Map line needs a kind, an address and a name: \{line}") }
     let kind = match fields[0] {
       "routine" => Routine
@@ -68,13 +85,60 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
     if kind == Table && length <= 0 { raise InvalidImage("Table \{name} needs a length") }
     entries.push({ kind, address, name, length, description })
   }
-  { entries, }
+  { entries, roms }
 }
 
 pub(all) struct Cartridge {
   prg: Array[Int]
   chr: Array[Int]
 } derive(Debug)
+
+pub(all) struct Dump {
+  cartridge: Cartridge
+  sha256: String // of PRG and CHR, without a header
+  headered: Bool
+} derive(Debug)
+
+// A cartridge from an iNES file, or from a raw dump of the cartridge's ROMs
+// (PRG then CHR, no header). A raw dump is split by the sizes of a dump the
+// map knows of the same length, or as 16 or 32 KiB of PRG and 8 KiB of CHR.
+pub fn load_dump(bytes: Bytes, map: RomMap) -> Dump raise ImageError {
+  let headered = bytes.length() >= 4 && bytes[0] == b'N' && bytes[1] == b'E' && bytes[2] == b'S' && bytes[3] == b'\x1a'
+  let cartridge = if headered {
+    load_ines(bytes)
+  } else {
+    let size = bytes.length()
+    let prg_size = match map.roms.iter().find_first(fn(r) { r.prg + r.chr == size }) {
+      Some(known) => known.prg
+      None =>
+        if size == 0x6000 || size == 0xa000 {
+          size - 0x2000
+        } else {
+          raise InvalidImage("Not an iNES file, nor a raw NROM dump (24 or 40 KiB): \{size} bytes")
+        }
+    }
+    if prg_size != 16384 && prg_size != 32768 { raise InvalidImage("NROM needs 16 or 32 KiB of PRG ROM") }
+    {
+      prg: Array::makei(prg_size, fn(i) { bytes[i].to_int() }),
+      chr: Array::makei(size - prg_size, fn(i) { bytes[prg_size + i].to_int() }),
+    }
+  }
+  let contents = cartridge.prg.copy()
+  contents.append(cartridge.chr)
+  { cartridge, sha256: sha256(contents), headered }
+}
+
+// The dump the map describes, if this is one of them.
+pub fn RomMap::identify(self: RomMap, dump: Dump) -> KnownRom? {
+  self.roms.iter().find_first(fn(r) { r.sha256 == dump.sha256 })
+}
+
+// A warning when the map names known dumps and this is none of them.
+pub fn RomMap::warning(self: RomMap, dump: Dump) -> String? {
+  if self.roms.is_empty() || self.identify(dump) is Some(_) { return None }
+  let expected = self.roms.map(fn(r) { if r.label == "" { r.sha256 } else { r.label } }).join(", ")
+  Some("Unrecognised ROM (SHA-256 of PRG and CHR \{dump.sha256}). The map was written for \{expected}: names may not match and the game may not work.")
+}
 
 // iNES file with mapper 0 (NROM): 16 or 32 KiB of PRG ROM, 8 KiB of CHR ROM.
 pub fn load_ines(bytes: Bytes) -> Cartridge raise ImageError {

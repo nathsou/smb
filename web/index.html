@@ -116,6 +116,16 @@
         }
 
         .hint { color: var(--dim); font-size: 8px; line-height: 14px; text-align: center; }
+        .warning {
+            max-width: 560px;
+            margin: 0;
+            padding: 8px 12px;
+            border: 2px solid var(--coin);
+            color: var(--coin);
+            font-size: 8px;
+            line-height: 14px;
+        }
+        .warning[hidden] { display: none; }
 
         #code {
             flex: 1 1 50%;
@@ -319,6 +329,7 @@
     </header>
     <main>
         <section id="screen">
+            <p class="warning" id="rom-warning" hidden></p>
             <p class="hint" id="controls">WASD MOVE · K B · L A · ENTER START · SPACE SELECT · Z SAVE · X LOAD</p>
         </section>
         <section id="code"></section>
@@ -328,7 +339,8 @@
             <h2>INSERT CARTRIDGE</h2>
             <p>This page recompiles Super Mario Bros. from your own copy of the
                game into WebAssembly and C, in your browser.</p>
-            <p>Load a legally obtained iNES dump (<code>.nes</code>, mapper 0) or drop it here.
+            <p>Load a legally obtained dump, an iNES file (<code>.nes</code>) or a raw dump of
+               the cartridge, or drop it here.
                It stays on this device.</p>
             <div class="actions">
                 <button id="dialog-load">LOAD ROM</button>

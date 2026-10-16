@@ -2,6 +2,7 @@ import { createGpuRenderer } from './gpu.js';
 import { link } from './link.js';
 import { createViewer } from './viewer.js';
 import * as store from './store.js';
+import { splitDump } from './cartridge.js';
 
 const SCREEN_WIDTH = 256;
 const SCREEN_HEIGHT = 240;
@@ -262,19 +263,12 @@ function readUint16(buffer, ptr) {
     return buffer[ptr] + buffer[ptr + 1] * 256;
 }
 
-// iNES: CHR ROM follows the PRG banks.
 function chrOf(rom) {
-    const start = 16 + (rom[6] & 4 ? 512 : 0) + rom[4] * 0x4000;
-    return rom.subarray(start, start + 8192);
+    return splitDump(rom).chr;
 }
 
 function checkRom(rom) {
-    if (rom.length < 16 || rom[0] !== 0x4e || rom[1] !== 0x45 || rom[2] !== 0x53 || rom[3] !== 0x1a) {
-        throw new Error('This is not an iNES file.');
-    }
-    if ((rom[6] >> 4 | (rom[7] & 0xf0)) !== 0 || rom[4] < 1 || rom[4] > 2) {
-        throw new Error('Only mapper 0 (NROM) games are supported.');
-    }
+    splitDump(rom); // throws with the reason
 }
 
 // The ROM: from storage, or asked for (file picker or drop).
@@ -311,7 +305,7 @@ function pickFile() {
     return new Promise(resolve => {
         const input = document.createElement('input');
         input.type = 'file';
-        input.accept = '.nes';
+        input.accept = '.nes,.bin,.rom';
         input.onchange = () => input.files[0] && resolve(input.files[0]);
         input.click();
     });
@@ -340,9 +334,16 @@ async function build(inputs, viewer) {
         worker.postMessage({ rom: inputs.rom, map: inputs.map, native: inputs.native, layout: inputs.layout });
     });
     viewer.setStatus(`RECOMPILED IN ${(result.ms / 1000).toFixed(1)} S: ${(result.wasm.length / 1024).toFixed(0)} KB OF WEBASSEMBLY`);
-    const entry = { wasm: result.wasm, files: result.files };
+    const entry = { wasm: result.wasm, files: result.files, warning: result.warning };
     await store.put('builds', key, entry);
     return entry;
+}
+
+// A ROM the map was not written for still runs, with a warning.
+function showWarning(text) {
+    const warning = document.getElementById('rom-warning');
+    warning.textContent = text ? text.toUpperCase() : '';
+    warning.hidden = !text;
 }
 
 // Generated files in reading order, then the hand-written display code.
@@ -445,6 +446,7 @@ async function main() {
             const layoutText = Object.entries(layout).map(([name, address]) => `${name} ${address}`).join('\n');
             const result = await build({ rom, map, native, layout: layoutText, version }, viewer);
             files = result.files;
+            showWarning(result.warning);
             return result.wasm;
         }, rom);
 

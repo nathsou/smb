@@ -5,6 +5,11 @@
 # tables that follow calls to the dispatcher), and var/io name RAM and
 # hardware registers; a length makes an array. The names are this
 # project's own.
+#
+# The dump the map was written for: SHA-256 of PRG then CHR ROM, without the
+# iNES header (so it matches headered and raw dumps), and their sizes. It is
+# the dump tests/golden/warpless.trace was recorded with.
+rom fcb6a0ef3a20c19b356005fbb21dc8009563b1cb5a9aaebc8e9386b4a8c5912e 32768 8192 ; Super Mario Bros. (NES)
 
 # Hardware registers
 io $2000 ppu_ctrl

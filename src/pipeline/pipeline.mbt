@@ -7,11 +7,13 @@ fn fail(stage : String, err : Error) -> PipelineError {
   PipelineError("\{stage}: \{@debug.to_string(err)}")
 }
 
-// A program discovered from an iNES image and a map.
-pub fn from_rom(rom : Bytes, map_text : String) -> @image.Program raise PipelineError {
+// A program discovered from a ROM (an iNES file or a raw dump) and a map,
+// with a warning when the map was written for other dumps.
+pub fn from_rom(rom : Bytes, map_text : String) -> (@image.Program, String?) raise PipelineError {
   try {
     let map = @image.parse_map(map_text)
-    @image.discover_rom(@image.rom_image(@image.load_ines(rom), map), map)
+    let dump = @image.load_dump(rom, map)
+    (@image.discover_rom(@image.rom_image(dump.cartridge, map), map), map.warning(dump))
   } catch {
     err => raise fail("ROM", err)
   }

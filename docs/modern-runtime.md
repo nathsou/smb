@@ -29,6 +29,15 @@ io $4015 apu_status
   tables after each call to the dispatcher (nothing else marks where those
   instruction streams stop).
 - `var`/`io`: RAM and hardware registers; a length makes an array.
+- `rom`: a dump the map was written for, by the SHA-256 of its PRG then CHR
+  ROM (without a header) and their sizes.
+
+The recompiler accepts an iNES file or a raw dump of the cartridge (PRG then
+CHR, no header; split by the sizes of a known dump of the same length, or as
+16 or 32 KiB of PRG and 8 KiB of CHR). Both hash the same. A dump the map
+does not name still recompiles, with a warning (on the command line, and
+under the game on the page), since its code may differ from what the names
+describe.
 
 Data names become upper-case address constants (`ram[GAME_MODE]`,
 `ROM(VRAM_LISTS_LOW + y)`), so they never collide with functions, struct

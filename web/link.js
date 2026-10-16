@@ -1,3 +1,5 @@
+import { splitDump } from './cartridge.js';
+
 // Links the two WebAssembly modules of the game into one memory:
 //
 // - the runtime, compiled from the C runtime (video, audio, the native display
@@ -57,16 +59,10 @@ export function runtimeLayout(runtime) {
     return Object.fromEntries(MACHINE_STATE.map(name => [name, runtime[name].value]));
 }
 
-// iNES with mapper 0: 16 or 32 KiB of PRG ROM after the header (and a
-// trainer, if any). A 16 KiB image appears twice.
+// The PRG banks of an iNES file or raw dump; a 16 KiB image appears twice.
 export function loadPrg(memory, address, rom) {
-    if (rom[0] !== 0x4e || rom[1] !== 0x45 || rom[2] !== 0x53 || rom[3] !== 0x1a) {
-        throw new Error('Not an iNES file');
-    }
-    const banks = rom[4];
-    const start = 16 + (rom[6] & 4 ? 512 : 0);
-    const prg = rom.subarray(start, start + banks * 0x4000);
+    const { prg } = splitDump(rom);
     const view = new Uint8Array(memory.buffer, address, 0x8000);
     view.set(prg);
-    if (banks === 1) view.set(prg, 0x4000);
+    if (prg.length === 0x4000) view.set(prg, 0x4000);
 }
