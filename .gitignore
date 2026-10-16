@@ -17,10 +17,5 @@ smb.dSYM
 *.dot
 *.svg
 *.sav
-3ds/build
-3ds/*.3dsx
-3ds/*.elf
-3ds/*.smdh
-3ds/source/chr_rom.h
 _build/
 codegen/prg.bin
