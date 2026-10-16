@@ -1,0 +1,18 @@
+#ifndef SMB_PPU_BUS_H
+#define SMB_PPU_BUS_H
+
+#include <stdint.h>
+#include "video.h"
+
+// NES PPU register interface ($2000-$2007, OAM DMA at $4014) on top of the
+// Video state, for generic programs that talk to the hardware registers.
+// SMB's build does not link it: its display code writes Video directly, so
+// any register access left in its generated code is a link error.
+
+extern uint8_t oam_addr;
+
+uint8_t ppu_bus_read(uint16_t addr);
+void ppu_bus_write(uint16_t addr, uint8_t value);
+void ppu_bus_oam_dma(uint8_t page);
+
+#endif

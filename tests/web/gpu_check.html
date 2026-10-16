@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>WebGL renderer check</title></head>
+<body>
+<script type="module">
+// Replays rec/warpless.rec with web/smb.wasm and the generated debug tiles,
+// and compares the WebGL renderer (web/gpu.js) with the wasm software
+// renderer pixel for pixel. Serve the repository root; see gpu_check.cjs.
+import { createGpuRenderer } from '../../web/gpu.js';
+
+const WIDTH = 256, HEIGHT = 240, FRAMES = 7987;
+const every = Number(new URLSearchParams(location.search).get('every') ?? 1);
+
+async function run() {
+    const memory = new WebAssembly.Memory({ initial: 10 });
+    const view = () => new Uint8Array(memory.buffer);
+    const { instance } = await WebAssembly.instantiateStreaming(fetch('../../web/smb.wasm'), {
+        env: {
+            memory,
+            memset: (ptr, value, num) => (view().fill(value, ptr, ptr + num), ptr),
+            memcpy: (dest, src, num) => (view().copyWithin(dest, src, src + num), dest),
+        },
+    });
+    const wasm = instance.exports;
+
+    // rec format: "frame:state" lines, each state held until the next line
+    const inputs = [];
+    for (const line of (await (await fetch('../../rec/warpless.rec')).text()).split('\n')) {
+        const match = /^(\d+):(\d+)$/.exec(line.trim());
+        if (match) inputs.push([Number(match[1]), Number(match[2])]);
+    }
+
+    wasm.cpu_init();
+    wasm.debug_chr_generate(wasm.chr_rom.value);
+    wasm.video_init(wasm.chr_rom.value);
+    wasm.render_init();
+
+    const canvas = document.createElement('canvas');
+    const gpu = await createGpuRenderer(canvas, wasm, memory, '../../web/video.frag');
+    if (gpu === null) return { error: 'WebGL2 unavailable' };
+    const gl = gpu.gl;
+    const pixels = new Uint8Array(WIDTH * HEIGHT * 4);
+
+    wasm.cpu_reset_entry();
+    let state = 0, next = 0, compared = 0, mismatched = 0, firstMismatch = -1;
+    for (let frame = 0; frame < FRAMES; frame++) {
+        while (next < inputs.length && inputs[next][0] <= frame) state = inputs[next++][1];
+        wasm.update_controller1(state);
+        wasm.next_frame();
+        if (frame % every !== 0) continue;
+
+        wasm.render_frame();
+        gpu.draw();
+        gl.readPixels(0, 0, WIDTH, HEIGHT, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        const rgb = view().subarray(wasm.frame.value, wasm.frame.value + WIDTH * HEIGHT * 3);
+        let same = true;
+        for (let y = 0; y < HEIGHT && same; y++) {
+            const row = (HEIGHT - 1 - y) * WIDTH * 4; // readPixels starts at the bottom row
+            for (let x = 0; x < WIDTH; x++) {
+                const i = (y * WIDTH + x) * 3;
+                if (pixels[row + x * 4] !== rgb[i] || pixels[row + x * 4 + 1] !== rgb[i + 1] ||
+                    pixels[row + x * 4 + 2] !== rgb[i + 2]) { same = false; break; }
+            }
+        }
+        compared++;
+        if (!same) {
+            mismatched++;
+            if (firstMismatch < 0) firstMismatch = frame;
+        }
+    }
+    return { compared, mismatched, firstMismatch, renderer: gl.getParameter(gl.RENDERER) };
+}
+
+window.result = run().catch(error => ({ error: String(error) }));
+</script>
+</body>
+</html>

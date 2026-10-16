@@ -1,5 +1,18 @@
-// Optional paths make the compiler usable with independent NROM fixtures.
-fn option(name: String, fallback: String) -> String {
+// Command line:
+//
+//   --rom FILE.nes --map FILE.map   recompile a ROM image named by a map
+//   --input FILE.asm                or assemble a source (the test fixtures)
+//   --output DIR                    where the C goes (default codegen/game)
+//   --map FILE --header FILE        only write the map's names as a C header
+//   --native FILE                   routines written by hand (see routines.txt)
+//   --reference                     the unoptimised IR (differential test)
+//   --wasm FILE                     also emit the WebAssembly game module
+//     --wasm-layout FILE            "name address" lines: the runtime's addresses
+//     --wasm-dispatch               every function as a dispatch loop
+//     --wasm-memory-vars            registers and flags in memory, not locals
+//     --wasm-no-inline              no inlining of small routines
+
+fn option(name : String, fallback : String) -> String {
   let args = @env.args()
   for i in 0..<(args.length() - 1) {
     if args[i] == name { return args[i + 1] }
@@ -7,94 +20,65 @@ fn option(name: String, fallback: String) -> String {
   fallback
 }
 
-
-suberror PipelineError {
-  IOError(String)
-  LexerError(@parse.LexerError)
-  ParserError(@parse.ParserError)
-  LoweringError(@lower.LoweringError)
-  ImageError(@image.ImageError)
-} derive(Debug)
-
-fn read_rom() -> String raise PipelineError {
-  try @fs.read_file_to_string(option("--input", "src/smb.asm")) catch {
-    err => raise IOError(Show::to_string(err))
-  } noraise {
-    assembly => assembly
-  }
+fn flag(name : String) -> Bool {
+  @env.args().contains(name)
 }
-
-fn tokenize() -> Array[@parse.Token] raise PipelineError {
-  let assembly = read_rom()
-  let lexer = @parse.Lexer::new(assembly)
-
-  try lexer.tokenize() catch {
-    err => raise LexerError(err)
-  } noraise {
-    tokens => tokens
-  }
-}
-
-fn parse() -> Array[@parse.SourceItem] raise PipelineError {
-  let tokens = tokenize()
-  let parser = @parse.Parser::new(tokens)
-
-  try parser.parse() catch {
-    err => raise ParserError(err)
-  } noraise {
-    instructions => instructions
-  }
-}
-
-fn lower() -> @lower.AsmLowering raise PipelineError {
-  let instructions = parse()
-  let program = try @image.discover(@image.assemble(instructions)) catch {
-    error => raise ImageError(error)
-  }
-  try program.validate_stacks() catch { error => raise ImageError(error) }
-  let lowering = @lower.AsmLowering::new(program.source, program=Some(program))
-  try lowering.lower() catch {
-    err => raise LoweringError(err)
-  } noraise {
-    _ => lowering
-  }
-}
-
-fn transpile() -> @transpile.Transpiler raise PipelineError {
-  let low = lower()
-  @transpile.Transpiler::transpile(low)
-}
-
-let output_dir: String = option("--output", "codegen")
-let lib_output_dir: String = "\{output_dir}/lib"
 
 fn run() -> Unit raise Error {
-  if !@fs.path_exists(output_dir) {
-    @fs.create_dir(output_dir)
+  let header_path = option("--header", "")
+  if header_path != "" {
+    let map_path = option("--map", "")
+    @fs.write_string_to_file(header_path, @pipeline.map_header(@fs.read_file_to_string(map_path), source=map_path))
+    return
   }
-
-  if !@fs.path_exists(lib_output_dir) {
-    @fs.create_dir(lib_output_dir)
+  let rom_path = option("--rom", "")
+  let program = if rom_path != "" {
+    let map_path = option("--map", "")
+    if map_path == "" { fail("--rom needs --map") }
+    let (program, warning) = @pipeline.from_rom(@fs.read_file_to_bytes(rom_path), @fs.read_file_to_string(map_path))
+    if warning is Some(text) { println("Warning: \{text}") }
+    program
+  } else {
+    let input = option("--input", "")
+    if input == "" { fail("Give --rom and --map, or --input") }
+    @pipeline.from_assembly(@fs.read_file_to_string(input))
   }
-
-  try transpile() catch {
-      err => {
-          println(@debug.to_string(err))
-          abort("Code generation failed")
-      }
-  } noraise {
-      tr => {
-          for file in tr.files {
-              file.write(dir=if file.is_lib { lib_output_dir } else { output_dir })
-          }
-      }
+  let native_path = option("--native", "")
+  let native = if native_path == "" { [] } else { @pipeline.parse_names(@fs.read_file_to_string(native_path)) }
+  let layout : Map[String, Int] = Map([])
+  let layout_path = option("--wasm-layout", "")
+  if layout_path != "" {
+    for line in @fs.read_file_to_string(layout_path).split("\n") {
+      let fields = line.split(" ").filter(fn(f) { !f.is_empty() }).map(fn(f) { f.to_owned() }).to_array()
+      if fields.length() == 2 { layout[fields[0]] = @string.parse_int(fields[1]) }
+    }
+  }
+  let wasm_path = option("--wasm", "")
+  let output = @pipeline.recompile(program, {
+    native,
+    reference: flag("--reference"),
+    wasm: wasm_path != "",
+    layout,
+    force_dispatch: flag("--wasm-dispatch"),
+    memory_vars: flag("--wasm-memory-vars"),
+    inline: !flag("--wasm-no-inline"),
+  })
+  let output_dir = option("--output", "codegen/game")
+  if !@fs.path_exists(output_dir) { @fs.create_dir(output_dir) }
+  for file in output.files { file.write(dir=output_dir) }
+  if output.wasm is Some(bytes) {
+    if !output.irreducible.is_empty() {
+      println("Irreducible control flow (dispatch loop): \{output.irreducible.join(", ")}")
+    }
+    @fs.write_bytes_to_file(wasm_path, bytes)
   }
 }
 
 fn main {
   try run() catch {
     err => {
-      abort("Error: \{Show::to_string(err)}")
+      println(@debug.to_string(err))
+      abort("Code generation failed")
     }
   }
 }

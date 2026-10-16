@@ -1,0 +1,13 @@
+{
+  "is-main": false,
+  "import": [
+    "nathsou/smb/pipeline",
+    "moonbitlang/core/string"
+  ],
+  "link": {
+    "js": {
+      "exports": ["recompile", "warning", "wasm", "file_count", "file_name", "file_contents"],
+      "format": "esm"
+    }
+  }
+}

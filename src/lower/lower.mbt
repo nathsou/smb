@@ -15,6 +15,17 @@ pub(all) struct AsmLowering {
   subroutines: Array[AsmSubroutine]
   flat_subroutines: Array[AsmFlatSubroutine]
   flag_liveness: Map[Int, FlagLiveness]
+  // Flags read after each exit block by the callers of its routines.
+  mut block_flag_demands: Array[FlagLiveness]
+  // Union of the flags any caller reads after the routine returns.
+  return_flag_demands: Map[String, FlagLiveness]
+  register_liveness: Map[Int, Registers] // registers live after each instruction
+  return_register_demands: Map[String, Registers]
+  entry_register_reads: Map[String, Registers]
+  routine_register_writes: Map[String, Registers]
+  routine_flag_writes: Map[String, FlagLiveness]
+  caller_register_demands: Map[String, Registers]
+  caller_flag_demands: Map[String, FlagLiveness]
   preamble: Array[String] // source comments before the first code item
 } derive (Debug)
 
@@ -37,6 +48,15 @@ pub fn AsmLowering::new(items: Array[@parse.SourceItem], program~: @image.Progra
     subroutines: [],
     flat_subroutines: [],
     flag_liveness: {},
+    block_flag_demands: [],
+    return_flag_demands: {},
+    register_liveness: {},
+    return_register_demands: {},
+    entry_register_reads: {},
+    routine_register_writes: {},
+    routine_flag_writes: {},
+    caller_register_demands: {},
+    caller_flag_demands: {},
     preamble: [],
   }
 }
@@ -558,85 +578,82 @@ fn BasicBlock::flags_escape(self: BasicBlock) -> Bool {
 // its actual callers need at return. No assumption that a call kills every
 // flag, and no unconditional "all flags live" at internal RTS instructions.
 fn AsmLowering::collect_flag_liveness(self: AsmLowering) -> Unit {
-  let returns: Map[String, Array[Int]] = Map([])
-  for name in self.targets.subroutines {
-    let pending = [self.bb_by_label[name]]
-    let seen: Set[Int] = Set([])
-    let exits = []
-    while !pending.is_empty() {
-      let bb = pending.pop().unwrap()
-      if seen.contains(bb.id) { continue }
-      seen.add(bb.id)
-      let yields = bb.items.iter().any(fn(item) {
-        match (item, self.program) {
-          (Inst(id~, ..), Some(p)) => p.idle.contains(id)
-          _ => false
-        }
-      })
-      if bb.flags_escape() || yields { exits.push(bb.id) }
-      for link in bb.successors { pending.push(link.bb) }
-    }
-    returns[name] = exits
-  }
-  let live_in = self.basic_blocks.map(fn(_) { FlagLiveness::none() })
-  let demands = self.basic_blocks.map(fn(_) { FlagLiveness::none() })
-  for name in self.targets.subroutines {
-    let external = match self.program {
-      Some(p) => p.roots.contains(name)
-      None => name.has_suffix("__sub")
-    }
-    if external {
-      for id in returns[name] { demands[id] = FlagLiveness::all() }
-    }
-  }
-  let mut changed = true
-  while changed {
-    changed = false
-    let mut index = self.basic_blocks.length() - 1
-    while index >= 0 {
-      let bb = self.basic_blocks[index]
-      let mut live = demands[index]
-      for link in bb.successors { live = live.union(live_in[link.bb.id]) }
-      let mut i = bb.items.length() - 1
-      while i >= 0 {
-        match bb.items[i] {
-          Inst(id~, op=JSR, mode=Absolute(Ident(name~, ..)), ..) => {
-            self.flag_liveness[id] = live
-            match returns.get(name) {
-              Some(exits) => {
-                for exit in exits {
-                  let next = demands[exit].union(live)
-                  if next != demands[exit] { demands[exit] = next; changed = true }
-                }
-                live = live_in[self.bb_by_label[name].id]
-              }
-              None => live = FlagLiveness::all()
-            }
-          }
-          Inst(id~, op~, ..) => {
-            self.flag_liveness[id] = live
-            live = flag_reads(op).union(live.subtract(flag_writes(op)))
-          }
-          // The emitted helper executes the exact setup accepted by the
-          // dispatcher proof. Propagate flag demands through those operations
-          // rather than assuming every accepted helper has SMB's ASL effects.
-          JumpEngine(site~, ..) => {
-            let steps = self.program.unwrap().dispatches[site].steps
-            let mut j = steps.length() - 1
-            while j >= 0 {
-              let op = steps[j].inst.op
-              live = flag_reads(op).union(live.subtract(flag_writes(op)))
-              j -= 1
-            }
-          }
-          _ => ()
-        }
-        i -= 1
+  let returns = self.routine_exits()
+  // A root's exits (RTI, or the idle yield where interrupts are delivered)
+  // are observed only by the roots themselves: the idle loop reads no flags
+  // and the runtime restores P around interrupts. Demand there what roots
+  // read on entry, iterated to the least fixpoint.
+  let mut root_demand = FlagLiveness::none()
+  let mut demands = self.basic_blocks.map(fn(_) { FlagLiveness::none() })
+  while true {
+    let live_in = self.basic_blocks.map(fn(_) { FlagLiveness::none() })
+    demands = self.basic_blocks.map(fn(_) { FlagLiveness::none() })
+    for name in self.targets.subroutines {
+      if self.is_root(name) {
+        for id in returns[name] { demands[id] = root_demand }
       }
-      if live != live_in[index] { live_in[index] = live; changed = true }
-      index -= 1
     }
+    let mut changed = true
+    while changed {
+      changed = false
+      let mut index = self.basic_blocks.length() - 1
+      while index >= 0 {
+        let bb = self.basic_blocks[index]
+        let mut live = demands[index]
+        for link in bb.successors { live = live.union(live_in[link.bb.id]) }
+        let mut i = bb.items.length() - 1
+        while i >= 0 {
+          match bb.items[i] {
+            Inst(id~, op=JSR, mode=Absolute(Ident(name~, ..)), ..) => {
+              self.flag_liveness[id] = live
+              match returns.get(name) {
+                Some(exits) => {
+                  for exit in exits {
+                    let next = demands[exit].union(live)
+                    if next != demands[exit] { demands[exit] = next; changed = true }
+                  }
+                  live = live_in[self.bb_by_label[name].id]
+                }
+                None => live = FlagLiveness::all()
+              }
+            }
+            Inst(id~, op~, ..) => {
+              self.flag_liveness[id] = live
+              live = flag_reads(op).union(live.subtract(flag_writes(op)))
+            }
+            // The emitted helper executes the exact setup accepted by the
+            // dispatcher proof. Propagate flag demands through those operations
+            // rather than assuming every accepted helper has SMB's ASL effects.
+            JumpEngine(site~, ..) => {
+              let steps = self.program.unwrap().dispatches[site].steps
+              let mut j = steps.length() - 1
+              while j >= 0 {
+                let op = steps[j].inst.op
+                live = flag_reads(op).union(live.subtract(flag_writes(op)))
+                j -= 1
+              }
+            }
+            _ => ()
+          }
+          i -= 1
+        }
+        if live != live_in[index] { live_in[index] = live; changed = true }
+        index -= 1
+      }
+    }
+    let mut entry = FlagLiveness::none()
+    for name in self.targets.subroutines {
+      if self.is_root(name) { entry = entry.union(live_in[self.bb_by_label[name].id]) }
+    }
+    if entry == root_demand { break }
+    root_demand = entry
   }
+  self.block_flag_demands = demands
+}
+
+// Flags that callers of `name` read after it returns (all, when unknown).
+pub fn AsmLowering::return_flag_demand(self: AsmLowering, name: String) -> FlagLiveness {
+  self.return_flag_demands.get(name).unwrap_or(FlagLiveness::all())
 }
 
 pub fn AsmLowering::flag_live_after(self: AsmLowering, id: Int) -> FlagLiveness {
@@ -841,6 +858,7 @@ pub fn AsmLowering::lower(self: AsmLowering) -> Unit raise LoweringError {
   self.collect_basic_blocks()
   self.collect_flag_liveness()
   self.collect_subroutines()
+  self.collect_register_liveness()
   self.collect_flat_subroutines()
 
   // @fs.write_string_to_file(path="cfg.dot", content=self.cfg_dotfile())

@@ -3,26 +3,351 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SMB</title>
-</head>
-<body>
+    <title>SMB Recompiled</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --bg: #0b0b17;
+            --panel: #000000;
+            --ink: #fcfcfc;
+            --dim: #7c7c7c;
+            --brick: #c84c0c;
+            --brick-dark: #881400;
+            --sky: #5c94fc;
+            --coin: #fcbc3c;
+            --pipe: #58d854;
+            --pink: #f8b8f8;
+            --salmon: #f87858;
+            --blue: #3cbcfc;
+            --lime: #b8f818;
+            --orange: #fca044;
+            --ice: #a4e4fc;
+            --pixel: 'Press Start 2P', monospace;
+            --code: 'VT323', ui-monospace, monospace;
+        }
+
+        * { box-sizing: border-box; }
+
         html, body {
             margin: 0;
-            padding: 0;
             height: 100%;
-            width: 100%;
+            background: var(--bg);
+            color: var(--ink);
+            font-family: var(--pixel);
+            font-size: 10px;
+        }
+
+        body {
             display: flex;
-            justify-content: center;
+            flex-direction: column;
+        }
+
+        header {
+            display: flex;
             align-items: center;
-            background-color: rgb(10, 10, 10);
+            gap: 12px;
+            padding: 8px 16px;
+            background: var(--brick);
+            border-bottom: 4px solid var(--brick-dark);
+            box-shadow: inset 0 -2px 0 #fc9838;
+            flex-wrap: wrap;
         }
 
-        canvas {
+        header h1 {
+            margin: 0 auto 0 0;
+            font-size: 12px;
+            letter-spacing: 1px;
+            text-shadow: 2px 2px 0 #000;
+            white-space: nowrap;
+        }
+
+        header h1 small {
+            color: var(--coin);
+            font-size: 8px;
+        }
+
+        button, .button {
+            font-family: var(--pixel);
+            font-size: 9px;
+            color: var(--ink);
+            background: var(--panel);
+            border: 2px solid var(--ink);
+            padding: 6px 10px;
+            cursor: pointer;
+            box-shadow: 2px 2px 0 #000;
+        }
+
+        button:hover:not(:disabled), .button:hover { background: var(--ink); color: var(--panel); }
+        button:disabled { opacity: 0.4; cursor: default; }
+        button[hidden] { display: none; }
+
+        label.toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 8px;
+            cursor: pointer;
+        }
+
+        main {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            gap: 16px;
+            padding: 16px;
+        }
+
+        #screen {
+            flex: 1 1 50%;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+        }
+
+        #screen canvas {
             image-rendering: pixelated;
+            border: 4px solid var(--ink);
+            box-shadow: 6px 6px 0 #000;
         }
-    </style>
 
+        .hint { color: var(--dim); font-size: 8px; line-height: 14px; text-align: center; }
+        .warning {
+            max-width: 560px;
+            margin: 0;
+            padding: 8px 12px;
+            border: 2px solid var(--coin);
+            color: var(--coin);
+            font-size: 8px;
+            line-height: 14px;
+        }
+        .warning[hidden] { display: none; }
+
+        #code {
+            flex: 1 1 50%;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        body.code-hidden #code { display: none; }
+
+        @media (max-width: 900px) {
+            main { flex-direction: column; }
+            #code { min-height: 60vh; }
+        }
+
+        /* overlay dialog */
+        #dialog {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.75);
+            z-index: 10;
+        }
+
+        #dialog[hidden] { display: none; }
+
+        #dialog .box {
+            max-width: 560px;
+            margin: 16px;
+            padding: 24px;
+            background: var(--panel);
+            border: 4px solid var(--ink);
+            box-shadow: 8px 8px 0 var(--brick-dark);
+            line-height: 18px;
+        }
+
+        #dialog h2 { margin: 0 0 16px; font-size: 12px; color: var(--coin); }
+        #dialog p { margin: 0 0 14px; }
+        #dialog .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 18px; }
+        #dialog.dragging .box { border-color: var(--coin); }
+
+        /* the code viewer (viewer.js) */
+        .viewer {
+            background: var(--panel);
+            border: 4px solid var(--ink);
+            box-shadow: 6px 6px 0 #000;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            flex: 1;
+        }
+
+        .viewer .tabs {
+            display: flex;
+            overflow-x: auto;
+            border-bottom: 2px solid var(--ink);
+            background: #1a1a2e;
+        }
+
+        .viewer .tab {
+            border: none;
+            border-right: 2px solid var(--ink);
+            box-shadow: none;
+            background: transparent;
+            padding: 8px 12px;
+            white-space: nowrap;
+            font-size: 8px;
+        }
+
+        .viewer .tab.active { background: var(--panel); color: var(--coin); }
+        .viewer .tab.editable::after { content: ' *'; color: var(--pipe); }
+        .viewer .tab:hover:not(.active) { background: #2a2a44; color: var(--ink); }
+
+        .viewer .toolbar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 8px;
+            border-bottom: 2px solid #2a2a44;
+        }
+
+        .viewer .toolbar .spacer { flex: 1; }
+        .viewer .tool { font-size: 8px; padding: 4px 8px; box-shadow: none; }
+        .viewer .tool.action:not(:disabled) { border-color: var(--pipe); color: var(--pipe); }
+        .viewer .tool.action:hover:not(:disabled) { background: var(--pipe); color: #000; }
+
+        .viewer .search {
+            font-family: var(--code);
+            font-size: 18px;
+            width: 180px;
+            padding: 0 6px;
+            color: var(--ink);
+            background: #000;
+            border: 2px solid var(--dim);
+            outline: none;
+        }
+
+        .viewer .search:focus { border-color: var(--coin); }
+        .viewer .search-info { font-size: 8px; color: var(--dim); white-space: nowrap; }
+
+        .viewer .body { flex: 1; min-height: 0; position: relative; }
+
+        .viewer .viewport {
+            position: absolute;
+            inset: 0;
+            overflow: auto;
+            font-family: var(--code);
+            font-size: 18px;
+            line-height: 18px;
+            outline: none;
+        }
+
+        .viewer .lines { position: absolute; left: 0; min-width: 100%; padding: 4px 0; }
+        .viewer .line { white-space: pre; height: 18px; padding-right: 16px; }
+        .viewer .no { display: inline-block; color: #3c3c5c; padding: 0 12px 0 8px; user-select: none; }
+        .viewer mark { background: var(--coin); color: #000; }
+
+        .viewer .editor {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            font-family: var(--code);
+            font-size: 18px;
+            line-height: 18px;
+        }
+
+        .viewer .gutter {
+            margin: 0;
+            padding: 4px 12px 4px 8px;
+            color: #3c3c5c;
+            text-align: right;
+            overflow: hidden;
+            user-select: none;
+            font: inherit;
+        }
+
+        .viewer .layers { position: relative; flex: 1; overflow: hidden; }
+
+        .viewer .highlight, .viewer .source {
+            position: absolute;
+            inset: 0;
+            margin: 0;
+            padding: 4px 16px 4px 0;
+            font: inherit;
+            white-space: pre;
+            tab-size: 8;
+        }
+
+        .viewer .highlight { pointer-events: none; }
+
+        .viewer .source {
+            width: 100%;
+            height: 100%;
+            resize: none;
+            border: none;
+            outline: none;
+            background: transparent;
+            color: transparent;
+            caret-color: var(--coin);
+            overflow: auto;
+        }
+
+        .viewer .source::selection { background: rgba(252, 188, 60, 0.35); }
+
+        .viewer .status {
+            padding: 6px 8px;
+            border-top: 2px solid #2a2a44;
+            font-size: 8px;
+            color: var(--dim);
+            min-height: 22px;
+        }
+
+        .viewer .status.error { color: var(--salmon); }
+        .viewer .status.busy { color: var(--coin); }
+
+        .comment { color: var(--dim); }
+        .keyword { color: var(--salmon); }
+        .type { color: var(--blue); }
+        .const { color: var(--coin); }
+        .number { color: var(--lime); }
+        .string { color: var(--orange); }
+        .machine { color: var(--pipe); }
+        .call { color: var(--pink); cursor: pointer; }
+        .call:hover { text-decoration: underline; }
+        .label { color: var(--orange); }
+        .pre { color: var(--ice); }
+        .kind-routine { color: var(--pink); }
+        .kind-table { color: var(--orange); }
+        .kind-var { color: var(--blue); }
+        .kind-io { color: var(--ice); }
+    </style>
+</head>
+<body class="code-hidden">
+    <header>
+        <h1>SUPER MARIO BROS. <small>RECOMPILED</small></h1>
+        <label class="toggle"><input type="checkbox" id="debug-tiles"> DEBUG TILES</label>
+        <button id="load-rom">LOAD ROM</button>
+        <button id="toggle-code">SHOW CODE</button>
+    </header>
+    <main>
+        <section id="screen">
+            <p class="warning" id="rom-warning" hidden></p>
+            <p class="hint" id="controls">WASD MOVE · K B · L A · ENTER START · SPACE SELECT · Z SAVE · X LOAD</p>
+        </section>
+        <section id="code"></section>
+    </main>
+    <div id="dialog" hidden>
+        <div class="box">
+            <h2>INSERT CARTRIDGE</h2>
+            <p>This page recompiles Super Mario Bros. from your own copy of the
+               game into WebAssembly and C, in your browser.</p>
+            <p>Load a legally obtained dump, an iNES file (<code>.nes</code>) or a raw dump of
+               the cartridge, or drop it here.
+               It stays on this device.</p>
+            <div class="actions">
+                <button id="dialog-load">LOAD ROM</button>
+            </div>
+            <p class="hint" id="dialog-error"></p>
+        </div>
+    </div>
     <script src="index.js" type="module"></script>
 </body>
 </html>

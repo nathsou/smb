@@ -3,6 +3,7 @@ target/
 used_insts.txt
 smb
 hash
+gpu_check
 smb.wasm
 web/*.nes
 *.nes
@@ -16,10 +17,14 @@ smb.dSYM
 *.dot
 *.svg
 *.sav
-3ds/build
-3ds/*.3dsx
-3ds/*.elf
-3ds/*.smdh
-3ds/source/chr_rom.h
 _build/
 codegen/prg.bin
+__pycache__/
+web/game.wasm
+web/runtime.wasm
+web/layout.txt
+web/recompiler.js
+web/smb.map
+web/routines.txt
+web/display.c
+codegen/game/

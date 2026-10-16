@@ -1,17 +1,17 @@
-name: Build and Deploy WASM
+name: Check and deploy
 
 on:
   push:
     branches:
-      - '**'  # Matches all branches
+      - '**'
   pull_request:
     branches:
-      - main  # Also run on PRs targeting main
+      - main
 permissions:
   contents: write
 
 jobs:
-  check-codegen:
+  check:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -21,37 +21,46 @@ jobs:
         run: |
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s '0.10.9+6e6c44045'
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
-      - name: Resolve MoonBit dependencies
-        run: moon update
-      - name: Check analysis, independent NROM, native semantics, and generated files
-        run: python3 tests/check_codegen.py
-
-  build-and-deploy:
-    needs: check-codegen
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup LLVM and Clang
+      - name: Install clang with the wasm32 target
         run: |
           sudo apt-get update
           sudo apt-get install -y llvm clang lld
+      - name: Resolve MoonBit dependencies
+        run: moon update
+      # No ROM here: the recompiled game is checked locally with
+      # `python3 tests/check_codegen.py --rom`.
+      - name: Analysis tests, fixtures through both backends, map header, runtime
+        run: python3 tests/check_codegen.py
 
-      - name: Build WASM
-        run: make wasm
-
+  build-and-deploy:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tested MoonBit toolchain
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s '0.10.9+6e6c44045'
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+      - name: Install clang with the wasm32 target
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm clang lld
+      - name: Resolve MoonBit dependencies
+        run: moon update
+      # The page recompiles the player's ROM in the browser.
+      - name: Build the page
+        run: make web
       - name: Prepare deployment
         run: |
           mkdir -p dist
-          cp -r web/* dist/
-          
+          cp web/*.html web/*.js web/*.frag web/runtime.wasm web/smb.map web/routines.txt web/display.c dist/
       - name: Deploy to GitHub Pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: JamesIves/github-pages-deploy-action@v4
         with:
           folder: dist
           branch: gh-pages
-          clean: true  # Automatically remove deleted files from the deploy branch
+          clean: true
+          # keep no history of earlier deployments on gh-pages
+          single-commit: true
           token: ${{ secrets.GITHUB_TOKEN }}

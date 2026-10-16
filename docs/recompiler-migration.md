@@ -1,5 +1,11 @@
 # Recompiling the original disassembly
 
+> The disassembly is no longer in the repository: the game is now recompiled
+> from the ROM with this project's own names (see
+> [modern-runtime.md](modern-runtime.md#recompiling-from-the-rom)). These
+> notes describe the analysis as it was developed on the assembly input,
+> which the generator still accepts for the test fixtures.
+
 This work starts at `2143a91`. `src/smb.asm` now matches the original checked-in
 assembly, `3988359:src/smb.asm`, byte for byte. Its SHA-256 is
 `e5c17c42783f430029ab90aa37c73d51c2c320898e533b3ff196dad38c50ae42`.
@@ -157,10 +163,10 @@ and `collect_flag_liveness` in `src/lower/lower.mbt`.
 
 The reset loop no longer needs to be replaced by an interrupt return. A proven
 self-jump in the reset region yields to the host with its guest PC recorded.
-The frame adapter invokes the vector-derived NMI entry and saves/restores PC/P
-on the guest stack. Normal JSRs likewise materialize their original return
-address bytes; the return helper checks and consumes them. Tail transfers do
-not create a fictitious guest call frame.
+The frame adapter invokes the vector-derived NMI entry and restores the status
+flags afterwards, as RTI would. Normal JSRs are plain C calls (see below); only
+the inline-table dispatchers push the return address they read. Tail transfers
+do not create a fictitious guest call frame.
 
 Static per-entry stack checking rejects negative/unbalanced data depth,
 unrecognized return-token pops, stack-pointer replacement in called routines,
@@ -190,9 +196,10 @@ indexed destinations use the bus, which handles RAM/PPU mirrors, OAM DMA,
 controller strobe, and APU writes. Zero-page indexing and indirect pointers wrap
 at 8 bits; absolute indexed addresses retain their index.
 
-The native instruction layer now supplies all documented instruction/addressing
-forms, ADC/SBC overflow, BIT overflow, and PHP/PLP status behavior. NES decimal
-status is retained while arithmetic remains binary. The independent NROM-128
+The generated C covers all documented instruction/addressing forms, ADC/SBC
+overflow, BIT overflow, and PHP/PLP status behavior (see
+[modern-runtime.md](modern-runtime.md); the instruction-helper layer has been
+removed). NES decimal status is retained while arithmetic remains binary. The independent NROM-128
 fixture exercises these address distinctions without SMB names.
 
 ## Readability and provenance
@@ -205,11 +212,11 @@ are placed above its C function; comments before the first routine form the
 file header. Generic dispatch setup is shared rather than repeated at every
 call site.
 
-JSRs are emitted as `CALL(routine, return_address)`, which pushes the original
-return address on the guest stack and checks it on return. Programs that never
-observe return addresses can build with `-DNATIVE_CALLS` (for example
-`make hash EXTRA_CFLAGS=-DNATIVE_CALLS`) to make these plain C calls; SMB
-produces the same replay hash either way.
+JSRs were first emitted as `CALL(routine, return_address)`, which pushed the
+original return address on the guest stack and checked it on return. SMB
+produced the same replay with plain C calls, and the static stack checks above
+already reject programs that inspect return addresses outside a proven
+dispatcher, so JSRs are now plain C calls.
 
 Compared with the generated C at `2143a91`:
 
@@ -255,9 +262,10 @@ required to annotate this source:
    Such execution currently reports an error. Add that support and test another
    independently licensed whole game, not only this authored fixture.
 5. **Timing and rendering.** Replace the frame adapter with resumable foreground
-   execution and scheduled PPU/NMI/IRQ events. The PPU still has an optional SMB
-   status-bar adapter; cycle accuracy, RMW bus timing, cartridge RAM, and general
-   mapper support are outside this PR. Compiler portability alone does not make
+   execution and scheduled PPU/NMI/IRQ events. SMB's display code now writes
+   the display state directly (see [modern-runtime.md](modern-runtime.md)) and
+   the renderer splits the status bar from that state; cycle accuracy, RMW bus
+   timing, cartridge RAM, and general mapper support are outside this PR. Compiler portability alone does not make
    the current renderer a general NES implementation.
 6. **Differential semantic coverage.** Extend independent instruction tests to
    randomized blocks and compare complete CPU/memory state against a trusted

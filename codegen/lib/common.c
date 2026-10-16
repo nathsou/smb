@@ -41,7 +41,8 @@ int read_chr_rom(char *rom_path) {
         return 1;
     }
 
-    ppu_init(chr_rom);
+    video_init(chr_rom);
+    render_init();
     
     fclose(input_file);
 

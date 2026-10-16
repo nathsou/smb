@@ -10,7 +10,7 @@ int main(void) {
     assert(ram[0x10] == 0 && ram[0x11] == 1);
     assert(ram[0x15] == 0 && ram[0x16] == 1);
     assert(ram[0x12] == 8 && ram[0x13] == 5);
-    assert(oam[0x21] == 0x42 && oam_addr == 0x22);
+    assert(video.oam[0x21] == 0x42 && oam_addr == 0x22);
     assert(sp == 0xff);
     assert(read_byte(0x8000) == read_byte(0xc000));
     assert(read_byte(0xbffc) == read_byte(0xfffc));
