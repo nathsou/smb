@@ -47,10 +47,30 @@ fn parse() -> Array[@parse.SourceItem] raise PipelineError {
   }
 }
 
-fn lower() -> @lower.AsmLowering raise PipelineError {
-  let instructions = parse()
-  let program = try @image.discover(@image.assemble(instructions)) catch {
+// --rom FILE.nes --map FILE.map: recompile a ROM image named by a map
+// instead of assembling --input.
+fn rom_program(rom_path: String) -> @image.Program raise PipelineError {
+  let map_path = option("--map", "")
+  if map_path == "" { raise IOError("--rom needs --map") }
+  let bytes = try @fs.read_file_to_bytes(rom_path) catch { err => raise IOError(Show::to_string(err)) }
+  let map_text = try @fs.read_file_to_string(map_path) catch { err => raise IOError(Show::to_string(err)) }
+  try {
+    let map = @image.parse_map(map_text)
+    @image.discover_rom(@image.rom_image(@image.load_ines(bytes), map), map)
+  } catch {
     error => raise ImageError(error)
+  }
+}
+
+fn lower() -> @lower.AsmLowering raise PipelineError {
+  let rom_path = option("--rom", "")
+  let program = if rom_path != "" {
+    rom_program(rom_path)
+  } else {
+    let instructions = parse()
+    try @image.discover(@image.assemble(instructions)) catch {
+      error => raise ImageError(error)
+    }
   }
   try program.validate_stacks() catch { error => raise ImageError(error) }
   let lowering = @lower.AsmLowering::new(program.source, program=Some(program))

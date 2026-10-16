@@ -8,6 +8,43 @@ Each step is checked to preserve
 the game state on every frame of the replay, and every generated routine is
 compared against the previous output.
 
+## Recompiling from the ROM
+
+The game is generated from the ROM image itself (`--rom smb.nes --map
+maps/smb.map`, used by `make codegen`), not from a disassembly. The map holds
+what execution from the vectors cannot recover, and the names this project
+gives to the program:
+
+```
+routine $8e04 dispatch                  ; jump through the address table that follows the call, indexed by A
+table $8218 game_mode_tasks 8
+var $0770 game_mode
+var $0780 timers 36
+io $4015 apu_status
+```
+
+- `routine`: an entry point, emitted as a C function of that name. Routines
+  not in the map get generated names, as do internal labels (`loc_8e19`).
+- `table`: data inside PRG ROM with its length, including the inline jump
+  tables after each call to the dispatcher (nothing else marks where those
+  instruction streams stop).
+- `var`/`io`: RAM and hardware registers; a length makes an array.
+
+Data names become upper-case address constants (`ram[GAME_MODE]`,
+`ROM(VRAM_LISTS_LOW + y)`), so they never collide with functions, struct
+fields or library names. The front end decodes the image with the same
+exploration as assembly input and rebuilds the source view the lowering
+consumes, choosing for each operand an array or a scalar at the same address
+depending on whether the access is indexed. An indexed read just before a
+table is written as that table minus an offset (`ROM((DEMO_BUTTONS - 1) + x)`).
+
+The names and descriptions are this project's own. Code generated from the
+ROM and from the disassembly were checked identical in behaviour (per-frame
+trace, ROM framebuffer hash and the routine-level differential test pairing
+routines by address). `tests/nrom128.map` names the independent NROM fixture,
+which `tests/check_fixtures.py` also recompiles from an iNES image built from
+its assembly.
+
 ## Oracles
 
 ### ROM-free replay and per-frame state hash
@@ -69,7 +106,7 @@ Every generated function is annotated with its interface, for example
 
 ```c
 // in: x, y; out: a, carry
-void GetObjRelativePosition(void) {
+void screen_position(void) {
 ```
 
 Inputs are registers read before being written; outputs are registers and
@@ -93,16 +130,16 @@ bodies are written by hand. The generator emits their prototypes and, in place
 of the body, the contract the replacement must keep:
 
 ```c
-// InitializeNameTables: native implementation, not generated.
+// clear_screens: native implementation, not generated.
 // It may read: none.
 // It must produce: y.
 ```
 
 ## Display without a PPU register model
 
-The routines that drove the PPU registers (`Start`,
-`NonMaskableInterrupt`, `UpdateScreen`, `InitScroll`, `WritePPUReg1`,
-`InitializeNameTables`, `WriteNTAddr`, `DrawTitleScreen`) are now C in
+The routines that drove the PPU registers (`reset`,
+`frame_interrupt`, `apply_vram_list`, `set_scroll`, `set_ppu_ctrl`,
+`clear_screens`, `clear_screen`, `draw_title_screen`) are now C in
 `codegen/native/display.c`. Instead of a shared write latch, an
 auto-incrementing VRAM address, a buffered data port and vblank / sprite 0
 polling loops, they update a `Video` struct (`codegen/lib/video.h`):
@@ -140,8 +177,8 @@ The generator now writes each instruction as C over the register and flag
 variables, updating only the flags that are live afterwards:
 
 ```c
-a = ram[SavedJoypad1Bits]; // check to see if start is pressed
-a &= Start_Button; zero_flag = a == 0; // on controller 1
+a = ram[JOYPAD1];
+a &= 0x10; zero_flag = a == 0;
 ```
 
 Operands are classified from their address range: provable RAM becomes a
@@ -162,8 +199,8 @@ assignment when the register is dead after the store and the load's flags are
 dead. In SMB this applies to 668 pairs:
 
 ```c
-ram[GamePauseTimer] = 0x2b; // set pause timer
-ram[PrimaryHardMode] = ram[WorldSelectEnableFlag];
+ram[PAUSE_TIMER] = 0x2b;
+ram[HARD_MODE] = ram[WORLD_SELECT_UNLOCKED];
 ```
 
 The differential test compares registers and flags only where the routine's

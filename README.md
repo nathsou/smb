@@ -73,21 +73,25 @@ The output of the code generator is in the `codegen/` folder. To regenerate it:
 $ curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s '0.10.9+6e6c44045'
 ```
 
-2. Run `make codegen`
+2. Place your `smb.nes` in the root folder and run `make codegen`
 
-The generator accepts the original, unmodified disassembly. It assembles an
-original-address PRG image, recovers reachable instructions and callable regions,
-and emits structured C with the source comments. See the
+The game is recompiled from the ROM image and `maps/smb.map`, which gives the
+routines, tables and variables this project's own names (see
+[recompiling from the ROM](docs/modern-runtime.md#recompiling-from-the-rom)).
+The generator recovers reachable instructions and callable regions from the
+vectors and emits structured C. It also still accepts assembly input
+(`--input`). See the
 [analysis and migration notes](docs/recompiler-migration.md) for techniques,
 validation, and current NROM limitations.
 
 Run `python3 tests/check_codegen.py` for the ROM-free regression suite: generator
-tests, the NROM fixture, a replay of the recorded 7,987 frames with generated
-debug tiles checked frame by frame against `tests/golden/warpless.trace`, and a
-differential test of every generated routine (`tests/check_routines.py`). Append
-`--rom` with a local `smb.nes` to also compare PRG bytes and the original
-framebuffer hash. These checks do not require Raylib. After `make wasm`,
-`node tests/web/replay.mjs` replays the WebAssembly build the same way.
+tests, the NROM fixtures (from assembly and from an iNES image), and a replay of
+the recorded 7,987 frames with generated debug tiles checked frame by frame
+against `tests/golden/warpless.trace`. With a local `smb.nes`, append `--rom` to
+also regenerate the code, run the differential test of every generated routine
+(`tests/check_routines.py`) and check the original framebuffer hash. These
+checks do not require Raylib. After `make wasm`, `node tests/web/replay.mjs`
+replays the WebAssembly build the same way.
 
 The GPU renderers can be compared with the software renderer pixel for pixel:
 `make gpu-check && xvfb-run ./gpu_check --debug-chr` (desktop) and

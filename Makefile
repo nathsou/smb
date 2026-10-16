@@ -19,6 +19,9 @@ endif
 
 OBJECTS = raylib-quickstart/bin/Debug/libraylib.a
 
+# The game is recompiled from your own copy of the ROM.
+ROM ?= smb.nes
+
 SOURCES += codegen/lib/code.c
 SOURCES += codegen/lib/data.c
 SOURCES += codegen/lib/cpu.c
@@ -33,7 +36,7 @@ MAIN = codegen/main.c
 .PHONY: codegen clean gpu-check
 
 codegen:
-	moon run src/main -- --native codegen/native/routines.txt
+	moon run src/main -- --rom $(ROM) --map maps/smb.map --native codegen/native/routines.txt
 
 build: clean
 	$(CC) $(CFLAGS) -o smb ${MAIN} codegen/gpu.c $(SOURCES) codegen/lib/common.c $(GC_FLAGS) $(RAYLIB_FLAGS) $(OBJECTS)

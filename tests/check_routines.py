@@ -42,8 +42,8 @@ def routines(code):
 def main():
     with tempfile.TemporaryDirectory(prefix="smb-routines-") as tmp:
         tmp = pathlib.Path(tmp)
-        run("moon", "run", "src/main", "--", "--native", "codegen/native/routines.txt",
-            "--no-fold", "--output", str(tmp / "ref"))
+        run("moon", "run", "src/main", "--", "--rom", "smb.nes", "--map", "maps/smb.map",
+            "--native", "codegen/native/routines.txt", "--no-fold", "--output", str(tmp / "ref"))
         reference = (tmp / "ref/lib/code.c").read_text()
         renamed = sorted(set(FUNCTION.findall(reference)) |
                          {name for name, _ in routines(reference)} |

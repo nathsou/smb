@@ -19,3 +19,4 @@ smb.dSYM
 *.sav
 _build/
 codegen/prg.bin
+__pycache__/
