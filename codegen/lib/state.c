@@ -26,5 +26,4 @@ void load_state(uint8_t *state) {
     memcpy(video.nametable, state + SAVE_STATE_NAMETABLE_OFFSET, NAMETABLE_SIZE);
     memcpy(video.palette.u8, state + SAVE_STATE_PALETTE_OFFSET, PALETTE_SIZE);
     memcpy(video.oam, state + SAVE_STATE_OAM_OFFSET, OAM_SIZE);
-    memset(audio_buffer, 0, AUDIO_BUFFER_SIZE); // clear audio buffer
 }

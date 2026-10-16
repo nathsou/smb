@@ -64,13 +64,12 @@ wasm.apu_init(AUDIO_SAMPLE_RATE);
 game.cpu_reset_entry();
 
 const u32 = address => new DataView(memory.buffer).getUint32(address, true);
-const u16 = address => new DataView(memory.buffer).getUint16(address, true);
+const FRAME_SAMPLES = AUDIO_SAMPLE_RATE / 60;
 function audioHashes() {
     const writes = u32(wasm.apu_write_hash.value);
-    wasm.apu_step_frame();
-    const count = u16(wasm.audio_buffer_index.value);
-    const samples = fnv(2166136261, view().subarray(wasm.audio_buffer.value, wasm.audio_buffer.value + count));
-    new DataView(memory.buffer).setUint16(wasm.audio_buffer_index.value, 0, true);
+    wasm.sound_end_frame();
+    wasm.apu_render(wasm.apu_output.value, FRAME_SAMPLES);
+    const samples = fnv(2166136261, view().subarray(wasm.apu_output.value, wasm.apu_output.value + FRAME_SAMPLES));
     return `${writes.toString(16).padStart(8, '0')} ${samples.toString(16).padStart(8, '0')}`;
 }
 

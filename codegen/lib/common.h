@@ -4,7 +4,7 @@
 #include "cpu.h"
 #include "video.h"
 #include "render.h"
-#include "apu.h"
+#include "sound.h"
 #include "external.h"
 
 #define CHR_ROM_SIZE 8192 // 8KB

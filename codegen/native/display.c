@@ -13,7 +13,7 @@
 
 #include "smb.h"
 #include "../lib/cpu.h"
-#include "../lib/apu.h"
+#include "../lib/sound.h"
 #include "../lib/video.h"
 #include "../lib/external.h"
 

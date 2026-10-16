@@ -31,11 +31,12 @@ SOURCES += codegen/lib/video.c
 SOURCES += codegen/lib/render.c
 SOURCES += codegen/native/display.c
 SOURCES += codegen/lib/apu.c
+SOURCES += codegen/lib/sound.c
 SOURCES += codegen/lib/state.c
 SOURCES += codegen/lib/debug_chr.c
 MAIN = codegen/main.c
 
-.PHONY: codegen header clean gpu-check runtime-wasm game-wasm web
+.PHONY: codegen header clean gpu-check runtime-wasm apu-wasm game-wasm web
 
 # The game is recompiled from your ROM into codegen/game (not in the
 # repository).
@@ -60,10 +61,14 @@ wasm: clean
 # The split WebAssembly build: the C runtime as one module (no game code,
 # no ROM data), and the game module recompiled from the ROM, linked at load
 # time by web/link.js. Check it with `node tests/web/replay_split.mjs`.
-RUNTIME_SOURCES = codegen/lib/cpu.c codegen/lib/video.c codegen/lib/render.c codegen/lib/apu.c codegen/lib/state.c codegen/lib/debug_chr.c codegen/lib/prg.c codegen/native/display.c
+RUNTIME_SOURCES = codegen/lib/cpu.c codegen/lib/video.c codegen/lib/render.c codegen/lib/apu.c codegen/lib/apu_buffers.c codegen/lib/sound.c codegen/lib/state.c codegen/lib/debug_chr.c codegen/lib/prg.c codegen/native/display.c
 
 runtime-wasm:
 	$(CC) -O3 -ffunction-sections -fdata-sections --target=wasm32 -nostdlib -Wl,--gc-sections -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined $(EXTRA_CFLAGS) -o web/runtime.wasm $(RUNTIME_SOURCES)
+
+# The synthesizer alone, for the page's AudioWorklet (its own memory).
+apu-wasm:
+	$(CC) -O3 --target=wasm32 -nostdlib -Wl,--no-entry -Wl,--allow-undefined -Wl,--export=apu_init -Wl,--export=apu_push_frame -Wl,--export=apu_render -Wl,--export=apu_input -Wl,--export=apu_output $(EXTRA_CFLAGS) -o web/apu.wasm codegen/lib/apu.c codegen/lib/apu_buffers.c
 
 # Bakes the runtime's addresses into the game module (as the page does).
 game-wasm: runtime-wasm
@@ -72,7 +77,7 @@ game-wasm: runtime-wasm
 
 # The page: the C runtime, the recompiler compiled to JavaScript, and the
 # inputs it recompiles the player's ROM with. Serve web/ over HTTP.
-web: runtime-wasm
+web: runtime-wasm apu-wasm
 	moon build --target js --release
 	cp _build/js/release/build/web/web.js web/recompiler.js
 	cp maps/smb.map web/smb.map
@@ -83,4 +88,4 @@ hash: clean
 	$(CC) $(CFLAGS) -o hash codegen/hash.c $(SOURCES) codegen/lib/rec.c codegen/lib/common.c $(GC_FLAGS)
 
 clean:
-	rm -f smb hash gpu_check smb.wasm
+	rm -f smb hash gpu_check smb.wasm audio_queue

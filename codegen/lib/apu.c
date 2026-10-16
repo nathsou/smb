@@ -643,20 +643,33 @@ float filter_output(Filter* f, float x) {
 
 // APU
 
-size_t sample_rate;
-uint8_t audio_buffer[AUDIO_BUFFER_SIZE];
-uint8_t web_audio_buffer[AUDIO_BUFFER_SIZE];
-uint16_t audio_buffer_index;
-Pulse pulse1, pulse2;
-Triangle triangle;
-Noise noise;
-DeltaModulationChannel dmc;
-Filter filter1, filter2, filter3;
-size_t frame_counter;
-uint16_t audio_buffer_size = AUDIO_BUFFER_SIZE;
+static size_t sample_rate;
+static Pulse pulse1, pulse2;
+static Triangle triangle;
+static Noise noise;
+static DeltaModulationChannel dmc;
+static Filter filter1, filter2, filter3;
+static size_t frame_counter;
+
+// The frames of register writes waiting for the synthesizer: a single
+// producer (the game, once per frame) and a single consumer (apu_render, on
+// the audio thread natively, or in the AudioWorklet on the web).
+#define QUEUE_FRAMES 8
+#define MAX_LATENCY_FRAMES 3
+
+typedef struct {
+    uint16_t count;
+    uint8_t events[APU_FRAME_EVENTS_MAX * 2];
+} QueuedFrame;
+
+static QueuedFrame queue[QUEUE_FRAMES];
+static uint32_t queue_head; // next slot the producer fills
+static uint32_t queue_tail; // next slot the consumer reads
+// Writes not yet published because the queue was full: they join the next
+// frame that fits, so no write is ever dropped.
+static QueuedFrame pending;
 
 void apu_init(size_t frequency) {
-    memset(audio_buffer, 0, AUDIO_BUFFER_SIZE);
     pulse_init(&pulse1);
     pulse_init(&pulse2);
     triangle_init(&triangle);
@@ -664,15 +677,16 @@ void apu_init(size_t frequency) {
     dmc_init(&dmc);
 
     sample_rate = frequency;
-    audio_buffer_index = 0;
     frame_counter = 0;
+    queue_head = queue_tail = 0;
+    pending.count = 0;
 
     filter_init_high_pass(&filter1, sample_rate, 90.0f);
     filter_init_high_pass(&filter2, sample_rate, 440.0f);
     filter_init_low_pass(&filter3, sample_rate, 14000.0f);
 }
 
-inline float clamp(float d, float min, float max) {
+static inline float clamp(float d, float min, float max) {
   const float t = d < min ? min : d;
   return t > max ? max : t;
 }
@@ -699,12 +713,8 @@ uint8_t apu_get_sample(void) {
     return (uint8_t)(255.0f * sample);
 }
 
-uint32_t apu_write_hash = APU_WRITE_HASH_RESET;
-
-void apu_write(uint16_t addr, uint8_t value) {
-    apu_write_hash = (apu_write_hash ^ (addr & 0xff)) * 16777619u;
-    apu_write_hash = (apu_write_hash ^ (addr >> 8)) * 16777619u;
-    apu_write_hash = (apu_write_hash ^ value) * 16777619u;
+// A register write, applied to the synthesizer.
+static void apu_apply(uint16_t addr, uint8_t value) {
     switch (addr) {
         // Pulse 1
         case 0x4000: {
@@ -806,6 +816,46 @@ void apu_write(uint16_t addr, uint8_t value) {
     }
 }
 
+void apu_push_frame(const uint8_t *events, size_t count) {
+    for (size_t i = 0; i < count && pending.count < APU_FRAME_EVENTS_MAX; i++) {
+        pending.events[2 * pending.count] = events[2 * i];
+        pending.events[2 * pending.count + 1] = events[2 * i + 1];
+        pending.count++;
+    }
+    uint32_t head = __atomic_load_n(&queue_head, __ATOMIC_RELAXED);
+    uint32_t tail = __atomic_load_n(&queue_tail, __ATOMIC_ACQUIRE);
+    if (head - tail >= QUEUE_FRAMES) return; // full: publish with the next frame
+    QueuedFrame *slot = &queue[head % QUEUE_FRAMES];
+    memcpy(slot->events, pending.events, 2 * (size_t)pending.count);
+    slot->count = pending.count;
+    pending.count = 0;
+    __atomic_store_n(&queue_head, head + 1, __ATOMIC_RELEASE);
+}
+
+uint32_t apu_applied_writes; // for tests
+
+static void apply_frame(const QueuedFrame *frame) {
+    apu_applied_writes += frame->count;
+    for (uint16_t i = 0; i < frame->count; i++) {
+        apu_apply((uint16_t)(0x4000 + frame->events[2 * i]), frame->events[2 * i + 1]);
+    }
+}
+
+// At a frame boundary: the next frame's writes. With nothing queued (the
+// game is late) the channels keep their state; when the game is ahead, older
+// frames are applied at once so latency stays bounded.
+static void take_frame(void) {
+    uint32_t tail = __atomic_load_n(&queue_tail, __ATOMIC_RELAXED);
+    uint32_t head = __atomic_load_n(&queue_head, __ATOMIC_ACQUIRE);
+    if (head == tail) return;
+    while (head - tail > MAX_LATENCY_FRAMES) {
+        apply_frame(&queue[tail % QUEUE_FRAMES]);
+        tail++;
+    }
+    apply_frame(&queue[tail % QUEUE_FRAMES]);
+    __atomic_store_n(&queue_tail, tail + 1, __ATOMIC_RELEASE);
+}
+
 void apu_step_timer(void) {
     pulse_step_timer(&pulse1);
     pulse_step_timer(&pulse2);
@@ -832,13 +882,12 @@ void apu_step_sweep(void) {
     pulse_step_sweep(&pulse2);
 }
 
-const size_t CYCLES_PER_FRAME = CPU_FREQUENCY / FRAME_RATE;
+#define CYCLES_PER_QUARTER (CPU_FREQUENCY / FRAME_RATE / 4)
 
-void apu_step_quarter_frame(void) {
-    static size_t quarter_frame_counter = 0;
-
-    /* sequencer steps */
-    frame_counter = (frame_counter + 1) % 5;  // TODO: confirm 4‑step never used
+// The frame sequencer (https://www.nesdev.org/wiki/APU_Frame_Counter),
+// clocked four times per frame.
+static void apu_step_sequencer(void) {
+    frame_counter = (frame_counter + 1) % 5;  // TODO: confirm 4-step never used
     if (frame_counter & 1) {
         apu_step_envelope();
     } else {
@@ -846,46 +895,41 @@ void apu_step_quarter_frame(void) {
         apu_step_envelope();
         apu_step_sweep();
     }
+}
 
-    size_t cycles = CYCLES_PER_FRAME / 4;
-    size_t spf_quarter = sample_rate / (4 * FRAME_RATE);
-    size_t spf_frame = sample_rate / FRAME_RATE;
-    size_t to_write = (quarter_frame_counter == 3)
-                      ? (spf_frame - 3 * spf_quarter)
-                      : spf_quarter;
+// Rendering resumes where the previous call stopped: within a quarter frame,
+// the channel timers advance at the CPU clock and every
+// CYCLES_PER_QUARTER / samples_this_quarter cycles a sample is taken.
+static uint32_t quarter;      // 0-3 within the frame
+static size_t quarter_cycle;  // cycles done in this quarter
+static size_t quarter_acc;
+static size_t quarter_samples;
+static bool in_quarter;
 
-    size_t acc = 0;
-    for (size_t i = 0; i < cycles; ++i) {
-        acc += to_write;
-        if (acc >= cycles) {
-            acc -= cycles;
-            if (audio_buffer_index < AUDIO_BUFFER_SIZE) {
-                audio_buffer[audio_buffer_index++] = apu_get_sample();
-            }
+void apu_render(uint8_t *out, size_t count) {
+    size_t produced = 0;
+    while (produced < count) {
+        if (!in_quarter) {
+            if (quarter == 0) take_frame();
+            apu_step_sequencer();
+            size_t per_quarter = sample_rate / (4 * FRAME_RATE);
+            quarter_samples = quarter == 3 ? sample_rate / FRAME_RATE - 3 * per_quarter : per_quarter;
+            quarter_cycle = 0;
+            quarter_acc = 0;
+            in_quarter = true;
         }
-        apu_step_timer();
+        while (quarter_cycle < CYCLES_PER_QUARTER && produced < count) {
+            quarter_acc += quarter_samples;
+            if (quarter_acc >= CYCLES_PER_QUARTER) {
+                quarter_acc -= CYCLES_PER_QUARTER;
+                out[produced++] = apu_get_sample();
+            }
+            apu_step_timer();
+            quarter_cycle++;
+        }
+        if (quarter_cycle == CYCLES_PER_QUARTER) {
+            in_quarter = false;
+            quarter = (quarter + 1) & 3;
+        }
     }
-
-    quarter_frame_counter = (quarter_frame_counter + 1) & 3;
-}
-
-void apu_step_frame(void) {
-    // step the frame sequencer 4 times per frame
-    // https://www.nesdev.org/wiki/APU_Frame_Counter
-
-    for (size_t i = 0; i < 4; i++) {
-        apu_step_quarter_frame();
-    }
-}
-
-void apu_fill_buffer(uint8_t* cb_buffer, size_t size) {
-    while (audio_buffer_index < size) {
-        apu_step_quarter_frame();
-    }
-
-    size_t len = size > audio_buffer_index ? audio_buffer_index : size;
-
-    memcpy(cb_buffer, audio_buffer, len);
-    audio_buffer_index -= len;
-    memcpy(audio_buffer, audio_buffer + len, audio_buffer_index);
 }

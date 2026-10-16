@@ -20,6 +20,8 @@
 //                      writes the game made, and the samples rendered from
 //                      them at 48 kHz (one frame's worth, 800 samples)
 //   --write-audio-trace FILE  record them
+//   --audio-chunk N    render in calls of N samples (the synthesizer must
+//                      resume anywhere, as audio callbacks ask for)
 
 #define ROM_PATH "smb.nes"
 #define REC_FILE "rec/warpless.rec"
@@ -30,6 +32,7 @@
 #define EXPECTED_DEBUG_FRAME_HASH 508916200u
 #define EXPECTED_DEBUG_STATE_HASH 1794530440u
 #define AUDIO_SAMPLE_RATE 48000
+#define AUDIO_FRAME_SAMPLES (AUDIO_SAMPLE_RATE / 60)
 
 // The guest stack grows down from $01FF and never reaches below $01E0 in the
 // replay; SMB keeps variables in $0100-$013F. Between frames the stack is
@@ -108,6 +111,9 @@ int main(int argc, char **argv) {
     const char *dump = option(argc, argv, "--dump");
     const char *audio_trace_path = option(argc, argv, "--audio-trace");
     const char *write_audio_trace_path = option(argc, argv, "--write-audio-trace");
+    const char *chunk_option = option(argc, argv, "--audio-chunk");
+    size_t audio_chunk = chunk_option ? (size_t)strtoul(chunk_option, NULL, 10) : AUDIO_FRAME_SAMPLES;
+    if (audio_chunk == 0) audio_chunk = AUDIO_FRAME_SAMPLES;
 
     cpu_init();
     apu_init(AUDIO_SAMPLE_RATE);
@@ -149,9 +155,13 @@ int main(int argc, char **argv) {
         next_frame();
         render_frame();
         uint32_t writes = apu_write_hash;
-        apu_step_frame();
-        uint32_t samples = hash_bytes(HASH_OFFSET_BASIS, audio_buffer, audio_buffer_index);
-        audio_buffer_index = 0;
+        sound_end_frame();
+        uint8_t audio[AUDIO_FRAME_SAMPLES];
+        for (size_t done = 0; done < AUDIO_FRAME_SAMPLES; done += audio_chunk) {
+            size_t left = AUDIO_FRAME_SAMPLES - done;
+            apu_render(audio + done, left < audio_chunk ? left : audio_chunk);
+        }
+        uint32_t samples = hash_bytes(HASH_OFFSET_BASIS, audio, AUDIO_FRAME_SAMPLES);
         if (write_audio_trace) fprintf(write_audio_trace, "%08x %08x\n", writes, samples);
         if (audio_trace && first_audio_divergence < 0) {
             unsigned expected_writes, expected_samples;

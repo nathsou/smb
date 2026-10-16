@@ -142,7 +142,7 @@ void handle_inputs(int gamepad, GamepadMapping *mapping) {
 
 void audio_input_callback(void* output_buffer, unsigned int frames) {
     uint8_t *samples = (uint8_t*)output_buffer;
-    apu_fill_buffer(samples, (size_t)frames);
+    apu_render(samples, (size_t)frames); // on raylib's audio thread
 }
 
 void read_save_state(char *path, uint8_t *buffer) {
@@ -234,7 +234,7 @@ int main(int argc, char **argv) {
             render_frame();
             UpdateTexture(texture, frame);
         }
-        apu_step_frame();
+        sound_end_frame(); // this frame's APU writes, for the audio thread
 
         BeginDrawing();
             ClearBackground(WHITE);

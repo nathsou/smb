@@ -269,6 +269,34 @@ routine names link to their definitions), the hand-written `display.c`, and
 the map, which is editable: Recompile regenerates the game and the C with the
 edited names and restarts the game.
 
+## Sound
+
+The game drives the sound hardware by writing the APU registers and never
+reads them back, so sound is one-way: the game side (`codegen/lib/sound.c`)
+collects each frame's writes, and the synthesizer (`codegen/lib/apu.c`)
+takes them through a single-producer, single-consumer queue of frames.
+`apu_render` applies the next frame's writes at each frame boundary in
+sample time (every sample rate / 60 samples) and resumes rendering wherever
+the previous call stopped, so it serves any callback size. When the game is
+late, the channels keep sounding; when it is ahead, older frames are applied
+at once to keep latency within a few frames, and writes that do not fit the
+queue join the next frame rather than being dropped.
+
+- Desktop: the game pushes a frame per frame on the main thread; raylib's
+  audio callback renders on its own thread. (The previous code ran the APU
+  from both threads at once.)
+- Web: the synthesizer is its own small WebAssembly module (`web/apu.wasm`)
+  inside the AudioWorklet (`web/audio-worklet.js`). The page posts each
+  frame's writes, so audio no longer depends on the main thread pushing
+  samples in time. Audio can only start after a key press; the page keeps
+  the last value of every register and the worklet starts from them, so the
+  channels the game enabled at power-on are not lost.
+
+`tests/web/worklet.mjs` runs the worklet processor in Node on the recorded
+game and matches the golden samples at the browsers' 128-sample quantum;
+`./hash --audio-chunk N` checks other chunk sizes natively, and
+`tests/audio_queue.c` the queue's edges.
+
 ## Hand-written routines
 
 `--native FILE` (for SMB, `codegen/native/routines.txt`) lists routines whose
@@ -325,4 +353,3 @@ previous frame's pixels, never occurs in SMB.
   flat byte array underneath for SMB's out-of-bounds idioms.
 - The status-bar split is decided after the frame's game logic, as before;
   hardware decides it at the sprite 0 hit, earlier in the frame.
-- Audio still runs on an APU model driven by register writes.

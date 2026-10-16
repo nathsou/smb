@@ -28,3 +28,5 @@ web/smb.map
 web/routines.txt
 web/display.c
 codegen/game/
+audio_queue
+web/apu.wasm
