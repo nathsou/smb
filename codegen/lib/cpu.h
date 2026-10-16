@@ -31,6 +31,13 @@ extern uint16_t cpu_dispatch_target;
 // memory
 extern uint8_t ram[RAM_SIZE];
 
+// The game: PRG ROM (from the generated data.c, or loaded at run time into
+// prg.c's buffer) and the generated entry points.
+extern const uint8_t data[];
+extern const unsigned prg_image_size;
+void cpu_reset_entry(void);
+void cpu_nmi_entry(void);
+
 uint8_t read_byte(uint16_t addr);
 void dynamic_ram_write(uint16_t addr, uint8_t value);
 

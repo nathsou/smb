@@ -1,6 +1,4 @@
 #include "cpu.h"
-#include "data.h"
-#include "code.h"
 #ifdef PPU_BUS
 #include "ppu_bus.h" // generic programs only: tests/support/ppu_bus.c
 #endif
@@ -120,7 +118,7 @@ uint8_t read_byte(uint16_t addr) {
     }
 
     if (addr >= 0x8000) {
-        return data[(addr - 0x8000) % PRG_IMAGE_SIZE];
+        return data[(addr - 0x8000) % prg_image_size];
     }
 
     return 0;

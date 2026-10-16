@@ -27,3 +27,4 @@ web/recompiler.js
 web/smb.map
 web/routines.txt
 web/display.c
+codegen/game/

@@ -5,6 +5,8 @@ CFLAGS += -I./raylib-quickstart/build/external/raylib-master/src
 CFLAGS += -O3 -std=c99
 CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -ferror-limit=0
+# the generated program (make codegen) and the runtime it includes
+CFLAGS += -Icodegen/game -Icodegen/lib
 CFLAGS += $(EXTRA_CFLAGS)
 
 # Platform-specific flags
@@ -22,8 +24,8 @@ OBJECTS = raylib-quickstart/bin/Debug/libraylib.a
 # The game is recompiled from your own copy of the ROM.
 ROM ?= smb.nes
 
-SOURCES += codegen/lib/code.c
-SOURCES += codegen/lib/data.c
+SOURCES += codegen/game/code.c
+SOURCES += codegen/game/data.c
 SOURCES += codegen/lib/cpu.c
 SOURCES += codegen/lib/video.c
 SOURCES += codegen/lib/render.c
@@ -33,10 +35,16 @@ SOURCES += codegen/lib/state.c
 SOURCES += codegen/lib/debug_chr.c
 MAIN = codegen/main.c
 
-.PHONY: codegen clean gpu-check runtime-wasm game-wasm web
+.PHONY: codegen header clean gpu-check runtime-wasm game-wasm web
 
+# The game is recompiled from your ROM into codegen/game (not in the
+# repository).
 codegen:
-	moon run src/main -- --rom $(ROM) --map maps/smb.map --native codegen/native/routines.txt
+	moon run src/main -- --rom $(ROM) --map maps/smb.map --native codegen/native/routines.txt --output codegen/game
+
+# The map's names for the hand-written code (committed; no ROM needed).
+header:
+	moon run src/main -- --map maps/smb.map --header codegen/native/smb.h
 
 build: clean
 	$(CC) $(CFLAGS) -o smb ${MAIN} codegen/gpu.c $(SOURCES) codegen/lib/common.c $(GC_FLAGS) $(RAYLIB_FLAGS) $(OBJECTS)
@@ -47,7 +55,7 @@ gpu-check: clean
 	$(CC) $(CFLAGS) -o gpu_check codegen/gpu_check.c codegen/gpu.c $(SOURCES) codegen/lib/rec.c codegen/lib/common.c $(GC_FLAGS) $(RAYLIB_FLAGS) $(OBJECTS)
 
 wasm: clean
-	$(CC) -O3 -ffunction-sections -fdata-sections --target=wasm32 -nostdlib -Wl,--gc-sections -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined $(EXTRA_CFLAGS) -o web/smb.wasm $(SOURCES)
+	$(CC) -O3 -ffunction-sections -fdata-sections --target=wasm32 -nostdlib -Wl,--gc-sections -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined $(EXTRA_CFLAGS) -Icodegen/game -Icodegen/lib -o web/smb.wasm $(SOURCES)
 
 # The split WebAssembly build: the C runtime as one module (no game code,
 # no ROM data), and the game module recompiled from the ROM, linked at load

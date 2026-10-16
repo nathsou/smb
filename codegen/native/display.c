@@ -8,10 +8,12 @@
 //
 // RAM side effects (pointers left in $00/$01, mirrors of the display bytes,
 // buffer resets) are kept exactly, and each routine leaves the registers its
-// callers read as printed in codegen/lib/code.c. The replay in codegen/hash.c
+// callers read as printed in the generated code.c. The replay in codegen/hash.c
 // checks this frame by frame against tests/golden/warpless.trace.
 
-#include "../lib/code.h"
+#include "smb.h"
+#include "../lib/cpu.h"
+#include "../lib/apu.h"
 #include "../lib/video.h"
 #include "../lib/external.h"
 

@@ -206,7 +206,9 @@ fn Emitter::emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
   }
 
   self.indentation -= 1
-    self.emit("};\n")
+  self.emit("};\n")
+  let size = match low.program { Some(p) => p.image.bytes.length(); None => low.table_offset }
+  self.emit("const unsigned prg_image_size = \{size};")
 }
 
 // `uses_ppu_bus`: the program writes PPU registers, which a host supplies

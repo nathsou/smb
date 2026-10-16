@@ -6,6 +6,7 @@
 // randomised registers and flags, and every other state also randomises some
 // RAM, so paths the replay never takes are exercised too.
 #include "lib/common.h"
+#include "code.h" // the generated program under test
 #include "lib/debug_chr.h"
 #include "lib/rec.h"
 #include <setjmp.h>

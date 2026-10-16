@@ -15,7 +15,8 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 LIB = ROOT / "codegen/lib"
-RUNTIME = ["cpu", "data", "video", "render", "apu", "state", "debug_chr", "rec", "common"]
+GAME = ROOT / "codegen/game"  # make codegen
+RUNTIME = ["cpu", "video", "render", "apu", "state", "debug_chr", "rec", "common"]
 INTERFACE = re.compile(r"^// in: (.*); out: (.*)$")
 FUNCTION = re.compile(r"^(?:void|static uint16_t) (\w+)\(", re.M)
 
@@ -45,14 +46,14 @@ def main():
         tmp = pathlib.Path(tmp)
         run("moon", "run", "src/main", "--", "--rom", "smb.nes", "--map", "maps/smb.map",
             "--native", "codegen/native/routines.txt", "--reference", "--output", str(tmp / "ref"))
-        reference = (tmp / "ref/lib/code.c").read_text()
+        reference = (tmp / "ref/code.c").read_text()
         renamed = sorted(set(FUNCTION.findall(reference)) |
                          {name for name, _ in routines(reference)} |
                          {"cpu_reset_entry", "cpu_nmi_entry"})
         (tmp / "rename.h").write_text("".join(f"#define {n} ref_{n}\n" for n in renamed))
 
         entries = []
-        for name, outputs in routines((LIB / "code.c").read_text()):
+        for name, outputs in routines((GAME / "code.c").read_text()):
             flags = ", ".join("true" if f in outputs else "false"
                               for f in ("a", "x", "y", "carry", "zero", "negative", "overflow"))
             entries.append(f'    {{"{name}", {name}, ref_{name}, {flags}}},\n')
@@ -61,14 +62,14 @@ def main():
             declarations + "static const Routine ROUTINES[] = {\n" + "".join(entries) + "};\n"
             f"#define ROUTINE_COUNT {len(entries)}\n")
 
-        flags = ["-std=gnu99", "-O2", "-I", str(ROOT / "codegen"), "-I", str(tmp)]
+        flags = ["-std=gnu99", "-O2", "-I", str(ROOT / "codegen"), "-I", str(tmp), "-I", str(GAME), "-I", str(LIB)]
         objects = []
         # reference code: its own generated headers, routines renamed
         ref_object = tmp / "ref_code.o"
-        run("cc", *flags, "-I", str(tmp / "ref/lib"), "-I", str(LIB), "-include", str(tmp / "rename.h"),
-            "-c", str(tmp / "ref/lib/code.c"), "-o", str(ref_object))
+        run("cc", *flags, "-I", str(tmp / "ref"), "-I", str(LIB), "-include", str(tmp / "rename.h"),
+            "-c", str(tmp / "ref/code.c"), "-o", str(ref_object))
         objects.append(str(ref_object))
-        sources = [LIB / "code.c", ROOT / "codegen/native/display.c",
+        sources = [GAME / "code.c", GAME / "data.c", ROOT / "codegen/native/display.c",
                    ROOT / "tests/routines/diff.c"] + [LIB / f"{n}.c" for n in RUNTIME]
         executable = tmp / "routine-diff"
         run("cc", *flags, "-o", str(executable), *map(str, sources), *objects)

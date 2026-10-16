@@ -1,7 +1,6 @@
 #ifndef SMB_COMMON_H
 #define SMB_COMMON_H
 
-#include "code.h"
 #include "cpu.h"
 #include "video.h"
 #include "render.h"

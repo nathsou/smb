@@ -38,8 +38,12 @@ consumes, choosing for each operand an array or a scalar at the same address
 depending on whether the access is indexed. An indexed read just before a
 table is written as that table minus an offset (`ROM((DEMO_BUTTONS - 1) + x)`).
 
-The names and descriptions are this project's own. Code generated from the
-ROM and from the disassembly were checked identical in behaviour (per-frame
+The names and descriptions are this project's own; the repository holds no
+game code or data, and the generated C goes to `codegen/game/` (`make
+codegen` with your ROM). The hand-written routines include
+`codegen/native/smb.h`, the map's names as a header generated from the map
+alone (`make header`). Code generated from the ROM and from the disassembly
+(before it was removed) were checked identical in behaviour (per-frame
 trace, ROM framebuffer hash and the routine-level differential test pairing
 routines by address). `tests/nrom128.map` names the independent NROM fixture,
 which `tests/check_fixtures.py` also recompiles from an iNES image built from
@@ -47,14 +51,15 @@ its assembly.
 
 ## Oracles
 
-### ROM-free replay and per-frame state hash
+### Replay with debug tiles and per-frame state hash
 
 `codegen/lib/debug_chr.c` generates placeholder pattern tables: SMB's font
 layout for background tiles $00-$23, a blank $24, and every other tile
 showing its index in hex, with transparent pixels so sprite priority stays
 visible. SMB reads its title screen from CHR ROM ($1EC0) as a VRAM update
 list, so the debug bank carries a small replacement list ("DEBUG TILES").
-The desktop and web builds fall back to these tiles when no ROM is given.
+The desktop and web builds can draw with these tiles instead of the ROM's
+(`--debug-chr`, DEBUG TILES); the program itself always comes from the ROM.
 
 `codegen/hash.c` replays `rec/warpless.rec` (7,987 frames) and computes two
 hashes:

@@ -4,3 +4,4 @@
 #include <stdint.h>
 
 uint8_t data[0x8000];
+const unsigned prg_image_size = 0x8000;

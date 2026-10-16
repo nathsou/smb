@@ -10,8 +10,9 @@
 // The ROM's PRG banks are copied into the runtime's PRG buffer.
 
 // `gameBytes` may be a function of the runtime's layout, to build the game
-// module once the runtime's addresses are known.
-export async function link(runtimeBytes, gameBytes, rom, pages = 20) {
+// module once the runtime's addresses are known. `hostImports` provides
+// runtime imports other than game routines.
+export async function link(runtimeBytes, gameBytes, rom, { pages = 20, hostImports = {} } = {}) {
     const memory = new WebAssembly.Memory({ initial: pages });
     const bytes = () => new Uint8Array(memory.buffer);
     let game = null;
@@ -19,7 +20,9 @@ export async function link(runtimeBytes, gameBytes, rom, pages = 20) {
     const env = { memory };
     for (const { name, kind } of WebAssembly.Module.imports(runtimeModule)) {
         if (kind !== 'function') continue;
-        if (name === 'memset') {
+        if (name in hostImports) {
+            env[name] = hostImports[name];
+        } else if (name === 'memset') {
             env.memset = (ptr, value, num) => (bytes().fill(value, ptr, ptr + num), ptr);
         } else if (name === 'memcpy') {
             env.memcpy = (dest, src, num) => (bytes().copyWithin(dest, src, src + num), dest);

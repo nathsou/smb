@@ -1,5 +1,11 @@
 # Recompiling the original disassembly
 
+> The disassembly is no longer in the repository: the game is now recompiled
+> from the ROM with this project's own names (see
+> [modern-runtime.md](modern-runtime.md#recompiling-from-the-rom)). These
+> notes describe the analysis as it was developed on the assembly input,
+> which the generator still accepts for the test fixtures.
+
 This work starts at `2143a91`. `src/smb.asm` now matches the original checked-in
 assembly, `3988359:src/smb.asm`, byte for byte. Its SHA-256 is
 `e5c17c42783f430029ab90aa37c73d51c2c320898e533b3ff196dad38c50ae42`.
