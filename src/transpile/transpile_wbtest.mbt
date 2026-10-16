@@ -4,7 +4,13 @@ fn transpile_fixture(source: String) -> Transpiler raise {
   program.validate_stacks()
   let low = @lower.AsmLowering::new(program.source, program=Some(program))
   low.lower()
-  Transpiler::transpile(low)
+  transpile_low(low)
+}
+
+fn transpile_low(low: @lower.AsmLowering, native~: Array[String] = [], reference~: Bool = false) -> Transpiler raise {
+  let program = @ir.build(low, native=Set::from_array(native))
+  if reference { program.analyze() |> ignore } else { program.optimize() }
+  Transpiler::transpile(low, program, native~)
 }
 
 test "dispatch emission uses the 6502 indirect-jump page wrap" {
@@ -13,7 +19,8 @@ test "dispatch emission uses the 6502 indirect-jump page wrap" {
   for file in output.files {
     if file.name == "code.c" { code = file.contents }
   }
-  assert_eq(code.contains("return cpu_dispatch_target = read_indirect_word(0xff);"), true)
+  // JMP ($ff) reads its high byte from $00, not $100
+  assert_eq(code.contains("return cpu_dispatch_target = (uint16_t)(ram[0xff] | (ram[0] << 8));"), true)
   assert_eq(code.contains("default: cpu_unresolved_jump(cpu_dispatch_target); return;"), true)
   assert_eq(code.contains("  Select();\n"), true)
 }
@@ -31,7 +38,7 @@ fn lower_fixture(source: String) -> @lower.AsmLowering raise {
 let native_fixture : String = ".org $c000\nBoot:\n jsr Probe\n bcs Boot\n clc\n clv\n lda #$00\nIdle:\n jmp Idle\nProbe:\n lda $2002\n asl\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
 
 test "native routines keep their prototype and document flag demands" {
-  let output = Transpiler::transpile(lower_fixture(native_fixture), native=["Probe"])
+  let output = transpile_low(lower_fixture(native_fixture), native=["Probe"])
   let files : Map[String, String] = Map([])
   for file in output.files { files[file.name] = file.contents }
   assert_eq(files["code.h"].contains("void Probe(void);"), true)
@@ -42,7 +49,7 @@ test "native routines keep their prototype and document flag demands" {
 }
 
 test "unknown native routines are rejected" {
-  try Transpiler::transpile(lower_fixture(native_fixture), native=["Missing"]) catch {
+  try transpile_low(lower_fixture(native_fixture), native=["Missing"]) catch {
     UnknownNativeRoutine(name) => assert_eq(name, "Missing")
     _ => fail("unexpected error")
   } noraise {
@@ -61,7 +68,7 @@ test "routine interfaces list registers read on entry and consumed outputs" {
   // Get reads X and produces A; Y only passes through Get, so it is neither
   // an input nor an output of Get even though Boot reads it afterwards.
   let source = ".org $c000\nBoot:\n ldx #$01\n ldy #$02\n jsr Get\n sta $10\n sty $11\n lda #$00\nIdle:\n jmp Idle\nGet:\n lda $20,x\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
-  let code = code_c(Transpiler::transpile(lower_fixture(source)))
+  let code = code_c(transpile_low(lower_fixture(source)))
   assert_eq(code.contains("// in: x; out: a\nvoid Get(void) {"), true)
   assert_eq(code.contains("void Tick(void) {"), true)
   assert_eq(code.contains("// in: a, x, y"), false)
@@ -69,34 +76,34 @@ test "routine interfaces list registers read on entry and consumed outputs" {
 
 test "a BIT hiding a second entry does not read A when its flags are dead" {
   let source = ".org $c000\nBoot:\n jsr Both\n jsr One\n lda #$00\nIdle:\n jmp Idle\nBoth:\n ldy #$00\n .db $2c\nOne:\n ldy #$04\n lda #$f8\n sta $0200,y\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
-  let code = code_c(Transpiler::transpile(lower_fixture(source)))
+  let code = code_c(transpile_low(lower_fixture(source)))
   assert_eq(code.contains("// in: a"), false)
 }
 
-test "instructions become C that updates only live flags" {
+test "instructions become C that computes only live flags" {
   // ADC's carry feeds the BCS; its Z/N/V are dead. LDA's flags are dead.
   let source = ".org $c000\nBoot:\n lda $10\n clc\n adc #$05\n bcs Done\n sta $11\nDone:\n lda #$00\n clc\n clv\nIdle:\n jmp Idle\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
-  let code = code_c(Transpiler::transpile(lower_fixture(source)))
-  assert_eq(code.contains("a = ram[0x10];\n"), true)
-  assert_eq(code.contains("{ uint16_t sum = a + 0x5 + carry_flag; carry_flag = sum > 0xff; a = (uint8_t)sum; }"), true)
-  assert_eq(code.contains("adc_imm"), false)
+  let code = code_c(transpile_low(lower_fixture(source)))
+  assert_eq(code.contains("uint16_t sum = (uint16_t)(ram[0x10] + 5);\n  a = (uint8_t)sum;\n  if (sum < 0x100) {\n    ram[0x11] = a;\n  }"), true)
+  assert_eq(code.contains("zero_flag"), false)
+  assert_eq(code.contains("overflow_flag"), false)
 
 }
 
-test "a load and store of a dead register become one assignment" {
+test "a value with one use moves into it" {
   let source = ".org $c000\nBoot:\n lda $10\n sta $11\n ldx #$03\n stx $12\n stx $13\n lda #$00\n clc\n clv\nIdle:\n jmp Idle\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
-  let code = code_c(Transpiler::transpile(lower_fixture(source)))
+  let code = code_c(transpile_low(lower_fixture(source)))
   assert_eq(code.contains("ram[0x11] = ram[0x10];"), true)
-  let unfolded = code_c(Transpiler::transpile(lower_fixture(source), fold=false))
-  assert_eq(unfolded.contains("a = ram[0x10];\n  ram[0x11] = a;"), true)
-  // X is still read by the second store, so the first pair is kept
-  assert_eq(code.contains("x = 0x3;\n  ram[0x12] = x;\n  ram[0x13] = x;"), true)
+  let unfolded = code_c(transpile_low(lower_fixture(source), reference=true))
+  assert_eq(unfolded.contains("a = ram[0x10];\n  zero_flag = a == 0;\n  neg_flag = (a & 0x80) != 0;\n  ram[0x11] = a;"), true)
+  // X is read by two stores, so it stays
+  assert_eq(code.contains("x = 3;\n  ram[0x12] = x;\n  ram[0x13] = x;"), true)
 }
 
 test "interfaces count only the routine's own callers" {
   // Tail and Other share Tail's RTS; only Other's caller reads A afterwards.
   let source = ".org $c000\nBoot:\n jsr Tail\n jsr Other\n sta $10\n lda #$00\n clc\n clv\nIdle:\n jmp Idle\nOther:\n lda #$05\n jmp Tail\nTail:\n inc $20\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
-  let code = code_c(Transpiler::transpile(lower_fixture(source)))
+  let code = code_c(transpile_low(lower_fixture(source)))
   assert_eq(code.contains("// in: none; out: a\nvoid Other(void) {"), true)
   assert_eq(code.contains("void Tail(void) {"), true)
   assert_eq(code.contains("out: a\nvoid Tail(void) {"), false)
@@ -104,7 +111,7 @@ test "interfaces count only the routine's own callers" {
 
 test "read-modify-write outside RAM goes through the bus" {
   let source = ".org $c000\nBoot:\n inc $6000\n asl $6001\n lda #$00\n clc\n clv\nIdle:\n jmp Idle\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
-  let code = code_c(Transpiler::transpile(lower_fixture(source)))
-  assert_eq(code.contains("{ uint16_t address = 0x6000; uint8_t m = read_byte(address); m++; dynamic_ram_write(address, m); }"), true)
-  assert_eq(code.contains("{ uint16_t address = 0x6001; uint8_t m = read_byte(address); m = (uint8_t)(m << 1); dynamic_ram_write(address, m); }"), true)
+  let code = code_c(transpile_low(lower_fixture(source)))
+  assert_eq(code.contains("dynamic_ram_write(0x6000, (uint8_t)(read_byte(0x6000) + 1));"), true)
+  assert_eq(code.contains("dynamic_ram_write(0x6001, (uint8_t)(read_byte(0x6001) << 1));"), true)
 }

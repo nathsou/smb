@@ -15,6 +15,7 @@ suberror PipelineError {
   LoweringError(@lower.LoweringError)
   ImageError(@image.ImageError)
   TranspileError(@transpile.TranspileError)
+  BuildError(@ir.BuildError)
 } derive(Debug)
 
 fn read_rom() -> String raise PipelineError {
@@ -101,10 +102,11 @@ fn native_routines() -> Array[String] raise PipelineError {
 fn transpile() -> @transpile.Transpiler raise PipelineError {
   let native = native_routines()
   let low = lower()
-  // --no-fold: one statement group per instruction (the differential
-  // test's reference)
-  let fold = !@env.args().contains("--no-fold")
-  try @transpile.Transpiler::transpile(low, native~, fold~) catch {
+  let program = try @ir.build(low, native=Set::from_array(native)) catch { err => raise BuildError(err) }
+  // --reference: every instruction with all of its effects, unoptimised
+  // (the differential test's reference)
+  if @env.args().contains("--reference") { program.analyze() |> ignore } else { program.optimize() }
+  try @transpile.Transpiler::transpile(low, program, native~) catch {
     err => raise TranspileError(err)
   }
 }

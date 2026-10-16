@@ -7,6 +7,7 @@
     "moonbitlang/core/debug",
     "nathsou/smb/transpile",
     "nathsou/smb/image",
+    "nathsou/smb/ir",
     "moonbitlang/core/env"
   ]
 }

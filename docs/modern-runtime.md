@@ -74,9 +74,9 @@ The replay executes about 66% of the generated code.
 
 ### Routine-level differential test
 
-`tests/check_routines.py` generates the program a second time without
-transformations (`--no-fold`: one statement group per instruction), links both
-into one binary with the reference routines renamed `ref_*`, and runs
+`tests/check_routines.py` generates the program a second time from the
+unoptimised IR (`--reference`: every instruction with all of its effects),
+links both into one binary with the reference routines renamed `ref_*`, and runs
 `tests/routines/diff.c`. For every generated routine it takes 50 states from
 the replay, randomises A/X/Y, SP and the flags (and, in every other state, 48
 RAM bytes), runs both versions under a trap and timeout guard, and compares
@@ -85,7 +85,9 @@ callers read. This exercises paths the replay never takes. While the
 instruction-helper layer still existed it served as the reference: in a sample
 of 24 random single-operator mutations of the generated code the test caught
 19; the others were boundary changes (`>=` to `>`) or paths that these states
-rarely reach.
+rarely reach. When the IR replaced the direct instruction printer, the new
+output was also compared routine by routine with the previous generator's
+(0 mismatches over 529 routines).
 
 `tests/semantics.asm` checks the generated instruction C itself: each routine
 ends with PHP so every flag is computed, and `tests/semantics.c` compares
@@ -93,16 +95,34 @@ ADC and SBC (all operands and carries), CMP, BIT, shifts and rotates (register
 and memory), zero-page wrapping and bus read-modify-write with independent
 models.
 
-## Routine interfaces
+## The IR
 
-`src/lower/registers.mbt` adds an interprocedural register analysis next to
-the flag analysis:
+The generator no longer prints C from the instructions directly. `src/ir`
+builds an intermediate representation shared by the backends:
 
-- A/X/Y liveness with matched call/return demands, like flags;
-- may-write and must-write summaries per routine (callees included);
-- upward-exposed reads: registers a routine reads before writing them.
+- one function per callable region, each a control-flow graph of blocks;
+- statements over explicit machine variables (A, X, Y, SP and the six
+  flags), single-assignment temporaries, and memory in three spaces: RAM
+  (an address proven inside $0000-$07FF after masking mirrors), ROM (proven
+  PRG ROM) and the bus (I/O, pointers); hardware writes with fixed targets
+  are effects (`apu_write`, ...);
+- terminators: goto, branch, return, tail call (fallthrough or jump into
+  another routine), dispatch through a proven inline table, idle yield, trap.
 
-Every generated function is annotated with its interface, for example
+Every instruction is built with its complete semantics, all flags included.
+PHP and PLP pack and unpack the status byte explicitly, the dispatchers push
+the return address and read their table explicitly, and pointers are two
+RAM loads, so no backend needs runtime helpers for them.
+
+`src/ir/analysis.mbt` computes interprocedural liveness over the IR with
+matched call/return demands: a routine's returns demand what its callers read
+after the call, and a call reads what the callee reads on entry (which
+includes the caller's demand flowing through the callee). A tail call passes
+the routine's demand on to its target. Roots return to the idle loop or to
+the interrupted idle loop, which read nothing, so their demand is what the
+roots read on entry; SP is live at every return. From the same summaries
+(may-write, must-write, upward-exposed reads) each function is annotated
+with its interface:
 
 ```c
 // in: x, y; out: a, carry
@@ -110,18 +130,42 @@ void screen_position(void) {
 ```
 
 Inputs are registers read before being written; outputs are registers and
-flags the routine may change that its callers read after it returns. A
-routine's callers are its JSR sites plus, transitively, the callers of every
-routine that jumps or falls through into it. (The demand at an exit block is
-wider: SMB shares RTS instructions between routines, so an exit block also
-carries what other routines' callers need.) A compare or BIT only consumes
-its register if one of its flags is live, so the BIT that hides a second
-entry point in SMB's `.db $2c` idiom no longer makes A an input.
+flags the routine may change that its callers read after it returns.
 
-Roots' exits (RTI and the idle yield where interrupts are delivered) now
-demand only what the roots read on entry, for flags as for registers. The idle
-loop reads nothing and the runtime restores P around interrupts; previously
-every flag was live there, which kept V live through nearly all code.
+`src/ir/passes.mbt` then optimises to a fixpoint:
+
+- dead code: assignments nobody reads (most flags), unused temporaries; reads
+  with side effects are kept;
+- forwarding: a value with a single use later in its block moves into that
+  use when nothing in between changes what it reads, keeping the
+  truncation of its destination;
+- local simplification (`!(a == b)` to `a != b`, nested byte truncations,
+  constant offsets).
+
+Forwarding subsumes the earlier load/store fusion and compare/branch folding,
+and also folds flag computations into the branches that read them:
+
+```c
+if ((ram[(uint8_t)(ENEMY_STATE + x)] & 0x20) != 0) {
+  move_defeated_enemy(); return;
+}
+ram[(uint8_t)(ENEMY_Y + x)] = (uint8_t)(ram[CANNON_Y + y] - 8);
+```
+
+## The C backend
+
+`src/transpile/c.mbt` prints the IR. Blocks keep their original order;
+forward branches over single-entry regions become if/else, conditional back
+edges closing single-entry regions become do/while loops, and other edges
+stay gotos. Blocks that only return, tail-call, yield or trap are printed
+where they are reached. Casts to `uint8_t` and `uint16_t` appear only where
+a value is not evidently in range, and the output compiles without warnings
+under `-Wconversion`.
+
+JSRs are plain C calls: SMB's replay was identical with and without the
+emulated return-address stack, and the generator's static stack checks reject
+programs that inspect return addresses outside a proven dispatcher.
+NMI delivery restores the status flags in C instead of pushing PC and P.
 
 ## Hand-written routines
 
@@ -171,50 +215,12 @@ frames: natively with Mesa under Xvfb (`make gpu-check`, then
 difference, a masked left column showing the backdrop rather than the
 previous frame's pixels, never occurs in SMB.
 
-## Instructions as C
-
-The generator now writes each instruction as C over the register and flag
-variables, updating only the flags that are live afterwards:
-
-```c
-a = ram[JOYPAD1];
-a &= 0x10; zero_flag = a == 0;
-```
-
-Operands are classified from their address range: provable RAM becomes a
-`ram[...]` lvalue, provable PRG ROM a `ROM(...)` read, and anything else
-(I/O, pointers) still goes through the bus (`read_byte`); read-modify-write
-outside proven RAM reads, updates and writes back a temporary through it.
-PHP/PLP call `php()`/`plp()`, which pack the status byte on the stack. The
-instruction-helper layer (`instructions.c`) has been removed.
-
-JSRs are plain C calls: SMB's replay was identical with and without the
-emulated return-address stack, and the generator's static stack checks reject
-programs that inspect return addresses outside a proven dispatcher.
-Dispatchers still push the return address they read their table through.
-NMI delivery restores the status flags in C instead of pushing PC and P.
-
-A load (or transfer) followed by a store of the same register becomes one
-assignment when the register is dead after the store and the load's flags are
-dead. In SMB this applies to 668 pairs:
-
-```c
-ram[PAUSE_TIMER] = 0x2b;
-ram[HARD_MODE] = ram[WORLD_SELECT_UNLOCKED];
-```
-
-The differential test compares registers and flags only where the routine's
-callers read them, since folded loads leave dead registers with other
-values.
-
 ## Remaining work
 
 - Registers as C locals and parameters: the interfaces give each routine's
   inputs and outputs, but callers and callees still share global registers.
 - Typed game state: a struct over RAM with named, sized fields, keeping the
   flat byte array underneath for SMB's out-of-bounds idioms.
-- Folding flag computations into the branches that consume them, beyond the
-  existing immediate compare/branch pairs.
 - The status-bar split is decided after the frame's game logic, as before;
   hardware decides it at the sprite 0 hit, earlier in the frame.
 - Audio still runs on an APU model driven by register writes.
