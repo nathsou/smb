@@ -20,3 +20,5 @@ smb.dSYM
 _build/
 codegen/prg.bin
 __pycache__/
+web/game.wasm
+web/runtime.wasm

@@ -167,6 +167,38 @@ emulated return-address stack, and the generator's static stack checks reject
 programs that inspect return addresses outside a proven dispatcher.
 NMI delivery restores the status flags in C instead of pushing PC and P.
 
+## The WebAssembly backend
+
+`src/wasm` emits a WebAssembly module from the same optimised IR
+(`--wasm FILE`). The page no longer needs a C compiler for the game: the C
+runtime (video, audio, the native display routines, a PRG buffer) is
+compiled once into `web/runtime.wasm` (`make runtime-wasm`), and the game
+module is recompiled from the ROM. `web/link.js` links the two at load
+time in one memory:
+
+- the game module imports the memory, the runtime's machine state as i32
+  globals holding addresses (`ram`, `data`, `a`, `carry_flag`, ...), and the
+  runtime functions it calls (bus access, APU and joypad writes, the idle
+  yield, traps, and the native routines);
+- the runtime imports the game routines it calls (the entry points and the
+  routines the natives call); these are JavaScript trampolines to the game
+  module, instantiated after it;
+- the loader copies the ROM's PRG banks into the runtime's buffer.
+
+Constant parts of addresses go into the memory instructions' offsets, so
+`ram[ENEMY_X + x]` is the `ram` global plus X, loaded at offset `ENEMY_X`.
+
+Control flow is structured with Ramsey's algorithm ("Beyond Relooper",
+ICFP 2022) on reducible graphs: blocks are emitted under their immediate
+dominator, merge nodes after a `block` that forward branches leave, loop
+headers as a `loop` that back edges continue. One SMB routine, the music
+engine's `update_music`, has irreducible control flow; it runs as a loop over
+a `br_table` on a block number. `--wasm-dispatch` builds every function that
+way, to check the fallback.
+
+`node tests/web/replay_split.mjs` replays the recording with the two modules
+(either structuring) and matches the golden trace on every frame.
+
 ## Hand-written routines
 
 `--native FILE` (for SMB, `codegen/native/routines.txt`) lists routines whose

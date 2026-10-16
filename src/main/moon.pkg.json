@@ -8,6 +8,7 @@
     "nathsou/smb/transpile",
     "nathsou/smb/image",
     "nathsou/smb/ir",
+    "nathsou/smb/wasm",
     "moonbitlang/core/env"
   ]
 }

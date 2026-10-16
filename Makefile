@@ -33,7 +33,7 @@ SOURCES += codegen/lib/state.c
 SOURCES += codegen/lib/debug_chr.c
 MAIN = codegen/main.c
 
-.PHONY: codegen clean gpu-check
+.PHONY: codegen clean gpu-check runtime-wasm game-wasm
 
 codegen:
 	moon run src/main -- --rom $(ROM) --map maps/smb.map --native codegen/native/routines.txt
@@ -48,6 +48,17 @@ gpu-check: clean
 
 wasm: clean
 	$(CC) -O3 -ffunction-sections -fdata-sections --target=wasm32 -nostdlib -Wl,--gc-sections -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined $(EXTRA_CFLAGS) -o web/smb.wasm $(SOURCES)
+
+# The split WebAssembly build: the C runtime as one module (no game code,
+# no ROM data), and the game module recompiled from the ROM, linked at load
+# time by web/link.js. Check it with `node tests/web/replay_split.mjs`.
+RUNTIME_SOURCES = codegen/lib/cpu.c codegen/lib/video.c codegen/lib/render.c codegen/lib/apu.c codegen/lib/state.c codegen/lib/debug_chr.c codegen/lib/prg.c codegen/native/display.c
+
+runtime-wasm:
+	$(CC) -O3 -ffunction-sections -fdata-sections --target=wasm32 -nostdlib -Wl,--gc-sections -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined $(EXTRA_CFLAGS) -o web/runtime.wasm $(RUNTIME_SOURCES)
+
+game-wasm:
+	moon run src/main -- --rom $(ROM) --map maps/smb.map --native codegen/native/routines.txt --wasm web/game.wasm
 
 hash: clean
 	$(CC) $(CFLAGS) -o hash codegen/hash.c $(SOURCES) codegen/lib/rec.c codegen/lib/common.c $(GC_FLAGS)

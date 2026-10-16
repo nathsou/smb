@@ -16,6 +16,7 @@ suberror PipelineError {
   ImageError(@image.ImageError)
   TranspileError(@transpile.TranspileError)
   BuildError(@ir.BuildError)
+  WasmError(@wasm.WasmError)
 } derive(Debug)
 
 fn read_rom() -> String raise PipelineError {
@@ -106,6 +107,18 @@ fn transpile() -> @transpile.Transpiler raise PipelineError {
   // --reference: every instruction with all of its effects, unoptimised
   // (the differential test's reference)
   if @env.args().contains("--reference") { program.analyze() |> ignore } else { program.optimize() }
+  // --wasm FILE: also emit the WebAssembly module (--wasm-dispatch: with
+  // every function structured as a dispatch loop)
+  let wasm_path = option("--wasm", "")
+  if wasm_path != "" {
+    let output = try @wasm.emit(program, force_dispatch=@env.args().contains("--wasm-dispatch")) catch {
+      err => raise WasmError(err)
+    }
+    if !output.irreducible.is_empty() {
+      println("Irreducible control flow (dispatch loop): \{output.irreducible.join(", ")}")
+    }
+    try @fs.write_bytes_to_file(wasm_path, output.bytes) catch { err => raise IOError(Show::to_string(err)) }
+  }
   try @transpile.Transpiler::transpile(low, program, native~) catch {
     err => raise TranspileError(err)
   }
