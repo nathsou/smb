@@ -3,6 +3,8 @@
 #include <string.h>
 #include <stdio.h>
 #include "lib/state.h"
+#include "lib/debug_chr.h"
+#include "gpu.h"
 
 #define ROM_PATH "smb.nes"
 
@@ -26,6 +28,7 @@
 
 #define AUDIO_SAMPLE_RATE 48000
 #define SAVE_FILE "smb.sav"
+#define SHADER_PATH "web/video.frag"
 
 bool last_save_state_loaded = false;
 bool should_save_state = false;
@@ -162,12 +165,18 @@ void write_save_state(char *path, uint8_t *buffer) {
     fclose(file);
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    bool software = argc > 1 && strcmp(argv[1], "--software") == 0;
+
     cpu_init();
     apu_init(AUDIO_SAMPLE_RATE);
 
     if (read_chr_rom(ROM_PATH)) {
-        return 1;
+        fprintf(stderr, "Using generated debug tiles instead\n");
+        uint8_t chr[DEBUG_CHR_SIZE];
+        debug_chr_generate(chr);
+        video_init(chr);
+        render_init();
     }
 
     cpu_reset_entry();
@@ -197,7 +206,14 @@ int main(void) {
     SetWindowMaxSize(SCREEN_WIDTH * WINDOW_SCALE, SCREEN_HEIGHT * WINDOW_SCALE);
     SetWindowMinSize(SCREEN_WIDTH * WINDOW_SCALE, SCREEN_HEIGHT * WINDOW_SCALE);
 
+    // The GPU renderer draws the frame in a shader; the software renderer is
+    // the fallback (--software, or when the shader cannot be loaded).
+    GpuRenderer gpu;
+    bool use_gpu = !software && gpu_renderer_init(&gpu, SHADER_PATH);
+    if (!use_gpu) fprintf(stderr, "Using the software renderer\n");
+
     Rectangle source = { 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
+    Rectangle gpu_source = { 0, 0, SCREEN_WIDTH, -SCREEN_HEIGHT }; // render targets are upside down
     Rectangle dest = { 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT };
     
     int gamepad = 0;
@@ -212,13 +228,21 @@ int main(void) {
         
         handle_inputs(gamepad, mapping);
         next_frame();
-        ppu_render();
+        if (use_gpu) {
+            gpu_renderer_draw(&gpu);
+        } else {
+            render_frame();
+            UpdateTexture(texture, frame);
+        }
         apu_step_frame();
-        UpdateTexture(texture, frame);
 
         BeginDrawing();
             ClearBackground(WHITE);
-            DrawTexturePro(texture, source, dest, (Vector2){ 0, 0 }, 0.0f, WHITE);
+            if (use_gpu) {
+                DrawTexturePro(gpu.target.texture, gpu_source, dest, (Vector2){ 0, 0 }, 0.0f, WHITE);
+            } else {
+                DrawTexturePro(texture, source, dest, (Vector2){ 0, 0 }, 0.0f, WHITE);
+            }
         EndDrawing();
 
         if (should_save_state) {
@@ -239,6 +263,7 @@ int main(void) {
 
     StopAudioStream(stream);
     UnloadAudioStream(stream);
+    if (use_gpu) gpu_renderer_unload(&gpu);
     UnloadTexture(texture);
     CloseAudioDevice();
     CloseWindow();

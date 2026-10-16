@@ -8,7 +8,7 @@ fn option(name: String, fallback: String) -> String {
 
 fn main {
   try {
-    let text = @fs.read_file_to_string(option("--input", "src/smb.asm"))
+    let text = @fs.read_file_to_string(option("--input", ""))
     let source = @parse.Parser::new(@parse.Lexer::new(text).tokenize()).parse()
     let image = @image.assemble(source)
     println("PRG: origin=\{image.origin}, bytes=\{image.bytes.length()}")

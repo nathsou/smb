@@ -162,3 +162,26 @@ test "a loop that only an interrupt can end is rejected" {
 test "counting, I/O polling and idle loops are accepted" {
   assert_eq(rejection(with_vectors("Boot:\n ldx #$08\nDelay:\n dex\n bne Delay\nPoll:\n lda $2002\n bpl Poll\nIdle:\n jmp Idle\n")), "accepted")
 }
+
+test "raw dumps and iNES files load the same cartridge, identified by hash" {
+  let prg_chr = Array::makei(0xa000, fn(i) { (i * 7) & 0xff })
+  let raw = Bytes::makei(prg_chr.length(), fn(i) { prg_chr[i].to_byte() })
+  let header = [0x4e, 0x45, 0x53, 0x1a, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let ines = Bytes::makei(16 + prg_chr.length(), fn(i) { (if i < 16 { header[i] } else { prg_chr[i - 16] }).to_byte() })
+  let digest = sha256(prg_chr)
+  let map = parse_map("rom \{digest} 32768 8192 ; test dump\nroutine $8000 reset\n")
+  let from_raw = load_dump(raw, map)
+  let from_ines = load_dump(ines, map)
+  assert_eq(from_raw.headered, false)
+  assert_eq(from_ines.headered, true)
+  assert_eq(from_raw.cartridge.prg, from_ines.cartridge.prg)
+  assert_eq(from_raw.cartridge.chr, from_ines.cartridge.chr)
+  assert_eq(from_raw.cartridge.prg.length(), 32768)
+  assert_eq(map.identify(from_raw).map(fn(r) { r.label }), Some("test dump"))
+  assert_eq(map.warning(from_ines), None)
+  // another dump is loaded, with a warning
+  let other = Bytes::makei(raw.length(), fn(i) { (if i == 100 { 1 } else { raw[i].to_int() }).to_byte() })
+  assert_eq(map.warning(load_dump(other, map)) is Some(_), true)
+  // a map that names no dump checks nothing
+  assert_eq(parse_map("routine $8000 reset\n").warning(from_raw), None)
+}

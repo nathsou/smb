@@ -1,3 +1,9 @@
+import { createGpuRenderer } from './gpu.js';
+import { link } from './link.js';
+import { createViewer } from './viewer.js';
+import * as store from './store.js';
+import { splitDump } from './cartridge.js';
+
 const SCREEN_WIDTH = 256;
 const SCREEN_HEIGHT = 240;
 const AUDIO_CHUNK_SIZE = 1024;
@@ -6,33 +12,49 @@ const SAVE_STATE_LOCAL_STORAGE_KEY = 'save_state';
 
 function createCanvas() {
     const canvas = document.createElement('canvas');
+    const screen = document.getElementById('screen');
 
-    if (canvas === null) {
-        throw new Error('Failed to create canvas');
-    }
-
+    // the largest whole multiple of the NES resolution that fits
     const updateSize = () => {
+        const width = screen.clientWidth - 16;
+        const height = screen.clientHeight - 48;
         const scalingFactor = Math.max(
-            Math.min(
-                Math.floor(window.innerWidth / SCREEN_WIDTH),
-                Math.floor(window.innerHeight / SCREEN_HEIGHT),
-            ), 1);
-
+            Math.min(Math.floor(width / SCREEN_WIDTH), Math.floor(height / SCREEN_HEIGHT)), 1);
         canvas.style.width = `${SCREEN_WIDTH * scalingFactor}px`;
         canvas.style.height = `${SCREEN_HEIGHT * scalingFactor}px`;
     };
 
     canvas.width = SCREEN_WIDTH;
     canvas.height = SCREEN_HEIGHT;
-    updateSize();
+    new ResizeObserver(updateSize).observe(screen);
 
-    const context = canvas.getContext('2d');
+    return { canvas, updateSize };
+}
 
-    if (context === null) {
+// Software fallback: copy the C renderer's RGB frame into a 2D canvas.
+function createSoftwareRenderer(canvas, renderVideo, uint8View, framePtr) {
+    const ctx = canvas.getContext('2d');
+
+    if (ctx === null) {
         throw new Error('Failed to get 2d context');
     }
 
-    return { canvas, context, updateSize };
+    const imageData = ctx.createImageData(SCREEN_WIDTH, SCREEN_HEIGHT);
+
+    return {
+        draw() {
+            renderVideo();
+
+            for (let i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) {
+                imageData.data[i * 4] = uint8View[framePtr + i * 3];
+                imageData.data[i * 4 + 1] = uint8View[framePtr + i * 3 + 1];
+                imageData.data[i * 4 + 2] = uint8View[framePtr + i * 3 + 2];
+                imageData.data[i * 4 + 3] = 255;
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+        },
+    };
 }
 
 const SUPPORTED_GAMEPAD_MAPPINGS = {
@@ -101,7 +123,10 @@ function createController(onStart, saveState) {
         gamepadConnected = false;
     });
 
+    const typing = event => event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
+
     window.addEventListener('keydown', (event) => {
+        if (typing(event)) return;
         const key = event.key;
 
         switch (key) {
@@ -141,6 +166,7 @@ function createController(onStart, saveState) {
     });
 
     window.addEventListener('keyup', (event) => {
+        if (typing(event)) return;
         const key = event.key;
 
         switch (key) {
@@ -233,299 +259,312 @@ function createController(onStart, saveState) {
     };
 }
 
-// Rest of the utility functions remain the same
-function createUploadButton() {
-    const button = document.createElement('button');
-    button.textContent = 'Upload ROM or CHR';
-    button.style.fontSize = '24px';
-    button.style.padding = '10px 20px';
-    button.style.marginTop = '20px';
-    return button;
-}
-
-function displayMessage(message) {
-    const msg = document.createElement('div');
-    msg.textContent = message;
-    msg.style.fontSize = '18px';
-    msg.style.marginTop = '10px';
-    return msg;
-}
-
-const CHR_ROM_LOCAL_STORAGE_KEY = 'chr_rom';
-
-async function getCHRROM() {
-    const chrRomData = localStorage.getItem(CHR_ROM_LOCAL_STORAGE_KEY);
-
-    if (chrRomData) {
-        const byteString = atob(chrRomData);
-        const array = new Uint8Array(byteString.length);
-        for (let i = 0; i < byteString.length; i++) {
-            array[i] = byteString.charCodeAt(i);
-        }
-        return array;
-    } else {
-        const container = document.createElement('div');
-        container.style.textAlign = 'center';
-        const uploadButton = createUploadButton();
-        const instruction = displayMessage('Please upload a NES ROM or CHR ROM dump to extract graphics data from.');
-
-        container.appendChild(instruction);
-        container.appendChild(uploadButton);
-        document.body.appendChild(container);
-
-        return new Promise((resolve, reject) => {
-            uploadButton.addEventListener('click', () => {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.accept = '.nes,.chr';
-
-                input.onchange = () => {
-                    const file = input.files[0];
-
-                    if (!file) {
-                        reject(new Error('No file selected'));
-                        return;
-                    }
-
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                        const arrayBuffer = reader.result;
-                        const rom = new Uint8Array(arrayBuffer);
-                        if (rom.length < 8192) {
-                            reject(new Error('ROM file is too small'));
-                            return;
-                        }
-                        const chrRom = rom.slice(-8192);
-                        let binary = '';
-                        const len = chrRom.byteLength;
-                        for (let i = 0; i < len; i++) {
-                            binary += String.fromCharCode(chrRom[i]);
-                        }
-                        const base64String = btoa(binary);
-                        localStorage.setItem(CHR_ROM_LOCAL_STORAGE_KEY, base64String);
-                        document.body.removeChild(container);
-                        resolve(chrRom);
-                    };
-                    reader.onerror = () => {
-                        reject(new Error('Failed to read file'));
-                    };
-                    reader.readAsArrayBuffer(file);
-                };
-
-                input.click();
-            });
-        });
-    }
-}
-
 function readUint16(buffer, ptr) {
     return buffer[ptr] + buffer[ptr + 1] * 256;
 }
 
-async function main() {
-    const memory = new WebAssembly.Memory({ initial: 10 });
-    const uint8View = new Uint8Array(memory.buffer);
+function chrOf(rom) {
+    return splitDump(rom).chr;
+}
 
-    const { instance } = await WebAssembly.instantiateStreaming(fetch('smb.wasm'), {
-        env: {
-            memory,
-            abort(_msg, _file, line, column) {
-                console.error(`[abort] at ${line}:${column} in ${_file}: ${_msg}`);
-            },
-            memset: (ptr, value, num) => {
-                uint8View.fill(value, ptr, ptr + num);
-            },
-            memcpy: (dest, src, num) => {
-                uint8View.copyWithin(dest, src, src + num);
-            },
+function checkRom(rom) {
+    splitDump(rom); // throws with the reason
+}
+
+// The ROM: from storage, or asked for (file picker or drop).
+function askForRom(error = '') {
+    const dialog = document.getElementById('dialog');
+    const message = document.getElementById('dialog-error');
+    message.textContent = error;
+    dialog.hidden = false;
+    return new Promise(resolve => {
+        const accept = async file => {
+            const rom = new Uint8Array(await file.arrayBuffer());
+            try {
+                checkRom(rom);
+            } catch (e) {
+                message.textContent = e.message;
+                return;
+            }
+            await store.put('rom', 'rom', rom);
+            dialog.hidden = true;
+            resolve(rom);
+        };
+        document.getElementById('dialog-load').onclick = () => pickFile().then(accept);
+        dialog.ondragover = event => { event.preventDefault(); dialog.classList.add('dragging'); };
+        dialog.ondragleave = () => dialog.classList.remove('dragging');
+        dialog.ondrop = event => {
+            event.preventDefault();
+            dialog.classList.remove('dragging');
+            if (event.dataTransfer.files[0]) accept(event.dataTransfer.files[0]);
+        };
+    });
+}
+
+function pickFile() {
+    return new Promise(resolve => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.nes,.bin,.rom';
+        input.onchange = () => input.files[0] && resolve(input.files[0]);
+        input.click();
+    });
+}
+
+// Recompiles in a worker, or reuses an earlier result for the same inputs.
+async function build(inputs, viewer) {
+    const key = await store.digest(inputs.rom, inputs.map, inputs.native, inputs.layout, inputs.version);
+    const cached = await store.get('builds', key);
+    if (cached) {
+        viewer.setStatus('RECOMPILED EARLIER: LOADED FROM THIS BROWSER\'S CACHE');
+        return cached;
+    }
+    viewer.setStatus('RECOMPILING THE ROM...', 'busy');
+    const result = await new Promise((resolve, reject) => {
+        const worker = new Worker('recompiler-worker.js', { type: 'module' });
+        worker.onmessage = ({ data }) => {
+            worker.terminate();
+            if (data.error) reject(new Error(data.error));
+            else resolve(data);
+        };
+        worker.onerror = event => {
+            worker.terminate();
+            reject(new Error(event.message || 'The recompiler failed to start'));
+        };
+        worker.postMessage({ rom: inputs.rom, map: inputs.map, native: inputs.native, layout: inputs.layout });
+    });
+    viewer.setStatus(`RECOMPILED IN ${(result.ms / 1000).toFixed(1)} S: ${(result.wasm.length / 1024).toFixed(0)} KB OF WEBASSEMBLY`);
+    const entry = { wasm: result.wasm, files: result.files, warning: result.warning };
+    await store.put('builds', key, entry);
+    return entry;
+}
+
+// A ROM the map was not written for still runs, with a warning.
+function showWarning(text) {
+    const warning = document.getElementById('rom-warning');
+    warning.textContent = text ? text.toUpperCase() : '';
+    warning.hidden = !text;
+}
+
+// Generated files in reading order, then the hand-written display code.
+const FILE_ORDER = ['code.c', 'code.h', 'constants.h', 'data.h', 'data.c'];
+const MAP_OVERRIDE_KEY = 'map';
+const DEBUG_TILES_KEY = 'debug_tiles';
+
+async function main() {
+    const viewer = createViewer(document.getElementById('code'), {
+        onRecompile: text => {
+            localStorage.setItem(MAP_OVERRIDE_KEY, text);
+            boot();
+        },
+        onResetMap: () => {
+            localStorage.removeItem(MAP_OVERRIDE_KEY);
+            boot();
         },
     });
+    const toggleCode = document.getElementById('toggle-code');
+    toggleCode.addEventListener('click', () => {
+        const hidden = document.body.classList.toggle('code-hidden');
+        toggleCode.textContent = hidden ? 'SHOW CODE' : 'HIDE CODE';
+        viewer.refresh();
+        updateSize();
+    });
 
-    const {
-        cpu_init: initCPU,
-        ppu_init: initPPU,
-        apu_init: initAPU,
-        Start: start,
-        ppu_render: renderPPU,
-        frame: framePtr,
-        update_controller1: updateController1,
-        apu_fill_buffer: fillAPUBuffer,
-        apu_step_frame: stepAPUFrame,
-        NonMaskableInterrupt: nmi,
-        load_state: loadState,
-        save_state: saveState,
-    } = instance.exports;
+    const debugTiles = document.getElementById('debug-tiles');
+    debugTiles.checked = localStorage.getItem(DEBUG_TILES_KEY) === '1';
+    debugTiles.addEventListener('change', () => {
+        localStorage.setItem(DEBUG_TILES_KEY, debugTiles.checked ? '1' : '0');
+        boot();
+    });
 
-    const chrRomPtr = instance.exports.chr_rom.value;
-    const audioBufferSizePtr = instance.exports.audio_buffer_size.value;
-    const audioBufferSize = readUint16(uint8View, audioBufferSizePtr);
-    const webAudioBufferPtr = instance.exports.web_audio_buffer.value;
-    const samples = new Uint8Array(uint8View.buffer, webAudioBufferPtr, audioBufferSize);
-    const lastSaveStatePtr = instance.exports.last_save_state.value;
-    const lastSaveState = new Uint8Array(uint8View.buffer, lastSaveStatePtr, SAVE_STATE_SIZE);
-    let saveStateReady = false;
+    const [defaultMap, native, display, runtimeBytes, recompiler] = await Promise.all([
+        fetch('smb.map').then(r => r.text()),
+        fetch('routines.txt').then(r => r.text()),
+        fetch('display.c').then(r => r.text()),
+        fetch('runtime.wasm').then(r => r.arrayBuffer()),
+        fetch('recompiler.js').then(r => r.arrayBuffer()),
+    ]);
+    const version = await store.digest(new Uint8Array(recompiler));
 
-    const chrRom = await getCHRROM();
-    uint8View.set(chrRom, chrRomPtr);
-
-    const { canvas, context: ctx, updateSize } = createCanvas();
-    document.body.appendChild(canvas);
-
-    const imageData = ctx.createImageData(SCREEN_WIDTH, SCREEN_HEIGHT);
-
-    const renderFrame = () => {
-        for (let i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) {
-            imageData.data[i * 4] = uint8View[framePtr + i * 3];
-            imageData.data[i * 4 + 1] = uint8View[framePtr + i * 3 + 1];
-            imageData.data[i * 4 + 2] = uint8View[framePtr + i * 3 + 2];
-            imageData.data[i * 4 + 3] = 255;
+    let rom = await store.get('rom', 'rom');
+    document.getElementById('load-rom').addEventListener('click', async () => {
+        const file = await pickFile();
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        try {
+            checkRom(bytes);
+        } catch (e) {
+            viewer.setStatus(e.message.toUpperCase(), 'error');
+            return;
         }
+        await store.put('rom', 'rom', bytes);
+        rom = bytes;
+        boot();
+    });
 
-        ctx.putImageData(imageData, 0, 0);
-    };
+    let { canvas, updateSize } = createCanvas();
+    document.getElementById('screen').prepend(canvas);
 
-    window.addEventListener('resize', updateSize);
-
-    // silence the audio when the tab is not active
+    const audioContext = new AudioContext({ latencyHint: 'interactive' });
     document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-            audioContext.suspend();
-        } else {
-            audioContext.resume();
-        }
+        if (document.hidden) audioContext.suspend();
+        else audioContext.resume();
     });
-
-    const audioContext = new AudioContext({
-        latencyHint: 'interactive',
-    });
-
-    let audioInitialized = false;
     let audioWorklet = null;
     let lastAudioTime = 0;
+    let session = null;
 
     const initAudio = async () => {
+        if (audioWorklet !== null) return;
+        await audioContext.resume();
         await audioContext.audioWorklet.addModule('audio-worklet.js');
         audioWorklet = new AudioWorkletNode(audioContext, 'apu-audio-processor', {
             outputChannelCount: [1],
-            processorOptions: {
-                sampleRate: audioContext.sampleRate
-            }
+            processorOptions: { sampleRate: audioContext.sampleRate },
         });
-
-        audioWorklet.port.onmessage = (event) => {
-            if (event.data.type === 'bufferLow') {
-                processAudio();
-            }
+        audioWorklet.port.onmessage = event => {
+            if (event.data.type === 'bufferLow') session?.processAudio();
         };
-
         audioWorklet.connect(audioContext.destination);
-    };
-
-    const normalizedSamples = new Float32Array(AUDIO_CHUNK_SIZE);
-
-    const processAudio = () => {
-        if (!audioInitialized) return;
-
-        // Calculate how many samples we need based on time elapsed
-        const currentTime = audioContext.currentTime;
-        const timeDelta = currentTime - lastAudioTime;
-        const samplesNeeded = Math.floor(timeDelta * audioContext.sampleRate);
-        const chunkSize = Math.min(AUDIO_CHUNK_SIZE, samplesNeeded);
-
-        fillAPUBuffer(samples.byteOffset, chunkSize);
-
-        for (let i = 0; i < chunkSize; i++) {
-            normalizedSamples[i] = (samples[i] / 255) * 2 - 1;
-        }
-
-        audioWorklet.port.postMessage({
-            type: 'samples',
-            samples: normalizedSamples,
-            chunkSize,
-        });
-
-        lastAudioTime = currentTime;
+        lastAudioTime = audioContext.currentTime;
     };
 
     let shouldSaveState = false;
     let shouldLoadState = false;
+    const joypad1 = createController(initAudio, {
+        save() { shouldSaveState = true; },
+        load() { shouldLoadState = true; },
+    });
 
-    const joypad1 = createController(
-        async () => {
-            if (!audioInitialized) {
-                await audioContext.resume();
-                await initAudio();
-                lastAudioTime = audioContext.currentTime;
-                audioInitialized = true;
-            }
-        },
-        {
-            save() {
-                shouldSaveState = true;
-            },
-            load() {
-                shouldLoadState = true;
-            },
-        },
-    );
+    // One run of the game: recompiled module, linked runtime, frame loop.
+    async function start() {
+        session?.stop();
+        session = null;
+        while (!rom) rom = await askForRom();
+        const map = localStorage.getItem(MAP_OVERRIDE_KEY) ?? defaultMap;
+        let files = null;
+        const { memory, runtime, game } = await link(runtimeBytes, async layout => {
+            const layoutText = Object.entries(layout).map(([name, address]) => `${name} ${address}`).join('\n');
+            const result = await build({ rom, map, native, layout: layoutText, version }, viewer);
+            files = result.files;
+            showWarning(result.warning);
+            return result.wasm;
+        }, rom);
 
-    initCPU();
-    initPPU(chrRomPtr);
-    initAPU(audioContext.sampleRate);
+        const ordered = FILE_ORDER.map(name => files.find(f => f.name === name)).filter(Boolean);
+        viewer.setFiles([
+            ...ordered,
+            { name: 'display.c', contents: display },
+            { name: 'smb.map', contents: map, editable: true, default: defaultMap },
+        ]);
 
-    start();
+        const uint8View = () => new Uint8Array(memory.buffer);
+        const audioBufferSize = readUint16(uint8View(), runtime.audio_buffer_size.value);
+        const samples = new Uint8Array(memory.buffer, runtime.web_audio_buffer.value, audioBufferSize);
+        const lastSaveState = new Uint8Array(memory.buffer, runtime.last_save_state.value, SAVE_STATE_SIZE);
+        let saveStateReady = false;
 
-    let lastFrameTime = performance.now();
-    let currentFrameTime = lastFrameTime;
-    let lastUpdateTime = lastFrameTime;
-    const targetFrameTime = 1000 / 60;
+        const chrRomPtr = runtime.chr_rom.value;
+        if (debugTiles.checked) runtime.debug_chr_generate(chrRomPtr);
+        else uint8View().set(chrOf(rom), chrRomPtr);
 
-    const update = () => {
-        const currentTime = performance.now();
-        const delta = currentTime - lastUpdateTime;
-        currentFrameTime += delta;
-        lastUpdateTime = currentTime;
+        runtime.cpu_init();
+        runtime.video_init(chrRomPtr);
+        runtime.render_init();
+        runtime.apu_init(audioContext.sampleRate);
 
-        if (currentFrameTime >= targetFrameTime) {
-            updateController1(joypad1.getState());
-            nmi();
-            stepAPUFrame();
-
-            if (audioInitialized) {
-                processAudio();
-            }
-
-            renderPPU();
-            renderFrame();
-            lastFrameTime = currentTime;
-            currentFrameTime = currentFrameTime - targetFrameTime;
-
-            if (shouldSaveState) {
-                saveState(lastSaveState.byteOffset);
-                localStorage.setItem(SAVE_STATE_LOCAL_STORAGE_KEY, JSON.stringify(Array.from(lastSaveState)));
-                shouldSaveState = false;
-                saveStateReady = true;
-            } else if (shouldLoadState) {
-                if (saveStateReady) {
-                    loadState(lastSaveState.byteOffset);
-                } else {
-                    const saveStateData = localStorage.getItem(SAVE_STATE_LOCAL_STORAGE_KEY);
-
-                    if (saveStateData) {
-                        const saveStateArray = JSON.parse(saveStateData);
-                        lastSaveState.set(saveStateArray);
-                        saveStateReady = true;
-                    }
-                }
-
-                shouldLoadState = false;
+        // Draw with WebGL2 unless unavailable or ?software is in the URL.
+        let renderer = null;
+        if (!new URLSearchParams(window.location.search).has('software')) {
+            try {
+                renderer = await createGpuRenderer(canvas, runtime, memory);
+            } catch (error) {
+                console.error('WebGL renderer unavailable:', error);
+                // a canvas keeps its first context type: start over with a 2D one
+                canvas.remove();
+                ({ canvas, updateSize } = createCanvas());
+                document.getElementById('screen').prepend(canvas);
             }
         }
+        if (renderer === null) {
+            renderer = createSoftwareRenderer(canvas, runtime.render_frame, uint8View(), runtime.frame.value);
+        }
+        updateSize();
 
-        requestAnimationFrame(update);
-    };
+        const normalizedSamples = new Float32Array(AUDIO_CHUNK_SIZE);
+        let running = true;
+        const current = {
+            stop() { running = false; },
+            processAudio() {
+                if (audioWorklet === null || !running) return;
+                const currentTime = audioContext.currentTime;
+                const samplesNeeded = Math.floor((currentTime - lastAudioTime) * audioContext.sampleRate);
+                const chunkSize = Math.min(AUDIO_CHUNK_SIZE, samplesNeeded);
+                runtime.apu_fill_buffer(samples.byteOffset, chunkSize);
+                for (let i = 0; i < chunkSize; i++) normalizedSamples[i] = (samples[i] / 255) * 2 - 1;
+                audioWorklet.port.postMessage({ type: 'samples', samples: normalizedSamples, chunkSize });
+                lastAudioTime = currentTime;
+            },
+        };
+        session = current;
 
-    update();
+        game.cpu_reset_entry();
+
+        let lastUpdateTime = performance.now();
+        let currentFrameTime = lastUpdateTime;
+        const targetFrameTime = 1000 / 60;
+
+        const update = () => {
+            if (!running) return;
+            const currentTime = performance.now();
+            currentFrameTime += currentTime - lastUpdateTime;
+            lastUpdateTime = currentTime;
+
+            if (currentFrameTime >= targetFrameTime) {
+                runtime.update_controller1(joypad1.getState());
+                runtime.next_frame();
+                runtime.apu_step_frame();
+                current.processAudio();
+                renderer.draw();
+                currentFrameTime -= targetFrameTime;
+
+                if (shouldSaveState) {
+                    runtime.save_state(lastSaveState.byteOffset);
+                    localStorage.setItem(SAVE_STATE_LOCAL_STORAGE_KEY, JSON.stringify(Array.from(lastSaveState)));
+                    shouldSaveState = false;
+                    saveStateReady = true;
+                } else if (shouldLoadState) {
+                    if (!saveStateReady) {
+                        const saveStateData = localStorage.getItem(SAVE_STATE_LOCAL_STORAGE_KEY);
+                        if (saveStateData) {
+                            lastSaveState.set(JSON.parse(saveStateData));
+                            saveStateReady = true;
+                        }
+                    }
+                    if (saveStateReady) runtime.load_state(lastSaveState.byteOffset);
+                    shouldLoadState = false;
+                }
+            }
+
+            requestAnimationFrame(update);
+        };
+
+        update();
+    }
+
+    async function boot() {
+        try {
+            await start();
+        } catch (error) {
+            console.error(error);
+            viewer.setStatus(`ERROR: ${error.message}`.toUpperCase(), 'error');
+            if (/iNES|mapper|ROM/.test(error.message)) {
+                rom = await askForRom(error.message);
+                boot();
+            }
+        }
+    }
+
+    boot();
 }
 
 main();

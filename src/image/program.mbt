@@ -29,7 +29,7 @@ pub fn address_name(image: Image, pc: Int) -> String {
   for i, item in image.source {
     if image.addresses[i] == pc && item is Label(name) { return name }
   }
-  "loc_\{pc}"
+  "loc_\{pc.to_string(radix=16)}"
 }
 
 pub fn branch_target(inst: Instruction) -> Int {
@@ -57,7 +57,22 @@ pub fn source_mode(image: Image, inst: Instruction) -> @parse.SourceAddressingMo
   }
 }
 
-pub fn discover(image: Image) -> Program raise ImageError {
+// Decoded control flow, independent of how the program was supplied.
+priv struct Exploration {
+  instructions: Map[Int, Instruction]
+  dispatches: Map[Int, Dispatch]
+  roots: Array[Int]
+  facts: Map[Int, Facts]
+  idle: Set[Int]
+  needed: Set[Int] // addresses that need a label (jump and call targets, entries)
+  following: Map[Int, Int] // next decoded instruction address
+  pcs: Array[Int] // decoded instruction addresses, ascending
+}
+
+// Follows execution from the reset and NMI vectors. Inline tables after a
+// call are the data directives in `image.source` that start at its return
+// address (from the assembly source, or from a ROM map).
+fn explore(image: Image) -> Exploration raise ImageError {
   if !((image.bytes.length() == 32768 && image.origin == 0x8000) ||
        (image.bytes.length() == 16384 && (image.origin == 0x8000 || image.origin == 0xc000))) {
     raise InvalidImage("NROM requires a 16 or 32 KiB PRG image in a cartridge window")
@@ -167,6 +182,11 @@ pub fn discover(image: Image) -> Program raise ImageError {
     for target in dispatch.targets { needed.add(target) }
   }
   check_wait_loops(image, instructions, facts, idle)
+  { instructions, dispatches, roots, facts, idle, needed, following, pcs }
+}
+
+pub fn discover(image: Image) -> Program raise ImageError {
+  let { instructions, dispatches, roots, facts, idle, needed, following, pcs } = explore(image)
   // Assign decoded addresses to byte-producing source spans, allowing several
   // executable entries inside one .db or one source instruction's encoding.
   let owners: Map[Int, Int] = Map([])

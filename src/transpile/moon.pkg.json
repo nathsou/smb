@@ -5,6 +5,7 @@
     "nathsou/smb/lower",
     "moonbitlang/x/fs",
     "moonbitlang/core/debug",
-    "nathsou/smb/image"
+    "nathsou/smb/image",
+    "nathsou/smb/ir"
   ]
 }
