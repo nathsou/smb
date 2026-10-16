@@ -626,6 +626,7 @@ fn Emitter::emit_flat_subroutine(self: Emitter, subroutine: @lower.AsmFlatSubrou
     self.emit("// \{text}")
     body += 1
   }
+  if interface_comment(low, subroutine.name) is Some(text) { self.emit(text) }
   self.emit("void \{rename_label(subroutine.name)}(void) {")
   self.indentation = 1
 
@@ -637,7 +638,21 @@ fn Emitter::emit_flat_subroutine(self: Emitter, subroutine: @lower.AsmFlatSubrou
   self.emit("}\n")
 }
 
-fn Emitter::emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
+fn show_names(names: Array[String]) -> String {
+  if names.is_empty() { "none" } else { names.join(", ") }
+}
+
+// Inputs are registers read before being written; outputs are registers and
+// flags the routine may change that some caller reads after it returns.
+fn interface_comment(low: @lower.AsmLowering, name: String) -> String? {
+  let inputs = low.routine_inputs(name).names()
+  let outputs = low.routine_register_outputs(name).names()
+  outputs.append(low.routine_flag_outputs(name).names())
+  if inputs.is_empty() && outputs.is_empty() { return None }
+  Some("// in: \{show_names(inputs)}; out: \{show_names(outputs)}")
+}
+
+fn Emitter::emit_code_c(self: Emitter, low: @lower.AsmLowering, native: Set[String]) -> Unit {
   self.emit("#include \"code.h\"")
   self.emit("")
   if !low.preamble.is_empty() {
@@ -688,7 +703,18 @@ fn Emitter::emit_code_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
   }
 
   for sub in low.flat_subroutines {
-    self.emit_flat_subroutine(sub, low)
+    let name = rename_label(sub.name)
+    if native.contains(name) {
+      // Hand-written replacement: it must leave every register and flag its
+      // callers read exactly as the original routine would.
+      let outputs = low.routine_register_outputs(sub.name).names()
+      outputs.append(low.routine_flag_outputs(sub.name).names())
+      self.emit("// \{name}: native implementation, not generated.")
+      self.emit("// It may read: \{show_names(low.routine_inputs(sub.name).names())}.")
+      self.emit("// It must produce: \{show_names(outputs)}.\n")
+    } else {
+      self.emit_flat_subroutine(sub, low)
+    }
   }
   if low.program is Some(p) {
     let base = if p.image.bytes.length() == 16384 { p.image.origin + 0x3ffa } else { 0xfffa }
@@ -712,7 +738,20 @@ pub(all) struct Transpiler {
   files: Array[File]
 }
 
-pub fn Transpiler::transpile(low: @lower.AsmLowering) -> Transpiler {
+pub(all) suberror TranspileError { UnknownNativeRoutine(String) } derive(Debug)
+
+// `native` lists routines whose bodies are supplied by hand-written C; only
+// their prototypes are generated.
+pub fn Transpiler::transpile(
+  low: @lower.AsmLowering,
+  native~: Array[String] = [],
+) -> Transpiler raise TranspileError {
+  let routines: Set[String] = Set([])
+  for sub in low.flat_subroutines { routines.add(rename_label(sub.name)) }
+  for name in native {
+    if !routines.contains(name) { raise UnknownNativeRoutine(name) }
+  }
+  let native = Set::from_array(native)
   let constants_h: File = {
     name: "constants.h",
     contents: {
@@ -757,7 +796,7 @@ pub fn Transpiler::transpile(low: @lower.AsmLowering) -> Transpiler {
     name: "code.c",
     contents: {
       let emitter = Emitter::new()
-      emitter.emit_code_c(low)
+      emitter.emit_code_c(low, native)
       emitter.output.to_string()
     },
     is_lib: true,

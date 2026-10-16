@@ -14,6 +14,7 @@ suberror PipelineError {
   ParserError(@parse.ParserError)
   LoweringError(@lower.LoweringError)
   ImageError(@image.ImageError)
+  TranspileError(@transpile.TranspileError)
 } derive(Debug)
 
 fn read_rom() -> String raise PipelineError {
@@ -60,9 +61,29 @@ fn lower() -> @lower.AsmLowering raise PipelineError {
   }
 }
 
+// --native FILE: routine names (one per line, # comments) implemented in
+// hand-written C instead of being generated.
+fn native_routines() -> Array[String] raise PipelineError {
+  let path = option("--native", "")
+  if path == "" { return [] }
+  let text = try @fs.read_file_to_string(path) catch {
+    err => raise IOError(Show::to_string(err))
+  }
+  let names = []
+  for line in text.split("\n") {
+    let line = match line.find("#") { Some(i) => line.view(end_offset=i); None => line }
+    let name = line.trim().to_owned()
+    if name != "" { names.push(name) }
+  }
+  names
+}
+
 fn transpile() -> @transpile.Transpiler raise PipelineError {
+  let native = native_routines()
   let low = lower()
-  @transpile.Transpiler::transpile(low)
+  try @transpile.Transpiler::transpile(low, native~) catch {
+    err => raise TranspileError(err)
+  }
 }
 
 let output_dir: String = option("--output", "codegen")
