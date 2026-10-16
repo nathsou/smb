@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "lib/state.h"
+#include "lib/debug_chr.h"
 
 #define ROM_PATH "smb.nes"
 
@@ -167,7 +168,10 @@ int main(void) {
     apu_init(AUDIO_SAMPLE_RATE);
 
     if (read_chr_rom(ROM_PATH)) {
-        return 1;
+        fprintf(stderr, "Using generated debug tiles instead\n");
+        uint8_t chr[DEBUG_CHR_SIZE];
+        debug_chr_generate(chr);
+        ppu_init(chr);
     }
 
     cpu_reset_entry();

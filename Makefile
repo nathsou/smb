@@ -26,6 +26,7 @@ SOURCES += codegen/lib/cpu.c
 SOURCES += codegen/lib/ppu.c
 SOURCES += codegen/lib/apu.c
 SOURCES += codegen/lib/state.c
+SOURCES += codegen/lib/debug_chr.c
 MAIN = codegen/main.c
 
 .PHONY: codegen clean

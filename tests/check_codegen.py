@@ -32,7 +32,11 @@ if __name__ == "__main__":
     run("git", "diff", "--exit-code", "--", "codegen/lib/code.c",
         "codegen/lib/code.h", "codegen/lib/data.c", "codegen/lib/data.h",
         "codegen/lib/constants.h")
-    run("make", "hash")
+    # ROM-free replay: generated debug tiles, per-frame state oracle.
+    trace = "tests/golden/warpless.trace"
+    for flags in ([], ["EXTRA_CFLAGS=-DNATIVE_CALLS"]):
+        run("make", "hash", *flags)
+        run("./hash", "--debug-chr", "--trace", trace)
     with tempfile.TemporaryDirectory(prefix="smb-semantics-") as tmp:
         executable = str(pathlib.Path(tmp) / "cpu-semantics")
         sources = ["instructions", "cpu", "code", "data", "ppu", "apu"]
@@ -40,6 +44,6 @@ if __name__ == "__main__":
             *(f"codegen/lib/{name}.c" for name in sources))
         run(executable)
     if args.rom:
-        run("./hash")
-        run("make", "hash", "EXTRA_CFLAGS=-DNATIVE_CALLS")
-        run("./hash")
+        for flags in ([], ["EXTRA_CFLAGS=-DNATIVE_CALLS"]):
+            run("make", "hash", *flags)
+            run("./hash")

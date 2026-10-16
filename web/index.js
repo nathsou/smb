@@ -267,13 +267,23 @@ async function getCHRROM() {
         const container = document.createElement('div');
         container.style.textAlign = 'center';
         const uploadButton = createUploadButton();
+        const debugButton = createUploadButton();
+        debugButton.textContent = 'Use debug tiles';
+        debugButton.style.marginLeft = '10px';
         const instruction = displayMessage('Please upload a NES ROM or CHR ROM dump to extract graphics data from.');
 
         container.appendChild(instruction);
         container.appendChild(uploadButton);
+        container.appendChild(debugButton);
         document.body.appendChild(container);
 
         return new Promise((resolve, reject) => {
+            // null selects the generated placeholder tiles (no ROM needed)
+            debugButton.addEventListener('click', () => {
+                document.body.removeChild(container);
+                resolve(null);
+            });
+
             uploadButton.addEventListener('click', () => {
                 const input = document.createElement('input');
                 input.type = 'file';
@@ -366,7 +376,11 @@ async function main() {
     let saveStateReady = false;
 
     const chrRom = await getCHRROM();
-    uint8View.set(chrRom, chrRomPtr);
+    if (chrRom === null) {
+        instance.exports.debug_chr_generate(chrRomPtr);
+    } else {
+        uint8View.set(chrRom, chrRomPtr);
+    }
 
     const { canvas, context: ctx, updateSize } = createCanvas();
     document.body.appendChild(canvas);
