@@ -1,3 +1,5 @@
+import { createGpuRenderer } from './gpu.js';
+
 const SCREEN_WIDTH = 256;
 const SCREEN_HEIGHT = 240;
 const AUDIO_CHUNK_SIZE = 1024;
@@ -26,13 +28,33 @@ function createCanvas() {
     canvas.height = SCREEN_HEIGHT;
     updateSize();
 
-    const context = canvas.getContext('2d');
+    return { canvas, updateSize };
+}
 
-    if (context === null) {
+// Software fallback: copy the C renderer's RGB frame into a 2D canvas.
+function createSoftwareRenderer(canvas, renderVideo, uint8View, framePtr) {
+    const ctx = canvas.getContext('2d');
+
+    if (ctx === null) {
         throw new Error('Failed to get 2d context');
     }
 
-    return { canvas, context, updateSize };
+    const imageData = ctx.createImageData(SCREEN_WIDTH, SCREEN_HEIGHT);
+
+    return {
+        draw() {
+            renderVideo();
+
+            for (let i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) {
+                imageData.data[i * 4] = uint8View[framePtr + i * 3];
+                imageData.data[i * 4 + 1] = uint8View[framePtr + i * 3 + 1];
+                imageData.data[i * 4 + 2] = uint8View[framePtr + i * 3 + 2];
+                imageData.data[i * 4 + 3] = 255;
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+        },
+    };
 }
 
 const SUPPORTED_GAMEPAD_MAPPINGS = {
@@ -386,21 +408,28 @@ async function main() {
         uint8View.set(chrRom, chrRomPtr);
     }
 
-    const { canvas, context: ctx, updateSize } = createCanvas();
+    let { canvas, updateSize } = createCanvas();
     document.body.appendChild(canvas);
 
-    const imageData = ctx.createImageData(SCREEN_WIDTH, SCREEN_HEIGHT);
+    // Draw with WebGL2 unless unavailable or ?software is in the URL.
+    const useSoftware = new URLSearchParams(window.location.search).has('software');
+    let renderer = null;
 
-    const renderFrame = () => {
-        for (let i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) {
-            imageData.data[i * 4] = uint8View[framePtr + i * 3];
-            imageData.data[i * 4 + 1] = uint8View[framePtr + i * 3 + 1];
-            imageData.data[i * 4 + 2] = uint8View[framePtr + i * 3 + 2];
-            imageData.data[i * 4 + 3] = 255;
+    if (!useSoftware) {
+        try {
+            renderer = await createGpuRenderer(canvas, instance.exports, memory);
+        } catch (error) {
+            console.error('WebGL renderer unavailable:', error);
+            // a canvas keeps its first context type: start over with a 2D one
+            canvas.remove();
+            ({ canvas, updateSize } = createCanvas());
+            document.body.appendChild(canvas);
         }
+    }
 
-        ctx.putImageData(imageData, 0, 0);
-    };
+    if (renderer === null) {
+        renderer = createSoftwareRenderer(canvas, renderVideo, uint8View, framePtr);
+    }
 
     window.addEventListener('resize', updateSize);
 
@@ -514,8 +543,7 @@ async function main() {
                 processAudio();
             }
 
-            renderVideo();
-            renderFrame();
+            renderer.draw();
             lastFrameTime = currentTime;
             currentFrameTime = currentFrameTime - targetFrameTime;
 

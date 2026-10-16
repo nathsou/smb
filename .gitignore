@@ -3,6 +3,7 @@ target/
 used_insts.txt
 smb
 hash
+gpu_check
 smb.wasm
 web/*.nes
 *.nes
