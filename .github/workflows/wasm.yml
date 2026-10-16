@@ -61,4 +61,6 @@ jobs:
           folder: dist
           branch: gh-pages
           clean: true
+          # keep no history of earlier deployments on gh-pages
+          single-commit: true
           token: ${{ secrets.GITHUB_TOKEN }}
