@@ -2,8 +2,7 @@
 #define SMB_CODE_H
 
 #include "data.h"
-#include "instructions.h"
-#include "ppu_bus.h"
+#include "cpu.h"
 #include "apu.h"
 
 // PRG ROM read; images smaller than 32 KiB are mirrored.

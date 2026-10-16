@@ -1,7 +1,7 @@
 
 pub(all) struct Emitter {
   output: StringBuilder
-  mut instruction_helpers: Bool // emit calls to instructions.c instead of C
+  mut fold: Bool // fold load/store pairs (off for the differential reference)
   mut indentation: Int
   mut jsr_return_index: Int
   local_labels: Set[String]
@@ -12,7 +12,7 @@ pub(all) struct Emitter {
 pub fn Emitter::new() -> Emitter {
   {
     output: StringBuilder::new(),
-    instruction_helpers: false,
+    fold: true,
     indentation: 0,
     jsr_return_index: 0,
     local_labels: Set([]),
@@ -215,13 +215,15 @@ fn Emitter::emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
     self.emit("};\n")
 }
 
-fn Emitter::emit_code_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
+// `uses_ppu_bus`: the program writes PPU registers, which a host supplies
+// through ppu_bus.h (SMB's display code writes its state directly instead).
+fn Emitter::emit_code_h(self: Emitter, low: @lower.AsmLowering, uses_ppu_bus~: Bool) -> Unit {
   self.emit("#ifndef SMB_CODE_H")
   self.emit("#define SMB_CODE_H")
   self.emit("")
   self.emit("#include \"data.h\"")
-  self.emit("#include \"instructions.h\"")
-  self.emit("#include \"ppu_bus.h\"")
+  self.emit("#include \"cpu.h\"")
+  if uses_ppu_bus { self.emit("#include \"ppu_bus.h\"") }
   self.emit("#include \"apu.h\"")
   self.emit("")
 
@@ -273,53 +275,6 @@ fn show_cond_opcode(op: @parse.OpCode) -> String {
     BVC => "!overflow_flag"
     BVS => "overflow_flag"
     _ => abort("unreachable")
-  }
-}
-
-fn flag_helper_suffix(op: @parse.OpCode, id: Int, low: @lower.AsmLowering) -> String {
-  let writes = @lower.flag_writes(op)
-  let live_writes = writes.intersect(low.flag_live_after(id))
-
-  if writes.is_none() {
-    ""
-  } else if !live_writes.carry && !live_writes.zero && !live_writes.negative {
-    ""
-  } else {
-    let mut suffix = "_f"
-
-    if live_writes.carry {
-      suffix += "c"
-    }
-    if live_writes.zero {
-      suffix += "z"
-    }
-    if live_writes.negative {
-      suffix += "n"
-    }
-
-    suffix
-  }
-}
-
-fn is_dead_flag_only_instruction(
-  op: @parse.OpCode,
-  mode: @lower.AsmAddressingMode,
-  id: Int,
-  low: @lower.AsmLowering,
-) -> Bool {
-  match (op, mode) {
-    (BIT, Absolute(expr) | ZeroPage(expr)) => {
-      match compute_expr_range(expr, low) {
-        Some({ min, max }) if min == max && ((min >= 0 && max < 0x2000) || (min >= 0x8000 && max < 65536)) => {
-          @lower.flag_writes(op).intersect(low.flag_live_after(id)).is_none()
-        }
-        _ => false
-      }
-    }
-    (CMP | CPX | CPY, Immediate(_)) => {
-      @lower.flag_writes(op).intersect(low.flag_live_after(id)).is_none()
-    }
-    _ => false
   }
 }
 
@@ -423,7 +378,7 @@ fn write_value(mode: @lower.AsmAddressingMode, target: String, low: @lower.AsmLo
 priv enum Operand {
   Value(String) // immediate
   Ram(String) // a ram[] lvalue
-  Rom(String) // a PRG ROM read
+  Rom(String) // the address of a PRG ROM read
   Bus(String) // an address that needs the bus (I/O, pointers, unknown)
 }
 
@@ -434,7 +389,7 @@ fn operand(mode: @lower.AsmAddressingMode, low: @lower.AsmLowering) -> Operand? 
     match compute_range(expr, mode, low) {
       Some({ min, max }) if min >= 0 && max < 0x800 => Ram("ram[\{address}]")
       Some({ min, max }) if min >= 0 && max < 0x2000 => Ram("ram[(\{address}) & 0x7ff]")
-      Some({ min, max }) if min >= 0x8000 && max < 0x10000 => Rom("ROM(\{address})")
+      Some({ min, max }) if min >= 0x8000 && max < 0x10000 => Rom(address)
       _ => Bus(if index == "" { address } else { "(uint16_t)(\{address})" })
     }
   }
@@ -454,7 +409,8 @@ fn operand(mode: @lower.AsmAddressingMode, low: @lower.AsmLowering) -> Operand? 
 
 fn Operand::read(self: Operand) -> String {
   match self {
-    Value(text) | Ram(text) | Rom(text) => text
+    Value(text) | Ram(text) => text
+    Rom(address) => "ROM(\{address})"
     Bus(address) => "read_byte(\{address})"
   }
 }
@@ -479,9 +435,23 @@ fn register_name(op: @parse.OpCode) -> String {
   }
 }
 
+// The value a read-modify-write instruction updates: a ram[] lvalue, or a
+// temporary read through the bus and written back (pushed into `out` before
+// and returned after the operation).
+fn rmw_target(mode: @lower.AsmAddressingMode, low: @lower.AsmLowering, out: Array[String]) -> (String, Array[String])? {
+  match operand(mode, low) {
+    Some(Ram(lvalue)) => Some((lvalue, []))
+    Some(Rom(address)) | Some(Bus(address)) => {
+      out.push("uint16_t address = \{address};")
+      out.push("uint8_t m = read_byte(address);")
+      Some(("m", ["dynamic_ram_write(address, m);"]))
+    }
+    _ => None
+  }
+}
+
 // Plain C for one instruction over the register and flag variables, updating
-// only the flags that are live afterwards. None keeps the instruction helper
-// (read-modify-write outside proven RAM, and PHP/PLP).
+// only the flags that are live afterwards. None for an unsupported form.
 fn native_instruction(
   op: @parse.OpCode,
   mode: @lower.AsmAddressingMode,
@@ -577,14 +547,15 @@ fn native_instruction(
     INX | INY => { out.push("\{register_name(op)}++;"); out.append(zn_updates(register_name(op), live)) }
     DEX | DEY => { out.push("\{register_name(op)}--;"); out.append(zn_updates(register_name(op), live)) }
     INC | DEC => {
-      let target = match operand(mode, low) { Some(Ram(lvalue)) => lvalue; _ => return None }
+      let (target, write_back) = match rmw_target(mode, low, out) { Some(t) => t; None => return None }
       out.push(if op == INC { "\{target}++;" } else { "\{target}--;" })
+      out.append(write_back)
       out.append(zn_updates(target, live))
     }
     ASL | LSR | ROL | ROR => {
-      let target = match mode {
-        Accumulator => "a"
-        _ => match operand(mode, low) { Some(Ram(lvalue)) => lvalue; _ => return None }
+      let (target, write_back) = match mode {
+        Accumulator => ("a", [])
+        _ => match rmw_target(mode, low, out) { Some(t) => t; None => return None }
       }
       let carry_out = if op == ASL || op == ROL { "(\{target} & 0x80) != 0" } else { "(\{target} & 1) != 0" }
       let shifted = match op {
@@ -602,6 +573,7 @@ fn native_instruction(
         if live.carry { out.push("carry_flag = \{carry_out};") }
         out.push("\{target} = \{shifted};")
       }
+      out.append(write_back)
       out.append(zn_updates(target, live))
     }
     PHA => out.push("ram[0x100 + sp--] = a;")
@@ -612,6 +584,8 @@ fn native_instruction(
     SEI => out.push("interrupt_disabled = true;")
     CLV => if live.overflow { out.push("overflow_flag = false;") }
     NOP => ()
+    PHP => out.push("php();")
+    PLP => out.push("plp();")
     _ => return None
   }
   Some(block())
@@ -660,7 +634,7 @@ fn item_comment(item: @lower.AsmItem) -> String? {
 fn Emitter::emit_items(self: Emitter, items: ArrayView[@lower.AsmItem], low: @lower.AsmLowering) -> Unit {
   let mut i = 0
   while i < items.length() {
-    if !self.instruction_helpers && i + 1 < items.length() {
+    if self.fold && i + 1 < items.length() {
       if fused_store(items[i], items[i + 1], low) is Some(code) {
         let comments = [item_comment(items[i]), item_comment(items[i + 1])].filter_map(fn(c) { c })
         self.emit(if comments.is_empty() { code } else { "\{code} // \{comments.join("; ")}" })
@@ -754,20 +728,13 @@ fn Emitter::emit_item(self: Emitter, item: @lower.AsmItem, low: @lower.AsmLoweri
                   _ => ""
                 }
 
-                if id >= 0 && low.program is Some(_) {
-                  "CALL(\{target}, 0x\{hex(id + 2)});"
-                } else { "\{target}();" }
+                "\{target}();"
               }
               (RTS, _) => "return;"
               _ => {
-                let native = if self.instruction_helpers { None } else { native_instruction(op, mode, id, low) }
-                if native is Some(code) {
-                  code
-                } else if is_dead_flag_only_instruction(op, mode, id, low) {
-                  ""
-                } else {
-                  let helper = "\{@debug.to_string(op).to_lower()}\{mode.suffix()}\{flag_helper_suffix(op, id, low)}"
-                  "\{helper}(\{args});"
+                match native_instruction(op, mode, id, low) {
+                  Some(code) => code
+                  None => abort("Unsupported instruction: \{@debug.to_string(op)} \{args}")
                 }
               }
             }
@@ -930,7 +897,7 @@ fn Emitter::emit_code_c(self: Emitter, low: @lower.AsmLowering, native: Set[Stri
       self.emit("// Inline-table dispatch proven by evaluating \{name}; its effects run here unchanged.")
       self.emit("static uint16_t \{name}(uint16_t return_address) {")
       self.indentation += 1
-      self.emit("cpu_call_begin(return_address);")
+      self.emit("cpu_push_return_address(return_address);")
       for step in dispatch.steps {
         let inst = step.inst
         if inst.op == JMP { continue }
@@ -1001,12 +968,12 @@ pub(all) suberror TranspileError { UnknownNativeRoutine(String) } derive(Debug)
 
 // `native` lists routines whose bodies are supplied by hand-written C; only
 // their prototypes are generated.
-// `instruction_helpers` emits calls into instructions.c instead of plain C
-// (the previous output style, kept as a reference for differential tests).
+// `fold` combines load/store pairs; the differential test disables it to
+// build its reference.
 pub fn Transpiler::transpile(
   low: @lower.AsmLowering,
   native~: Array[String] = [],
-  instruction_helpers~: Bool = false,
+  fold~: Bool = true,
 ) -> Transpiler raise TranspileError {
   let routines: Set[String] = Set([])
   for sub in low.flat_subroutines { routines.add(rename_label(sub.name)) }
@@ -1044,22 +1011,22 @@ pub fn Transpiler::transpile(
     is_lib: true,
   }
 
-  let code_h = {
-    name: "code.h",
+  let code_c = {
+    name: "code.c",
     contents: {
       let emitter = Emitter::new()
-      emitter.emit_code_h(low)
+      emitter.fold = fold
+      emitter.emit_code_c(low, native)
       emitter.output.to_string()
     },
     is_lib: true,
   }
 
-  let code_c = {
-    name: "code.c",
+  let code_h = {
+    name: "code.h",
     contents: {
       let emitter = Emitter::new()
-      emitter.instruction_helpers = instruction_helpers
-      emitter.emit_code_c(low, native)
+      emitter.emit_code_h(low, uses_ppu_bus=code_c.contents.contains("ppu_bus_"))
       emitter.output.to_string()
     },
     is_lib: true,

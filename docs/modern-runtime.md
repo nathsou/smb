@@ -3,7 +3,8 @@
 The recompiler produces C that preserves the original program exactly (see
 [recompiler-migration.md](recompiler-migration.md)). This work starts moving
 that output away from the emulation layers it relied on: the PPU's register
-protocol and the 6502 instruction helpers. Each step is checked to preserve
+protocol, the 6502 instruction helpers and the emulated return-address stack.
+Each step is checked to preserve
 the game state on every frame of the replay, and every generated routine is
 compared against the previous output.
 
@@ -36,17 +37,24 @@ The replay executes about 66% of the generated code.
 
 ### Routine-level differential test
 
-`tests/check_routines.py` generates the program a second time in the previous
-style (`--instruction-helpers`: calls into `instructions.c`), links both into
-one binary with the reference routines renamed `ref_*`, and runs
+`tests/check_routines.py` generates the program a second time without
+transformations (`--no-fold`: one statement group per instruction), links both
+into one binary with the reference routines renamed `ref_*`, and runs
 `tests/routines/diff.c`. For every generated routine it takes 50 states from
 the replay, randomises A/X/Y, SP and the flags (and, in every other state, 48
 RAM bytes), runs both versions under a trap and timeout guard, and compares
 registers, RAM, the display state, traps, and the flags that the routine's
-callers read. This exercises paths the replay never takes. In a sample of 24
-random single-operator mutations of the generated code it caught 19; the
-others were boundary changes (`>=` to `>`) or paths that these states rarely
-reach.
+callers read. This exercises paths the replay never takes. While the
+instruction-helper layer still existed it served as the reference: in a sample
+of 24 random single-operator mutations of the generated code the test caught
+19; the others were boundary changes (`>=` to `>`) or paths that these states
+rarely reach.
+
+`tests/semantics.asm` checks the generated instruction C itself: each routine
+ends with PHP so every flag is computed, and `tests/semantics.c` compares
+ADC and SBC (all operands and carries), CMP, BIT, shifts and rotates (register
+and memory), zero-page wrapping and bus read-modify-write with independent
+models.
 
 ## Routine interfaces
 
@@ -105,13 +113,11 @@ The old PPU module is split in three:
 
 - `video.c`: the display state and VRAM address decoding;
 - `render.c`: the software renderer, a function of `Video` only;
-- `ppu_bus.c`: the register interface over `Video`, compiled only with
-  `-DPPU_BUS` for generic programs (the NROM fixture and the CPU semantics
-  test).
+- `tests/support/ppu_bus.c`: the register interface over `Video`, compiled
+  only with `-DPPU_BUS` for generic programs (the test fixtures).
 
-SMB's build does not link `ppu_bus.c`: a register access left in its
-generated code is a link error, and a computed access to $2000-$3FFF or
-$4014 traps.
+SMB's build does not include it: a register access left in its generated code
+is a link error, and a computed access to $2000-$3FFF or $4014 traps.
 
 ## GPU rendering
 
@@ -140,11 +146,16 @@ a &= Start_Button; zero_flag = a == 0; // on controller 1
 
 Operands are classified from their address range: provable RAM becomes a
 `ram[...]` lvalue, provable PRG ROM a `ROM(...)` read, and anything else
-(I/O, pointers) still goes through the bus (`read_byte`). Read-modify-write
-instructions outside proven RAM, and PHP/PLP, keep their helpers. For SMB no
-helper call remains, so `instructions.c` is no longer part of its build.
-`--instruction-helpers` restores the previous output as the reference for the
-differential test.
+(I/O, pointers) still goes through the bus (`read_byte`); read-modify-write
+outside proven RAM reads, updates and writes back a temporary through it.
+PHP/PLP call `php()`/`plp()`, which pack the status byte on the stack. The
+instruction-helper layer (`instructions.c`) has been removed.
+
+JSRs are plain C calls: SMB's replay was identical with and without the
+emulated return-address stack, and the generator's static stack checks reject
+programs that inspect return addresses outside a proven dispatcher.
+Dispatchers still push the return address they read their table through.
+NMI delivery restores the status flags in C instead of pushing PC and P.
 
 A load (or transfer) followed by a store of the same register becomes one
 assignment when the register is dead after the store and the load's flags are

@@ -1,7 +1,9 @@
 #include "cpu.h"
 #include "data.h"
 #include "code.h"
-#include "ppu_bus.h"
+#ifdef PPU_BUS
+#include "ppu_bus.h" // generic programs only: tests/support/ppu_bus.c
+#endif
 #include "apu.h"
 
 uint8_t a;
@@ -17,20 +19,11 @@ bool interrupt_disabled;
 bool decimal_flag;
 uint16_t cpu_resume_pc;
 
-// C calls express normal continuations; the guest stack remains observable to
-// PHA/PLA, TSX, memory accesses, and return-address-based inline dispatchers.
-void cpu_call_begin(uint16_t return_address) {
+// Routine calls are C calls and leave no return address on the guest stack,
+// which stays observable to PHA/PLA, TSX and memory accesses.
+void cpu_push_return_address(uint16_t return_address) {
     ram[0x100 + sp--] = (uint8_t)(return_address >> 8);
     ram[0x100 + sp--] = (uint8_t)return_address;
-}
-
-void cpu_call_end(uint16_t expected_return_address) {
-    uint16_t actual = (uint16_t)(ram[0x100 + (uint8_t)(sp + 1)] |
-        (ram[0x100 + (uint8_t)(sp + 2)] << 8));
-    if (actual != expected_return_address) {
-        cpu_unresolved_jump((uint16_t)(actual + 1));
-    }
-    sp = (uint8_t)(sp + 2);
 }
 
 void cpu_yield(uint16_t pc) {
@@ -269,14 +262,12 @@ void plp(void) {
 }
 
 inline void next_frame(void) {
-    // The frame adapter delivers NMI while the foreground is at a proven idle
-    // yield. Hardware saves PC/P, not A/X/Y. Keep those stack bytes observable.
-    uint16_t return_pc = cpu_resume_pc;
-    cpu_call_begin(return_pc);
-    php();
-    ram[0x100 + (uint8_t)(sp + 1)] &= (uint8_t)~0x10; // hardware clears B
+    // NMI is delivered while the foreground is at a proven idle yield, which
+    // reads no registers or flags. Like RTI, restore the status flags.
+    bool c = carry_flag, z = zero_flag, n = neg_flag, v = overflow_flag;
+    bool i = interrupt_disabled, d = decimal_flag;
     interrupt_disabled = true;
     cpu_nmi_entry();
-    plp();
-    cpu_call_end(return_pc);
+    carry_flag = c; zero_flag = z; neg_flag = n; overflow_flag = v;
+    interrupt_disabled = i; decimal_flag = d;
 }

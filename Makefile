@@ -5,7 +5,7 @@ CFLAGS += -I./raylib-quickstart/build/external/raylib-master/src
 CFLAGS += -O3 -std=c99
 CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -ferror-limit=0
-CFLAGS += $(EXTRA_CFLAGS) # e.g. EXTRA_CFLAGS=-DNATIVE_CALLS
+CFLAGS += $(EXTRA_CFLAGS)
 
 # Platform-specific flags
 UNAME_S := $(shell uname -s)

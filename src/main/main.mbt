@@ -81,8 +81,10 @@ fn native_routines() -> Array[String] raise PipelineError {
 fn transpile() -> @transpile.Transpiler raise PipelineError {
   let native = native_routines()
   let low = lower()
-  let instruction_helpers = @env.args().contains("--instruction-helpers")
-  try @transpile.Transpiler::transpile(low, native~, instruction_helpers~) catch {
+  // --no-fold: one statement group per instruction (the differential
+  // test's reference)
+  let fold = !@env.args().contains("--no-fold")
+  try @transpile.Transpiler::transpile(low, native~, fold~) catch {
     err => raise TranspileError(err)
   }
 }

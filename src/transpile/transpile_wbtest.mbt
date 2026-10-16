@@ -15,7 +15,7 @@ test "dispatch emission uses the 6502 indirect-jump page wrap" {
   }
   assert_eq(code.contains("return cpu_dispatch_target = read_indirect_word(0xff);"), true)
   assert_eq(code.contains("default: cpu_unresolved_jump(cpu_dispatch_target); return;"), true)
-  assert_eq(code.contains("CALL(Select, 0xc005);"), true)
+  assert_eq(code.contains("  Select();\n"), true)
 }
 
 
@@ -80,14 +80,15 @@ test "instructions become C that updates only live flags" {
   assert_eq(code.contains("a = ram[0x10];\n"), true)
   assert_eq(code.contains("{ uint16_t sum = a + 0x5 + carry_flag; carry_flag = sum > 0xff; a = (uint8_t)sum; }"), true)
   assert_eq(code.contains("adc_imm"), false)
-  let helpers = code_c(Transpiler::transpile(lower_fixture(source), instruction_helpers=true))
-  assert_eq(helpers.contains("adc_imm_fc(0x5);"), true)
+
 }
 
 test "a load and store of a dead register become one assignment" {
   let source = ".org $c000\nBoot:\n lda $10\n sta $11\n ldx #$03\n stx $12\n stx $13\n lda #$00\n clc\n clv\nIdle:\n jmp Idle\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
   let code = code_c(Transpiler::transpile(lower_fixture(source)))
   assert_eq(code.contains("ram[0x11] = ram[0x10];"), true)
+  let unfolded = code_c(Transpiler::transpile(lower_fixture(source), fold=false))
+  assert_eq(unfolded.contains("a = ram[0x10];\n  ram[0x11] = a;"), true)
   // X is still read by the second store, so the first pair is kept
   assert_eq(code.contains("x = 0x3;\n  ram[0x12] = x;\n  ram[0x13] = x;"), true)
 }
@@ -99,4 +100,11 @@ test "interfaces count only the routine's own callers" {
   assert_eq(code.contains("// in: none; out: a\nvoid Other(void) {"), true)
   assert_eq(code.contains("void Tail(void) {"), true)
   assert_eq(code.contains("out: a\nvoid Tail(void) {"), false)
+}
+
+test "read-modify-write outside RAM goes through the bus" {
+  let source = ".org $c000\nBoot:\n inc $6000\n asl $6001\n lda #$00\n clc\n clv\nIdle:\n jmp Idle\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let code = code_c(Transpiler::transpile(lower_fixture(source)))
+  assert_eq(code.contains("{ uint16_t address = 0x6000; uint8_t m = read_byte(address); m++; dynamic_ram_write(address, m); }"), true)
+  assert_eq(code.contains("{ uint16_t address = 0x6001; uint8_t m = read_byte(address); m = (uint8_t)(m << 1); dynamic_ram_write(address, m); }"), true)
 }

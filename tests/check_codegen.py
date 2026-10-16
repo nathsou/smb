@@ -4,7 +4,6 @@ import argparse
 import pathlib
 import subprocess
 import hashlib
-import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -19,7 +18,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     run("moon", "check")
     run("moon", "test")
-    run("python3", "tests/check_nrom.py")
+    run("python3", "tests/check_fixtures.py")
     expected = "e5c17c42783f430029ab90aa37c73d51c2c320898e533b3ff196dad38c50ae42"
     assert hashlib.sha256((ROOT / "src/smb.asm").read_bytes()).hexdigest() == expected
     run("moon", "run", "src/inspect")
@@ -34,18 +33,9 @@ if __name__ == "__main__":
         "codegen/lib/constants.h")
     # ROM-free replay: generated debug tiles, per-frame state oracle.
     trace = "tests/golden/warpless.trace"
-    for flags in ([], ["EXTRA_CFLAGS=-DNATIVE_CALLS"]):
-        run("make", "hash", *flags)
-        run("./hash", "--debug-chr", "--trace", trace)
-    # Every generated routine against the --instruction-helpers reference.
+    run("make", "hash")
+    run("./hash", "--debug-chr", "--trace", trace)
+    # Every generated routine against the unfolded (--no-fold) reference.
     run("python3", "tests/check_routines.py")
-    with tempfile.TemporaryDirectory(prefix="smb-semantics-") as tmp:
-        executable = str(pathlib.Path(tmp) / "cpu-semantics")
-        sources = ["instructions", "cpu", "code", "data", "video", "ppu_bus", "apu"]
-        run("cc", "-std=c99", "-O2", "-DPPU_BUS", "-o", executable, "tests/cpu_semantics.c",
-            "codegen/native/display.c", *(f"codegen/lib/{name}.c" for name in sources))
-        run(executable)
     if args.rom:
-        for flags in ([], ["EXTRA_CFLAGS=-DNATIVE_CALLS"]):
-            run("make", "hash", *flags)
-            run("./hash")
+        run("./hash")

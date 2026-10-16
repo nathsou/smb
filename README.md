@@ -94,9 +94,8 @@ The GPU renderers can be compared with the software renderer pixel for pixel:
 `NODE_PATH=$(npm root -g) node tests/web/gpu_check.cjs` (WebGL2 in headless
 Chromium, needs Playwright).
 
-Calls are emitted as `CALL(routine, return_address)` and keep the original
-return addresses on the guest stack. Add `EXTRA_CFLAGS=-DNATIVE_CALLS` to any
-`make` target to compile them as plain C calls instead.
+Calls are plain C calls. Return addresses are not kept on the emulated stack,
+except by the inline-table dispatchers, which read their table through it.
 
 To compile another compatible assembly input into a separate directory:
 

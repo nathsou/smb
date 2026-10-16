@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Differential test of every generated routine against a reference build.
 
-The reference is the same program generated with --instruction-helpers
-(calls into codegen/lib/instructions.c, the previous output style). Both are
-linked into one binary, the reference routines renamed ref_*, and
+The reference is the same program generated with --no-fold (one statement
+group per instruction, no load/store folding or later transformations). Both
+are linked into one binary, the reference routines renamed ref_*, and
 tests/routines/diff.c runs each routine from many states and compares them.
 """
 import pathlib
@@ -43,7 +43,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="smb-routines-") as tmp:
         tmp = pathlib.Path(tmp)
         run("moon", "run", "src/main", "--", "--native", "codegen/native/routines.txt",
-            "--instruction-helpers", "--output", str(tmp / "ref"))
+            "--no-fold", "--output", str(tmp / "ref"))
         reference = (tmp / "ref/lib/code.c").read_text()
         renamed = sorted(set(FUNCTION.findall(reference)) |
                          {name for name, _ in routines(reference)} |
@@ -67,7 +67,7 @@ def main():
         run("cc", *flags, "-I", str(tmp / "ref/lib"), "-I", str(LIB), "-include", str(tmp / "rename.h"),
             "-c", str(tmp / "ref/lib/code.c"), "-o", str(ref_object))
         objects.append(str(ref_object))
-        sources = [LIB / "code.c", LIB / "instructions.c", ROOT / "codegen/native/display.c",
+        sources = [LIB / "code.c", ROOT / "codegen/native/display.c",
                    ROOT / "tests/routines/diff.c"] + [LIB / f"{n}.c" for n in RUNTIME]
         executable = tmp / "routine-diff"
         run("cc", *flags, "-o", str(executable), *map(str, sources), *objects)

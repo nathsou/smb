@@ -157,10 +157,10 @@ and `collect_flag_liveness` in `src/lower/lower.mbt`.
 
 The reset loop no longer needs to be replaced by an interrupt return. A proven
 self-jump in the reset region yields to the host with its guest PC recorded.
-The frame adapter invokes the vector-derived NMI entry and saves/restores PC/P
-on the guest stack. Normal JSRs likewise materialize their original return
-address bytes; the return helper checks and consumes them. Tail transfers do
-not create a fictitious guest call frame.
+The frame adapter invokes the vector-derived NMI entry and restores the status
+flags afterwards, as RTI would. Normal JSRs are plain C calls (see below); only
+the inline-table dispatchers push the return address they read. Tail transfers
+do not create a fictitious guest call frame.
 
 Static per-entry stack checking rejects negative/unbalanced data depth,
 unrecognized return-token pops, stack-pointer replacement in called routines,
@@ -190,9 +190,10 @@ indexed destinations use the bus, which handles RAM/PPU mirrors, OAM DMA,
 controller strobe, and APU writes. Zero-page indexing and indirect pointers wrap
 at 8 bits; absolute indexed addresses retain their index.
 
-The native instruction layer now supplies all documented instruction/addressing
-forms, ADC/SBC overflow, BIT overflow, and PHP/PLP status behavior. NES decimal
-status is retained while arithmetic remains binary. The independent NROM-128
+The generated C covers all documented instruction/addressing forms, ADC/SBC
+overflow, BIT overflow, and PHP/PLP status behavior (see
+[modern-runtime.md](modern-runtime.md); the instruction-helper layer has been
+removed). NES decimal status is retained while arithmetic remains binary. The independent NROM-128
 fixture exercises these address distinctions without SMB names.
 
 ## Readability and provenance
@@ -205,11 +206,11 @@ are placed above its C function; comments before the first routine form the
 file header. Generic dispatch setup is shared rather than repeated at every
 call site.
 
-JSRs are emitted as `CALL(routine, return_address)`, which pushes the original
-return address on the guest stack and checks it on return. Programs that never
-observe return addresses can build with `-DNATIVE_CALLS` (for example
-`make hash EXTRA_CFLAGS=-DNATIVE_CALLS`) to make these plain C calls; SMB
-produces the same replay hash either way.
+JSRs were first emitted as `CALL(routine, return_address)`, which pushed the
+original return address on the guest stack and checked it on return. SMB
+produced the same replay with plain C calls, and the static stack checks above
+already reject programs that inspect return addresses outside a proven
+dispatcher, so JSRs are now plain C calls.
 
 Compared with the generated C at `2143a91`:
 

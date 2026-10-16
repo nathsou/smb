@@ -31,7 +31,7 @@
 
 // Inline-table dispatch proven by evaluating JumpEngine; its effects run here unchanged.
 static uint16_t JumpEngine(uint16_t return_address) {
-  cpu_call_begin(return_address);
+  cpu_push_return_address(return_address);
   carry_flag = (a & 0x80) != 0; a = (uint8_t)(a << 1); zero_flag = a == 0; neg_flag = (a & 0x80) != 0; // shift bit from contents of A
   y = a; zero_flag = y == 0; neg_flag = (y & 0x80) != 0;
   a = ram[0x100 + ++sp]; zero_flag = a == 0; neg_flag = (a & 0x80) != 0; // pull saved return address from stack
@@ -231,7 +231,7 @@ ChkSelect:
     // Original branch: if demo timer not expired, branch to check world selection
     if (zero_flag) {
       ram[SelectTimer] = a; // set controller bits here if running demo
-      CALL(DemoEngine, 0x8266); // run through the demo actions
+      DemoEngine(); // run through the demo actions
       if (carry_flag) { goto ResetTitle; } // if carry flag set, demo over, thus branch
       goto RunDemo; // otherwise, run game engine for demo
     }
@@ -256,7 +256,7 @@ ChkSelect:
       a = ram[NumberOfPlayers]; // if no, must have been the select button, therefore
       a ^= 0b00000001; // change number of players and draw icon accordingly
       ram[NumberOfPlayers] = a;
-      CALL(DrawMushroomIcon, 0x8298);
+      DrawMushroomIcon();
       goto NullJoypad;
     }
     // IncWorldSel:
@@ -265,7 +265,7 @@ ChkSelect:
     a = x;
     a &= 0b00000111; // mask out higher bits
     ram[WorldSelectNumber] = a; // store as current world select number
-    CALL(GoContinue, 0x82a8);
+    GoContinue();
     do {
       // UpdateShroom:
       ram[(VRAM_Buffer1 - 1) + x] = ROM(WSelectBufferTemplate + x); // write template for world select in vram buffer; do this until all bytes are written
@@ -281,7 +281,7 @@ NullJoypad:
   ram[SavedJoypad1Bits] = 0x0; // clear joypad bits for player 1
   
 RunDemo:
-  CALL(GameCoreRoutine, 0x82c2); // run game engine
+  GameCoreRoutine(); // run game engine
   a = ram[GameEngineSubroutine]; // check to see if we're running lose life routine
   // if not, do not do all the resetting below
   if (a != 0x6) {
@@ -303,10 +303,10 @@ ChkContinue:
   // Original branch: if not, don't load continue function's world number
   if (carry_flag) {
     a = ram[ContinueWorld]; // load previously saved world number for secret
-    CALL(GoContinue, 0x82e5); // continue function when pressing A + start
+    GoContinue(); // continue function when pressing A + start
   }
   // StartWorld1:
-  CALL(LoadAreaPointer, 0x82e8);
+  LoadAreaPointer();
   ram[Hidden1UpFlag]++; // set 1-up box flag for both players
   ram[OffScr_Hidden1UpFlag]++;
   ram[FetchNewGameTimerFlag]++; // set fetch new game timer flag
@@ -382,16 +382,16 @@ void DemoEngine(void) {
 
 // -------------------------------------------------------------------------------------
 void VictoryMode(void) {
-  CALL(VictoryModeSubroutines, 0x838d); // run victory mode subroutines
+  VictoryModeSubroutines(); // run victory mode subroutines
   a = ram[OperMode_Task]; zero_flag = a == 0; // get current task of victory mode
   // Original branch: if on bridge collapse, skip enemy processing
   if (!zero_flag) {
     x = 0x0;
     ram[ObjectOffset] = x; // otherwise reset enemy object offset 
-    CALL(EnemiesAndLoopsCore, 0x8399); // and run enemy code
+    EnemiesAndLoopsCore(); // and run enemy code
   }
   // AutoPlayer:
-  CALL(RelativePlayerPosition, 0x839c); // get player's relative coordinates
+  RelativePlayerPosition(); // get player's relative coordinates
   PlayerGfxHandler(); return; // draw the player, then leave
 }
 
@@ -433,7 +433,7 @@ void PlayerVictoryWalk(void) {
   
 DontWalk:
   a = y; // put contents of Y in A and
-  CALL(AutoControlPlayer, 0x83d3); // use A to move player to the right or not
+  AutoControlPlayer(); // use A to move player to the right or not
   a = ram[ScreenLeft_PageLoc]; // check page location of left side of screen
   zero_flag = a == ram[DestinationPageLoc]; // against set value here
   // Original branch: branch if equal to change modes if necessary
@@ -445,8 +445,8 @@ DontWalk:
     a = 0x1; // set 1 pixel per frame
     a = (uint8_t)(a + 0x0 + carry_flag); // add carry from previous addition
     y = a; // use as scroll amount
-    CALL(ScrollScreen, 0x83eb); // do sub to scroll the screen
-    CALL(UpdScrollVar, 0x83ee); // do another sub to update screen and scroll variables
+    ScrollScreen(); // do sub to scroll the screen
+    UpdScrollVar(); // do another sub to update screen and scroll variables
     ram[VictoryWalkControl]++; // increment value to stay in this routine
   }
   // ExitVWalk:
@@ -559,7 +559,7 @@ void PlayerEndWorld(void) {
     ram[LevelNumber] = a; // and level number control to start at area 1
     ram[OperMode_Task] = a; // initialize secondary mode of operation
     ram[WorldNumber]++; // increment world number to move onto the next world
-    CALL(LoadAreaPointer, 0x847d); // get area address offset for the next area
+    LoadAreaPointer(); // get area address offset for the next area
     ram[FetchNewGameTimerFlag]++; // set flag to load game timer from header
     ram[OperMode] = GameModeValue; // set mode of operation to game mode
     // EndExitOne:
@@ -575,7 +575,7 @@ void PlayerEndWorld(void) {
   }
   ram[WorldSelectEnableFlag] = 0x1; // otherwise set world selection flag
   ram[NumberofLives] = 0xff; // remove onscreen player's lives
-  CALL(TerminateGame, 0x849d); // do sub to continue other player or end game
+  TerminateGame(); // do sub to continue other player or end game
   // EndExitTwo:
   return; // leave
 }
@@ -623,7 +623,7 @@ void FloateyNumbersRoutine(void) {
     a = ROM(ScoreUpdateData + y); // load again and this time
     a &= 0b00001111; // mask out the high nybble
     ram[DigitModifier + x] = a; // store as amount to add to the digit
-    CALL(AddToScore, 0x84ff); // update the score accordingly
+    AddToScore(); // update the score accordingly
   }
   // ChkTallEnemy:
   y = ram[Enemy_SprDataOffset + x]; // get OAM data offset for enemy object
@@ -662,7 +662,7 @@ FloateyPart:
   // SetupNumSpr:
   a = ram[FloateyNum_Y_Pos + x]; // get vertical coordinate
   { uint16_t diff = (uint16_t)(a - 0x8 - !carry_flag); carry_flag = diff <= 0xff; a = (uint8_t)diff; } // subtract eight and dump into the
-  CALL(DumpTwoSpr, 0x853e); // left and right sprite's Y coordinates
+  DumpTwoSpr(); // left and right sprite's Y coordinates
   a = ram[FloateyNum_X_Pos + x]; // get horizontal coordinate
   ram[Sprite_X_Position + y] = a; // store into X coordinate of left sprite
   carry_flag = false;
@@ -703,8 +703,8 @@ void ScreenRoutines(void) {
 }
 
 void InitScreen(void) {
-  CALL(MoveAllSpritesOffscreen, 0x858d); // initialize all sprites including sprite #0
-  CALL(InitializeNameTables, 0x8590); // and erase both name and attribute tables
+  MoveAllSpritesOffscreen(); // initialize all sprites including sprite #0
+  InitializeNameTables(); // and erase both name and attribute tables
   a = ram[OperMode]; zero_flag = a == 0;
   // if mode still 0, do not load
   if (zero_flag) {
@@ -723,7 +723,7 @@ void SetupIntermediate(void) {
   ram[0x100 + sp--] = a;
   ram[PlayerStatus] = 0x0; // set background color to black; and player status to not fiery
   ram[BackgroundColorCtrl] = 0x2; // this is the ONLY time background color control; is set to less than 4
-  CALL(GetPlayerColors, 0x85af);
+  GetPlayerColors();
   a = ram[0x100 + ++sp]; // we only execute this routine for
   ram[PlayerStatus] = a; // the intermediate lives display
   a = ram[0x100 + ++sp]; // and once we're done, we return bg
@@ -838,13 +838,13 @@ void NoAltPal(void) {
 // -------------------------------------------------------------------------------------
 void WriteTopStatusLine(void) {
   a = 0x0; // select main status bar
-  CALL(WriteGameText, 0x8656); // output it
+  WriteGameText(); // output it
   IncSubtask(); return; // onto the next task
 }
 
 // -------------------------------------------------------------------------------------
 void WriteBottomStatusLine(void) {
-  CALL(GetSBNybbles, 0x865c); // write player's score and coin tally to screen
+  GetSBNybbles(); // write player's score and coin tally to screen
   x = ram[VRAM_Buffer1_Offset];
   ram[VRAM_Buffer1 + x] = 0x20; // write address for world-area number on screen
   ram[(VRAM_Buffer1 + 1) + x] = 0x73;
@@ -895,7 +895,7 @@ void DisplayIntermediate(void) {
         if (!zero_flag) { goto NoInter; } // and jump to specific task, otherwise
       }
       // PlayerInter:
-      CALL(DrawPlayer_Intermediate, 0x86c4); // put player in appropriate place for
+      DrawPlayer_Intermediate(); // put player in appropriate place for
       a = 0x1; // lives display, then output lives display to buffer
       OutputInter(); // fallthrough
       return;
@@ -903,7 +903,7 @@ void DisplayIntermediate(void) {
     // GameOverInter:
     ram[ScreenTimer] = 0x12; // set screen timer
     a = 0x3; // output game over screen to buffer
-    CALL(WriteGameText, 0x86dc);
+    WriteGameText();
     IncModeTask_B(); return;
   }
   
@@ -914,8 +914,8 @@ NoInter:
 
 // in: a; out: none
 void OutputInter(void) {
-  CALL(WriteGameText, 0x86c9);
-  CALL(ResetScreenTimer, 0x86cc);
+  WriteGameText();
+  ResetScreenTimer();
   ram[DisableScreenFlag] = 0x0; // reenable screen output
   return;
 }
@@ -925,7 +925,7 @@ void AreaParserTaskControl(void) {
   ram[DisableScreenFlag]++; // turn off screen
   do {
     // TaskLoop:
-    CALL(AreaParserTaskHandler, 0x86eb); // render column set of current area
+    AreaParserTaskHandler(); // render column set of current area
     a = ram[AreaParserTaskNum]; zero_flag = a == 0; // check number of tasks
   } while (!zero_flag); // if tasks still not all done, do another one
   ram[ColumnSets]--; neg_flag = (ram[ColumnSets] & 0x80) != 0; // do we need to render more column sets?
@@ -956,7 +956,7 @@ void ClearBuffersDrawIcon(void) {
     ram[((VRAM_Buffer1 - 1) + 0x100) + x] = a;
     x--; zero_flag = x == 0;
   } while (!zero_flag);
-  CALL(DrawMushroomIcon, 0x8744); // draw player select icon
+  DrawMushroomIcon(); // draw player select icon
   IncSubtask(); // fallthrough
   return;
 }
@@ -969,7 +969,7 @@ void IncSubtask(void) {
 // -------------------------------------------------------------------------------------
 void WriteTopScore(void) {
   a = 0xfa; // run display routine to display top score on title
-  CALL(UpdateNumber, 0x874d);
+  UpdateNumber();
   IncModeTask_B(); // fallthrough
   return;
 }
@@ -1096,7 +1096,7 @@ void ResetSpritesAndScreenTimer(void) {
   if (!zero_flag) {
     return;
   }
-  CALL(MoveAllSpritesOffscreen, 0x88a4); // otherwise reset sprites now
+  MoveAllSpritesOffscreen(); // otherwise reset sprites now
   ResetScreenTimer(); // fallthrough
   return;
 }
@@ -1340,14 +1340,14 @@ void RemoveCoin_Axe(void) {
     a = 0x4; // otherwise load offset for blank metatile used in water
   }
   // WriteBlankMT:
-  CALL(PutBlockMetatile, 0x8a5a); // do a sub to write blank metatile to vram buffer
+  PutBlockMetatile(); // do a sub to write blank metatile to vram buffer
   ram[VRAM_Buffer_AddrCtrl] = 0x6; // set vram address controller to $0341 and leave
   return;
 }
 
 // in: a, x; out: x
 void ReplaceBlockMetatile(void) {
-  CALL(WriteBlockMetatile, 0x8a63); // write metatile to vram buffer to replace block object
+  WriteBlockMetatile(); // write metatile to vram buffer to replace block object
   ram[Block_ResidualCounter]++; // increment unused counter (residual code)
   ram[Block_RepFlag + x]--; // decrement flag (residual code)
   return; // leave
@@ -1383,7 +1383,7 @@ UseBOffset:
   a = y; // put Y in A
   y = ram[VRAM_Buffer1_Offset]; // get vram buffer offset
   y++; // move onto next byte
-  CALL(PutBlockMetatile, 0x8a8e); // get appropriate block data and write to vram buffer
+  PutBlockMetatile(); // get appropriate block data and write to vram buffer
   MoveVOffset(); // fallthrough
   return;
 }
@@ -1474,7 +1474,7 @@ void ReadJoypads(void) {
   a = a >> 1;
   x = a; // start with joypad 1's port
   write_joypad1(a); write_joypad2(a);
-  CALL(ReadPortBits, 0x8e68);
+  ReadPortBits();
   x++; // increment for joypad 2's port
   ReadPortBits(); // fallthrough
   return;
@@ -1532,7 +1532,7 @@ void ReadPortBits(void) {
 // in: a; out: none
 void PrintStatusBarNumbers(void) {
   ram[0x0] = a; // store player-specific offset
-  CALL(OutputNumbers, 0x8f0a); // use first nybble to print the coin display
+  OutputNumbers(); // use first nybble to print the coin display
   a = ram[0x0]; // move high nybble to low
   a = a >> 1; // and print to score display
   a = a >> 1;
@@ -1636,7 +1636,7 @@ CarryOne:
 // -------------------------------------------------------------------------------------
 void UpdateTopScore(void) {
   x = 0x5; // start with mario's score
-  CALL(TopScoreCheck, 0x8f9b);
+  TopScoreCheck();
   x = 0xb; // now do luigi's score
   TopScoreCheck(); // fallthrough
   return;
@@ -1673,7 +1673,7 @@ void TopScoreCheck(void) {
 // -------------------------------------------------------------------------------------
 void InitializeGame(void) {
   y = 0x6f; // clear all memory as in initialization procedure,
-  CALL(InitializeMemory, 0x8fd3); // but this time, clear only as far as $076f
+  InitializeMemory(); // but this time, clear only as far as $076f
   y = 0x1f;
   do {
     // ClrSndLoop:
@@ -1681,14 +1681,14 @@ void InitializeGame(void) {
     y--; neg_flag = (y & 0x80) != 0; // by the sound engines
   } while (!neg_flag);
   ram[DemoTimer] = 0x18; // set demo timer
-  CALL(LoadAreaPointer, 0x8fe3);
+  LoadAreaPointer();
   InitializeArea(); // fallthrough
   return;
 }
 
 void InitializeArea(void) {
   y = 0x4b; // clear all memory again, only as far as $074b
-  CALL(InitializeMemory, 0x8fe8); // this is only necessary if branching from
+  InitializeMemory(); // this is only necessary if branching from
   x = 0x21;
   a = 0x0;
   do {
@@ -1705,7 +1705,7 @@ void InitializeArea(void) {
   ram[ScreenLeft_PageLoc] = a; // set as value here
   ram[CurrentPageLoc] = a; // also set as current page
   ram[BackloadingFlag] = a; // set flag here if halfway page or saved entry page number found
-  CALL(GetScreenPosition, 0x9009); // get pixel coordinates for screen borders
+  GetScreenPosition(); // get pixel coordinates for screen borders
   y = 0x20; // if on odd numbered page, use $2480 as start of rendering
   a &= 0b00000001; zero_flag = a == 0; // otherwise use $2080, this address used later as name table
   // Original branch: address for rendering of game area
@@ -1724,7 +1724,7 @@ void InitializeArea(void) {
   ram[(AreaObjectLength + 1)]--;
   ram[(AreaObjectLength + 2)]--;
   ram[ColumnSets] = 0xb; // set value for renderer to update 12 column sets; 12 column sets = 24 metatile columns = 1 1/2 screens
-  CALL(GetAreaDataAddrs, 0x9031); // get enemy and level addresses and load header
+  GetAreaDataAddrs(); // get enemy and level addresses and load header
   a = ram[PrimaryHardMode]; zero_flag = a == 0; // check to see if primary hard mode has been activated
   // Original branch: if so, activate the secondary no matter where we're at
   if (zero_flag) {
@@ -1782,7 +1782,7 @@ void SecondaryGameSetup(void) {
   a &= 0x1; // mask out all but LSB of page location
   { bool carry = (a & 1) != 0; a = (uint8_t)(a >> 1 | carry_flag << 7); carry_flag = carry; } // rotate LSB of page location into carry then onto mirror
   ram[Mirror_PPU_CTRL_REG1] = (uint8_t)(ram[Mirror_PPU_CTRL_REG1] << 1 | carry_flag); // this is to set the proper PPU name table
-  CALL(GetAreaMusic, 0x9099); // load proper music into queue
+  GetAreaMusic(); // load proper music into queue
   ram[(SprShuffleAmt + 2)] = 0x38; // load sprite shuffle amounts to be used later
   ram[(SprShuffleAmt + 1)] = 0x48;
   ram[SprShuffleAmt] = 0x58;
@@ -1798,8 +1798,8 @@ void SecondaryGameSetup(void) {
     ram[Sprite_Data + y] = ROM(Sprite0Data + y);
     y--; neg_flag = (y & 0x80) != 0;
   } while (!neg_flag);
-  CALL(DoNothing2, 0x90c1); // these jsrs doesn't do anything useful
-  CALL(DoNothing1, 0x90c4);
+  DoNothing2(); // these jsrs doesn't do anything useful
+  DoNothing1();
   ram[Sprite0HitDetectFlag]++; // set sprite #0 check flag
   ram[OperMode_Task]++; // increment to next task
   return;
@@ -1897,7 +1897,7 @@ SetStPos:
   ram[Player_X_Position] = ROM(PlayerStarting_X_Pos + y); // load appropriate horizontal position; and vertical positions for the player, using
   ram[Player_Y_Position] = ROM(PlayerStarting_Y_Pos + x); // AltEntranceControl as offset for horizontal and either $0710; or value that overwrote $0710 as offset for vertical
   ram[Player_SprAttrib] = ROM(PlayerBGPriorityData + x); // set player sprite attributes using offset in X
-  CALL(GetPlayerColors, 0x9177); // get appropriate player palette
+  GetPlayerColors(); // get appropriate player palette
   y = ram[GameTimerSetting]; zero_flag = y == 0; // get timer control value from header
   // Original branch: if set to zero, branch (do not use dummy byte for this)
   if (!zero_flag) {
@@ -1917,17 +1917,17 @@ ChkOverR:
   if (!zero_flag) {
     ram[Player_State] = 0x3; // set player state to climbing
     x = 0x0; // set offset for first slot, for block object
-    CALL(InitBlock_XY_Pos, 0x91a4);
+    InitBlock_XY_Pos();
     ram[Block_Y_Position] = 0xf0; // set vertical coordinate for block object
     x = 0x5; // set offset in X for last enemy object buffer slot
     y = 0x0; // set offset in Y for object coordinates used earlier
-    CALL(Setup_Vine, 0x91af); // do a sub to grow vine
+    Setup_Vine(); // do a sub to grow vine
   }
   // ChkSwimE:
   y = ram[AreaType]; zero_flag = y == 0; // if level not water-type,
   // Original branch: skip this subroutine
   if (zero_flag) {
-    CALL(SetupBubble, 0x91b7); // otherwise, execute sub to set up air bubbles
+    SetupBubble(); // otherwise, execute sub to set up air bubbles
   }
   // SetPESub:
   ram[GameEngineSubroutine] = 0x7; // set to run player entrance subroutine; on the next frame of game engine
@@ -1979,7 +1979,7 @@ void PlayerLoseLife(void) {
   
 SetHalfway:
   ram[HalfwayPage] = a; // store as halfway page for player
-  CALL(TransposePlayers, 0x9214); // switch players around if 2-player game
+  TransposePlayers(); // switch players around if 2-player game
   ContinueGame(); return; // continue the game
 }
 
@@ -2024,7 +2024,7 @@ void RunGameOver(void) {
 
 void TerminateGame(void) {
   ram[EventMusicQueue] = Silence; // silence music
-  CALL(TransposePlayers, 0x924e); // check if other player can keep
+  TransposePlayers(); // check if other player can keep
   // going, and do so if possible
   if (!carry_flag) {
     ContinueGame();
@@ -2040,7 +2040,7 @@ void TerminateGame(void) {
 }
 
 void ContinueGame(void) {
-  CALL(LoadAreaPointer, 0x9266); // update level pointer with
+  LoadAreaPointer(); // update level pointer with
   ram[PlayerSize] = 0x1; // actual world and area numbers, then; reset player's size, status, and
   ram[FetchNewGameTimerFlag]++; // set game timer flag to reload
   a = 0x0; // game timer from header
@@ -2105,13 +2105,13 @@ void AreaParserTaskHandler(void) {
   // DoAPTasks:
   y--;
   a = y;
-  CALL(AreaParserTasks, 0x92be);
+  AreaParserTasks();
   ram[AreaParserTaskNum]--; zero_flag = ram[AreaParserTaskNum] == 0; // if all tasks not complete do not
   // render attribute table yet
   if (!zero_flag) {
     return;
   }
-  CALL(RenderAttributeTables, 0x92c6);
+  RenderAttributeTables();
   // SkipATRender:
   return;
 }
@@ -2151,7 +2151,7 @@ void AreaParserCore(void) {
   a = ram[BackloadingFlag]; zero_flag = a == 0; // check to see if we are starting right of start
   // Original branch: if not, go ahead and render background, foreground and terrain
   if (!zero_flag) {
-    CALL(ProcessAreaData, 0x9403); // otherwise skip ahead and load level data
+    ProcessAreaData(); // otherwise skip ahead and load level data
   }
   // RenderSceneryTerrain:
   x = 0xc;
@@ -2295,9 +2295,9 @@ EndUChk:
   } while (!zero_flag); // unconditional branch, use Y to load next byte
   
 RendBBuf:
-  CALL(ProcessAreaData, 0x94d5); // do the area data loading routine now
+  ProcessAreaData(); // do the area data loading routine now
   a = ram[BlockBufferColumnPos];
-  CALL(GetBlockBufferAddr, 0x94db); // get block buffer address from where we're at
+  GetBlockBufferAddr(); // get block buffer address from where we're at
   x = 0x0;
   y = 0x0; // init index regs and start at beginning of smaller buffer
   do {
@@ -2390,14 +2390,14 @@ CheckRear:
       }
       
 RdyDecode:
-      CALL(DecodeAreaData, 0x9567); // do sub and do not turn on flag
+      DecodeAreaData(); // do sub and do not turn on flag
       goto ChkLength;
       
 SetBehind:
       ram[BehindAreaParserFlag]++; // turn on flag if object is behind renderer
       
 NextAObj:
-      CALL(IncAreaObjOffset, 0x9570); // increment buffer offset and move on
+      IncAreaObjOffset(); // increment buffer offset and move on
       
 ChkLength:
       x = ram[ObjectOffset]; // get buffer offset
@@ -2562,7 +2562,7 @@ NormObj:
     
 StrAObj:
     ram[(AreaObjOffsetBuffer + x) & 0x7ff] = ram[AreaDataOffset]; // if so, load area obj offset and store in buffer
-    CALL(IncAreaObjOffset, 0x965e); // do sub to increment to next object data
+    IncAreaObjOffset(); // do sub to increment to next object data
   }
   // RunAObj:
   a = ram[0x0]; // get stored value and add offset to it
@@ -2666,9 +2666,9 @@ void ScrollLockObject_Warp(void) {
 WarpNum:
   a = x;
   ram[WarpZoneControl] = a; // store number here to be used by warp zone routine
-  CALL(WriteGameText, 0x9707); // print text and warp zone numbers
+  WriteGameText(); // print text and warp zone numbers
   a = PiranhaPlant;
-  CALL(KillEnemies, 0x970c); // load identifier for piranha plants and do sub
+  KillEnemies(); // load identifier for piranha plants and do sub
   ScrollLockObject(); // fallthrough
   return;
 }
@@ -2733,7 +2733,7 @@ void AreaStyleObject(void) {
 
 // in: x; out: none
 void TreeLedge(void) {
-  CALL(GetLrgObjAttrib, 0x974e); // get row and length of green ledge
+  GetLrgObjAttrib(); // get row and length of green ledge
   a = ram[(AreaObjectLength + x) & 0x7ff]; zero_flag = a == 0; neg_flag = (a & 0x80) != 0; // check length counter for expiration
   if (!zero_flag) {
     if (neg_flag) {
@@ -2758,7 +2758,7 @@ MidTreeL:
 
 // in: x; out: none
 void MushroomLedge(void) {
-  CALL(ChkLrgObjLength, 0x977a); // get shroom dimensions
+  ChkLrgObjLength(); // get shroom dimensions
   ram[0x6] = y; // store length here for now
   if (carry_flag) {
     a = ram[(AreaObjectLength + x) & 0x7ff]; // divide length by 2 and store elsewhere
@@ -2807,7 +2807,7 @@ void NoUnder(void) {
 // tiles used by pulleys and rope object
 // in: x; out: none
 void PulleyRopeObject(void) {
-  CALL(ChkLrgObjLength, 0x97bc); // get length of pulley/rope object
+  ChkLrgObjLength(); // get length of pulley/rope object
   y = 0x0; // initialize metatile offset
   // Original branch: if starting, render left pulley
   if (!carry_flag) {
@@ -2827,10 +2827,10 @@ RenderPul:
 // $06 - used to store upper limit of rows for CastleObject
 // in: x; out: none
 void CastleObject(void) {
-  CALL(GetLrgObjAttrib, 0x9808); // save lower nybble as starting row
+  GetLrgObjAttrib(); // save lower nybble as starting row
   ram[0x7] = y; // if starting row is above $0a, game will crash!!!
   y = 0x4;
-  CALL(ChkLrgObjFixedLength, 0x980f); // load length of castle if not already loaded
+  ChkLrgObjFixedLength(); // load length of castle if not already loaded
   a = x;
   ram[0x100 + sp--] = a; // save obj buffer offset to stack
   y = ram[(AreaObjectLength + x) & 0x7ff]; // use current length as offset for castle data
@@ -2874,9 +2874,9 @@ void CastleObject(void) {
     if (a != 0x2) {
       return;
     }
-    CALL(GetAreaObjXPosition, 0x984d); // otherwise, obtain and save horizontal pixel coordinate
+    GetAreaObjXPosition(); // otherwise, obtain and save horizontal pixel coordinate
     ram[0x100 + sp--] = a;
-    CALL(FindEmptyEnemySlot, 0x9851); // find an empty place on the enemy object buffer
+    FindEmptyEnemySlot(); // find an empty place on the enemy object buffer
     a = ram[0x100 + ++sp];
     ram[(uint8_t)(Enemy_X_Position + x)] = a; // then write horizontal coordinate for star flag
     ram[(uint8_t)(Enemy_PageLoc + x)] = ram[CurrentPageLoc]; // set page location for star flag
@@ -2897,7 +2897,7 @@ PlayerStop:
 // --------------------------------
 // in: x; out: none
 void WaterPipe(void) {
-  CALL(GetLrgObjAttrib, 0x9871); // get row and lower nybble
+  GetLrgObjAttrib(); // get row and lower nybble
   y = ram[(AreaObjectLength + x) & 0x7ff]; // get length (residual code, water pipe is 1 col thick)
   x = ram[0x7]; // get row
   ram[MetatileBuffer + x] = 0x6b; // draw something here and below it
@@ -2912,9 +2912,9 @@ void WaterPipe(void) {
 // in: x; out: none
 void IntroPipe(void) {
   y = 0x3; // check if length set, if not set, set it
-  CALL(ChkLrgObjFixedLength, 0x9886);
+  ChkLrgObjFixedLength();
   y = 0xa; // set fixed value and render the sideways part
-  CALL(RenderSidewaysPipe, 0x988b);
+  RenderSidewaysPipe();
   // if carry flag set, not time to draw vertical pipe part
   if (carry_flag) {
     return;
@@ -2933,8 +2933,8 @@ void IntroPipe(void) {
 // in: x; out: none
 void ExitPipe(void) {
   y = 0x3; // check if length set, if not set, set it
-  CALL(ChkLrgObjFixedLength, 0x98af);
-  CALL(GetLrgObjAttrib, 0x98b2); // get vertical length, then plow on through RenderSidewaysPipe
+  ChkLrgObjFixedLength();
+  GetLrgObjAttrib(); // get vertical length, then plow on through RenderSidewaysPipe
   RenderSidewaysPipe(); // fallthrough
   return;
 }
@@ -2954,7 +2954,7 @@ void RenderSidewaysPipe(void) {
   if (!zero_flag) {
     x = 0x0;
     y = ram[0x5]; // init buffer offset and get vertical length
-    CALL(RenderUnderPart, 0x98cc); // and render vertical shaft using tile number in A
+    RenderUnderPart(); // and render vertical shaft using tile number in A
     carry_flag = false; // clear carry flag to be used by IntroPipe
   }
   // DrawSidePart:
@@ -2966,7 +2966,7 @@ void RenderSidewaysPipe(void) {
 
 // in: x; out: none
 void VerticalPipe(void) {
-  CALL(GetPipeHeight, 0x98e7);
+  GetPipeHeight();
   a = ram[0x0]; zero_flag = a == 0; // check to see if value was nullified earlier
   // Original branch: (if d3, the usage control bit of second byte, was set)
   if (!zero_flag) {
@@ -2983,9 +2983,9 @@ void VerticalPipe(void) {
   if (!zero_flag) {
     y = ram[(AreaObjectLength + x) & 0x7ff]; zero_flag = y == 0; // if on second column of pipe, branch
     if (zero_flag) { goto DrawPipe; } // (because we only need to do this once)
-    CALL(FindEmptyEnemySlot, 0x9901); // check for an empty moving data buffer space
+    FindEmptyEnemySlot(); // check for an empty moving data buffer space
     if (carry_flag) { goto DrawPipe; } // if not found, too many enemies, thus skip
-    CALL(GetAreaObjXPosition, 0x9906); // get horizontal pixel coordinate
+    GetAreaObjXPosition(); // get horizontal pixel coordinate
     carry_flag = false;
     { uint16_t sum = a + 0x8 + carry_flag; carry_flag = sum > 0xff; a = (uint8_t)sum; } // add eight to put the piranha plant in the center
     ram[(uint8_t)(Enemy_X_Position + x)] = a; // store as enemy's horizontal coordinate
@@ -2995,10 +2995,10 @@ void VerticalPipe(void) {
     a = 0x1;
     ram[(uint8_t)(Enemy_Y_HighPos + x)] = a;
     ram[(uint8_t)(Enemy_Flag + x)] = a; // activate enemy flag
-    CALL(GetAreaObjYPosition, 0x991b); // get piranha plant's vertical coordinate and store here
+    GetAreaObjYPosition(); // get piranha plant's vertical coordinate and store here
     ram[(uint8_t)(Enemy_Y_Position + x)] = a;
     ram[(uint8_t)(Enemy_ID + x)] = PiranhaPlant; // write piranha plant's value into buffer
-    CALL(InitPiranhaPlant, 0x9924);
+    InitPiranhaPlant();
   }
   
 DrawPipe:
@@ -3016,8 +3016,8 @@ DrawPipe:
 // in: x; out: y
 void GetPipeHeight(void) {
   y = 0x1; // check for length loaded, if not, load
-  CALL(ChkLrgObjFixedLength, 0x993d); // pipe length of 2 (horizontal)
-  CALL(GetLrgObjAttrib, 0x9940);
+  ChkLrgObjFixedLength(); // pipe length of 2 (horizontal)
+  GetLrgObjAttrib();
   a = y; // get saved lower nybble as height
   a &= 0x7; // save only the three lower bits as
   ram[0x6] = a; // vertical length, then load Y with
@@ -3046,7 +3046,7 @@ void FindEmptyEnemySlot(void) {
 // --------------------------------
 // in: x; out: none
 void Hole_Water(void) {
-  CALL(ChkLrgObjLength, 0x9959); // get low nybble and save as length
+  ChkLrgObjLength(); // get low nybble and save as length
   ram[(MetatileBuffer + 10)] = 0x86; // render waves
   x = 0xb;
   y = 0x1; // now render the water underneath
@@ -3072,7 +3072,7 @@ void QuestionBlockRow_Low(void) {
 // in: a, x; out: none
 void loc_39277(void) {
   ram[0x100 + sp--] = a; // save whatever row to the stack for now
-  CALL(ChkLrgObjLength, 0x9970); // get low nybble and save as length
+  ChkLrgObjLength(); // get low nybble and save as length
   a = ram[0x100 + ++sp];
   x = a; // render question boxes with coins
   ram[MetatileBuffer + x] = 0xc0;
@@ -3110,7 +3110,7 @@ void Bridge_Low(void) {
 // in: a, x; out: none
 void loc_39297(void) {
   ram[0x100 + sp--] = a; // save whatever row to the stack for now
-  CALL(ChkLrgObjLength, 0x9984); // get low nybble and save as length
+  ChkLrgObjLength(); // get low nybble and save as length
   a = ram[0x100 + ++sp];
   x = a; // render bridge railing
   ram[MetatileBuffer + x] = 0xb;
@@ -3123,7 +3123,7 @@ void loc_39297(void) {
 // --------------------------------
 // in: x; out: none
 void FlagBalls_Residual(void) {
-  CALL(GetLrgObjAttrib, 0x9996); // get low nybble from object byte
+  GetLrgObjAttrib(); // get low nybble from object byte
   x = 0x2; // render flag balls on third row from top
   a = 0x6d; // of screen downwards based on low nybble
   RenderUnderPart(); return;
@@ -3135,9 +3135,9 @@ void FlagpoleObject(void) {
   x = 0x1; // now render the flagpole shaft
   y = 0x8;
   a = 0x25;
-  CALL(RenderUnderPart, 0x99ab);
+  RenderUnderPart();
   ram[(MetatileBuffer + 10)] = 0x61; // render solid block at the bottom
-  CALL(GetAreaObjXPosition, 0x99b3);
+  GetAreaObjXPosition();
   carry_flag = true; // get pixel coordinate of where the flagpole is,
   { uint16_t diff = (uint16_t)(a - 0x8 - !carry_flag); carry_flag = diff <= 0xff; a = (uint8_t)diff; } // subtract eight pixels and use as horizontal
   ram[(Enemy_X_Position + 5)] = a; // coordinate for the flag
@@ -3165,10 +3165,10 @@ void BalancePlatRope(void) {
   x = 0x1; // blank out all from second row to the bottom
   y = 0xf; // with blank used for balance platform rope
   a = 0x44;
-  CALL(RenderUnderPart, 0x99e1);
+  RenderUnderPart();
   a = ram[0x100 + ++sp]; // get back object buffer offset
   x = a;
-  CALL(GetLrgObjAttrib, 0x99e6); // get vertical length from lower nybble
+  GetLrgObjAttrib(); // get vertical length from lower nybble
   x = 0x1;
   DrawRope(); // fallthrough
   return;
@@ -3192,7 +3192,7 @@ void RowOfCoins(void) {
 // in: x; out: none
 void CastleBridgeObj(void) {
   y = 0xc; // load length of 13 columns
-  CALL(ChkLrgObjFixedLength, 0x9a05);
+  ChkLrgObjFixedLength();
   ChainObj(); return;
 }
 
@@ -3211,7 +3211,7 @@ void ChainObj(void) {
 
 // in: x; out: none
 void EmptyBlock(void) {
-  CALL(GetLrgObjAttrib, 0x9a1b); // get row location
+  GetLrgObjAttrib(); // get row location
   x = ram[0x7];
   a = 0xc4;
   ColObj(); // fallthrough
@@ -3248,7 +3248,7 @@ void RowOfSolidBlocks(void) {
 // in: a, x; out: none
 void GetRow(void) {
   ram[0x100 + sp--] = a; // store metatile here
-  CALL(ChkLrgObjLength, 0x9a47); // get row number, load length
+  ChkLrgObjLength(); // get row number, load length
   DrawRow(); // fallthrough
   return;
 }
@@ -3278,7 +3278,7 @@ void ColumnOfSolidBlocks(void) {
 // in: a, x; out: none
 void GetRow2(void) {
   ram[0x100 + sp--] = a; // save metatile to stack for now
-  CALL(GetLrgObjAttrib, 0x9a62); // get length and row
+  GetLrgObjAttrib(); // get length and row
   a = ram[0x100 + ++sp]; // restore metatile
   x = ram[0x7]; // get starting row
   RenderUnderPart(); return; // now render the column
@@ -3287,7 +3287,7 @@ void GetRow2(void) {
 // --------------------------------
 // in: x; out: none
 void BulletBillCannon(void) {
-  CALL(GetLrgObjAttrib, 0x9a6b); // get row and length of bullet bill cannon
+  GetLrgObjAttrib(); // get row and length of bullet bill cannon
   x = ram[0x7]; // start at first row
   ram[MetatileBuffer + x] = 0x64; // render bullet bill cannon
   x++;
@@ -3298,15 +3298,15 @@ void BulletBillCannon(void) {
     y--; neg_flag = (y & 0x80) != 0; // done yet?
     if (neg_flag) { goto SetupCannon; }
     a = 0x66; // if not, render bottom until length expires
-    CALL(RenderUnderPart, 0x9a84);
+    RenderUnderPart();
   }
   
 SetupCannon:
   x = ram[Cannon_Offset]; // get offset for data used by cannons and whirlpools
-  CALL(GetAreaObjYPosition, 0x9a8a); // get proper vertical coordinate for cannon
+  GetAreaObjYPosition(); // get proper vertical coordinate for cannon
   ram[Cannon_Y_Position + x] = a; // and store it here
   ram[Cannon_PageLoc + x] = ram[CurrentPageLoc]; // store page number for cannon here
-  CALL(GetAreaObjXPosition, 0x9a96); // get proper horizontal coordinate for cannon
+  GetAreaObjXPosition(); // get proper horizontal coordinate for cannon
   ram[Cannon_X_Position + x] = a; // and store it here
   x++;
   // increment and check offset
@@ -3322,7 +3322,7 @@ SetupCannon:
 // --------------------------------
 // in: x; out: none
 void StaircaseObject(void) {
-  CALL(ChkLrgObjLength, 0x9ab9); // check and load length
+  ChkLrgObjLength(); // check and load length
   // Original branch: if length already loaded, skip init part
   if (carry_flag) {
     ram[StaircaseControl] = 0x9; // start past the end for the bottom; of the staircase
@@ -3340,12 +3340,12 @@ void StaircaseObject(void) {
 // --------------------------------
 // in: x; out: none
 void Jumpspring(void) {
-  CALL(GetLrgObjAttrib, 0x9ad5);
-  CALL(FindEmptyEnemySlot, 0x9ad8); // find empty space in enemy object buffer
-  CALL(GetAreaObjXPosition, 0x9adb); // get horizontal coordinate for jumpspring
+  GetLrgObjAttrib();
+  FindEmptyEnemySlot(); // find empty space in enemy object buffer
+  GetAreaObjXPosition(); // get horizontal coordinate for jumpspring
   ram[(uint8_t)(Enemy_X_Position + x)] = a; // and store
   ram[(uint8_t)(Enemy_PageLoc + x)] = ram[CurrentPageLoc]; // store page location of jumpspring
-  CALL(GetAreaObjYPosition, 0x9ae5); // get vertical coordinate for jumpspring
+  GetAreaObjYPosition(); // get vertical coordinate for jumpspring
   ram[(uint8_t)(Enemy_Y_Position + x)] = a; // and store
   ram[(uint8_t)(Jumpspring_FixedYPos + x)] = a; // store as permanent coordinate here
   ram[(uint8_t)(Enemy_ID + x)] = JumpspringObject; // write jumpspring object to enemy object buffer
@@ -3371,7 +3371,7 @@ void Hidden1UpBlock(void) {
 
 // in: x; out: none
 void QuestionBlock(void) {
-  CALL(GetAreaObjectID, 0x9b10); // get value from level decoder routine
+  GetAreaObjectID(); // get value from level decoder routine
   DrawQBlk(); return; // go to render it
 }
 
@@ -3384,7 +3384,7 @@ void BrickWithCoins(void) {
 
 // in: x; out: none
 void BrickWithItem(void) {
-  CALL(GetAreaObjectID, 0x9b1b); // save area object ID
+  GetAreaObjectID(); // save area object ID
   ram[0x7] = y;
   a = 0x0; // load default adder for bricks with lines
   y = ram[AreaType]; // check level type for ground level
@@ -3405,7 +3405,7 @@ void BrickWithItem(void) {
 void DrawQBlk(void) {
   a = ROM(BrickQBlockMetatiles + y); // get appropriate metatile for brick (question block
   ram[0x100 + sp--] = a; // if branched to here from question block routine)
-  CALL(GetLrgObjAttrib, 0x9b32); // get row from location byte
+  GetLrgObjAttrib(); // get row from location byte
   DrawRow(); return; // now render the object
 }
 
@@ -3422,13 +3422,13 @@ void GetAreaObjectID(void) {
 // --------------------------------
 // in: x; out: none
 void Hole_Empty(void) {
-  CALL(ChkLrgObjLength, 0x9b43); // get lower nybble and save as length
+  ChkLrgObjLength(); // get lower nybble and save as length
   // Original branch: skip this part if length already loaded
   if (carry_flag) {
     a = ram[AreaType]; zero_flag = a == 0; // check for water type level
     if (!zero_flag) { goto NoWhirlP; } // if not water type, skip this part
     x = ram[Whirlpool_Offset]; // get offset for data used by cannons and whirlpools
-    CALL(GetAreaObjXPosition, 0x9b50); // get proper vertical coordinate of where we're at
+    GetAreaObjXPosition(); // get proper vertical coordinate of where we're at
     carry_flag = true;
     { uint16_t diff = (uint16_t)(a - 0x10 - !carry_flag); carry_flag = diff <= 0xff; a = (uint8_t)diff; } // subtract 16 pixels
     ram[Whirlpool_LeftExtent + x] = a; // store as left extent of whirlpool
@@ -3503,7 +3503,7 @@ WaitOneRow:
 // --------------------------------
 // in: x; out: y, carry
 void ChkLrgObjLength(void) {
-  CALL(GetLrgObjAttrib, 0x9bae); // get row location and size (length if branched to from here)
+  GetLrgObjAttrib(); // get row location and size (length if branched to from here)
   ChkLrgObjFixedLength(); // fallthrough
   return;
 }
@@ -3582,7 +3582,7 @@ void GetBlockBufferAddr(void) {
 // unused space
 // -------------------------------------------------------------------------------------
 void LoadAreaPointer(void) {
-  CALL(FindAreaPointer, 0x9c05); // find it and store it here
+  FindAreaPointer(); // find it and store it here
   ram[AreaPointer] = a;
   GetAreaType(); // fallthrough
   return;
@@ -3612,7 +3612,7 @@ void FindAreaPointer(void) {
 
 void GetAreaDataAddrs(void) {
   a = ram[AreaPointer]; // use 2 MSB for Y
-  CALL(GetAreaType, 0x9c27);
+  GetAreaType();
   y = a;
   a = ram[AreaPointer]; // mask out all but 5 LSB
   a &= 0b00011111;
@@ -3707,7 +3707,7 @@ void GameMode(void) {
 void GameCoreRoutine(void) {
   x = ram[CurrentPlayer]; // get which player is on the screen
   ram[SavedJoypadBits] = ram[SavedJoypadBits + x]; // use appropriate player's controller bits; as the master controller bits
-  CALL(GameRoutines, 0xaef5); // execute one of many possible subs
+  GameRoutines(); // execute one of many possible subs
   a = ram[OperMode_Task]; // check major task of operating mode
   // if we are supposed to be here,
   // Original branch: branch to the game engine itself
@@ -3715,32 +3715,32 @@ void GameCoreRoutine(void) {
     return;
   }
   // GameEngine:
-  CALL(ProcFireball_Bubble, 0xaf00); // process fireballs and air bubbles
+  ProcFireball_Bubble(); // process fireballs and air bubbles
   x = 0x0;
   do {
     // ProcELoop:
     ram[ObjectOffset] = x; // put incremented offset in X as enemy object offset
-    CALL(EnemiesAndLoopsCore, 0xaf07); // process enemy objects
-    CALL(FloateyNumbersRoutine, 0xaf0a); // process floatey numbers
+    EnemiesAndLoopsCore(); // process enemy objects
+    FloateyNumbersRoutine(); // process floatey numbers
     x++;
     zero_flag = x == 0x6; // do these two subroutines until the whole buffer is done
   } while (!zero_flag);
-  CALL(GetPlayerOffscreenBits, 0xaf12); // get offscreen bits for player object
-  CALL(RelativePlayerPosition, 0xaf15); // get relative coordinates for player object
-  CALL(PlayerGfxHandler, 0xaf18); // draw the player
-  CALL(BlockObjMT_Updater, 0xaf1b); // replace block objects with metatiles if necessary
+  GetPlayerOffscreenBits(); // get offscreen bits for player object
+  RelativePlayerPosition(); // get relative coordinates for player object
+  PlayerGfxHandler(); // draw the player
+  BlockObjMT_Updater(); // replace block objects with metatiles if necessary
   x = 0x1;
   ram[ObjectOffset] = x; // set offset for second
-  CALL(BlockObjectsCore, 0xaf22); // process second block object
+  BlockObjectsCore(); // process second block object
   x--;
   ram[ObjectOffset] = x; // set offset for first
-  CALL(BlockObjectsCore, 0xaf28); // process first block object
-  CALL(MiscObjectsCore, 0xaf2b); // process misc objects (hammer, jumping coins)
-  CALL(ProcessCannons, 0xaf2e); // process bullet bill cannons
-  CALL(ProcessWhirlpools, 0xaf31); // process whirlpools
-  CALL(FlagpoleRoutine, 0xaf34); // process the flagpole
-  CALL(RunGameTimer, 0xaf37); // count down the game timer
-  CALL(ColorRotation, 0xaf3a); // cycle one of the background colors
+  BlockObjectsCore(); // process first block object
+  MiscObjectsCore(); // process misc objects (hammer, jumping coins)
+  ProcessCannons(); // process bullet bill cannons
+  ProcessWhirlpools(); // process whirlpools
+  FlagpoleRoutine(); // process the flagpole
+  RunGameTimer(); // count down the game timer
+  ColorRotation(); // cycle one of the background colors
   a = ram[Player_Y_HighPos];
   neg_flag = ((a - 0x2) & 0x80) != 0; // if player is below the screen, don't bother with the music
   if (neg_flag) {
@@ -3750,7 +3750,7 @@ void GameCoreRoutine(void) {
     if (!zero_flag) { goto NoChgMus; } // if not yet at a certain point, continue
     a = ram[IntervalTimerControl]; zero_flag = a == 0; // if interval timer not yet expired,
     if (!zero_flag) { goto NoChgMus; } // branch ahead, don't bother with the music
-    CALL(GetAreaMusic, 0xaf51); // to re-attain appropriate level music
+    GetAreaMusic(); // to re-attain appropriate level music
   }
   
 NoChgMus:
@@ -3764,11 +3764,11 @@ NoChgMus:
   }
   // CycleTwo:
   a = a >> 1; // if branched here, divide by 2 to cycle every other frame
-  CALL(CyclePlayerPalette, 0xaf60); // do sub to cycle the palette (note: shares fire flower code)
+  CyclePlayerPalette(); // do sub to cycle the palette (note: shares fire flower code)
   goto SaveAB; // then skip this sub to finish up the game engine
   
 ClrPlrPal:
-  CALL(ResetPalStar, 0xaf66); // do sub to clear player's palette bits in attributes
+  ResetPalStar(); // do sub to clear player's palette bits in attributes
   
 SaveAB:
   ram[PreviousA_B_Buttons] = ram[A_B_Buttons]; // save current A and B button; into temp variable to be used on next frame
@@ -3798,7 +3798,7 @@ void UpdScrollVar(void) {
     ram[VRAM_Buffer2_Offset] = 0x0; // reset vram buffer offset used in conjunction with; level graphics buffer at $0341-$035f
   }
   // RunParser:
-  CALL(AreaParserTaskHandler, 0xaf91); // update the name table with more level graphics
+  AreaParserTaskHandler(); // update the name table with more level graphics
   // ExitEng:
   return; // and after all that, we're finally done!
 }
@@ -3865,14 +3865,14 @@ void ScrollScreen(void) {
   a &= 0b11111110; // save all bits except d0
   a |= ram[0x0]; // get saved bit here and save in PPU register 1
   ram[Mirror_PPU_CTRL_REG1] = a; // mirror to be used to set name table later
-  CALL(GetScreenPosition, 0xaff2); // figure out where the right side is
+  GetScreenPosition(); // figure out where the right side is
   ram[ScrollIntervalTimer] = 0x8; // set scroll timer (residual, not used elsewhere)
   ChkPOffscr(); return; // skip this part
 }
 
 void ChkPOffscr(void) {
   x = 0x0; // set X for player offset
-  CALL(GetXOffscreenBits, 0xb004); // get horizontal offscreen bits for player
+  GetXOffscreenBits(); // get horizontal offscreen bits for player
   ram[0x0] = a; // save them here
   y = 0x0; // load default offset (left side)
   carry_flag = (a & 0x80) != 0; a = (uint8_t)(a << 1); // if d7 of offscreen bits are set,
@@ -3962,7 +3962,7 @@ void PlayerEntrance(void) {
       AutoControlPlayer(); return; // force player to walk to the right
     }
     // IntroEntr:
-    CALL(EnterSidePipe, 0xb08f); // execute sub to move player to the right
+    EnterSidePipe(); // execute sub to move player to the right
     ram[ChangeAreaTimer]--; zero_flag = ram[ChangeAreaTimer] == 0; // decrement timer for change of area
     // branch to exit if not yet expired
     if (!zero_flag) {
@@ -3976,7 +3976,7 @@ void PlayerEntrance(void) {
   // Original branch: branch to enter with vine
   if (zero_flag) {
     a = 0xff; // otherwise, set value here then execute sub
-    CALL(MovePlayerYAxis, 0xb0a4); // to move player upwards (note $ff = -1)
+    MovePlayerYAxis(); // to move player upwards (note $ff = -1)
     a = ram[Player_Y_Position]; // check to see if player is at a specific coordinate
     carry_flag = a >= 0x91; // if player risen to a certain point (this requires pipes
     if (!carry_flag) { goto PlayerRdy; } // to be at specific height to look/function right) branch
@@ -4002,7 +4002,7 @@ void PlayerEntrance(void) {
   }
   // OffVine:
   ram[DisableCollisionDet] = y; // set collision detection disable flag
-  CALL(AutoControlPlayer, 0xb0cc); // use contents of A to move player up or right, execute sub
+  AutoControlPlayer(); // use contents of A to move player up or right, execute sub
   a = ram[Player_X_Position];
   // check player's horizontal position
   // if not far enough to the right, branch to leave
@@ -4072,7 +4072,7 @@ SaveJoyp:
   }
   
 SizeChk:
-  CALL(PlayerMovementSubs, 0xb12d); // run movement subroutines
+  PlayerMovementSubs(); // run movement subroutines
   y = 0x1; // is player small?
   a = ram[PlayerSize]; zero_flag = a == 0;
   if (zero_flag) {
@@ -4096,12 +4096,12 @@ ChkMoveDir:
     ram[Player_MovingDir] = a; // set moving direction
   }
   // PlayerSubs:
-  CALL(ScrollHandler, 0xb14e); // move the screen if necessary
-  CALL(GetPlayerOffscreenBits, 0xb151); // get player's offscreen bits
-  CALL(RelativePlayerPosition, 0xb154); // get coordinates relative to the screen
+  ScrollHandler(); // move the screen if necessary
+  GetPlayerOffscreenBits(); // get player's offscreen bits
+  RelativePlayerPosition(); // get coordinates relative to the screen
   x = 0x0; // set offset for player object
-  CALL(BoundingBoxCore, 0xb159); // get player's bounding box coordinates
-  CALL(PlayerBGCollision, 0xb15c); // do collision detection and process
+  BoundingBoxCore(); // get player's bounding box coordinates
+  PlayerBGCollision(); // do collision detection and process
   a = ram[Player_Y_Position];
   // check to see if player is higher than 64th pixel
   // Original branch: if so, branch ahead
@@ -4171,7 +4171,7 @@ ChkHoleX:
   }
   // CloudExit:
   ram[JoypadOverride] = 0x0; // clear controller override bits if any are set
-  CALL(SetEntr, 0xb1c2); // do sub to set secondary mode
+  SetEntr(); // do sub to set secondary mode
   ram[AltEntranceControl]++; // set mode of entry to 3
   return;
 }
@@ -4202,8 +4202,8 @@ void SetEntr(void) {
 // -------------------------------------------------------------------------------------
 void VerticalPipeEntry(void) {
   a = 0x1; // set 1 as movement amount
-  CALL(MovePlayerYAxis, 0xb1e9); // do sub to move player downwards
-  CALL(ScrollHandler, 0xb1ec); // do sub to scroll screen with saved force if necessary
+  MovePlayerYAxis(); // do sub to move player downwards
+  ScrollHandler(); // do sub to scroll screen with saved force if necessary
   y = 0x0; // load default mode of entry
   a = ram[WarpZoneControl]; zero_flag = a == 0; // check warp zone control variable/flag
   // if set, branch to use mode 0
@@ -4232,7 +4232,7 @@ void MovePlayerYAxis(void) {
 
 // -------------------------------------------------------------------------------------
 void SideExitPipeEntry(void) {
-  CALL(EnterSidePipe, 0xb208); // execute sub to move player to the right
+  EnterSidePipe(); // execute sub to move player to the right
   y = 0x2;
   ChgAreaPipe(); // fallthrough
   return;
@@ -4270,7 +4270,7 @@ void EnterSidePipe(void) {
   }
   // RightPipe:
   a = y; // use contents of Y to
-  CALL(AutoControlPlayer, 0xb231); // execute player control routine with ctrl bits nulled
+  AutoControlPlayer(); // execute player control routine with ctrl bits nulled
   return;
 }
 
@@ -4288,7 +4288,7 @@ void PlayerChangeSize(void) {
   if (a != 0xc4) {
     return;
   }
-  CALL(DonePlayerTask, 0xb243); // otherwise do sub to init timer control and set routine
+  DonePlayerTask(); // otherwise do sub to init timer control and set routine
   // ExitChgSize:
   return; // and then leave
 }
@@ -4361,7 +4361,7 @@ void PlayerFireFlower(void) {
     return;
   }
   // ResetPalFireFlower:
-  CALL(DonePlayerTask, 0xb299); // do sub to init timer control and run player control routine
+  DonePlayerTask(); // do sub to init timer control and run player control routine
   ResetPalStar(); // fallthrough
   return;
 }
@@ -4410,7 +4410,7 @@ void FlagpoleSlide(void) {
 // -------------------------------------------------------------------------------------
 void PlayerEndLevel(void) {
   a = 0x1; // force player to walk to the right
-  CALL(AutoControlPlayer, 0xb2ce);
+  AutoControlPlayer();
   a = ram[Player_Y_Position]; // check player's vertical position
   // Original branch: if player is not yet off the flagpole, skip this part
   if (a >= 0xae) {
@@ -4463,9 +4463,9 @@ ChkStop:
 
 void NextArea(void) {
   ram[AreaNumber]++; // increment area number used for address loader
-  CALL(LoadAreaPointer, 0xb31a); // get new level pointer
+  LoadAreaPointer(); // get new level pointer
   ram[FetchNewGameTimerFlag]++; // set flag to load new game timer
-  CALL(ChgAreaMode, 0xb320); // do sub to set secondary mode, disable screen and sprite 0
+  ChgAreaMode(); // do sub to set secondary mode, disable screen and sprite 0
   ram[HalfwayPage] = a; // reset halfway page to 0 (beginning)
   ram[EventMusicQueue] = Silence; // silence music and leave
   // ExitNA:
@@ -4487,7 +4487,7 @@ void PlayerMovementSubs(void) {
   ram[CrouchingFlag] = a; // store value in crouch flag
   
 ProcMove:
-  CALL(PlayerPhysicsSub, 0xb33d); // run sub related to jumping and swimming
+  PlayerPhysicsSub(); // run sub related to jumping and swimming
   a = ram[PlayerChangeSizeFlag]; zero_flag = a == 0; // if growing/shrinking flag set,
   // branch to leave
   if (!zero_flag) {
@@ -4512,15 +4512,15 @@ ProcMove:
 // -------------------------------------------------------------------------------------
 // $00 - used by ClimbingSub to store high vertical adder
 void OnGroundStateSub(void) {
-  CALL(GetPlayerAnimSpeed, 0xb35c); // do a sub to set animation frame timing
+  GetPlayerAnimSpeed(); // do a sub to set animation frame timing
   a = ram[Left_Right_Buttons]; zero_flag = a == 0;
   // Original branch: if left/right controller bits not set, skip instruction
   if (!zero_flag) {
     ram[PlayerFacingDir] = a; // otherwise set new facing direction
   }
   // GndMove:
-  CALL(ImposeFriction, 0xb365); // do a sub to impose friction on player's walk/run
-  CALL(MovePlayerHorizontally, 0xb368); // do another sub to move player horizontally
+  ImposeFriction(); // do a sub to impose friction on player's walk/run
+  MovePlayerHorizontally(); // do another sub to move player horizontally
   ram[Player_X_Scroll] = a; // set returned value as player's movement speed for scroll
   return;
 }
@@ -4556,7 +4556,7 @@ ProcSwim:
     LRAir();
     return;
   }
-  CALL(GetPlayerAnimSpeed, 0xb39a); // do a sub to get animation frame timing
+  GetPlayerAnimSpeed(); // do a sub to get animation frame timing
   a = ram[Player_Y_Position];
   // check vertical position against preset value
   // Original branch: if not yet reached a certain position, branch ahead
@@ -4579,10 +4579,10 @@ void LRAir(void) {
   a = ram[Left_Right_Buttons]; zero_flag = a == 0; // check left/right controller bits (check for jumping/falling)
   // Original branch: if not pressing any, skip
   if (!zero_flag) {
-    CALL(ImposeFriction, 0xb3b2); // otherwise process horizontal movement
+    ImposeFriction(); // otherwise process horizontal movement
   }
   // JSMove:
-  CALL(MovePlayerHorizontally, 0xb3b5); // do a sub to move player horizontally
+  MovePlayerHorizontally(); // do a sub to move player horizontally
   ram[Player_X_Scroll] = a; // set player's speed here, to be used for scroll later
   a = ram[GameEngineSubroutine];
   // check for specific routine selected
@@ -4992,9 +4992,9 @@ void ProcFireball_Bubble(void) {
     
 ProcFireballs:
     x = 0x0;
-    CALL(FireballObjCore, 0xb668); // process first fireball object
+    FireballObjCore(); // process first fireball object
     x = 0x1;
-    CALL(FireballObjCore, 0xb66d); // process second fireball object, then do air bubbles
+    FireballObjCore(); // process second fireball object, then do air bubbles
   }
   // ProcAirBubbles:
   a = ram[AreaType]; zero_flag = a == 0; // if not water type level, skip the rest of this
@@ -5005,10 +5005,10 @@ ProcFireballs:
   do {
     // BublLoop:
     ram[ObjectOffset] = x; // store offset
-    CALL(BubbleCheck, 0xb679); // check timers and coordinates, create air bubble
-    CALL(RelativeBubblePosition, 0xb67c); // get relative coordinates
-    CALL(GetBubbleOffscreenBits, 0xb67f); // get offscreen information
-    CALL(DrawBubble, 0xb682); // draw the air bubble
+    BubbleCheck(); // check timers and coordinates, create air bubble
+    RelativeBubblePosition(); // get relative coordinates
+    GetBubbleOffscreenBits(); // get offscreen information
+    DrawBubble(); // draw the air bubble
     x--; neg_flag = (x & 0x80) != 0;
   } while (!neg_flag); // do this until all three are handled
   // BublExit:
@@ -5051,18 +5051,18 @@ void FireballObjCore(void) {
     ram[0x0] = 0x50; // set downward movement force here
     ram[0x2] = 0x3; // set maximum speed here
     a = 0x0;
-    CALL(ImposeGravity, 0xb6cf); // do sub here to impose gravity on fireball and move vertically
-    CALL(MoveObjectHorizontally, 0xb6d2); // do another sub to move it horizontally
+    ImposeGravity(); // do sub here to impose gravity on fireball and move vertically
+    MoveObjectHorizontally(); // do another sub to move it horizontally
     x = ram[ObjectOffset]; // return fireball offset to X
-    CALL(RelativeFireballPosition, 0xb6d7); // get relative coordinates
-    CALL(GetFireballOffscreenBits, 0xb6da); // get offscreen information
-    CALL(GetFireballBoundBox, 0xb6dd); // get bounding box coordinates
-    CALL(FireballBGCollision, 0xb6e0); // do fireball to background collision detection
+    RelativeFireballPosition(); // get relative coordinates
+    GetFireballOffscreenBits(); // get offscreen information
+    GetFireballBoundBox(); // get bounding box coordinates
+    FireballBGCollision(); // do fireball to background collision detection
     a = ram[FBall_OffscreenBits]; // get fireball offscreen bits
     a &= 0b11001100; zero_flag = a == 0; // mask out certain bits
     // Original branch: if any bits still set, branch to kill fireball
     if (zero_flag) {
-      CALL(FireballEnemyCollision, 0xb6ea); // do fireball to enemy collision detection and deal with collisions
+      FireballEnemyCollision(); // do fireball to enemy collision detection and deal with collisions
       goto DrawFireball; // draw fireball appropriately and leave
     }
     // EraseFB:
@@ -5071,7 +5071,7 @@ void FireballObjCore(void) {
     return; // leave
   }
   // FireballExplosion:
-  CALL(RelativeFireballPosition, 0xb6f5);
+  RelativeFireballPosition();
   goto DrawExplosion_Fireball;
   // -------------------------------------------------------------------------------------
   
@@ -5215,13 +5215,13 @@ ResGTCtrl:
     ram[GameTimerCtrlTimer] = 0x18; // reset game timer control
     y = 0x23; // set offset for last digit
     ram[(DigitModifier + 5)] = 0xff; // set value to decrement game timer digit
-    CALL(DigitsMathRoutine, 0xb794); // do sub to decrement game timer slowly
+    DigitsMathRoutine(); // do sub to decrement game timer slowly
     a = 0xa4; // set status nybbles to update game timer display
     PrintStatusBarNumbers(); return; // do sub to update the display
   }
   // TimeUpOn:
   ram[PlayerStatus] = a; // init player status (note A will always be zero here)
-  CALL(ForceInjury, 0xb79f); // do sub to kill the player (note player is small here)
+  ForceInjury(); // do sub to kill the player (note player is small here)
   ram[GameTimerExpiredFlag]++; // set game timer expiration flag
   // ExGTimer:
   return; // leave
@@ -5397,13 +5397,13 @@ GiveFPScr:
   a = ROM(FlagpoleScoreMods + y); // get amount to award player points
   x = ROM(FlagpoleScoreDigits + y); // get digit with which to award points
   ram[DigitModifier + x] = a; // store in digit modifier
-  CALL(AddToScore, 0xb8a7); // do sub to award player points depending on height of collision
+  AddToScore(); // do sub to award player points depending on height of collision
   ram[GameEngineSubroutine] = 0x5; // set to run end-of-level subroutine on next frame
   
 FPGfx:
-  CALL(GetEnemyOffscreenBits, 0xb8ae); // get offscreen information
-  CALL(RelativeEnemyPosition, 0xb8b1); // get relative coordinates
-  CALL(FlagpoleGfxHandler, 0xb8b4); // draw flagpole flag and floatey number
+  GetEnemyOffscreenBits(); // get offscreen information
+  RelativeEnemyPosition(); // get relative coordinates
+  FlagpoleGfxHandler(); // draw flagpole flag and floatey number
   // ExitFlagP:
   return;
 }
@@ -5411,7 +5411,7 @@ FPGfx:
 // -------------------------------------------------------------------------------------
 // in: x; out: x
 void JumpspringHandler(void) {
-  CALL(GetEnemyOffscreenBits, 0xb8bc); // get offscreen information
+  GetEnemyOffscreenBits(); // get offscreen information
   a = ram[TimerControl]; zero_flag = a == 0; // check master timer control
   // Original branch: branch to last section if set
   if (zero_flag) {
@@ -5454,9 +5454,9 @@ BounceJS:
   }
   
 DrawJSpr:
-  CALL(RelativeEnemyPosition, 0xb904); // get jumpspring's relative coordinates
-  CALL(EnemyGfxHandler, 0xb907); // draw jumpspring
-  CALL(OffscreenBoundsCheck, 0xb90a); // check to see if we need to kill it
+  RelativeEnemyPosition(); // get jumpspring's relative coordinates
+  EnemyGfxHandler(); // draw jumpspring
+  OffscreenBoundsCheck(); // check to see if we need to kill it
   a = ram[JumpspringAnimCtrl]; zero_flag = a == 0; // if frame control at zero, don't bother
   // trying to animate it, just leave
   if (zero_flag) {
@@ -5522,12 +5522,12 @@ RunVSubs:
     a = ram[VineHeight]; // if vine still very small,
     carry_flag = a >= 0x8; // branch to leave
     if (!carry_flag) { goto ExitVH; }
-    CALL(RelativeEnemyPosition, 0xb973); // get relative coordinates of vine,
-    CALL(GetEnemyOffscreenBits, 0xb976); // and any offscreen bits
+    RelativeEnemyPosition(); // get relative coordinates of vine,
+    GetEnemyOffscreenBits(); // and any offscreen bits
     y = 0x0; // initialize offset used in draw vine sub
     do {
       // VDrawLoop:
-      CALL(DrawVine, 0xb97b); // draw vine
+      DrawVine(); // draw vine
       y++; // increment offset
       zero_flag = y == ram[VineFlagOffset]; // if offset in Y and offset here
     } while (!zero_flag); // do not yet match, loop back to draw more vine
@@ -5539,7 +5539,7 @@ RunVSubs:
       do {
         // KillVine:
         x = ram[VineObjOffset + y]; // get enemy object offset for this vine object
-        CALL(EraseEnemyObject, 0xb98f); // kill this vine object
+        EraseEnemyObject(); // kill this vine object
         y--; neg_flag = (y & 0x80) != 0; // decrement Y
       } while (!neg_flag); // if any vine objects left, loop back to kill it
       ram[VineFlagOffset] = a; // initialize vine flag/offset
@@ -5552,7 +5552,7 @@ RunVSubs:
     x = 0x6; // set offset in X to last enemy slot
     a = 0x1; // set A to obtain horizontal in $04, but we don't care
     y = 0x1b; // set Y to offset to get block at ($04, $10) of coordinates
-    CALL(BlockBufferCollision, 0xb9a8); // do a sub to get block buffer address set, return contents
+    BlockBufferCollision(); // do a sub to get block buffer address set, return contents
     y = ram[0x2];
     carry_flag = y >= 0xd0; // if vertical high nybble offset beyond extent of
     if (carry_flag) { goto ExitVH; } // current block buffer, branch to leave, do not write
@@ -5618,11 +5618,11 @@ Chk_BB:
       a = ram[(uint8_t)(Enemy_ID + x)]; // check enemy identifier for bullet bill (cannon variant)
       zero_flag = a == BulletBill_CannonVar;
       if (!zero_flag) { goto Next3Slt; } // if not found, branch to get next slot
-      CALL(OffscreenBoundsCheck, 0xba22); // otherwise, check to see if it went offscreen
+      OffscreenBoundsCheck(); // otherwise, check to see if it went offscreen
       a = ram[(uint8_t)(Enemy_Flag + x)]; zero_flag = a == 0; // check enemy buffer flag
       if (zero_flag) { goto Next3Slt; } // if not set, branch to get next slot
-      CALL(GetEnemyOffscreenBits, 0xba29); // otherwise, get offscreen information
-      CALL(BulletBillHandler, 0xba2c); // then do sub to handle bullet bill
+      GetEnemyOffscreenBits(); // otherwise, get offscreen information
+      BulletBillHandler(); // then do sub to handle bullet bill
     }
     
 Next3Slt:
@@ -5646,7 +5646,7 @@ void BulletBillHandler(void) {
       zero_flag = a == 0b00001100; // check to see if all bits are set
       if (zero_flag) { goto KillBB; } // if so, branch to kill this object
       y = 0x1; // set to move right by default
-      CALL(PlayerEnemyDiff, 0xba49); // get horizontal difference between player and bullet bill
+      PlayerEnemyDiff(); // get horizontal difference between player and bullet bill
       // Original branch: if enemy to the left of player, branch
       if (!neg_flag) {
         y++; // otherwise increment to move left
@@ -5668,20 +5668,20 @@ void BulletBillHandler(void) {
     a &= 0b00100000; zero_flag = a == 0;
     // Original branch: if not set, skip to move horizontally
     if (!zero_flag) {
-      CALL(MoveD_EnemyVertically, 0xba72); // otherwise do sub to move bullet bill vertically
+      MoveD_EnemyVertically(); // otherwise do sub to move bullet bill vertically
     }
     // BBFly:
-    CALL(MoveEnemyHorizontally, 0xba75); // do sub to move bullet bill horizontally
+    MoveEnemyHorizontally(); // do sub to move bullet bill horizontally
   }
   // RunBBSubs:
-  CALL(GetEnemyOffscreenBits, 0xba78); // get offscreen information
-  CALL(RelativeEnemyPosition, 0xba7b); // get relative coordinates
-  CALL(GetEnemyBoundBox, 0xba7e); // get bounding box coordinates
-  CALL(PlayerEnemyCollision, 0xba81); // handle player to enemy collisions
+  GetEnemyOffscreenBits(); // get offscreen information
+  RelativeEnemyPosition(); // get relative coordinates
+  GetEnemyBoundBox(); // get bounding box coordinates
+  PlayerEnemyCollision(); // handle player to enemy collisions
   EnemyGfxHandler(); return; // draw the bullet bill and leave
   
 KillBB:
-  CALL(EraseEnemyObject, 0xba87); // kill bullet bill and leave
+  EraseEnemyObject(); // kill bullet bill and leave
   return;
 }
 
@@ -5741,8 +5741,8 @@ void ProcHammerObj(void) {
       ram[0x1] = 0xf; // set upward movement force (not used)
       ram[0x2] = 0x4; // set maximum vertical speed
       a = 0x0; // set A to impose gravity on hammer
-      CALL(ImposeGravity, 0xbaea); // do sub to impose gravity on hammer and move vertically
-      CALL(MoveObjectHorizontally, 0xbaed); // do sub to move it horizontally
+      ImposeGravity(); // do sub to impose gravity on hammer and move vertically
+      MoveObjectHorizontally(); // do sub to move it horizontally
       x = ram[ObjectOffset]; // get original misc object offset
     } else {
       // SetHSpd:
@@ -5773,14 +5773,14 @@ SetHPos:
       goto RunHSubs; // unconditional branch to skip first routine
     }
     // RunAllH:
-    CALL(PlayerHammerCollision, 0xbb2a); // handle collisions
+    PlayerHammerCollision(); // handle collisions
   }
   
 RunHSubs:
-  CALL(GetMiscOffscreenBits, 0xbb2d); // get offscreen information
-  CALL(RelativeMiscPosition, 0xbb30); // get relative coordinates
-  CALL(GetMiscBoundBox, 0xbb33); // get bounding box coordinates
-  CALL(DrawHammer, 0xbb36); // draw the hammer
+  GetMiscOffscreenBits(); // get offscreen information
+  RelativeMiscPosition(); // get relative coordinates
+  GetMiscBoundBox(); // get bounding box coordinates
+  DrawHammer(); // draw the hammer
   return; // and we are done here
 }
 
@@ -5789,7 +5789,7 @@ RunHSubs:
 // $06 - used to store low byte of block buffer address
 // in: x; out: none
 void CoinBlock(void) {
-  CALL(FindEmptyMiscSlot, 0xbb3a); // set offset for empty or last misc object buffer slot
+  FindEmptyMiscSlot(); // set offset for empty or last misc object buffer slot
   ram[Misc_PageLoc + y] = ram[(uint8_t)(Block_PageLoc + x)]; // get page location of block object; store as page location of misc object
   a = ram[(uint8_t)(Block_X_Position + x)]; // get horizontal coordinate of block object
   a |= 0x5; // add 5 pixels
@@ -5802,7 +5802,7 @@ void CoinBlock(void) {
 
 // in: x; out: x
 void SetupJumpCoin(void) {
-  CALL(FindEmptyMiscSlot, 0xbb53); // set offset for empty or last misc object buffer slot
+  FindEmptyMiscSlot(); // set offset for empty or last misc object buffer slot
   ram[Misc_PageLoc + y] = ram[Block_PageLoc2 + x]; // get page location saved earlier; and save as page location for misc object
   a = ram[0x6]; // get low byte of block buffer offset
   a = (uint8_t)(a << 1);
@@ -5826,7 +5826,7 @@ void JCoinC(void) {
   ram[Misc_State + y] = a; // set state for misc object
   ram[Square2SoundQueue] = a; // load coin grab sound
   ram[ObjectOffset] = x; // store current control bit as misc object offset 
-  CALL(GiveOneCoin, 0xbb7f); // update coin tally on the screen and coin amount variable
+  GiveOneCoin(); // update coin tally on the screen and coin amount variable
   ram[CoinTallyFor1Ups]++; // increment coin tally used to activate 1-up block flag
   return;
 }
@@ -5860,7 +5860,7 @@ void MiscObjectsCore(void) {
       carry_flag = (a & 0x80) != 0; a = (uint8_t)(a << 1); // otherwise shift d7 into carry
       // Original branch: if d7 not set, jumping coin, thus skip to rest of code here
       if (carry_flag) {
-        CALL(ProcHammerObj, 0xbba3); // otherwise go to process hammer,
+        ProcHammerObj(); // otherwise go to process hammer,
         goto MiscLoopBack; // then check next slot
         // --------------------------------
         // $00 - used to set downward force
@@ -5897,7 +5897,7 @@ void MiscObjectsCore(void) {
       a = a >> 1; // divide by 2 and set
       ram[0x1] = a; // as upward movement amount (apparently residual)
       a = 0x0; // set A to impose gravity on jumping coin
-      CALL(ImposeGravity, 0xbbdd); // do sub to move coin vertically and impose gravity on it
+      ImposeGravity(); // do sub to move coin vertically and impose gravity on it
       x = ram[ObjectOffset]; // get original misc object offset
       a = ram[(uint8_t)(Misc_Y_Speed + x)]; // check vertical speed
       // Original branch: if not moving downward fast enough, keep state as-is
@@ -5906,10 +5906,10 @@ void MiscObjectsCore(void) {
       }
       
 RunJCSubs:
-      CALL(RelativeMiscPosition, 0xbbea); // get relative coordinates
-      CALL(GetMiscOffscreenBits, 0xbbed); // get offscreen information
-      CALL(GetMiscBoundBox, 0xbbf0); // get bounding box coordinates (why?)
-      CALL(JCoinGfxHandler, 0xbbf3); // draw the coin or floatey number
+      RelativeMiscPosition(); // get relative coordinates
+      GetMiscOffscreenBits(); // get offscreen information
+      GetMiscBoundBox(); // get bounding box coordinates (why?)
+      JCoinGfxHandler(); // draw the coin or floatey number
     }
     
 MiscLoopBack:
@@ -5924,7 +5924,7 @@ void GiveOneCoin(void) {
   ram[(DigitModifier + 5)] = 0x1; // set digit modifier to add 1 coin; to the current player's coin tally
   x = ram[CurrentPlayer]; // get current player on the screen
   y = ROM(CoinTallyOffsets + x); // get offset for player's coin tally
-  CALL(DigitsMathRoutine, 0xbc0b); // update the coin tally
+  DigitsMathRoutine(); // update the coin tally
   ram[CoinTally]++; // increment onscreen player's coin amount
   a = ram[CoinTally];
   // does player have 100 coins yet?
@@ -5944,7 +5944,7 @@ void GiveOneCoin(void) {
 void AddToScore(void) {
   x = ram[CurrentPlayer]; // get current player
   y = ROM(ScoreOffsets + x); // get offset for player's score
-  CALL(DigitsMathRoutine, 0xbc2f); // update the score internally with value in digit modifier
+  DigitsMathRoutine(); // update the score internally with value in digit modifier
   GetSBNybbles(); // fallthrough
   return;
 }
@@ -5959,7 +5959,7 @@ void GetSBNybbles(void) {
 
 // in: a; out: x
 void UpdateNumber(void) {
-  CALL(PrintStatusBarNumbers, 0xbc38); // print status bar numbers based on nybbles, whatever they be
+  PrintStatusBarNumbers(); // print status bar numbers based on nybbles, whatever they be
   y = ram[VRAM_Buffer1_Offset];
   a = ram[(VRAM_Buffer1 - 6) + y]; zero_flag = a == 0; // check highest digit of score
   // Original branch: if zero, overwrite with space tile for zero suppression
@@ -6016,14 +6016,14 @@ void PowerUpObjHandler(void) {
       if (zero_flag) { goto ShroomM; } // if 1-up mushroom, branch ahead to move it
       zero_flag = a == 0x2;
       if (!zero_flag) { goto RunPUSubs; } // if not star, branch elsewhere to skip movement
-      CALL(MoveJumpingEnemy, 0xbca3); // otherwise impose gravity on star power-up and make it jump
-      CALL(EnemyJump, 0xbca6); // note that green paratroopa shares the same code here 
+      MoveJumpingEnemy(); // otherwise impose gravity on star power-up and make it jump
+      EnemyJump(); // note that green paratroopa shares the same code here 
       goto RunPUSubs; // then jump to other power-up subroutines
     }
     
 ShroomM:
-    CALL(MoveNormalEnemy, 0xbcac); // do sub to make mushrooms move
-    CALL(EnemyToBGCollisionDet, 0xbcaf); // deal with collisions
+    MoveNormalEnemy(); // do sub to make mushrooms move
+    EnemyToBGCollisionDet(); // deal with collisions
   } else {
     // GrowThePowerUp:
     a = ram[FrameCounter]; // get frame counter
@@ -6054,12 +6054,12 @@ ChkPUSte:
   }
   
 RunPUSubs:
-  CALL(RelativeEnemyPosition, 0xbcda); // get coordinates relative to screen
-  CALL(GetEnemyOffscreenBits, 0xbcdd); // get offscreen bits
-  CALL(GetEnemyBoundBox, 0xbce0); // get bounding box coordinates
-  CALL(DrawPowerUp, 0xbce3); // draw the power-up object
-  CALL(PlayerEnemyCollision, 0xbce6); // check for collision with player
-  CALL(OffscreenBoundsCheck, 0xbce9); // check to see if it went offscreen
+  RelativeEnemyPosition(); // get coordinates relative to screen
+  GetEnemyOffscreenBits(); // get offscreen bits
+  GetEnemyBoundBox(); // get bounding box coordinates
+  DrawPowerUp(); // draw the power-up object
+  PlayerEnemyCollision(); // check for collision with player
+  OffscreenBoundsCheck(); // check to see if it went offscreen
   // ExitPUp:
   return; // and we're done
 }
@@ -6082,14 +6082,14 @@ void PlayerHeadCollision(void) {
   }
   // DBlockSte:
   ram[(uint8_t)(Block_State + x)] = a; // store into block object buffer
-  CALL(DestroyBlockMetatile, 0xbcfe); // store blank metatile in vram buffer to write to name table
+  DestroyBlockMetatile(); // store blank metatile in vram buffer to write to name table
   x = ram[SprDataOffset_Ctrl]; // load offset control bit
   a = ram[0x2]; // get vertical high nybble offset used in block buffer routine
   ram[Block_Orig_YPos + x] = a; // set as vertical coordinate for block object
   y = a;
   ram[Block_BBuf_Low + x] = ram[0x6]; // get low byte of block buffer address used in same routine; save as offset here to be used later
   a = read_byte(indirect_y_addr(0x6)); // get contents of block buffer at old address at $06, $07
-  CALL(BlockBumpedChk, 0xbd11); // do a sub to check which block player bumped head on
+  BlockBumpedChk(); // do a sub to check which block player bumped head on
   ram[0x0] = a; // store metatile here
   y = ram[PlayerSize]; zero_flag = y == 0; // check player's size
   // Original branch: if small, use metatile itself as contents of A
@@ -6127,7 +6127,7 @@ void PlayerHeadCollision(void) {
   
 PutMTileB:
   ram[Block_Metatile + x] = a; // store whatever metatile be appropriate here
-  CALL(InitBlock_XY_Pos, 0xbd46); // get block object horizontal coordinates saved
+  InitBlock_XY_Pos(); // get block object horizontal coordinates saved
   y = ram[0x2]; // get vertical high nybble offset
   dynamic_ram_write(indirect_y_addr(0x6), 0x23); // write blank metatile $23 to block buffer
   ram[BlockBounceTimer] = 0x10; // set block bounce timer
@@ -6152,10 +6152,10 @@ BigBP:
   y = ram[(uint8_t)(Block_State + x)]; // get block object state
   // Original branch: if set to value loaded for unbreakable, branch
   if (y != 0x11) {
-    CALL(BrickShatter, 0xbd74); // execute code for breakable brick
+    BrickShatter(); // execute code for breakable brick
   } else {
     // Unbreak:
-    CALL(BumpBlock, 0xbd7a); // execute code for unbreakable brick or question block
+    BumpBlock(); // execute code for unbreakable brick or question block
   }
   // InvOBit:
   a = ram[SprDataOffset_Ctrl]; // invert control bit used by block objects
@@ -6182,7 +6182,7 @@ void InitBlock_XY_Pos(void) {
 
 // --------------------------------
 void BumpBlock(void) {
-  CALL(CheckTopOfBlock, 0xbd9d); // check to see if there's a coin directly above this block
+  CheckTopOfBlock(); // check to see if there's a coin directly above this block
   ram[Square1SoundQueue] = Sfx_Bump; // play bump sound
   a = 0x0;
   ram[(uint8_t)(Block_X_Speed + x)] = a; // initialize horizontal speed for block object
@@ -6190,7 +6190,7 @@ void BumpBlock(void) {
   ram[Player_Y_Speed] = a; // init player's vertical speed
   ram[(uint8_t)(Block_Y_Speed + x)] = 0xfe; // set vertical speed for block object
   a = ram[0x5]; // get original metatile from stack
-  CALL(BlockBumpedChk, 0xbdb3); // do a sub to check which block player bumped head on
+  BlockBumpedChk(); // do a sub to check which block player bumped head on
   // if no match was found, branch to leave
   if (!carry_flag) {
     return;
@@ -6264,7 +6264,7 @@ loc_48602:
 void VineBlock(void) {
   x = 0x5; // load last slot for enemy object buffer
   y = ram[SprDataOffset_Ctrl]; // get control bit
-  CALL(Setup_Vine, 0xbde6); // set up vine object
+  Setup_Vine(); // set up vine object
   // ExitBlockChk:
   return; // leave
 }
@@ -6289,14 +6289,14 @@ void BlockBumpedChk(void) {
 
 // --------------------------------
 void BrickShatter(void) {
-  CALL(CheckTopOfBlock, 0xbe04); // check to see if there's a coin directly above this block
+  CheckTopOfBlock(); // check to see if there's a coin directly above this block
   a = Sfx_BrickShatter;
   ram[Block_RepFlag + x] = a; // set flag for block object to immediately replace metatile
   ram[NoiseSoundQueue] = a; // load brick shatter sound
-  CALL(SpawnBrickChunks, 0xbe0e); // create brick chunk objects
+  SpawnBrickChunks(); // create brick chunk objects
   ram[Player_Y_Speed] = 0xfe; // set vertical speed for player
   ram[(DigitModifier + 5)] = 0x5; // set digit modifier to give player 50 points
-  CALL(AddToScore, 0xbe1a); // do sub to update the score
+  AddToScore(); // do sub to update the score
   x = ram[SprDataOffset_Ctrl]; // load control bit and leave
   return;
 }
@@ -6322,9 +6322,9 @@ void CheckTopOfBlock(void) {
     return;
   }
   dynamic_ram_write(indirect_y_addr(0x6), 0x0); // otherwise put blank metatile where coin was
-  CALL(RemoveCoin_Axe, 0xbe39); // write blank metatile to vram buffer
+  RemoveCoin_Axe(); // write blank metatile to vram buffer
   x = ram[SprDataOffset_Ctrl]; // get control bit
-  CALL(SetupJumpCoin, 0xbe3f); // create jumping coin object and update coin variables
+  SetupJumpCoin(); // create jumping coin object and update coin variables
   // TopEx:
   return; // leave!
 }
@@ -6367,18 +6367,18 @@ void BlockObjectsCore(void) {
     y--; zero_flag = y == 0; // decrement Y to check for solid block state
     // Original branch: branch if found, otherwise continue for brick chunks
     if (!zero_flag) {
-      CALL(ImposeGravityBlock, 0xbe82); // do sub to impose gravity on one block object object
-      CALL(MoveObjectHorizontally, 0xbe85); // do another sub to move horizontally
+      ImposeGravityBlock(); // do sub to impose gravity on one block object object
+      MoveObjectHorizontally(); // do another sub to move horizontally
       a = x;
       carry_flag = false; // move onto next block object
       a = (uint8_t)(a + 0x2 + carry_flag);
       x = a;
-      CALL(ImposeGravityBlock, 0xbe8d); // do sub to impose gravity on other block object
-      CALL(MoveObjectHorizontally, 0xbe90); // do another sub to move horizontally
+      ImposeGravityBlock(); // do sub to impose gravity on other block object
+      MoveObjectHorizontally(); // do another sub to move horizontally
       x = ram[ObjectOffset]; // get block object offset used for both
-      CALL(RelativeBlockPosition, 0xbe95); // get relative coordinates
-      CALL(GetBlockOffscreenBits, 0xbe98); // get offscreen information
-      CALL(DrawBrickChunks, 0xbe9b); // draw the brick chunks
+      RelativeBlockPosition(); // get relative coordinates
+      GetBlockOffscreenBits(); // get offscreen information
+      DrawBrickChunks(); // draw the brick chunks
       a = ram[0x100 + ++sp]; // get lower nybble of saved state
       y = ram[(uint8_t)(Block_Y_HighPos + x)]; zero_flag = y == 0; // check vertical high byte of block object
       if (zero_flag) { goto UpdSte; } // if above the screen, branch to kill it
@@ -6396,11 +6396,11 @@ void BlockObjectsCore(void) {
       if (!carry_flag) { goto UpdSte; } // if not, branch to save state
     } else {
       // BouncingBlockHandler:
-      CALL(ImposeGravityBlock, 0xbeb5); // do sub to impose gravity on block object
+      ImposeGravityBlock(); // do sub to impose gravity on block object
       x = ram[ObjectOffset]; // get block object offset
-      CALL(RelativeBlockPosition, 0xbeba); // get relative coordinates
-      CALL(GetBlockOffscreenBits, 0xbebd); // get offscreen information
-      CALL(DrawBlock, 0xbec0); // draw the block
+      RelativeBlockPosition(); // get relative coordinates
+      GetBlockOffscreenBits(); // get offscreen information
+      DrawBlock(); // draw the block
       a = ram[(uint8_t)(Block_Y_Position + x)]; // get vertical coordinate
       a &= 0xf; // mask out high nybble
       carry_flag = a >= 0x5; // check to see if low nybble wrapped around
@@ -6437,7 +6437,7 @@ void BlockObjMT_Updater(void) {
       y = a;
       a = ram[Block_Metatile + x]; // get metatile to be written
       dynamic_ram_write(indirect_y_addr(0x6), a); // write it to the block buffer
-      CALL(ReplaceBlockMetatile, 0xbef8); // do sub to replace metatile where block object is
+      ReplaceBlockMetatile(); // do sub to replace metatile where block object is
       ram[Block_RepFlag + x] = 0x0; // clear block object flag
     }
     
@@ -6454,7 +6454,7 @@ NextBUpd:
 // in: x; out: a, x, y
 void MoveEnemyHorizontally(void) {
   x++; // increment offset for enemy offset
-  CALL(MoveObjectHorizontally, 0xbf05); // position object horizontally according to
+  MoveObjectHorizontally(); // position object horizontally according to
   x = ram[ObjectOffset]; // counters, return with saved value in A,
   return; // put enemy offset back in X and leave
 }
@@ -6584,7 +6584,7 @@ void SetHiMax(void) {
 void SetXMoveAmt(void) {
   ram[0x0] = y; // set movement amount here
   x++; // increment X for enemy offset
-  CALL(ImposeGravitySprObj, 0xbf9b); // do a sub to move enemy object downwards
+  ImposeGravitySprObj(); // do a sub to move enemy object downwards
   x = ram[ObjectOffset]; // get enemy object buffer offset and leave
   return;
 }
@@ -6644,7 +6644,7 @@ void loc_49081(void) {
 
 // in: a, x; out: x
 void RedPTroopaGrav(void) {
-  CALL(ImposeGravity, 0xbfd3); // do a sub to move object gradually
+  ImposeGravity(); // do a sub to move object gradually
   x = ram[ObjectOffset]; // get enemy object offset and leave
   return;
 }
@@ -6803,8 +6803,8 @@ WrongChk:
     if (zero_flag) { goto IncMLoop; }
     
 DoLpBack:
-    CALL(ExecGameLoopback, 0xc11e); // if player is not in right place, loop back
-    CALL(KillAllEnemies, 0xc121);
+    ExecGameLoopback(); // if player is not in right place, loop back
+    KillAllEnemies();
     
 InitMLp:
     a = 0x0; // initialize counters used for multi-part loop commands
@@ -6948,7 +6948,7 @@ PositionEnemyObj:
 StrID:
     ram[(uint8_t)(Enemy_ID + x)] = a; // store enemy object number into buffer
     ram[(uint8_t)(Enemy_Flag + x)] = 0x1; // set flag for enemy in buffer
-    CALL(InitEnemyObject, 0xc210);
+    InitEnemyObject();
     a = ram[(uint8_t)(Enemy_Flag + x)]; zero_flag = a == 0; // check to see if flag is set
     if (!zero_flag) { goto Inc2B; } // if not, leave, otherwise branch
     return;
@@ -7080,7 +7080,7 @@ HandleGroupEnemies:
     a = 0x1; // activate flag for buffer, and
     ram[(uint8_t)(Enemy_Y_HighPos + x)] = a; // put enemy within the screen vertically
     ram[(uint8_t)(Enemy_Flag + x)] = a;
-    CALL(CheckpointEnemyID, 0xc77e); // process each enemy object separately
+    CheckpointEnemyID(); // process each enemy object separately
     ram[NumberofGroupEnemies]--; zero_flag = ram[NumberofGroupEnemies] == 0; // do this until we run out of enemy objects
   } while (!zero_flag);
   
@@ -7153,7 +7153,7 @@ void ExecGameLoopback(void) {
 // in: x; out: x
 void InitEnemyObject(void) {
   ram[(uint8_t)(Enemy_State + x)] = 0x0; // initialize enemy state
-  CALL(CheckpointEnemyID, 0xc22c); // jump ahead to run jump engine and subroutines
+  CheckpointEnemyID(); // jump ahead to run jump engine and subroutines
   // ExEPar:
   return; // then leave
 }
@@ -7215,7 +7215,7 @@ void NoInitCode(void) {
 // --------------------------------
 // in: x; out: none
 void InitGoomba(void) {
-  CALL(InitNormalEnemy, 0xc2f3); // set appropriate horizontal speed
+  InitNormalEnemy(); // set appropriate horizontal speed
   SmallBBox(); return; // set $09 as bounding box control, set other values
 }
 
@@ -7262,7 +7262,7 @@ void SetESpd(void) {
 // --------------------------------
 // in: x; out: none
 void InitRedKoopa(void) {
-  CALL(InitNormalEnemy, 0xc320); // load appropriate horizontal speed
+  InitNormalEnemy(); // load appropriate horizontal speed
   ram[(uint8_t)(Enemy_State + x)] = 0x1; // set enemy state for red koopa troopa $03
   return;
 }
@@ -7352,7 +7352,7 @@ void InitBulletBill(void) {
 // --------------------------------
 // in: x; out: none
 void InitCheepCheep(void) {
-  CALL(SmallBBox, 0xc377); // set vertical bounding box, speed, init others
+  SmallBBox(); // set vertical bounding box, speed, init others
   a = ram[(PseudoRandomBitReg + x) & 0x7ff]; // check one portion of LSFR
   a &= 0b00010000; // get d4 from it
   ram[(uint8_t)(CheepCheepMoveMFlag + x)] = a; // save as movement flag of some sort
@@ -7376,7 +7376,7 @@ void InitLakitu(void) {
 // in: x; out: none
 void SetupLakitu(void) {
   ram[LakituReappearTimer] = 0x0; // erase counter for lakitu's reappearance
-  CALL(InitHorizFlySwimEnemy, 0xc391); // set $03 as bounding box, set other attributes
+  InitHorizFlySwimEnemy(); // set $03 as bounding box, set other attributes
   TallBBox2(); return; // set $03 as bounding box again (not necessary) and leave
 }
 
@@ -7420,9 +7420,9 @@ void LakituAndSpinyHandler(void) {
 CreateL:
   ram[(uint8_t)(Enemy_State + x)] = 0x0; // initialize enemy state
   ram[(uint8_t)(Enemy_ID + x)] = Lakitu; // create lakitu enemy object
-  CALL(SetupLakitu, 0xc3dd); // do a sub to set up lakitu
+  SetupLakitu(); // do a sub to set up lakitu
   a = 0x20;
-  CALL(PutAtRightExtent, 0xc3e2); // finish setting up lakitu
+  PutAtRightExtent(); // finish setting up lakitu
   
 RetEOfs:
   x = ram[ObjectOffset]; // get enemy object buffer offset again and leave
@@ -7460,7 +7460,7 @@ CreateSpiny:
     x--; neg_flag = (x & 0x80) != 0; // decrement X for each one
   } while (!neg_flag); // loop until all three are written
   x = ram[ObjectOffset]; // get enemy object buffer offset
-  CALL(PlayerLakituDiff, 0xc41f); // move enemy, change direction, get value - difference
+  PlayerLakituDiff(); // move enemy, change direction, get value - difference
   y = ram[Player_X_Speed]; // check player's horizontal speed
   // Original branch: if moving faster than a certain amount, branch elsewhere
   if (y < 0x8) {
@@ -7478,7 +7478,7 @@ CreateSpiny:
     a = y; // put value from A in Y back to A (they will be lost anyway)
   }
   // SetSpSpd:
-  CALL(SmallBBox, 0xc436); // set bounding box control, init attributes, lose contents of A
+  SmallBBox(); // set bounding box control, init attributes, lose contents of A
   y = 0x2;
   ram[(uint8_t)(Enemy_X_Speed + x)] = a; // set horizontal speed to zero because previous contents
   neg_flag = ((a - 0x0) & 0x80) != 0; // of A were lost...branch here will never be taken for
@@ -7498,7 +7498,7 @@ CreateSpiny:
 // --------------------------------
 // in: x; out: none
 void InitLongFirebar(void) {
-  CALL(DuplicateEnemyObj, 0xc45b); // create enemy object for long firebar
+  DuplicateEnemyObj(); // create enemy object for long firebar
   InitShortFirebar(); // fallthrough
   return;
 }
@@ -7534,7 +7534,7 @@ void InitFlyingCheepCheep(void) {
   if (!zero_flag) {
     return;
   }
-  CALL(SmallBBox, 0xc4af); // jump to set bounding box size $09 and init other values
+  SmallBBox(); // jump to set bounding box size $09 and init other values
   a = ram[((PseudoRandomBitReg + 1) + x) & 0x7ff];
   a &= 0b00000011; // set pseudorandom offset here
   y = a;
@@ -7633,7 +7633,7 @@ D2XPos1:
 // --------------------------------
 // in: x; out: none
 void InitBowser(void) {
-  CALL(DuplicateEnemyObj, 0xc54b); // jump to create another bowser object
+  DuplicateEnemyObj(); // jump to create another bowser object
   ram[BowserFront_Offset] = x; // save offset of first here
   a = 0x0;
   ram[BowserBodyControls] = a; // initialize bowser's body controls
@@ -7690,7 +7690,7 @@ void InitBowserFlame(void) {
   a = ram[Enemy_ID + y]; // check for bowser
   // Original branch: branch if found
   if (a != Bowser) {
-    CALL(SetFlameTimer, 0xc5bd); // get timer data based on flame counter
+    SetFlameTimer(); // get timer data based on flame counter
     carry_flag = false;
     a = (uint8_t)(a + 0x20 + carry_flag); // add 32 frames by default
     y = ram[SecondaryHardMode]; zero_flag = y == 0;
@@ -7865,7 +7865,7 @@ ChkRBit:
   a |= ram[BitMFilter]; // add bit to already set bits in filter
   ram[BitMFilter] = a; // and store
   a = ROM(Enemy17YPosData + y); // load vertical position using offset
-  CALL(PutAtRightExtent, 0xc6f1); // set vertical position and other values
+  PutAtRightExtent(); // set vertical position and other values
   ram[Enemy_YMF_Dummy + x] = a; // initialize dummy variable
   ram[FrenzyEnemyTimer] = 0x20; // set timer
   CheckpointEnemyID(); return; // process our new enemy object
@@ -7984,7 +7984,7 @@ void InitBalPlatform(void) {
   // Original branch: branch ahead
   if (zero_flag) {
     y = 0x2; // otherwise set value here
-    CALL(PosPlatform, 0xc7ec); // do a sub to add or subtract pixels
+    PosPlatform(); // do a sub to add or subtract pixels
   }
   // AlignP:
   y = 0xff; // set default value here for now
@@ -8000,7 +8000,7 @@ void InitBalPlatform(void) {
   a = 0x0;
   ram[(uint8_t)(Enemy_MovingDir + x)] = a; // init moving direction
   y = a; // init Y
-  CALL(PosPlatform, 0xc802); // do a sub to add 8 pixels, then run shared code here
+  PosPlatform(); // do a sub to add 8 pixels, then run shared code here
   InitDropPlatform(); // fallthrough
   return;
 }
@@ -8044,7 +8044,7 @@ void InitVertPlatform(void) {
 // --------------------------------
 // in: x; out: none
 void CommonPlatCode(void) {
-  CALL(InitVStf, 0xc82a); // do a sub to init certain other values 
+  InitVStf(); // do a sub to init certain other values 
   SPBBox(); // fallthrough
   return;
 }
@@ -8069,13 +8069,13 @@ CasPBB:
 // --------------------------------
 // in: x; out: none
 void LargeLiftUp(void) {
-  CALL(PlatLiftUp, 0xc841); // execute code for platforms going up
+  PlatLiftUp(); // execute code for platforms going up
   LargeLiftBBox(); return; // overwrite bounding box for large platforms
 }
 
 // in: x; out: none
 void LargeLiftDown(void) {
-  CALL(PlatLiftDown, 0xc847); // execute code for platforms going down
+  PlatLiftDown(); // execute code for platforms going down
   LargeLiftBBox(); // fallthrough
   return;
 }
@@ -8106,7 +8106,7 @@ void PlatLiftDown(void) {
 // in: x; out: none
 void CommonSmallLift(void) {
   y = 0x1;
-  CALL(PosPlatform, 0xc864); // do a sub to add 12 pixels due to preset value  
+  PosPlatform(); // do a sub to add 12 pixels due to preset value  
   ram[Enemy_BoundBoxCtrl + x] = 0x4; // set bounding box control for small platforms
   return;
 }
@@ -8136,8 +8136,8 @@ void NoRunCode(void) {
 // --------------------------------
 // in: x; out: x
 void RunRetainerObj(void) {
-  CALL(GetEnemyOffscreenBits, 0xc8d9);
-  CALL(RelativeEnemyPosition, 0xc8dc);
+  GetEnemyOffscreenBits();
+  RelativeEnemyPosition();
   EnemyGfxHandler(); return;
 }
 
@@ -8145,16 +8145,16 @@ void RunRetainerObj(void) {
 // in: x; out: x
 void RunNormalEnemies(void) {
   ram[Enemy_SprAttrib + x] = 0x0; // init sprite attributes
-  CALL(GetEnemyOffscreenBits, 0xc8e7);
-  CALL(RelativeEnemyPosition, 0xc8ea);
-  CALL(EnemyGfxHandler, 0xc8ed);
-  CALL(GetEnemyBoundBox, 0xc8f0);
-  CALL(EnemyToBGCollisionDet, 0xc8f3);
-  CALL(EnemiesCollision, 0xc8f6);
-  CALL(PlayerEnemyCollision, 0xc8f9);
+  GetEnemyOffscreenBits();
+  RelativeEnemyPosition();
+  EnemyGfxHandler();
+  GetEnemyBoundBox();
+  EnemyToBGCollisionDet();
+  EnemiesCollision();
+  PlayerEnemyCollision();
   y = ram[TimerControl]; zero_flag = y == 0; // if master timer control set, skip to last routine
   if (zero_flag) {
-    CALL(EnemyMovementSubs, 0xc901);
+    EnemyMovementSubs();
   }
   // SkipMove:
   OffscreenBoundsCheck(); return;
@@ -8188,49 +8188,49 @@ void NoMoveCode(void) {
 // --------------------------------
 // in: x; out: x
 void RunBowserFlame(void) {
-  CALL(ProcBowserFlame, 0xc937);
-  CALL(GetEnemyOffscreenBits, 0xc93a);
-  CALL(RelativeEnemyPosition, 0xc93d);
-  CALL(GetEnemyBoundBox, 0xc940);
-  CALL(PlayerEnemyCollision, 0xc943);
+  ProcBowserFlame();
+  GetEnemyOffscreenBits();
+  RelativeEnemyPosition();
+  GetEnemyBoundBox();
+  PlayerEnemyCollision();
   OffscreenBoundsCheck(); return;
 }
 
 // --------------------------------
 // in: x; out: x
 void RunFirebarObj(void) {
-  CALL(ProcFirebar, 0xc949);
+  ProcFirebar();
   OffscreenBoundsCheck(); return;
 }
 
 // --------------------------------
 // in: x; out: x
 void RunSmallPlatform(void) {
-  CALL(GetEnemyOffscreenBits, 0xc94f);
-  CALL(RelativeEnemyPosition, 0xc952);
-  CALL(SmallPlatformBoundBox, 0xc955);
-  CALL(SmallPlatformCollision, 0xc958);
-  CALL(RelativeEnemyPosition, 0xc95b);
-  CALL(DrawSmallPlatform, 0xc95e);
-  CALL(MoveSmallPlatform, 0xc961);
+  GetEnemyOffscreenBits();
+  RelativeEnemyPosition();
+  SmallPlatformBoundBox();
+  SmallPlatformCollision();
+  RelativeEnemyPosition();
+  DrawSmallPlatform();
+  MoveSmallPlatform();
   OffscreenBoundsCheck(); return;
 }
 
 // --------------------------------
 // in: x; out: x
 void RunLargePlatform(void) {
-  CALL(GetEnemyOffscreenBits, 0xc967);
-  CALL(RelativeEnemyPosition, 0xc96a);
-  CALL(LargePlatformBoundBox, 0xc96d);
-  CALL(LargePlatformCollision, 0xc970);
+  GetEnemyOffscreenBits();
+  RelativeEnemyPosition();
+  LargePlatformBoundBox();
+  LargePlatformCollision();
   a = ram[TimerControl]; zero_flag = a == 0; // if master timer control set,
   // Original branch: skip subroutine tree
   if (zero_flag) {
-    CALL(LargePlatformSubroutines, 0xc978);
+    LargePlatformSubroutines();
   }
   // SkipPT:
-  CALL(RelativeEnemyPosition, 0xc97b);
-  CALL(DrawLargePlatform, 0xc97e);
+  RelativeEnemyPosition();
+  DrawLargePlatform();
   OffscreenBoundsCheck(); return;
 }
 
@@ -8271,7 +8271,7 @@ void MovePodoboo(void) {
   a = ram[(EnemyIntervalTimer + x) & 0x7ff]; zero_flag = a == 0; // check enemy timer
   // Original branch: branch to move enemy if not expired
   if (zero_flag) {
-    CALL(InitPodoboo, 0xc9b7); // otherwise set up podoboo again
+    InitPodoboo(); // otherwise set up podoboo again
     a = ram[((PseudoRandomBitReg + 1) + x) & 0x7ff]; // get part of LSFR
     a |= 0b10000000; // set d7
     ram[Enemy_Y_MoveForce + x] = a; // store as movement force
@@ -8311,7 +8311,7 @@ void ProcHammerBro(void) {
     if (zero_flag) {
       y = ram[SecondaryHardMode]; // otherwise get secondary hard mode flag
       ram[HammerThrowingTimer + x] = ROM(HammerThrowTmrData + y); // get timer data using flag as offset; set as new timer
-      CALL(SpawnHammerObj, 0xc9fe); // do a sub here to spawn hammer object
+      SpawnHammerObj(); // do a sub here to spawn hammer object
       if (!carry_flag) { goto DecHT; } // if carry clear, hammer not spawned, skip to decrement timer
       a = ram[(uint8_t)(Enemy_State + x)];
       a |= 0b00001000; // set d3 in enemy state for hammer throw
@@ -8394,7 +8394,7 @@ void MoveHammerBroXDir(void) {
   // Shimmy:
   ram[(uint8_t)(Enemy_X_Speed + x)] = y; // store horizontal speed
   y = 0x1; // set to face right by default
-  CALL(PlayerEnemyDiff, 0xca68); // get horizontal difference between player and hammer bro
+  PlayerEnemyDiff(); // get horizontal difference between player and hammer bro
   // Original branch: if enemy to the left of player, skip this part
   if (!neg_flag) {
     y++; // set to face left
@@ -8436,7 +8436,7 @@ void MoveNormalEnemy(void) {
   }
   
 FallE:
-  CALL(MoveD_EnemyVertically, 0xca9a); // do a sub here to move enemy downwards
+  MoveD_EnemyVertically(); // do a sub here to move enemy downwards
   y = 0x0;
   a = ram[(uint8_t)(Enemy_State + x)]; // check for enemy state $02
   // Original branch: if found, branch to move enemy horizontally
@@ -8465,7 +8465,7 @@ SteadM:
   carry_flag = false;
   a = (uint8_t)(a + ROM(XSpeedAdderData + y) + carry_flag); // add value here to slow enemy down if necessary
   ram[(uint8_t)(Enemy_X_Speed + x)] = a; // save as horizontal speed temporarily
-  CALL(MoveEnemyHorizontally, 0xcac3); // then do a sub to move horizontally
+  MoveEnemyHorizontally(); // then do a sub to move horizontally
   a = ram[0x100 + ++sp];
   ram[(uint8_t)(Enemy_X_Speed + x)] = a; // get old horizontal speed from stack and return to
   return; // original memory location, then leave
@@ -8503,21 +8503,21 @@ ReviveStunned:
   if (a != Goomba) {
     return;
   }
-  CALL(EraseEnemyObject, 0xcaf7); // otherwise, kill this goomba object
+  EraseEnemyObject(); // otherwise, kill this goomba object
   // NKGmba:
   return; // leave!
 }
 
 // in: x; out: x, y
 void MoveDefeatedEnemy(void) {
-  CALL(MoveD_EnemyVertically, 0xcae7); // execute sub to move defeated enemy downwards
+  MoveD_EnemyVertically(); // execute sub to move defeated enemy downwards
   MoveEnemyHorizontally(); return; // now move defeated enemy horizontally
 }
 
 // --------------------------------
 // in: x; out: x
 void MoveJumpingEnemy(void) {
-  CALL(MoveJ_EnemyVertically, 0xcafb); // do a sub to impose gravity on green paratroopa
+  MoveJ_EnemyVertically(); // do a sub to impose gravity on green paratroopa
   MoveEnemyHorizontally(); return; // jump to move enemy horizontally
 }
 
@@ -8578,8 +8578,8 @@ MoveRedPTUpOrDown:
 // $01 - used to store maximum value for secondary counter
 // in: x; out: x
 void MoveFlyGreenPTroopa(void) {
-  CALL(XMoveCntr_GreenPTroopa, 0xcb27); // do sub to increment primary and secondary counters
-  CALL(MoveWithXMCntrs, 0xcb2a); // do sub to move green paratroopa accordingly, and horizontally
+  XMoveCntr_GreenPTroopa(); // do sub to increment primary and secondary counters
+  MoveWithXMCntrs(); // do sub to move green paratroopa accordingly, and horizontally
   y = 0x1; // set Y to move green paratroopa down
   a = ram[FrameCounter];
   a &= 0b00000011; zero_flag = a == 0; // check frame counter 2 LSB for any bits set
@@ -8660,7 +8660,7 @@ void MoveWithXMCntrs(void) {
   }
   // XMRight:
   ram[(uint8_t)(Enemy_MovingDir + x)] = y; // store as moving direction
-  CALL(MoveEnemyHorizontally, 0xcb80);
+  MoveEnemyHorizontally();
   ram[0x0] = a; // save value obtained from sub here
   a = ram[0x100 + ++sp]; // get secondary counter from stack
   ram[(uint8_t)(XMoveSecondaryCounter + x)] = a; // and return to original place
@@ -8687,7 +8687,7 @@ void MoveBloober(void) {
       } else {
         // FBLeft:
         y = 0x2; // set left moving direction by default
-        CALL(PlayerEnemyDiff, 0xcba6); // get horizontal difference between player and bloober
+        PlayerEnemyDiff(); // get horizontal difference between player and bloober
         if (!neg_flag) { goto SBMDir; } // if enemy to the right of player, keep left
         y--; // otherwise decrement to set right moving direction
       }
@@ -8696,7 +8696,7 @@ SBMDir:
       ram[(uint8_t)(Enemy_MovingDir + x)] = y; // set moving direction of bloober, then continue on here
     }
     // BlooberSwim:
-    CALL(ProcSwimmingB, 0xcbae); // execute sub to make bloober swim characteristically
+    ProcSwimmingB(); // execute sub to make bloober swim characteristically
     a = ram[(uint8_t)(Enemy_Y_Position + x)]; // get vertical coordinate
     carry_flag = true;
     a = (uint8_t)(a - ram[Enemy_Y_MoveForce + x] - !carry_flag); // subtract movement force
@@ -8921,7 +8921,7 @@ void MoveSwimmingCheepCheep(void) {
 // if greater than $08 for proper oscillation
 // in: x; out: x
 void ProcFirebar(void) {
-  CALL(GetEnemyOffscreenBits, 0xcd3e); // get offscreen information
+  GetEnemyOffscreenBits(); // get offscreen information
   a = ram[Enemy_OffscreenBits]; // check for d3 set
   a &= 0b00001000; zero_flag = a == 0; // if so, branch to leave
   if (!zero_flag) {
@@ -8931,7 +8931,7 @@ void ProcFirebar(void) {
   // Original branch: ahead of this part
   if (zero_flag) {
     a = ram[FirebarSpinSpeed + x]; // load spinning speed of firebar
-    CALL(FirebarSpin, 0xcd50); // modify current spinstate
+    FirebarSpin(); // modify current spinstate
     a &= 0b00011111; // mask out all but 5 LSB
     ram[(uint8_t)(FirebarSpinState_High + x)] = a; // and store as new high byte of spinstate
   }
@@ -8954,8 +8954,8 @@ void ProcFirebar(void) {
   
 SetupGFB:
   ram[0xef] = a; // save high byte of spinning thing, modified or otherwise
-  CALL(RelativeEnemyPosition, 0xcd6e); // get relative coordinates to screen
-  CALL(GetFirebarPosition, 0xcd71); // do a sub here (residual, too early to be used now)
+  RelativeEnemyPosition(); // get relative coordinates to screen
+  GetFirebarPosition(); // do a sub here (residual, too early to be used now)
   y = ram[Enemy_SprDataOffset + x]; // get OAM data offset
   a = ram[Enemy_Rel_YPos]; // get relative vertical coordinate
   ram[Sprite_Y_Position + y] = a; // store as Y in OAM data
@@ -8964,7 +8964,7 @@ SetupGFB:
   ram[Sprite_X_Position + y] = a; // store as X in OAM data
   ram[0x6] = a; // also save here
   ram[0x0] = 0x1; // set $01 value here (not necessary)
-  CALL(FirebarCollision, 0xcd8b); // draw fireball part and do collision detection
+  FirebarCollision(); // draw fireball part and do collision detection
   y = 0x5; // load value for short firebars by default
   a = ram[(uint8_t)(Enemy_ID + x)];
   // are we doing a long firebar?
@@ -8978,8 +8978,8 @@ SetupGFB:
   do {
     // DrawFbar:
     a = ram[0xef]; // load high byte of spinstate
-    CALL(GetFirebarPosition, 0xcda0); // get fireball position data depending on firebar part
-    CALL(DrawFirebar_Collision, 0xcda3); // position it properly, draw it and do collision detection
+    GetFirebarPosition(); // get fireball position data depending on firebar part
+    DrawFirebar_Collision(); // position it properly, draw it and do collision detection
     a = ram[0x0]; // check which firebar part
     if (a == 0x4) {
       y = ram[DuplicateObj_Offset]; // if we arrive at fifth firebar part,
@@ -9052,7 +9052,7 @@ SetVFbr:
 
 // in: y; out: x
 void FirebarCollision(void) {
-  CALL(DrawFirebar, 0xce0a); // run sub here to draw current tile of firebar
+  DrawFirebar(); // run sub here to draw current tile of firebar
   a = y; // return OAM data offset and save
   ram[0x100 + sp--] = a; // to the stack for now
   a = ram[StarInvincibleTimer]; // if star mario invincibility timer
@@ -9137,7 +9137,7 @@ ChgSDir:
     x = 0x0;
     a = ram[0x0]; // save value written to $00 to stack
     ram[0x100 + sp--] = a;
-    CALL(InjurePlayer, 0xce81); // perform sub to hurt or kill player
+    InjurePlayer(); // perform sub to hurt or kill player
     a = ram[0x100 + ++sp];
     ram[0x0] = a; // get value of $00 from stack
   }
@@ -9208,10 +9208,10 @@ void MoveFlyingCheepCheep(void) {
     MoveJ_EnemyVertically(); return; // and jump to move defeated cheep-cheep downwards
   }
   // FlyCC:
-  CALL(MoveEnemyHorizontally, 0xceef); // move cheep-cheep horizontally based on speed and force
+  MoveEnemyHorizontally(); // move cheep-cheep horizontally based on speed and force
   y = 0xd; // set vertical movement amount
   a = 0x5; // set maximum speed
-  CALL(SetXMoveAmt, 0xcef6); // branch to impose gravity on flying cheep-cheep
+  SetXMoveAmt(); // branch to impose gravity on flying cheep-cheep
   a = ram[Enemy_Y_MoveForce + x];
   a = a >> 1; // get vertical movement force and
   a = a >> 1; // move high nybble to low
@@ -9274,7 +9274,7 @@ void MoveLakitu(void) {
       ram[0x1 + y] = ROM(LakituDiffAdj + y); // load values; store in zero page
       y--; neg_flag = (y & 0x80) != 0;
     } while (!neg_flag); // do this until all values are stired
-    CALL(PlayerLakituDiff, 0xcf52); // execute sub to set speed and create spinys
+    PlayerLakituDiff(); // execute sub to set speed and create spinys
   }
   // SetLSpd:
   ram[(uint8_t)(LakituMoveSpeed + x)] = a; // set movement speed returned from sub
@@ -9298,7 +9298,7 @@ void MoveLakitu(void) {
 // in: x; out: a
 void PlayerLakituDiff(void) {
   y = 0x0; // set Y for default value
-  CALL(PlayerEnemyDiff, 0xcf70); // get horizontal difference between enemy and player
+  PlayerEnemyDiff(); // get horizontal difference between enemy and player
   // Original branch: branch if enemy is to the right of the player
   if (neg_flag) {
     y++; // increment Y for left of player
@@ -9420,16 +9420,16 @@ RemoveBridge:
     y = ram[VRAM_Buffer1_Offset]; // increment vram buffer offset
     y++;
     x = 0xc; // set offset for tile data for sub to draw blank metatile
-    CALL(RemBridge, 0xd03b); // do sub here to remove bowser's bridge metatiles
+    RemBridge(); // do sub here to remove bowser's bridge metatiles
     x = ram[ObjectOffset]; // get enemy offset
-    CALL(MoveVOffset, 0xd040); // set new vram buffer offset
+    MoveVOffset(); // set new vram buffer offset
     ram[Square2SoundQueue] = Sfx_Blast; // load the fireworks/gunfire sound into the square 2 sfx; queue while at the same time loading the brick
     ram[NoiseSoundQueue] = Sfx_BrickShatter; // shatter sound into the noise sfx queue thus; producing the unique sound of the bridge collapsing 
     ram[BridgeCollapseOffset]++; // increment bridge collapse offset
     a = ram[BridgeCollapseOffset];
     zero_flag = a == 0xf; // if bridge collapse offset has not yet reached
     if (!zero_flag) { goto NoBFall; } // the end, go ahead and skip this part
-    CALL(InitVStf, 0xd055); // initialize whatever vertical speed bowser has
+    InitVStf(); // initialize whatever vertical speed bowser has
     ram[(uint8_t)(Enemy_State + x)] = 0b01000000; // set bowser's state to one of defeated states (d6 set)
     ram[Square2SoundQueue] = Sfx_BowserFall; // play bowser defeat sound
   }
@@ -9440,7 +9440,7 @@ NoBFall:
 
 // in: x; out: x
 void MoveD_Bowser(void) {
-  CALL(MoveEnemySlowVert, 0xd011); // do a sub to move bowser downwards
+  MoveEnemySlowVert(); // do a sub to move bowser downwards
   BowserGfxHandler(); return; // jump to draw bowser's front and rear, then leave
 }
 
@@ -9491,7 +9491,7 @@ void RunBowser(void) {
       a = ram[(EnemyFrameTimer + x) & 0x7ff]; zero_flag = a == 0; // if timer set here expired,
       // Original branch: branch to next section
       if (!zero_flag) {
-        CALL(PlayerEnemyDiff, 0xd0b7); // get horizontal difference between player and bowser,
+        PlayerEnemyDiff(); // get horizontal difference between player and bowser,
         if (!neg_flag) { goto GetPRCmp; } // and branch if bowser to the right of the player
         ram[(uint8_t)(Enemy_MovingDir + x)] = 0x1; // set bowser to move and face to the right
         ram[BowserMovementSpeed] = 0x2; // set movement speed
@@ -9543,14 +9543,14 @@ GetPRCmp:
 HammerChk:
     a = ram[(EnemyFrameTimer + x) & 0x7ff]; zero_flag = a == 0; // if timer set here not expired yet, skip ahead to
     if (!zero_flag) { goto MakeBJump; } // some other section of code
-    CALL(MoveEnemySlowVert, 0xd116); // otherwise start by moving bowser downwards
+    MoveEnemySlowVert(); // otherwise start by moving bowser downwards
     a = ram[WorldNumber]; // check world number
     // Original branch: if world 1-5, skip this part (not time to throw hammers yet)
     if (a >= World6) {
       a = ram[FrameCounter];
       a &= 0b00000011; zero_flag = a == 0; // check to see if it's time to execute sub
       if (!zero_flag) { goto SetHmrTmr; } // if not, skip sub, otherwise
-      CALL(SpawnHammerObj, 0xd126); // execute sub on every fourth frame to spawn misc object (hammer)
+      SpawnHammerObj(); // execute sub on every fourth frame to spawn misc object (hammer)
     }
     
 SetHmrTmr:
@@ -9570,7 +9570,7 @@ MakeBJump:
   // Original branch: skip ahead to next part
   if (a == 0x1) {
     ram[(uint8_t)(Enemy_Y_Position + x)]--; // otherwise decrement vertical coordinate
-    CALL(InitVStf, 0xd144); // initialize movement amount
+    InitVStf(); // initialize movement amount
     ram[(uint8_t)(Enemy_Y_Speed + x)] = 0xfe; // set vertical speed to move bowser upwards
   }
   do {
@@ -9599,7 +9599,7 @@ ChkFireB:
     a ^= 0b10000000; neg_flag = (a & 0x80) != 0; // invert bowser's mouth bit to open
     ram[BowserBodyControls] = a; // and close bowser's mouth
   } while (neg_flag); // if bowser's mouth open, loop back
-  CALL(SetFlameTimer, 0xd16a); // get timing for bowser's flame
+  SetFlameTimer(); // get timing for bowser's flame
   y = ram[SecondaryHardMode]; zero_flag = y == 0;
   // Original branch: if secondary hard mode flag not set, skip this
   if (!zero_flag) {
@@ -9618,7 +9618,7 @@ void KillAllEnemies(void) {
   x = 0x4; // start with last enemy slot
   do {
     // KillLoop:
-    CALL(EraseEnemyObject, 0xd075); // branch to kill enemy objects
+    EraseEnemyObject(); // branch to kill enemy objects
     x--; neg_flag = (x & 0x80) != 0; // move onto next enemy slot
   } while (!neg_flag); // do this until all slots are emptied
   ram[EnemyFrenzyBuffer] = a; // empty frenzy buffer
@@ -9629,7 +9629,7 @@ void KillAllEnemies(void) {
 // --------------------------------
 // in: x; out: x
 void BowserGfxHandler(void) {
-  CALL(ProcessBowserHalf, 0xd17d); // do a sub here to process bowser's front
+  ProcessBowserHalf(); // do a sub here to process bowser's front
   y = 0x10; // load default value here to position bowser's rear
   a = ram[(uint8_t)(Enemy_MovingDir + x)]; // check moving direction
   carry_flag = (a & 1) != 0; a = a >> 1;
@@ -9654,7 +9654,7 @@ void BowserGfxHandler(void) {
   x = ram[DuplicateObj_Offset]; // put enemy object offset of rear as current
   ram[ObjectOffset] = x;
   ram[(uint8_t)(Enemy_ID + x)] = Bowser; // set bowser's enemy identifier; store in bowser's rear object
-  CALL(ProcessBowserHalf, 0xd1b1); // do a sub here to process bowser's rear
+  ProcessBowserHalf(); // do a sub here to process bowser's rear
   a = ram[0x100 + ++sp];
   ram[ObjectOffset] = a; // get original enemy object offset
   x = a;
@@ -9666,14 +9666,14 @@ void BowserGfxHandler(void) {
 // in: x; out: x
 void ProcessBowserHalf(void) {
   ram[BowserGfxFlag]++; // increment bowser's graphics flag, then run subroutines
-  CALL(RunRetainerObj, 0xd1c1); // to get offscreen bits, relative position and draw bowser (finally!)
+  RunRetainerObj(); // to get offscreen bits, relative position and draw bowser (finally!)
   a = ram[(uint8_t)(Enemy_State + x)]; zero_flag = a == 0;
   // if either enemy object not in normal state, branch to leave
   if (!zero_flag) {
     return;
   }
   ram[Enemy_BoundBoxCtrl + x] = 0xa; // set bounding box size control
-  CALL(GetEnemyBoundBox, 0xd1cd); // get bounding box coordinates
+  GetEnemyBoundBox(); // get bounding box coordinates
   PlayerEnemyCollision(); return; // do player-to-enemy collision detection
 }
 
@@ -9725,7 +9725,7 @@ void ProcBowserFlame(void) {
   }
   
 SetGfxF:
-  CALL(RelativeEnemyPosition, 0xd222); // get new relative coordinates
+  RelativeEnemyPosition(); // get new relative coordinates
   a = ram[(uint8_t)(Enemy_State + x)]; zero_flag = a == 0; // if bowser's flame not in normal state,
   // branch to leave
   if (!zero_flag) {
@@ -9762,7 +9762,7 @@ SetGfxF:
     carry_flag = x >= 0x3; // have not yet been done
   } while (!carry_flag);
   x = ram[ObjectOffset]; // reload original enemy offset
-  CALL(GetEnemyOffscreenBits, 0xd267); // get offscreen information
+  GetEnemyOffscreenBits(); // get offscreen information
   y = ram[Enemy_SprDataOffset + x]; // get OAM data offset
   a = ram[Enemy_OffscreenBits]; // get enemy object offscreen bits
   carry_flag = (a & 1) != 0; a = a >> 1; // move d0 to carry and result to stack
@@ -9812,12 +9812,12 @@ void RunFireworks(void) {
     if (carry_flag) { goto FireworksSoundScore; } // if at a certain point, branch to kill this object
   }
   // SetupExpl:
-  CALL(RelativeEnemyPosition, 0xd2a7); // get relative coordinates of explosion
+  RelativeEnemyPosition(); // get relative coordinates of explosion
   ram[Fireball_Rel_YPos] = ram[Enemy_Rel_YPos]; // copy relative coordinates; from the enemy object to the fireball object
   ram[Fireball_Rel_XPos] = ram[Enemy_Rel_XPos]; // first vertical, then horizontal
   y = ram[Enemy_SprDataOffset + x]; // get OAM data offset
   a = ram[(uint8_t)(ExplosionGfxCounter + x)]; // get explosion graphics counter
-  CALL(DrawExplosion_Fireworks, 0xd2bb); // do a sub to draw the explosion then leave
+  DrawExplosion_Fireworks(); // do a sub to draw the explosion then leave
   return;
   
 FireworksSoundScore:
@@ -9897,7 +9897,7 @@ void AwardGameTimerPoints(void) {
   // NoTTick:
   y = 0x23; // set offset here to subtract from game timer's last digit
   ram[(DigitModifier + 5)] = 0xff; // set adder here to $ff, or -1, to subtract one; from the last digit of the game timer
-  CALL(DigitsMathRoutine, 0xd330); // subtract digit
+  DigitsMathRoutine(); // subtract digit
   ram[(DigitModifier + 5)] = 0x5; // set now to add 50 points; per game timer interval subtracted
   EndAreaPoints(); // fallthrough
   return;
@@ -9912,7 +9912,7 @@ void EndAreaPoints(void) {
     y = 0x11; // otherwise load offset for luigi's score
   }
   // ELPGive:
-  CALL(DigitsMathRoutine, 0xd341); // award 50 points per game timer interval
+  DigitsMathRoutine(); // award 50 points per game timer interval
   a = ram[CurrentPlayer]; // get player on the screen (or 500 points per
   a = (uint8_t)(a << 1); // fireworks explosion if branched here from there)
   a = (uint8_t)(a << 1); // shift to high nybble
@@ -9942,7 +9942,7 @@ void RaiseFlagSetoffFWorks(void) {
   }
   
 DrawFlagSetTimer:
-  CALL(DrawStarFlag, 0xd398); // do sub to draw star flag
+  DrawStarFlag(); // do sub to draw star flag
   ram[(EnemyIntervalTimer + x) & 0x7ff] = 0x6; // set interval timer here
   IncrementSFTask2(); // fallthrough
   return;
@@ -9950,7 +9950,7 @@ DrawFlagSetTimer:
 
 // in: x; out: x
 void DrawStarFlag(void) {
-  CALL(RelativeEnemyPosition, 0xd367); // get relative coordinates of star flag
+  RelativeEnemyPosition(); // get relative coordinates of star flag
   y = ram[Enemy_SprDataOffset + x]; // get OAM data offset
   x = 0x3; // do four sprites
   do {
@@ -9982,7 +9982,7 @@ void IncrementSFTask2(void) {
 
 // in: x; out: x
 void DelayToAreaEnd(void) {
-  CALL(DrawStarFlag, 0xd3a4); // do sub to draw star flag
+  DrawStarFlag(); // do sub to draw star flag
   a = ram[(EnemyIntervalTimer + x) & 0x7ff]; zero_flag = a == 0; // if interval timer set in previous task
   // not yet expired, branch to leave
   if (!zero_flag) {
@@ -10013,7 +10013,7 @@ void MovePiranhaPlant(void) {
       a = ram[(uint8_t)(PiranhaPlant_Y_Speed + x)]; neg_flag = (a & 0x80) != 0; // if currently rising, branch 
       // Original branch: to move enemy upwards out of pipe
       if (!neg_flag) {
-        CALL(PlayerEnemyDiff, 0xd3c3); // get horizontal difference between player and
+        PlayerEnemyDiff(); // get horizontal difference between player and
         // Original branch: piranha plant, and branch if enemy to right of player
         if (neg_flag) {
           a = ram[0x0]; // otherwise get saved horizontal difference
@@ -10165,15 +10165,15 @@ ChkOtherForFall:
     }
     
 PlatUp:
-    CALL(MovePlatformUp, 0xd49a); // do a sub to move upwards
+    MovePlatformUp(); // do a sub to move upwards
     goto DoOtherPlatform; // jump ahead to remaining code
     
 PlatSt:
-    CALL(StopPlatforms, 0xd4a0); // do a sub to stop movement
+    StopPlatforms(); // do a sub to stop movement
     goto DoOtherPlatform; // jump ahead to remaining code
     
 PlatDn:
-    CALL(MovePlatformDown, 0xd4a6); // do a sub to move downwards
+    MovePlatformDown(); // do a sub to move downwards
     
 DoOtherPlatform:
     y = ram[(uint8_t)(Enemy_State + x)]; // get offset of other platform
@@ -10186,7 +10186,7 @@ DoOtherPlatform:
     a = ram[PlatformCollisionFlag + x]; neg_flag = (a & 0x80) != 0; // if no collision, skip this part here
     if (!neg_flag) {
       x = a; // put offset which collision occurred here
-      CALL(PositionPlayerOnVPlat, 0xd4bc); // and use it to position player accordingly
+      PositionPlayerOnVPlat(); // and use it to position player accordingly
     }
     // DrawEraseRope:
     y = ram[ObjectOffset]; // get enemy object offset
@@ -10200,7 +10200,7 @@ DoOtherPlatform:
       a = ram[Enemy_Y_Speed + y];
       ram[0x100 + sp--] = a; // save two copies of vertical speed to stack
       ram[0x100 + sp--] = a;
-      CALL(SetupPlatformRope, 0xd4d5); // do a sub to figure out where to put new bg tiles
+      SetupPlatformRope(); // do a sub to figure out where to put new bg tiles
       ram[VRAM_Buffer1 + x] = ram[0x1]; // write name table address to vram buffer; first the high byte, then the low
       ram[(VRAM_Buffer1 + 1) + x] = ram[0x0];
       ram[(VRAM_Buffer1 + 2) + x] = 0x2; // set length for 2 bytes
@@ -10220,7 +10220,7 @@ DoOtherPlatform:
       y = a; // use as Y here
       a = ram[0x100 + ++sp]; // pull second copy of vertical speed from stack
       a ^= 0xff; // invert bits to reverse speed
-      CALL(SetupPlatformRope, 0xd508); // do sub again to figure out where to put bg tiles  
+      SetupPlatformRope(); // do sub again to figure out where to put bg tiles  
       ram[(VRAM_Buffer1 + 5) + x] = ram[0x1]; // write name table address to vram buffer; this time we're doing putting tiles for
       ram[(VRAM_Buffer1 + 6) + x] = ram[0x0]; // the other platform
       ram[(VRAM_Buffer1 + 7) + x] = 0x2; // set length again for 2 bytes
@@ -10250,9 +10250,9 @@ ExitRp:
 InitPlatformFall:
     a = y; // move offset of other platform from Y to X
     x = a;
-    CALL(GetEnemyOffscreenBits, 0xd59c); // get offscreen bits
+    GetEnemyOffscreenBits(); // get offscreen bits
     a = 0x6;
-    CALL(SetupFloateyNumber, 0xd5a1); // award 1000 points to player
+    SetupFloateyNumber(); // award 1000 points to player
     ram[FloateyNum_X_Pos + x] = ram[Player_Rel_XPos]; // put floatey number coordinates where player is
     ram[FloateyNum_Y_Pos + x] = ram[Player_Y_Position];
     ram[(uint8_t)(Enemy_MovingDir + x)] = 0x1; // set moving direction as flag for; falling platforms
@@ -10262,16 +10262,16 @@ InitPlatformFall:
   // PlatformFall:
   a = y; // save offset for other platform to stack
   ram[0x100 + sp--] = a;
-  CALL(MoveFallingPlatform, 0xd5bf); // make current platform fall
+  MoveFallingPlatform(); // make current platform fall
   a = ram[0x100 + ++sp];
   x = a; // pull offset from stack and save to X
-  CALL(MoveFallingPlatform, 0xd5c4); // make other platform fall
+  MoveFallingPlatform(); // make other platform fall
   x = ram[ObjectOffset];
   a = ram[PlatformCollisionFlag + x]; neg_flag = (a & 0x80) != 0; // if player not standing on either platform,
   // Original branch: skip this part
   if (!neg_flag) {
     x = a; // transfer collision flag offset as offset to X
-    CALL(PositionPlayerOnVPlat, 0xd5cf); // and position player appropriately
+    PositionPlayerOnVPlat(); // and position player appropriately
   }
   // ExPF:
   x = ram[ObjectOffset]; // get enemy object buffer offset and leave
@@ -10346,7 +10346,7 @@ void SetupPlatformRope(void) {
 
 // in: x, y; out: none
 void StopPlatforms(void) {
-  CALL(InitVStf, 0xd5b3); // initialize vertical speed and low byte
+  InitVStf(); // initialize vertical speed and low byte
   ram[Enemy_Y_Speed + y] = a; // for both platforms and leave
   ram[Enemy_Y_MoveForce + y] = a;
   return;
@@ -10375,11 +10375,11 @@ ChkYCenterPos:
   a = ram[(uint8_t)(Enemy_Y_Position + x)]; // if current vertical position < central position, branch
   carry_flag = a >= ram[(uint8_t)(YPlatformCenterYPos + x)]; // to slow ascent/move downwards
   if (carry_flag) {
-    CALL(MovePlatformUp, 0xd5f7); // otherwise start slowing descent/moving upwards
+    MovePlatformUp(); // otherwise start slowing descent/moving upwards
     ChkYPCollision(); return;
   }
   // YMDown:
-  CALL(MovePlatformDown, 0xd5fd); // start slowing ascent/moving downwards
+  MovePlatformDown(); // start slowing ascent/moving downwards
   ChkYPCollision(); // fallthrough
   return;
 }
@@ -10391,7 +10391,7 @@ void ChkYPCollision(void) {
   if (neg_flag) {
     return;
   }
-  CALL(PositionPlayerOnVPlat, 0xd605); // otherwise position player appropriately
+  PositionPlayerOnVPlat(); // otherwise position player appropriately
   // ExYPl:
   return; // leave
 }
@@ -10401,8 +10401,8 @@ void ChkYPCollision(void) {
 // in: x; out: x
 void XMovingPlatform(void) {
   a = 0xe; // load preset maximum value for secondary counter
-  CALL(XMoveCntr_Platform, 0xd60b); // do a sub to increment counters for movement
-  CALL(MoveWithXMCntrs, 0xd60e); // do a sub to move platform accordingly, and return value
+  XMoveCntr_Platform(); // do a sub to increment counters for movement
+  MoveWithXMCntrs(); // do a sub to move platform accordingly, and return value
   a = ram[PlatformCollisionFlag + x]; neg_flag = (a & 0x80) != 0; // if no collision with player,
   // branch ahead to leave
   if (neg_flag) {
@@ -10430,7 +10430,7 @@ void PositionPlayerOnHPlat(void) {
   // SetPVar:
   ram[Player_PageLoc] = a; // save result to player's page location
   ram[Platform_X_Scroll] = y; // put saved value from second sub here to be used later
-  CALL(PositionPlayerOnVPlat, 0xd62f); // position player vertically and appropriately
+  PositionPlayerOnVPlat(); // position player vertically and appropriately
   // ExXMP:
   return; // and we are done here
 }
@@ -10443,8 +10443,8 @@ void DropPlatform(void) {
   if (neg_flag) {
     return;
   }
-  CALL(MoveDropPlatform, 0xd638); // otherwise do a sub to move platform down very quickly
-  CALL(PositionPlayerOnVPlat, 0xd63b); // do a sub to position player appropriately
+  MoveDropPlatform(); // otherwise do a sub to move platform down very quickly
+  PositionPlayerOnVPlat(); // do a sub to position player appropriately
   // ExDPl:
   return; // leave
 }
@@ -10453,7 +10453,7 @@ void DropPlatform(void) {
 // $00 - residual value from sub
 // in: x; out: x
 void RightPlatform(void) {
-  CALL(MoveEnemyHorizontally, 0xd63f); // move platform with current horizontal speed, if any
+  MoveEnemyHorizontally(); // move platform with current horizontal speed, if any
   ram[0x0] = a; // store saved value here (residual code)
   a = ram[PlatformCollisionFlag + x]; neg_flag = (a & 0x80) != 0; // check collision flag, if no collision between player
   // and platform, branch ahead, leave speed unaltered
@@ -10461,7 +10461,7 @@ void RightPlatform(void) {
     return;
   }
   ram[(uint8_t)(Enemy_X_Speed + x)] = 0x10; // otherwise set new speed (gets moving if motionless)
-  CALL(PositionPlayerOnHPlat, 0xd64d); // use saved value from earlier sub to position player
+  PositionPlayerOnHPlat(); // use saved value from earlier sub to position player
   // ExRPl:
   return; // then leave
 }
@@ -10469,13 +10469,13 @@ void RightPlatform(void) {
 // --------------------------------
 // in: x; out: none
 void MoveLargeLiftPlat(void) {
-  CALL(MoveLiftPlatforms, 0xd651); // execute common to all large and small lift platforms
+  MoveLiftPlatforms(); // execute common to all large and small lift platforms
   ChkYPCollision(); return; // branch to position player correctly
 }
 
 // in: x; out: none
 void MoveSmallPlatform(void) {
-  CALL(MoveLiftPlatforms, 0xd657); // execute common to all large and small lift platforms
+  MoveLiftPlatforms(); // execute common to all large and small lift platforms
   // branch to position player correctly
   // ChkSmallPlatCollision:
   a = ram[PlatformCollisionFlag + x]; zero_flag = a == 0; // get bounding box counter saved in collision flag
@@ -10483,7 +10483,7 @@ void MoveSmallPlatform(void) {
   if (zero_flag) {
     return;
   }
-  CALL(PositionPlayerOnS_Plat, 0xd678); // use to position player correctly
+  PositionPlayerOnS_Plat(); // use to position player correctly
   // ExLiftP:
   return; // then leave
 }
@@ -10577,7 +10577,7 @@ ExtendLB:
     }
   }
   // TooFar:
-  CALL(EraseEnemyObject, 0xd6d4); // erase object if necessary
+  EraseEnemyObject(); // erase object if necessary
   // ExScrnBd:
   return; // leave
 }
@@ -10637,12 +10637,12 @@ void FireballEnemyCollision(void) {
         carry_flag = false;
         a = (uint8_t)(a + 0x4 + carry_flag); // add 4 bytes to it
         x = a; // to use enemy's bounding box coordinates
-        CALL(SprObjectCollisionCore, 0xd71e); // do fireball-to-enemy collision detection
+        SprObjectCollisionCore(); // do fireball-to-enemy collision detection
         x = ram[ObjectOffset]; // return fireball's original offset
         if (!carry_flag) { goto NoFToECol; } // if carry clear, no collision, thus do next enemy slot
         ram[(uint8_t)(Fireball_State + x)] = 0b10000000; // set d7 in enemy state
         x = ram[0x1]; // get enemy offset
-        CALL(HandleEnemyFBallCol, 0xd72b); // jump to handle fireball to enemy collision
+        HandleEnemyFBallCol(); // jump to handle fireball to enemy collision
       }
       
 NoFToECol:
@@ -10660,7 +10660,7 @@ ExitFBallEnemy:
 
 // in: x; out: none
 void HandleEnemyFBallCol(void) {
-  CALL(RelativeEnemyPosition, 0xd740); // get relative coordinate of enemy
+  RelativeEnemyPosition(); // get relative coordinate of enemy
   x = ram[0x1]; // get current enemy object offset
   a = ram[(uint8_t)(Enemy_Flag + x)]; neg_flag = (a & 0x80) != 0; // check buffer flag for d7 set
   // Original branch: branch if not set to continue
@@ -10688,7 +10688,7 @@ HurtBowser:
   if (!zero_flag) {
     return;
   }
-  CALL(InitVStf, 0xd763); // otherwise do sub to init vertical speed and movement force
+  InitVStf(); // otherwise do sub to init vertical speed and movement force
   ram[(uint8_t)(Enemy_X_Speed + x)] = a; // initialize horizontal speed
   ram[EnemyFrenzyBuffer] = a; // init enemy frenzy buffer
   ram[(uint8_t)(Enemy_Y_Speed + x)] = 0xfe; // set vertical speed to make defeated bowser jump a little
@@ -10735,7 +10735,7 @@ void ShellOrBlockDefeat(void) {
     ram[(uint8_t)(Enemy_Y_Position + x)] = a;
   }
   // StnE:
-  CALL(ChkToStunEnemies, 0xd7a3); // do yet another sub
+  ChkToStunEnemies(); // do yet another sub
   a = ram[(uint8_t)(Enemy_State + x)];
   a &= 0b00011111; // mask out 2 MSB of enemy object's state
   a |= 0b00100000; // set d5 to defeat enemy and save as new state
@@ -10760,7 +10760,7 @@ void ShellOrBlockDefeat(void) {
 
 // in: a, x; out: none
 void EnemySmackScore(void) {
-  CALL(SetupFloateyNumber, 0xd7be); // update necessary score variables
+  SetupFloateyNumber(); // update necessary score variables
   ram[Square1SoundQueue] = Sfx_EnemySmack; // play smack enemy sound
   // ExHCF:
   return; // and now let's leave
@@ -10787,7 +10787,7 @@ void PlayerHammerCollision(void) {
   carry_flag = false;
   a = (uint8_t)(a + 0x24 + carry_flag); // add 36 or $24 bytes to get proper offset
   y = a; // for misc object bounding box coordinates
-  CALL(PlayerCollisionCore, 0xd7da); // do player-to-hammer collision detection
+  PlayerCollisionCore(); // do player-to-hammer collision detection
   x = ram[ObjectOffset]; // get misc object offset
   // Original branch: if no collision, then branch
   if (carry_flag) {
@@ -10821,9 +10821,9 @@ void PlayerEnemyCollision(void) {
   // -------------------------------------------------------------------------------------
   
 HandlePowerUpCollision:
-  CALL(EraseEnemyObject, 0xd802); // erase the power-up object
+  EraseEnemyObject(); // erase the power-up object
   a = 0x6;
-  CALL(SetupFloateyNumber, 0xd807); // award 1000 points to player by default
+  SetupFloateyNumber(); // award 1000 points to player by default
   ram[Square2SoundQueue] = Sfx_PowerUpGrab; // play the power-up sound
   a = ram[PowerUpType]; // check power-up type
   // Original branch: if mushroom or fire flower, branch
@@ -10843,7 +10843,7 @@ HandlePowerUpCollision:
   }
   x = ram[ObjectOffset]; // get enemy offset, not necessary
   ram[PlayerStatus] = 0x2; // set player status to fiery
-  CALL(GetPlayerColors, 0xd832); // run sub to change colors of player
+  GetPlayerColors(); // run sub to change colors of player
   x = ram[ObjectOffset]; // get enemy offset again, and again not necessary
   a = 0xc; // set value to be used by subroutine tree (fiery)
   goto UpToFiery; // jump to set values accordingly
@@ -10858,7 +10858,7 @@ UpToSuper:
   
 UpToFiery:
   y = 0x0; // set value to be used as new player state
-  CALL(SetPRout, 0xd84b); // set values to stop certain things in motion
+  SetPRout(); // set values to stop certain things in motion
   // NoPUp:
   return;
   // --------------------------------
@@ -10870,7 +10870,7 @@ PlayerEnemyCollision:
   if (carry_flag) {
     return;
   }
-  CALL(CheckPlayerVertical, 0xd85a); // if player object is completely offscreen or
+  CheckPlayerVertical(); // if player object is completely offscreen or
   // if down past 224th pixel row, branch to leave
   if (carry_flag) {
     return;
@@ -10891,8 +10891,8 @@ PlayerEnemyCollision:
   if (!zero_flag) {
     return;
   }
-  CALL(GetEnemyBoundBoxOfs, 0xd870); // get bounding box offset for current enemy object
-  CALL(PlayerCollisionCore, 0xd873); // do collision detection on player vs. enemy
+  GetEnemyBoundBoxOfs(); // get bounding box offset for current enemy object
+  PlayerCollisionCore(); // do collision detection on player vs. enemy
   x = ram[ObjectOffset]; // get enemy object buffer offset
   // Original branch: if collision, branch past this part here
   if (!carry_flag) {
@@ -10965,7 +10965,7 @@ PlayerEnemyCollision:
     a = ram[(uint8_t)(Enemy_State + x)]; // set d7 in enemy state, thus become moving shell
     a |= 0b10000000;
     ram[(uint8_t)(Enemy_State + x)] = a;
-    CALL(EnemyFacePlayer, 0xd8df); // set moving direction and get offset
+    EnemyFacePlayer(); // set moving direction and get offset
     ram[(uint8_t)(Enemy_X_Speed + x)] = ROM(KickedShellXSpdData + y); // load and set horizontal speed data with offset
     a = 0x3; // add three to whatever the stomp counter contains
     carry_flag = false; // to give points for kicking the shell
@@ -10977,7 +10977,7 @@ PlayerEnemyCollision:
       a = ROM(KickedShellPtsData + y); // otherwise, set points based on proximity to timer expiration
     }
     // KSPts:
-    CALL(SetupFloateyNumber, 0xd8f7); // set values for floatey number now
+    SetupFloateyNumber(); // set values for floatey number now
     // ExPEC:
     return; // leave!!!
   }
@@ -11055,14 +11055,14 @@ EnemyStomped:
   
 EnemyStompedPts:
   a = ROM(StompedEnemyPtsData + y); // load points data using offset in Y
-  CALL(SetupFloateyNumber, 0xd99b); // run sub to set floatey number controls
+  SetupFloateyNumber(); // run sub to set floatey number controls
   a = ram[(uint8_t)(Enemy_MovingDir + x)];
   ram[0x100 + sp--] = a; // save enemy movement direction to stack
-  CALL(SetStun, 0xd9a1); // run sub to kill enemy
+  SetStun(); // run sub to kill enemy
   a = ram[0x100 + ++sp];
   ram[(uint8_t)(Enemy_MovingDir + x)] = a; // return enemy movement direction from stack
   ram[(uint8_t)(Enemy_State + x)] = 0b00100000; // set d5 in enemy state
-  CALL(InitVStf, 0xd9ab); // nullify vertical speed, physics-related thing,
+  InitVStf(); // nullify vertical speed, physics-related thing,
   ram[(uint8_t)(Enemy_X_Speed + x)] = a; // and horizontal speed
   ram[Player_Y_Speed] = 0xfd; // set player's vertical speed, to give bounce
   return;
@@ -11075,9 +11075,9 @@ ChkForDemoteKoopa:
     y = 0x0; // return enemy to normal state
     ram[(uint8_t)(Enemy_State + x)] = y;
     a = 0x3; // award 400 points to the player
-    CALL(SetupFloateyNumber, 0xd9c3);
-    CALL(InitVStf, 0xd9c6); // nullify physics-related thing and vertical speed
-    CALL(EnemyFacePlayer, 0xd9c9); // turn enemy around if necessary
+    SetupFloateyNumber();
+    InitVStf(); // nullify physics-related thing and vertical speed
+    EnemyFacePlayer(); // turn enemy around if necessary
     ram[(uint8_t)(Enemy_X_Speed + x)] = ROM(DemotedKoopaXSpdData + y); // set appropriate moving speed based on direction
   } else {
     // HandleStompedShellE:
@@ -11086,7 +11086,7 @@ ChkForDemoteKoopa:
     a = ram[StompChainCounter]; // add whatever is in the stomp counter
     carry_flag = false; // to whatever is in the stomp timer
     a = (uint8_t)(a + ram[StompTimer] + carry_flag);
-    CALL(SetupFloateyNumber, 0xd9e4); // award points accordingly
+    SetupFloateyNumber(); // award points accordingly
     ram[StompTimer]++; // increment stomp timer of some sort
     y = ram[PrimaryHardMode]; // check primary hard mode flag
     ram[(EnemyIntervalTimer + x) & 0x7ff] = ROM(RevivalRateData + y); // load timer setting according to flag; set as enemy timer to revive stomped enemy
@@ -11103,7 +11103,7 @@ ChkEnemyFaceRight:
   }
   
 LInj:
-  CALL(EnemyTurnAround, 0xda01); // turn the enemy around, if necessary
+  EnemyTurnAround(); // turn the enemy around, if necessary
   InjurePlayer(); return; // go back to hurt player
 }
 
@@ -11128,7 +11128,7 @@ void ForceInjury(void) {
   ram[InjuryTimer] = a; // set injured invincibility timer
   a = (uint8_t)(a << 1);
   ram[Square1SoundQueue] = a; // play pipedown/injury sound
-  CALL(GetPlayerColors, 0xd943); // change player's palette if necessary
+  GetPlayerColors(); // change player's palette if necessary
   a = 0xa; // set subroutine to run on next frame
   
 SetKRout:
@@ -11166,7 +11166,7 @@ void ExInjColRoutines(void) {
 // in: x; out: y
 void EnemyFacePlayer(void) {
   y = 0x1; // set to move right by default
-  CALL(PlayerEnemyDiff, 0xda09); // get horizontal difference between player and enemy
+  PlayerEnemyDiff(); // get horizontal difference between player and enemy
   // Original branch: if enemy is to the right of player, do not increment
   if (neg_flag) {
     y++; // otherwise, increment to set to move to the left
@@ -11212,7 +11212,7 @@ void EnemiesCollision(void) {
     if (zero_flag) { goto ExitECRoutine; }
     a = ram[EnemyOffscrBitsMasked + x]; zero_flag = a == 0; // if masked offscreen bits nonzero, branch to leave
     if (!zero_flag) { goto ExitECRoutine; }
-    CALL(GetEnemyBoundBoxOfs, 0xda52); // otherwise, do sub, get appropriate bounding box offset for
+    GetEnemyBoundBoxOfs(); // otherwise, do sub, get appropriate bounding box offset for
     x--; neg_flag = (x & 0x80) != 0; // first enemy we're going to compare, then decrement for second
     if (neg_flag) { goto ExitECRoutine; } // branch to leave if there are no other enemies
     do {
@@ -11238,7 +11238,7 @@ void EnemiesCollision(void) {
         carry_flag = false;
         a = (uint8_t)(a + 0x4 + carry_flag);
         x = a; // use as new contents of X
-        CALL(SprObjectCollisionCore, 0xda7a); // do collision detection using the two enemies here
+        SprObjectCollisionCore(); // do collision detection using the two enemies here
         x = ram[ObjectOffset]; // use first enemy offset for X
         y = ram[0x1]; // use second enemy offset for Y
         // Original branch: if carry clear, no collision, branch ahead of this
@@ -11256,7 +11256,7 @@ void EnemiesCollision(void) {
             ram[Enemy_CollisionBits + y] = a;
           }
           // YesEC:
-          CALL(ProcEnemyCollisions, 0xda9d); // react according to the nature of collision
+          ProcEnemyCollisions(); // react according to the nature of collision
           goto ReadyNextEnemy; // move onto next enemy slot
         }
         // NoEnemyCollision:
@@ -11300,20 +11300,20 @@ void ProcEnemyCollisions(void) {
     // Original branch: branch if d7 is clear
     if (carry_flag) {
       a = 0x6;
-      CALL(SetupFloateyNumber, 0xdad3); // award 1000 points for killing enemy
-      CALL(ShellOrBlockDefeat, 0xdad6); // then kill enemy, then load
+      SetupFloateyNumber(); // award 1000 points for killing enemy
+      ShellOrBlockDefeat(); // then kill enemy, then load
       y = ram[0x1]; // original offset of second enemy
     }
     // ShellCollisions:
     a = y; // move Y to X
     x = a;
-    CALL(ShellOrBlockDefeat, 0xdadd); // kill second enemy
+    ShellOrBlockDefeat(); // kill second enemy
     x = ram[ObjectOffset];
     a = ram[ShellChainCounter + x]; // get chain counter for shell
     carry_flag = false;
     a = (uint8_t)(a + 0x4 + carry_flag); // add four to get appropriate point offset
     x = ram[0x1];
-    CALL(SetupFloateyNumber, 0xdaea); // award appropriate number of points for second enemy
+    SetupFloateyNumber(); // award appropriate number of points for second enemy
     x = ram[ObjectOffset]; // load original offset of first enemy
     ram[ShellChainCounter + x]++; // increment chain counter for additional enemies
     // ExitProcessEColl:
@@ -11327,13 +11327,13 @@ void ProcEnemyCollisions(void) {
     if (a == HammerBro) {
       return;
     }
-    CALL(ShellOrBlockDefeat, 0xdb01); // otherwise, kill first enemy
+    ShellOrBlockDefeat(); // otherwise, kill first enemy
     y = ram[0x1];
     a = ram[ShellChainCounter + y]; // get chain counter for shell
     carry_flag = false;
     a = (uint8_t)(a + 0x4 + carry_flag); // add four to get appropriate point offset
     x = ram[ObjectOffset];
-    CALL(SetupFloateyNumber, 0xdb0e); // award appropriate number of points for first enemy
+    SetupFloateyNumber(); // award appropriate number of points for first enemy
     x = ram[0x1]; // load original offset of second enemy
     ram[ShellChainCounter + x]++; // increment chain counter for additional enemies
     return; // leave!!!
@@ -11341,7 +11341,7 @@ void ProcEnemyCollisions(void) {
   // MoveEOfs:
   a = y; // move Y ($01) to X
   x = a;
-  CALL(EnemyTurnAround, 0xdb19); // do the sub here using value from $01
+  EnemyTurnAround(); // do the sub here using value from $01
   x = ram[ObjectOffset]; // then do it again using value from $08
   EnemyTurnAround(); // fallthrough
   return;
@@ -11420,25 +11420,25 @@ void LargePlatformCollision(void) {
   }
   a = ram[(uint8_t)(Enemy_State + x)];
   x = a; // set state as enemy offset here
-  CALL(ChkForPlayerC_LargeP, 0xdb5e); // perform code with state offset, then original offset, in X
+  ChkForPlayerC_LargeP(); // perform code with state offset, then original offset, in X
   ChkForPlayerC_LargeP(); // fallthrough
   return;
 }
 
 // in: x; out: x
 void ChkForPlayerC_LargeP(void) {
-  CALL(CheckPlayerVertical, 0xdb61); // figure out if player is below a certain point
+  CheckPlayerVertical(); // figure out if player is below a certain point
   // or offscreen, branch to leave if true
   if (carry_flag) {
     ExLPC();
     return;
   }
   a = x;
-  CALL(GetEnemyBoundBoxOfsArg, 0xdb67); // get bounding box offset in Y
+  GetEnemyBoundBoxOfsArg(); // get bounding box offset in Y
   ram[0x0] = ram[(uint8_t)(Enemy_Y_Position + x)]; // store vertical coordinate in; temp variable for now
   a = x; // send offset we're on to the stack
   ram[0x100 + sp--] = a;
-  CALL(PlayerCollisionCore, 0xdb70); // do player-to-platform collision detection
+  PlayerCollisionCore(); // do player-to-platform collision detection
   a = ram[0x100 + ++sp]; // retrieve offset from the stack
   x = a;
   // if no collision, branch to leave
@@ -11446,7 +11446,7 @@ void ChkForPlayerC_LargeP(void) {
     ExLPC();
     return;
   }
-  CALL(ProcLPlatCollisions, 0xdb77); // otherwise collision, perform sub
+  ProcLPlatCollisions(); // otherwise collision, perform sub
   ExLPC(); // fallthrough
   return;
 }
@@ -11465,20 +11465,20 @@ void SmallPlatformCollision(void) {
   // Original branch: branch to leave
   if (zero_flag) {
     ram[PlatformCollisionFlag + x] = a; // otherwise initialize collision flag
-    CALL(CheckPlayerVertical, 0xdb85); // do a sub to see if player is below a certain point
+    CheckPlayerVertical(); // do a sub to see if player is below a certain point
     if (carry_flag) { goto ExSPC; } // or entirely offscreen, and branch to leave if true
     ram[0x0] = 0x2; // load counter here for 2 bounding boxes
     do {
       // ChkSmallPlatLoop:
       x = ram[ObjectOffset]; // get enemy object offset
-      CALL(GetEnemyBoundBoxOfs, 0xdb90); // get bounding box offset in Y
+      GetEnemyBoundBoxOfs(); // get bounding box offset in Y
       a &= 0b00000010; zero_flag = a == 0; // if d1 of offscreen lower nybble bits was set
       if (!zero_flag) { goto ExSPC; } // then branch to leave
       a = ram[BoundingBox_UL_YPos + y]; // check top of platform's bounding box for being
       // above a specific point
       // Original branch: if so, branch, don't do collision detection
       if (a >= 0x20) {
-        CALL(PlayerCollisionCore, 0xdb9e); // otherwise, perform player-to-platform collision detection
+        PlayerCollisionCore(); // otherwise, perform player-to-platform collision detection
         if (carry_flag) { goto ProcSPlatCollisions; } // skip ahead if collision
       }
       // MoveBoundBox:
@@ -11558,7 +11558,7 @@ PlatformSideCollisions:
     if (carry_flag) { goto NoSideC; } // and instead branch to leave (no collision)
   }
   // SideC:
-  CALL(ImpedePlayerMove, 0xdc13); // deal with horizontal collision
+  ImpedePlayerMove(); // deal with horizontal collision
   
 NoSideC:
   x = ram[ObjectOffset]; // return with enemy object buffer offset
@@ -11728,23 +11728,23 @@ GBBAdr:
   carry_flag = a >= ROM(PlayerBGUpperExtent + x); // compare with upper extent value based on offset
   // Original branch: if player is too high, skip this part
   if (carry_flag) {
-    CALL(BlockBufferColli_Head, 0xdcc3); // do player-to-bg collision detection on top of
+    BlockBufferColli_Head(); // do player-to-bg collision detection on top of
     if (zero_flag) { goto DoFootCheck; } // player, and branch if nothing above player's head
-    CALL(CheckForCoinMTiles, 0xdcc8); // check to see if player touched coin with their head
+    CheckForCoinMTiles(); // check to see if player touched coin with their head
     if (carry_flag) { goto AwardTouchedCoin; } // if so, branch to some other part of code
     y = ram[Player_Y_Speed]; neg_flag = (y & 0x80) != 0; // check player's vertical speed
     if (!neg_flag) { goto DoFootCheck; } // if player not moving upwards, branch elsewhere
     y = ram[0x4]; // check lower nybble of vertical coordinate returned
     carry_flag = y >= 0x4; // from collision detection routine
     if (!carry_flag) { goto DoFootCheck; } // if low nybble < 4, branch
-    CALL(CheckForSolidMTiles, 0xdcd7); // check to see what player's head bumped on
+    CheckForSolidMTiles(); // check to see what player's head bumped on
     // Original branch: if player collided with solid metatile, branch
     if (!carry_flag) {
       y = ram[AreaType]; zero_flag = y == 0; // otherwise check area type
       if (zero_flag) { goto NYSpd; } // if water level, branch ahead
       y = ram[BlockBounceTimer]; zero_flag = y == 0; // if block bounce timer not expired,
       if (!zero_flag) { goto NYSpd; } // branch ahead, do not process collision
-      CALL(PlayerHeadCollision, 0xdce6); // otherwise do a sub to process collision
+      PlayerHeadCollision(); // otherwise do a sub to process collision
       goto DoFootCheck; // jump ahead to skip these other parts here
     }
     // SolidOrClimb:
@@ -11763,19 +11763,19 @@ DoFootCheck:
   a = ram[Player_Y_Position];
   carry_flag = a >= 0xcf; // check to see how low player is
   if (carry_flag) { goto DoPlayerSideCheck; } // if player is too far down on screen, skip all of this
-  CALL(BlockBufferColli_Feet, 0xdd00); // do player-to-bg collision detection on bottom left of player
-  CALL(CheckForCoinMTiles, 0xdd03); // check to see if player touched coin with their left foot
+  BlockBufferColli_Feet(); // do player-to-bg collision detection on bottom left of player
+  CheckForCoinMTiles(); // check to see if player touched coin with their left foot
   // Original branch: if so, branch to some other part of code
   if (!carry_flag) {
     ram[0x100 + sp--] = a; // save bottom left metatile to stack
-    CALL(BlockBufferColli_Feet, 0xdd09); // do player-to-bg collision detection on bottom right of player
+    BlockBufferColli_Feet(); // do player-to-bg collision detection on bottom right of player
     ram[0x0] = a; // save bottom right metatile here
     a = ram[0x100 + ++sp]; zero_flag = a == 0;
     ram[0x1] = a; // pull bottom left metatile and save here
     if (!zero_flag) { goto ChkFootMTile; } // if anything here, skip this part
     a = ram[0x0]; zero_flag = a == 0; // otherwise check for anything in bottom right metatile
     if (zero_flag) { goto DoPlayerSideCheck; } // and skip ahead if not
-    CALL(CheckForCoinMTiles, 0xdd17); // check to see if player touched coin with their right foot
+    CheckForCoinMTiles(); // check to see if player touched coin with their right foot
     if (!carry_flag) { goto ChkFootMTile; } // if not, skip unconditional jump and continue code
   }
   
@@ -11783,7 +11783,7 @@ AwardTouchedCoin:
   goto HandleCoinMetatile; // follow the code to erase coin and award to player 1 coin
   
 ChkFootMTile:
-  CALL(CheckForClimbMTiles, 0xdd1f); // check to see if player landed on climbable metatiles
+  CheckForClimbMTiles(); // check to see if player landed on climbable metatiles
   // Original branch: if so, branch
   if (!carry_flag) {
     y = ram[Player_Y_Speed]; neg_flag = (y & 0x80) != 0; // check player's vertical speed
@@ -11793,7 +11793,7 @@ ChkFootMTile:
       goto HandleAxeMetatile; // otherwise jump to set modes of operation
     }
     // ContChk:
-    CALL(ChkInvisibleMTiles, 0xdd2f); // do sub to check for hidden coin or 1-up blocks
+    ChkInvisibleMTiles(); // do sub to check for hidden coin or 1-up blocks
     if (zero_flag) { goto DoPlayerSideCheck; } // if either found, branch
     y = ram[JumpspringAnimCtrl]; zero_flag = y == 0; // if jumpspring animating right now,
     // Original branch: branch ahead
@@ -11806,11 +11806,11 @@ ChkFootMTile:
         ImpedePlayerMove(); return; // jump to impede player's movement in that direction
       }
       // LandPlyr:
-      CALL(ChkForLandJumpSpring, 0xdd46); // do sub to check for jumpspring metatiles and deal with it
+      ChkForLandJumpSpring(); // do sub to check for jumpspring metatiles and deal with it
       a = 0xf0;
       a &= ram[Player_Y_Position]; // mask out lower nybble of player's vertical position
       ram[Player_Y_Position] = a; // and store as new vertical position to land player properly
-      CALL(HandlePipeEntry, 0xdd4f); // do sub to process potential pipe entry
+      HandlePipeEntry(); // do sub to process potential pipe entry
       a = 0x0;
       ram[Player_Y_Speed] = a; // initialize vertical speed and fractional
       ram[Player_Y_MoveForce] = a; // movement force to stop player's vertical movement
@@ -11837,13 +11837,13 @@ DoPlayerSideCheck:
       if (a >= 0xe4) {
         return;
       }
-      CALL(BlockBufferColli_Side, 0xdd75); // do player-to-bg collision detection on one half of player
+      BlockBufferColli_Side(); // do player-to-bg collision detection on one half of player
       if (zero_flag) { goto BHalf; } // branch ahead if nothing found
       zero_flag = a == 0x1c; // otherwise check for pipe metatiles
       if (zero_flag) { goto BHalf; } // if collided with sideways pipe (top), branch ahead
       zero_flag = a == 0x6b;
       if (zero_flag) { goto BHalf; } // if collided with water pipe (top), branch ahead
-      CALL(CheckForClimbMTiles, 0xdd82); // do sub to see if player bumped into anything climbable
+      CheckForClimbMTiles(); // do sub to see if player bumped into anything climbable
       if (!carry_flag) { goto CheckSideMTiles; } // if not, branch to alternate section of code
     }
     
@@ -11859,7 +11859,7 @@ BHalf:
     if (a >= 0xd0) {
       return;
     }
-    CALL(BlockBufferColli_Side, 0xdd94); // do player-to-bg collision detection on other half of player
+    BlockBufferColli_Side(); // do player-to-bg collision detection on other half of player
     if (!zero_flag) { goto CheckSideMTiles; } // if something found, branch
     ram[0x0]--; zero_flag = ram[0x0] == 0; // otherwise decrement counter
   } while (!zero_flag); // run code until both sides of player are checked
@@ -11867,21 +11867,21 @@ BHalf:
   return; // leave
   
 CheckSideMTiles:
-  CALL(ChkInvisibleMTiles, 0xdd9e); // check for hidden or coin 1-up blocks
+  ChkInvisibleMTiles(); // check for hidden or coin 1-up blocks
   // branch to leave if either found
   if (zero_flag) {
     return;
   }
-  CALL(CheckForClimbMTiles, 0xdda3); // check for climbable metatiles
+  CheckForClimbMTiles(); // check for climbable metatiles
   // Original branch: if not found, skip and continue with code
   if (carry_flag) {
     goto HandleClimbing; // otherwise jump to handle climbing
   }
   // ContSChk:
-  CALL(CheckForCoinMTiles, 0xddab); // check to see if player touched coin
+  CheckForCoinMTiles(); // check to see if player touched coin
   // Original branch: if so, execute code to erase coin and award to player 1 coin
   if (!carry_flag) {
-    CALL(ChkJumpspringMetatiles, 0xddb0); // check for jumpspring metatiles
+    ChkJumpspringMetatiles(); // check for jumpspring metatiles
     // Original branch: if not found, branch ahead to continue cude
     if (carry_flag) {
       a = ram[JumpspringAnimCtrl]; zero_flag = a == 0; // otherwise check jumpspring animation control
@@ -11944,13 +11944,13 @@ CheckSideMTiles:
     }
     
 StopPlayerMove:
-    CALL(ImpedePlayerMove, 0xde01); // stop player's movement
+    ImpedePlayerMove(); // stop player's movement
     // ExCSM:
     return; // leave
   }
   
 HandleCoinMetatile:
-  CALL(ErACM, 0xde07); // do sub to erase coin metatile from block buffer
+  ErACM(); // do sub to erase coin metatile from block buffer
   ram[CoinTallyFor1Ups]++; // increment coin tally used for 1-up blocks
   GiveOneCoin(); return; // update coin amount and tally on the screen
   
@@ -11995,7 +11995,7 @@ HandleClimbing:
   // Original branch: if running, branch to end of flagpole code here
   if (a != 0x4) {
     a = BulletBill_CannonVar; // load identifier for bullet bills (cannon variant)
-    CALL(KillEnemies, 0xde58); // get rid of them
+    KillEnemies(); // get rid of them
     a = Silence;
     ram[EventMusicQueue] = a; // silence music
     a = a >> 1;
@@ -12085,7 +12085,7 @@ void ChkInvisibleMTiles(void) {
 // $00 - used as flag by ImpedePlayerMove to restrict specific movement
 // in: a; out: none
 void ChkForLandJumpSpring(void) {
-  CALL(ChkJumpspringMetatiles, 0xdec6); // do sub to check if player landed on jumpspring
+  ChkJumpspringMetatiles(); // do sub to check if player landed on jumpspring
   // if carry not set, jumpspring not found, therefore leave
   if (!carry_flag) {
     return;
@@ -12224,14 +12224,14 @@ ExIPM:
 // --------------------------------
 // in: a; out: a, carry
 void CheckForSolidMTiles(void) {
-  CALL(GetMTileAttrib, 0xdf91); // find appropriate offset based on metatile's 2 MSB
+  GetMTileAttrib(); // find appropriate offset based on metatile's 2 MSB
   carry_flag = a >= ROM(SolidMTileUpperExt + x); // compare current metatile with solid metatiles
   return;
 }
 
 // in: a; out: a, y, carry
 void CheckForClimbMTiles(void) {
-  CALL(GetMTileAttrib, 0xdf9c); // find appropriate offset based on metatile's 2 MSB
+  GetMTileAttrib(); // find appropriate offset based on metatile's 2 MSB
   carry_flag = a >= ROM(ClimbMTileUpperExt + x); // compare current metatile with climbable metatiles
   return;
 }
@@ -12276,7 +12276,7 @@ void EnemyToBGCollisionDet(void) {
   if (!zero_flag) {
     return;
   }
-  CALL(SubtEnemyYPos, 0xdfc9); // otherwise, do a subroutine here
+  SubtEnemyYPos(); // otherwise, do a subroutine here
   // if enemy vertical coord + 62 < 68, branch to leave
   if (!carry_flag) {
     return;
@@ -12313,7 +12313,7 @@ void EnemyToBGCollisionDet(void) {
     }
     
 YesIn:
-    CALL(ChkUnderEnemy, 0xdff4); // if enemy object < $07, or = $12 or $2e, do this sub
+    ChkUnderEnemy(); // if enemy object < $07, or = $12 or $2e, do this sub
     if (!zero_flag) { goto HandleEToBGCollision; } // if block underneath enemy, branch
     
 NoEToBGCollision:
@@ -12322,7 +12322,7 @@ NoEToBGCollision:
     // $02 - vertical coordinate from block buffer routine
     
 HandleEToBGCollision:
-    CALL(ChkForNonSolids, 0xdffc); // if something is underneath enemy, find out what
+    ChkForNonSolids(); // if something is underneath enemy, find out what
     if (zero_flag) { goto NoEToBGCollision; } // if blank $26, coins, or hidden blocks, jump, enemy falls through
     // Original branch: check for blank metatile $23 and branch if not found
     if (a == 0x23) {
@@ -12336,11 +12336,11 @@ HandleEToBGCollision:
       }
       // if enemy object not goomba, branch ahead of this routine
       if (a == Goomba) {
-        CALL(KillEnemyAboveBlock, 0xe015); // if enemy object IS goomba, do this sub
+        KillEnemyAboveBlock(); // if enemy object IS goomba, do this sub
       }
       // GiveOEPoints:
       a = 0x1; // award 100 points for hitting block beneath enemy
-      CALL(SetupFloateyNumber, 0xe01a);
+      SetupFloateyNumber();
       ChkToStunEnemies(); // fallthrough
       return;
       // --------------------------------
@@ -12386,7 +12386,7 @@ ChkLandedEnemyState:
           // SetForStn:
           ram[(EnemyIntervalTimer + x) & 0x7ff] = a; // set timer here
           ram[(uint8_t)(Enemy_State + x)] = 0x3; // set state here, apparently used to render; upside-down koopas and buzzy beetles
-          CALL(EnemyLanding, 0xe0a3); // then land it properly
+          EnemyLanding(); // then land it properly
           // ExSteChk:
           return; // then leave
         }
@@ -12406,7 +12406,7 @@ ProcEnemyDirection:
         }
         // InvtD:
         y = 0x1; // load 1 for enemy to face the left (inverted here)
-        CALL(PlayerEnemyDiff, 0xe0c1); // get horizontal difference between player and enemy
+        PlayerEnemyDiff(); // get horizontal difference between player and enemy
         // Original branch: if enemy to the right of player, branch
         if (neg_flag) {
           y++; // if to the left, increment by one for enemy to face right (inverted)
@@ -12415,11 +12415,11 @@ ProcEnemyDirection:
         a = y;
         zero_flag = a == ram[(uint8_t)(Enemy_MovingDir + x)]; // compare direction in A with current direction in memory
         if (!zero_flag) { goto LandEnemyInitState; }
-        CALL(ChkForBump_HammerBroJ, 0xe0cc); // if equal, not facing in correct dir, do sub to turn around
+        ChkForBump_HammerBroJ(); // if equal, not facing in correct dir, do sub to turn around
       }
       
 LandEnemyInitState:
-      CALL(EnemyLanding, 0xe0cf); // land enemy properly
+      EnemyLanding(); // land enemy properly
       a = ram[(uint8_t)(Enemy_State + x)];
       a &= 0b10000000; zero_flag = a == 0; // if d7 of enemy state is set, branch
       if (zero_flag) {
@@ -12464,7 +12464,7 @@ ChkForRedKoopa:
     // --------------------------------
   }
   // HammerBroBGColl:
-  CALL(ChkUnderEnemy, 0xe187); // check to see if hammer bro is standing on anything
+  ChkUnderEnemy(); // check to see if hammer bro is standing on anything
   if (!zero_flag) {
     // check for blank metatile $23 and branch if not found
     if (a == 0x23) {
@@ -12477,7 +12477,7 @@ ChkForRedKoopa:
     a = ram[(uint8_t)(Enemy_State + x)];
     a &= 0b10001000; // save d7 and d3 from enemy state, nullify other bits
     ram[(uint8_t)(Enemy_State + x)] = a; // and store
-    CALL(EnemyLanding, 0xe1a3); // modify vertical coordinate, speed and something else
+    EnemyLanding(); // modify vertical coordinate, speed and something else
     DoEnemySideCheck(); return; // then check for horizontal blockage and leave
   }
   
@@ -12539,7 +12539,7 @@ void SetStun(void) {
 SetNotW:
   ram[(uint8_t)(Enemy_Y_Speed + x)] = a; // set vertical speed now
   y = 0x1;
-  CALL(PlayerEnemyDiff, 0xe050); // get horizontal difference between player and enemy object
+  PlayerEnemyDiff(); // get horizontal difference between player and enemy object
   // Original branch: branch if enemy is to the right of player
   if (neg_flag) {
     y++; // increment Y if not
@@ -12579,9 +12579,9 @@ void DoEnemySideCheck(void) {
     // Original branch: branch if different and do not seek block there
     if (zero_flag) {
       a = 0x1; // set flag in A for save horizontal coordinate 
-      CALL(BlockBufferChk_Enemy, 0xe114); // find block to left or right of enemy object
+      BlockBufferChk_Enemy(); // find block to left or right of enemy object
       if (zero_flag) { goto NextSdeC; } // if nothing found, branch
-      CALL(ChkForNonSolids, 0xe119); // check for non-solid blocks
+      ChkForNonSolids(); // check for non-solid blocks
       // branch if not found
       if (!zero_flag) {
         ChkForBump_HammerBroJ();
@@ -12637,7 +12637,7 @@ void PlayerEnemyDiff(void) {
 // --------------------------------
 // in: x; out: none
 void EnemyLanding(void) {
-  CALL(InitVStf, 0xe151); // do something here to vertical speed and something else
+  InitVStf(); // do something here to vertical speed and something else
   a = ram[(uint8_t)(Enemy_Y_Position + x)];
   a &= 0b11110000; // save high nybble of vertical coordinate, and
   a |= 0b00001000; // set d3, then store, probably used to set enemy object
@@ -12656,7 +12656,7 @@ void SubtEnemyYPos(void) {
 
 // in: x; out: x
 void EnemyJump(void) {
-  CALL(SubtEnemyYPos, 0xe165); // do a sub here
+  SubtEnemyYPos(); // do a sub here
   // Original branch: if enemy vertical coord + 62 < 68, branch to leave
   if (carry_flag) {
     a = ram[(uint8_t)(Enemy_Y_Speed + x)];
@@ -12664,11 +12664,11 @@ void EnemyJump(void) {
     a = (uint8_t)(a + 0x2 + carry_flag);
     carry_flag = a >= 0x3; // if green paratroopa not falling, branch ahead
     if (!carry_flag) { goto DoSide; }
-    CALL(ChkUnderEnemy, 0xe173); // otherwise, check to see if green paratroopa is 
+    ChkUnderEnemy(); // otherwise, check to see if green paratroopa is 
     if (zero_flag) { goto DoSide; } // standing on anything, then branch to same place if not
-    CALL(ChkForNonSolids, 0xe178); // check for non-solid blocks
+    ChkForNonSolids(); // check for non-solid blocks
     if (zero_flag) { goto DoSide; } // branch if found
-    CALL(EnemyLanding, 0xe17d); // change vertical coordinate and speed
+    EnemyLanding(); // change vertical coordinate and speed
     ram[(uint8_t)(Enemy_Y_Speed + x)] = 0xfd; // make the paratroopa jump again
   }
   
@@ -12678,7 +12678,7 @@ DoSide:
 
 // in: x; out: y
 void KillEnemyAboveBlock(void) {
-  CALL(ShellOrBlockDefeat, 0xe190); // do this sub to kill enemy
+  ShellOrBlockDefeat(); // do this sub to kill enemy
   ram[(uint8_t)(Enemy_Y_Speed + x)] = 0xfc; // alter vertical speed of enemy and leave
   return;
 }
@@ -12719,9 +12719,9 @@ void FireballBGCollision(void) {
   a = ram[(uint8_t)(Fireball_Y_Position + x)]; // check fireball's vertical coordinate
   // Original branch: if within the status bar area of the screen, branch ahead
   if (a >= 0x18) {
-    CALL(BlockBufferChk_FBall, 0xe1d0); // do fireball to background collision detection on bottom of it
+    BlockBufferChk_FBall(); // do fireball to background collision detection on bottom of it
     if (zero_flag) { goto ClearBounceFlag; } // if nothing underneath fireball, branch
-    CALL(ChkForNonSolids, 0xe1d5); // check for non-solid metatiles
+    ChkForNonSolids(); // check for non-solid metatiles
     if (zero_flag) { goto ClearBounceFlag; } // branch if any found
     a = ram[(uint8_t)(Fireball_Y_Speed + x)]; neg_flag = (a & 0x80) != 0; // if fireball's vertical speed set to move upwards,
     if (neg_flag) { goto InitFireballExplode; } // branch to set exploding bit in fireball's state
@@ -12774,7 +12774,7 @@ void GetMiscBoundBox(void) {
 
 // in: x, y; out: x
 void FBallB(void) {
-  CALL(BoundingBoxCore, 0xe23f); // get bounding box coordinates
+  BoundingBoxCore(); // get bounding box coordinates
   CheckRightScreenBBox(); return; // jump to handle any offscreen coordinates
 }
 
@@ -12823,7 +12823,7 @@ CMBits:
 // in: x; out: x
 void LargePlatformBoundBox(void) {
   x++; // increment X to get the proper offset
-  CALL(GetXOffscreenBits, 0xe276); // then jump directly to the sub for horizontal offscreen bits
+  GetXOffscreenBits(); // then jump directly to the sub for horizontal offscreen bits
   x--; // decrement to return to original offset
   // if completely offscreen, branch to put entire bounding
   // box offscreen, otherwise start getting coordinates
@@ -12842,7 +12842,7 @@ void SetupEOffsetFBBox(void) {
   a = (uint8_t)(a + 0x1 + carry_flag);
   x = a;
   y = 0x1; // load 1 as offset here, same reason
-  CALL(BoundingBoxCore, 0xe285); // do a sub to get the coordinates of the bounding box
+  BoundingBoxCore(); // do a sub to get the coordinates of the bounding box
   CheckRightScreenBBox(); return; // jump to handle offscreen coordinates of bounding box
 }
 
@@ -13056,7 +13056,7 @@ void BlockBufferChk_FBall(void) {
 
 // in: a, x, y; out: a, x, y, zero
 void BBChk_E(void) {
-  CALL(BlockBufferCollision, 0xe3a7); // do collision detection subroutine for sprite object
+  BlockBufferCollision(); // do collision detection subroutine for sprite object
   x = ram[ObjectOffset]; // get object offset
   zero_flag = a == 0x0; // check to see if object bumped into anything
   return;
@@ -13107,7 +13107,7 @@ void BlockBufferCollision(void) {
   a = a >> 1; // and effectively move high nybble to
   a = a >> 1; // lower, LSB which became MSB will be
   a = a >> 1; // d4 at this point
-  CALL(GetBlockBufferAddr, 0xe40a); // get address of block buffer into $06, $07
+  GetBlockBufferAddr(); // get address of block buffer into $06, $07
   y = ram[0x4]; // get old contents of Y
   a = ram[(uint8_t)(SprObject_Y_Position + x)]; // get vertical coordinate of object
   carry_flag = false;
@@ -13148,7 +13148,7 @@ void DrawVine(void) {
   x = ram[VineObjOffset + y]; // get offset to vine
   y = ram[Enemy_SprDataOffset + x]; // get sprite data offset
   ram[0x2] = y; // store sprite data offset here
-  CALL(SixSpriteStacker, 0xe448); // stack six sprites on top of each other vertically
+  SixSpriteStacker(); // stack six sprites on top of each other vertically
   a = ram[Enemy_Rel_XPos]; // get relative horizontal coordinate
   ram[Sprite_X_Position + y] = a; // store in first, third and fifth sprites
   ram[(Sprite_X_Position + 8) + y] = a;
@@ -13276,7 +13276,7 @@ RenderH:
   }
   ram[(uint8_t)(Misc_State + x)] = 0x0; // otherwise nullify misc object state
   a = 0xf8;
-  CALL(DumpTwoSpr, 0xe53f); // do sub to move hammer sprites offscreen
+  DumpTwoSpr(); // do sub to move hammer sprites offscreen
   // NoHOffscr:
   return; // leave
 }
@@ -13300,7 +13300,7 @@ void FlagpoleGfxHandler(void) {
   { uint16_t sum = a + 0xc + carry_flag; carry_flag = sum > 0xff; a = (uint8_t)sum; } // add twelve more pixels and
   ram[0x5] = a; // store here to be used later by floatey number
   a = ram[(uint8_t)(Enemy_Y_Position + x)]; // get vertical coordinate
-  CALL(DumpTwoSpr, 0xe566); // and do sub to dump into first and second sprites
+  DumpTwoSpr(); // and do sub to dump into first and second sprites
   { uint16_t sum = a + 0x8 + carry_flag; carry_flag = sum > 0xff; a = (uint8_t)sum; } // add eight pixels
   ram[(Sprite_Y_Position + 8) + y] = a; // and store into third sprite
   ram[0x2] = ram[FlagpoleFNum_Y_Pos]; // get vertical coordinate for floatey number; store it here
@@ -13326,7 +13326,7 @@ void FlagpoleGfxHandler(void) {
     x = a;
     ram[0x0] = ROM(FlagpoleScoreNumTiles + x); // get appropriate tile data
     a = ROM((FlagpoleScoreNumTiles + 1) + x);
-    CALL(DrawOneSpriteRow, 0xe5a6); // use it to render floatey number
+    DrawOneSpriteRow(); // use it to render floatey number
   }
   // ChkFlagOffscreen:
   x = ram[ObjectOffset]; // get object offset for flag
@@ -13388,10 +13388,10 @@ void DrawLargePlatform(void) {
   y++; // to X coordinate
   y++;
   a = ram[Enemy_Rel_XPos]; // get horizontal relative coordinate
-  CALL(SixSpriteStacker, 0xe5d5); // store X coordinates using A as base, stack horizontally
+  SixSpriteStacker(); // store X coordinates using A as base, stack horizontally
   x = ram[ObjectOffset];
   a = ram[(uint8_t)(Enemy_Y_Position + x)]; // get vertical coordinate
-  CALL(DumpFourSpr, 0xe5dc); // dump into first four sprites as Y coordinate
+  DumpFourSpr(); // dump into first four sprites as Y coordinate
   y = ram[AreaType];
   { uint8_t m = 0x3; carry_flag = y >= m; zero_flag = y == m; } // check for castle-type level
   if (!zero_flag) {
@@ -13414,12 +13414,12 @@ SetLast2Platform:
   // SetPlatformTilenum:
   x = ram[ObjectOffset]; // get enemy object buffer offset
   y++; // increment Y for tile offset
-  CALL(DumpSixSpr, 0xe602); // dump tile number into all six sprites
+  DumpSixSpr(); // dump tile number into all six sprites
   a = 0x2; // set palette controls
   y++; // increment Y for sprite attributes
-  CALL(DumpSixSpr, 0xe608); // dump attributes into all six sprites
+  DumpSixSpr(); // dump attributes into all six sprites
   x++; // increment X for enemy objects
-  CALL(GetXOffscreenBits, 0xe60c); // get offscreen bits again
+  GetXOffscreenBits(); // get offscreen bits again
   x--;
   y = ram[Enemy_SprDataOffset + x]; // get OAM data offset
   carry_flag = (a & 0x80) != 0; a = (uint8_t)(a << 1); // rotate d7 into carry, save remaining
@@ -13468,7 +13468,7 @@ SetLast2Platform:
   if (!carry_flag) {
     return;
   }
-  CALL(MoveSixSpritesOffscreen, 0xe653); // otherwise branch to move all sprites offscreen
+  MoveSixSpritesOffscreen(); // otherwise branch to move all sprites offscreen
   // ExDLPl:
   return;
 }
@@ -13487,7 +13487,7 @@ DrawFloateyNumber_Coin:
   }
   // NotRsNum:
   a = ram[(uint8_t)(Misc_Y_Position + x)]; // get vertical coordinate
-  CALL(DumpTwoSpr, 0xe660); // dump into both sprites
+  DumpTwoSpr(); // dump into both sprites
   a = ram[Misc_Rel_XPos]; // get relative horizontal coordinate
   ram[Sprite_X_Position + y] = a; // store as X coordinate for first sprite
   carry_flag = false;
@@ -13519,7 +13519,7 @@ JCoinGfxHandler:
   x = a; // use as graphical offset
   a = ROM(JumpingCoinTiles + x); // load tile number
   y++; // increment OAM data offset to write tile numbers
-  CALL(DumpTwoSpr, 0xe6af); // do sub to dump tile number into both sprites
+  DumpTwoSpr(); // do sub to dump tile number into both sprites
   y--; // decrement to get old offset
   ram[Sprite_Attributes + y] = 0x2; // set attribute byte in first sprite
   ram[(Sprite_Attributes + 4) + y] = 0x82; // set attribute byte with vertical flip in second sprite
@@ -13560,7 +13560,7 @@ void DrawPowerUp(void) {
     // PUpDrawLoop:
     ram[0x0] = ROM(PowerUpGfxTable + x); // load left tile of power-up object
     a = ROM((PowerUpGfxTable + 1) + x); // load right tile
-    CALL(DrawOneSpriteRow, 0xe701); // branch to draw one row of our power-up object
+    DrawOneSpriteRow(); // branch to draw one row of our power-up object
     ram[0x7]--; neg_flag = (ram[0x7] & 0x80) != 0; // decrement counter
   } while (!neg_flag); // branch until two rows are drawn
   y = ram[(Enemy_SprDataOffset + 5)]; // get sprite data offset again
@@ -13901,9 +13901,9 @@ CheckDefeatedState:
   
 DrawEnemyObject:
   y = ram[0xeb]; // load sprite data offset
-  CALL(DrawEnemyObjRow, 0xea4f); // draw six tiles of data
-  CALL(DrawEnemyObjRow, 0xea52); // into sprite data
-  CALL(DrawEnemyObjRow, 0xea55);
+  DrawEnemyObjRow(); // draw six tiles of data
+  DrawEnemyObjRow(); // into sprite data
+  DrawEnemyObjRow();
   x = ram[ObjectOffset]; // get enemy object offset
   y = ram[Enemy_SprDataOffset + x]; // get sprite data offset
   a = ram[0xef];
@@ -13921,7 +13921,7 @@ CheckForVerticalFlip:
     a |= 0b10000000; // set bit for vertical flip
     y++;
     y++; // increment two bytes so that we store the vertical flip
-    CALL(DumpSixSpr, 0xea72); // in attribute bytes of enemy obj sprite data
+    DumpSixSpr(); // in attribute bytes of enemy obj sprite data
     y--;
     y--; // now go back to the Y coordinate offset
     a = y;
@@ -14072,7 +14072,7 @@ void SprObjectOffscrChk(void) {
   // Original branch: branch if not set
   if (carry_flag) {
     a = 0x4; // set for right column sprites
-    CALL(MoveESprColOffscreen, 0xeb73); // and move them offscreen
+    MoveESprColOffscreen(); // and move them offscreen
   }
   // LcChk:
   a = ram[0x100 + ++sp]; // get from stack
@@ -14081,7 +14081,7 @@ void SprObjectOffscrChk(void) {
   // Original branch: branch if not set
   if (carry_flag) {
     a = 0x0; // set for left column sprites,
-    CALL(MoveESprColOffscreen, 0xeb7d); // move them offscreen
+    MoveESprColOffscreen(); // move them offscreen
   }
   // Row3C:
   a = ram[0x100 + ++sp]; // get from stack again
@@ -14091,7 +14091,7 @@ void SprObjectOffscrChk(void) {
   // Original branch: branch if carry not set
   if (carry_flag) {
     a = 0x10; // set for third row of sprites
-    CALL(MoveESprRowOffscreen, 0xeb88); // and move them offscreen
+    MoveESprRowOffscreen(); // and move them offscreen
   }
   // Row23C:
   a = ram[0x100 + ++sp]; // get from stack
@@ -14099,7 +14099,7 @@ void SprObjectOffscrChk(void) {
   ram[0x100 + sp--] = a; // save to stack
   if (carry_flag) {
     a = 0x8; // set for second and third rows
-    CALL(MoveESprRowOffscreen, 0xeb92); // move them offscreen
+    MoveESprRowOffscreen(); // move them offscreen
   }
   // AllRowC:
   a = ram[0x100 + ++sp]; // get from stack once more
@@ -14107,7 +14107,7 @@ void SprObjectOffscrChk(void) {
   if (!carry_flag) {
     return;
   }
-  CALL(MoveESprRowOffscreen, 0xeb99); // move all sprites offscreen (A should be 0 by now)
+  MoveESprRowOffscreen(); // move all sprites offscreen (A should be 0 by now)
   a = ram[(uint8_t)(Enemy_ID + x)];
   // check enemy identifier for podoboo
   // skip this part if found, we do not want to erase podoboo!
@@ -14119,7 +14119,7 @@ void SprObjectOffscrChk(void) {
   if (a != 0x2) {
     return;
   }
-  CALL(EraseEnemyObject, 0xeba8); // what it says
+  EraseEnemyObject(); // what it says
   // ExEGHandler:
   return;
 }
@@ -14197,7 +14197,7 @@ void MoveESprColOffscreen(void) {
   carry_flag = false; // add A to enemy object OAM data offset
   a = (uint8_t)(a + ram[Enemy_SprDataOffset + x] + carry_flag);
   y = a; // use as offset
-  CALL(MoveColOffscreen, 0xebc8); // move first and second row sprites in column offscreen
+  MoveColOffscreen(); // move first and second row sprites in column offscreen
   ram[(Sprite_Data + 16) + y] = a; // move third row sprite in column offscreen
   return;
 }
@@ -14222,7 +14222,7 @@ void DrawBlock(void) {
     // DBlkLoop:
     ram[0x0] = ROM(DefaultBlockObjTiles + x); // get left tile number; set here
     a = ROM((DefaultBlockObjTiles + 1) + x); // get right tile number
-    CALL(DrawOneSpriteRow, 0xebf1); // do sub to write tile numbers to first row of sprites
+    DrawOneSpriteRow(); // do sub to write tile numbers to first row of sprites
     zero_flag = x == 0x4; // check incremented offset
   } while (!zero_flag); // and loop back until all four sprites are done
   x = ram[ObjectOffset]; // get block object offset
@@ -14242,7 +14242,7 @@ void DrawBlock(void) {
   if (zero_flag) {
     a = 0x87; // set A for used block tile
     y++; // increment Y to write to tile bytes
-    CALL(DumpFourSpr, 0xec16); // do sub to dump into all four sprites
+    DumpFourSpr(); // do sub to dump into all four sprites
     y--; // return Y to original offset
     a = 0x3; // set palette bits
     x = ram[AreaType];
@@ -14313,7 +14313,7 @@ void DrawBrickChunks(void) {
   // DChunks:
   y = ram[Block_SprDataOffset + x]; // get OAM data offset
   y++; // increment to start with tile bytes in OAM
-  CALL(DumpFourSpr, 0xec6b); // do sub to dump tile number into all four sprites
+  DumpFourSpr(); // do sub to dump tile number into all four sprites
   a = ram[FrameCounter]; // get frame counter
   a = (uint8_t)(a << 1);
   a = (uint8_t)(a << 1);
@@ -14322,11 +14322,11 @@ void DrawBrickChunks(void) {
   a &= 0xc0; // get what was originally d3-d2 of low nybble
   a |= ram[0x0]; // add palette bits
   y++; // increment offset for attribute bytes
-  CALL(DumpFourSpr, 0xec79); // do sub to dump attribute data into all four sprites
+  DumpFourSpr(); // do sub to dump attribute data into all four sprites
   y--;
   y--; // decrement offset to Y coordinate
   a = ram[Block_Rel_YPos]; // get first block object's relative vertical coordinate
-  CALL(DumpTwoSpr, 0xec81); // do sub to dump current Y coordinate into two sprites
+  DumpTwoSpr(); // do sub to dump current Y coordinate into two sprites
   ram[Sprite_X_Position + y] = ram[Block_Rel_XPos]; // get first block object's relative horizontal coordinate; save into X coordinate of first sprite
   a = ram[Block_Orig_XPos + x]; // get original horizontal coordinate
   carry_flag = true;
@@ -14348,13 +14348,13 @@ void DrawBrickChunks(void) {
   a = (uint8_t)(a + 0x6 + carry_flag); // plus 6 pixels to position fourth brick chunk correctly
   ram[(Sprite_X_Position + 12) + y] = a; // save into X coordinate of fourth sprite
   a = ram[Block_OffscreenBits]; // get offscreen bits for block object
-  CALL(ChkLeftCo, 0xecbd); // do sub to move left half of sprites offscreen if necessary
+  ChkLeftCo(); // do sub to move left half of sprites offscreen if necessary
   a = ram[Block_OffscreenBits]; // get offscreen bits again
   carry_flag = (a & 0x80) != 0; a = (uint8_t)(a << 1); // shift d7 into carry
   // Original branch: if d7 not set, branch to last part
   if (carry_flag) {
     a = 0xf8;
-    CALL(DumpTwoSpr, 0xecc8); // otherwise move top sprites offscreen
+    DumpTwoSpr(); // otherwise move top sprites offscreen
   }
   // ChnkOfs:
   a = ram[0x0]; neg_flag = (a & 0x80) != 0; // if relative position on left side of screen,
@@ -14402,7 +14402,7 @@ void DrawExplosion_Fireworks(void) {
   x = a; // use whatever's in A for offset
   a = ROM(ExplosionTiles + x); // get tile number using offset
   y++; // increment Y (contains sprite data offset)
-  CALL(DumpFourSpr, 0xed1e); // and dump into tile number part of sprite data
+  DumpFourSpr(); // and dump into tile number part of sprite data
   y--; // decrement Y so we have the proper offset again
   x = ram[ObjectOffset]; // return enemy object buffer offset to X
   a = ram[Fireball_Rel_YPos]; // get relative vertical coordinate
@@ -14436,10 +14436,10 @@ void DrawSmallPlatform(void) {
   y = ram[Enemy_SprDataOffset + x]; // get OAM data offset
   a = 0x5b; // load tile number for small platforms
   y++; // increment offset for tile numbers
-  CALL(DumpSixSpr, 0xed6e); // dump tile number into all six sprites
+  DumpSixSpr(); // dump tile number into all six sprites
   y++; // increment offset for attributes
   a = 0x2; // load palette controls
-  CALL(DumpSixSpr, 0xed74); // dump attributes into all six sprites
+  DumpSixSpr(); // dump attributes into all six sprites
   y--; // decrement for original offset
   y--;
   a = ram[Enemy_Rel_XPos]; // get relative horizontal coordinate
@@ -14462,7 +14462,7 @@ void DrawSmallPlatform(void) {
     a = 0xf8; // otherwise move first three sprites offscreen
   }
   // TopSP:
-  CALL(DumpThreeSpr, 0xed9e); // dump vertical coordinate into Y coordinates
+  DumpThreeSpr(); // dump vertical coordinate into Y coordinates
   a = ram[0x100 + ++sp]; // pull from stack
   carry_flag = false;
   a = (uint8_t)(a + 0x80 + carry_flag); // add 128 pixels
@@ -14562,7 +14562,7 @@ void PlayerGfxHandler(void) {
         FindPlayerAction();
         return;
       }
-      CALL(FindPlayerAction, 0xef0b); // otherwise jump and return
+      FindPlayerAction(); // otherwise jump and return
       a = ram[FrameCounter];
       a &= 0b00000100; zero_flag = a == 0; // check frame counter for d2 set (8 frames every
       // eighth frame), and branch if set to leave
@@ -14598,7 +14598,7 @@ void PlayerGfxHandler(void) {
       return; // then leave
     }
     // DoChangeSize:
-    CALL(HandleChangeSize, 0xef3c); // find proper offset to graphics table for grow/shrink
+    HandleChangeSize(); // find proper offset to graphics table for grow/shrink
     PlayerGfxProcessing(); return; // draw player, then process for fireball throwing
   }
   // PlayerKilled:
@@ -14609,7 +14609,7 @@ void PlayerGfxHandler(void) {
 }
 
 void FindPlayerAction(void) {
-  CALL(ProcessPlayerAction, 0xef36); // find proper offset to graphics table by player's actions
+  ProcessPlayerAction(); // find proper offset to graphics table by player's actions
   PlayerGfxProcessing(); return; // draw player, then process for fireball throwing
 }
 
@@ -14617,8 +14617,8 @@ void FindPlayerAction(void) {
 void PlayerGfxProcessing(void) {
   ram[PlayerGfxOffset] = a; // store offset to graphics table here
   a = 0x4;
-  CALL(RenderPlayerSub, 0xef4c); // draw player based on offset loaded
-  CALL(ChkForPlayerAttrib, 0xef4f); // set horizontal flip bits as necessary
+  RenderPlayerSub(); // draw player based on offset loaded
+  ChkForPlayerAttrib(); // set horizontal flip bits as necessary
   a = ram[FireballThrowingTimer]; zero_flag = a == 0;
   // Original branch: if fireball throw timer not set, skip to the end
   if (!zero_flag) {
@@ -14639,7 +14639,7 @@ void PlayerGfxProcessing(void) {
     }
     // SUpdR:
     a = y; // save in A for use
-    CALL(RenderPlayerSub, 0xef79); // in sub, draw player object again
+    RenderPlayerSub(); // in sub, draw player object again
   }
   
 PlayerOffscreenChk:
@@ -14660,7 +14660,7 @@ PlayerOffscreenChk:
     carry_flag = (ram[0x0] & 1) != 0; ram[0x0] = ram[0x0] >> 1; // shift bit into carry
     // Original branch: if bit not set, skip, do not move sprites
     if (carry_flag) {
-      CALL(DumpTwoSpr, 0xef94); // otherwise dump offscreen Y coordinate into sprite data
+      DumpTwoSpr(); // otherwise dump offscreen Y coordinate into sprite data
     }
     // NPROffscr:
     a = y;
@@ -14682,7 +14682,7 @@ void DrawPlayer_Intermediate(void) {
   } while (!neg_flag); // do this until all data is loaded
   x = 0xb8; // load offset for small standing
   y = 0x4; // load sprite data offset
-  CALL(DrawPlayerLoop, 0xefb4); // draw player accordingly
+  DrawPlayerLoop(); // draw player accordingly
   a = ram[(Sprite_Attributes + 36)]; // get empty sprite attributes
   a |= 0b01000000; // set horizontal flip bit for bottom-right sprite
   ram[(Sprite_Attributes + 32)] = a; // store and leave
@@ -14717,7 +14717,7 @@ void DrawPlayerLoop(void) {
   do {
     ram[0x0] = ROM(PlayerGraphicsTable + x); // load player's left side
     a = ROM((PlayerGraphicsTable + 1) + x); // now load right side
-    CALL(DrawOneSpriteRow, 0xefe6);
+    DrawOneSpriteRow();
     ram[0x7]--; zero_flag = ram[0x7] == 0; // decrement rows of sprites to draw
   } while (!zero_flag); // do this until all rows are drawn
   return;
@@ -14757,31 +14757,31 @@ void ProcessPlayerAction(void) {
   }
   
 NonAnimatedActs:
-  CALL(GetGfxOffsetAdder, 0xf02a); // do a sub here to get offset adder for graphics table
+  GetGfxOffsetAdder(); // do a sub here to get offset adder for graphics table
   ram[PlayerAnimCtrl] = 0x0; // initialize animation frame control
   a = ROM(PlayerGfxTblOffsets + y); // load offset to graphics table using size as offset
   return;
   
 ActionFalling:
   y = 0x4; // load offset for walking/running
-  CALL(GetGfxOffsetAdder, 0xf038); // get offset to graphics table
+  GetGfxOffsetAdder(); // get offset to graphics table
   GetCurrentAnimOffset(); return; // execute instructions for falling state
   
 ActionWalkRun:
   y = 0x4; // load offset for walking/running
-  CALL(GetGfxOffsetAdder, 0xf040); // get offset to graphics table
+  GetGfxOffsetAdder(); // get offset to graphics table
   goto FourFrameExtent; // execute instructions for normal state
   
 ActionClimbing:
   y = 0x5; // load offset for climbing
   a = ram[Player_Y_Speed]; zero_flag = a == 0; // check player's vertical speed
   if (zero_flag) { goto NonAnimatedActs; } // if no speed, branch, use offset as-is
-  CALL(GetGfxOffsetAdder, 0xf04c); // otherwise get offset for graphics table
+  GetGfxOffsetAdder(); // otherwise get offset for graphics table
   goto ThreeFrameExtent; // then skip ahead to more code
   
 ActionSwimming:
   y = 0x1; // load offset for swimming
-  CALL(GetGfxOffsetAdder, 0xf054);
+  GetGfxOffsetAdder();
   a = ram[JumpSwimTimer]; // check jump/swim timer
   a |= ram[PlayerAnimCtrl]; zero_flag = a == 0; // and animation frame control
   // Original branch: if any one of these set, branch ahead
@@ -14802,7 +14802,7 @@ ThreeFrameExtent:
   
 AnimationControl:
   ram[0x0] = a; // store upper extent here
-  CALL(GetCurrentAnimOffset, 0xf073); // get proper offset to graphics table
+  GetCurrentAnimOffset(); // get proper offset to graphics table
   ram[0x100 + sp--] = a; // save offset to stack
   a = ram[PlayerAnimTimer]; zero_flag = a == 0; // load animation frame timer
   // Original branch: branch if not expired
@@ -14947,7 +14947,7 @@ void RelativePlayerPosition(void) {
 // in: x; out: x
 void RelativeBubblePosition(void) {
   y = 0x1; // set for air bubble offsets
-  CALL(GetProperObjOffset, 0xf135); // modify X to get proper air bubble offset
+  GetProperObjOffset(); // modify X to get proper air bubble offset
   y = 0x3;
   RelWOfs(); return; // get the coordinates
 }
@@ -14955,7 +14955,7 @@ void RelativeBubblePosition(void) {
 // in: x; out: x
 void RelativeFireballPosition(void) {
   y = 0x0; // set for fireball offsets
-  CALL(GetProperObjOffset, 0xf13f); // modify X to get proper fireball offset
+  GetProperObjOffset(); // modify X to get proper fireball offset
   y = 0x2;
   RelWOfs(); // fallthrough
   return;
@@ -14963,7 +14963,7 @@ void RelativeFireballPosition(void) {
 
 // in: x, y; out: x
 void RelWOfs(void) {
-  CALL(GetObjRelativePosition, 0xf144); // get the coordinates
+  GetObjRelativePosition(); // get the coordinates
   x = ram[ObjectOffset]; // return original offset
   return; // leave
 }
@@ -14971,7 +14971,7 @@ void RelWOfs(void) {
 // in: x; out: x
 void RelativeMiscPosition(void) {
   y = 0x2; // set for misc object offsets
-  CALL(GetProperObjOffset, 0xf14c); // modify X to get proper misc object offset
+  GetProperObjOffset(); // modify X to get proper misc object offset
   y = 0x6;
   RelWOfs(); return; // get the coordinates
 }
@@ -14987,7 +14987,7 @@ void RelativeEnemyPosition(void) {
 void RelativeBlockPosition(void) {
   a = 0x9; // get coordinates of one block object
   y = 0x4; // relative to the screen
-  CALL(VariableObjOfsRelPos, 0xf15f);
+  VariableObjOfsRelPos();
   x++; // adjust offset for other block object if any
   x++;
   a = 0x9;
@@ -15002,7 +15002,7 @@ void VariableObjOfsRelPos(void) {
   carry_flag = false;
   a = (uint8_t)(a + ram[0x0] + carry_flag); // add A to value stored
   x = a; // use as enemy offset
-  CALL(GetObjRelativePosition, 0xf16d);
+  GetObjRelativePosition();
   x = ram[ObjectOffset]; // reload old object offset and leave
   return;
 }
@@ -15028,7 +15028,7 @@ void GetPlayerOffscreenBits(void) {
 // in: x; out: x
 void GetFireballOffscreenBits(void) {
   y = 0x0; // set for fireball offsets
-  CALL(GetProperObjOffset, 0xf18b); // modify X to get proper fireball offset
+  GetProperObjOffset(); // modify X to get proper fireball offset
   y = 0x2; // set other offset for fireball's offscreen bits
   GetOffScreenBitsSet(); return; // and get offscreen information about fireball
 }
@@ -15036,7 +15036,7 @@ void GetFireballOffscreenBits(void) {
 // in: x; out: x
 void GetBubbleOffscreenBits(void) {
   y = 0x1; // set for air bubble offsets
-  CALL(GetProperObjOffset, 0xf195); // modify X to get proper air bubble offset
+  GetProperObjOffset(); // modify X to get proper air bubble offset
   y = 0x3; // set other offset for airbubble's offscreen bits
   GetOffScreenBitsSet(); return; // and get offscreen information about air bubble
 }
@@ -15044,7 +15044,7 @@ void GetBubbleOffscreenBits(void) {
 // in: x; out: x
 void GetMiscOffscreenBits(void) {
   y = 0x2; // set for misc object offsets
-  CALL(GetProperObjOffset, 0xf19f); // modify X to get proper misc object offset
+  GetProperObjOffset(); // modify X to get proper misc object offset
   y = 0x6; // set other offset for misc object's offscreen bits
   GetOffScreenBitsSet(); return; // and get offscreen information about misc object
 }
@@ -15087,7 +15087,7 @@ void SetOffscrBitsOffset(void) {
 void GetOffScreenBitsSet(void) {
   a = y; // save offscreen bits offset to stack for now
   ram[0x100 + sp--] = a;
-  CALL(RunOffscrBitsSubs, 0xf1c4);
+  RunOffscrBitsSubs();
   a = (uint8_t)(a << 1); // move low nybble to high nybble
   a = (uint8_t)(a << 1);
   a = (uint8_t)(a << 1);
@@ -15103,7 +15103,7 @@ void GetOffScreenBitsSet(void) {
 
 // in: x; out: a
 void RunOffscrBitsSubs(void) {
-  CALL(GetXOffscreenBits, 0xf1d9); // do subroutine here
+  GetXOffscreenBits(); // do subroutine here
   a = a >> 1; // move high nybble to low
   a = a >> 1;
   a = a >> 1;
@@ -15130,7 +15130,7 @@ void RunOffscrBitsSubs(void) {
       if (!neg_flag) { goto YLdBData; } // if one vertical unit or more above the screen, branch
       ram[0x6] = 0x20; // if no branching, load value here and store
       a = 0x4; // load some other value and execute subroutine
-      CALL(DividePDiff, 0xf25f);
+      DividePDiff();
     }
     
 YLdBData:
@@ -15173,7 +15173,7 @@ void GetXOffscreenBits(void) {
       if (!neg_flag) { goto XLdBData; } // if one page or more to the left of either edge, branch
       ram[0x6] = 0x38; // if no branching, load value here and store
       a = 0x8; // load some other value and execute subroutine
-      CALL(DividePDiff, 0xf21d);
+      DividePDiff();
     }
     
 XLdBData:
@@ -15266,7 +15266,7 @@ ContPau:
 PTRegC:
   x = 0x84;
   y = 0x7f; zero_flag = y == 0;
-  CALL(PlaySqu1Sfx, 0xf32d);
+  PlaySqu1Sfx();
   
 DecPauC:
   ram[Squ1_SfxLenCounter]--; zero_flag = ram[Squ1_SfxLenCounter] == 0; // decrement pause sfx counter
@@ -15282,10 +15282,10 @@ DecPauC:
   goto SkipSoundSubroutines;
   
 RunSoundSubroutines:
-  CALL(Square1SfxHandler, 0xf34d); // play sfx on square channel 1
-  CALL(Square2SfxHandler, 0xf350); //  ''  ''  '' square channel 2
-  CALL(NoiseSfxHandler, 0xf353); //  ''  ''  '' noise channel
-  CALL(MusicHandler, 0xf356); // play music on all channels
+  Square1SfxHandler(); // play sfx on square channel 1
+  Square2SfxHandler(); //  ''  ''  '' square channel 2
+  NoiseSfxHandler(); //  ''  ''  '' noise channel
+  MusicHandler(); // play music on all channels
   a = 0x0; // clear the music queues
   ram[AreaMusicQueue] = a;
   ram[EventMusicQueue] = a;
@@ -15326,7 +15326,7 @@ void Dump_Squ1_Regs(void) {
 
 // in: a, x, y; out: a, x, zero
 void PlaySqu1Sfx(void) {
-  CALL(Dump_Squ1_Regs, 0xf38a); // do sub to set ctrl regs for square 1, then set frequency regs
+  Dump_Squ1_Regs(); // do sub to set ctrl regs for square 1, then set frequency regs
   SetFreq_Squ1(); // fallthrough
   return;
 }
@@ -15363,7 +15363,7 @@ void Dump_Sq2_Regs(void) {
 
 // in: a, x, y; out: a, x
 void PlaySqu2Sfx(void) {
-  CALL(Dump_Sq2_Regs, 0xf3a8); // do sub to set ctrl regs for square 2, then set frequency regs
+  Dump_Sq2_Regs(); // do sub to set ctrl regs for square 2, then set frequency regs
   SetFreq_Squ2(); // fallthrough
   return;
 }
@@ -15388,7 +15388,7 @@ void Square1SfxHandler(void) {
 PlayFlagpoleSlide:
   ram[Squ1_SfxLenCounter] = 0x40; // store length of flagpole sound
   a = 0x62; // load part of reg contents for flagpole sound
-  CALL(SetFreq_Squ1, 0xf3c8);
+  SetFreq_Squ1();
   x = 0x99; // now load the rest
   goto FPS2nd;
   
@@ -15402,7 +15402,7 @@ PlayBigJump:
 JumpRegContents:
   x = 0x82; // note that small and big jump borrow each others' reg contents
   y = 0xa7; zero_flag = y == 0; // anyway, this loads the first part of mario's jumping sound
-  CALL(PlaySqu1Sfx, 0xf3d9);
+  PlaySqu1Sfx();
   ram[Squ1_SfxLenCounter] = 0x28; // store length of sfx for both jumping sounds; then continue on here
   
 ContinueSndJump:
@@ -15422,7 +15422,7 @@ FPS2nd:
   y = 0xbc; zero_flag = y == 0; // the flagpole slide sound shares part of third part
   
 DmpJpFPS:
-  CALL(Dump_Squ1_Regs, 0xf3f6);
+  Dump_Squ1_Regs();
   if (!zero_flag) { goto DecJpFPS; } // unconditional branch outta here
   
 PlayFireballThrow:
@@ -15438,7 +15438,7 @@ Fthrow:
   x = 0x9e; // the fireball sound shares reg contents with the bump sound
   ram[Squ1_SfxLenCounter] = a;
   a = 0xc; zero_flag = a == 0; // load offset for bump sound
-  CALL(PlaySqu1Sfx, 0xf40c);
+  PlaySqu1Sfx();
   
 ContinueBumpThrow:
   a = ram[Squ1_SfxLenCounter]; // check for second part of bump sound
@@ -15500,7 +15500,7 @@ PlaySwimStomp:
   y = 0x9c; // store reg contents for swim/stomp sound
   x = 0x9e;
   a = 0x26; zero_flag = a == 0;
-  CALL(PlaySqu1Sfx, 0xf468);
+  PlaySqu1Sfx();
   
 ContinueSwimStomp:
   y = ram[Squ1_SfxLenCounter]; // look up reg contents in data section based on
@@ -15521,7 +15521,7 @@ PlaySmackEnemy:
   x = 0x9f;
   ram[Squ1_SfxLenCounter] = a;
   a = 0x28; zero_flag = a == 0; // store reg contents for smack enemy sound
-  CALL(PlaySqu1Sfx, 0xf48a);
+  PlaySqu1Sfx();
   if (!zero_flag) { goto DecrementSfx1Length; } // unconditional branch
   
 ContinueSmackEnemy:
@@ -15560,7 +15560,7 @@ ContinuePipeDownInj:
     y = 0x91; // and this is where it actually gets written in
     x = 0x9a;
     a = 0x44; zero_flag = a == 0;
-    CALL(PlaySqu1Sfx, 0xf4d0);
+    PlaySqu1Sfx();
   }
   
 NoPDwnL:
@@ -15604,7 +15604,7 @@ CGrab_TTickRegL:
   ram[Squ2_SfxLenCounter] = a;
   y = 0x7f; // load the rest of reg contents 
   a = 0x42; // of coin grab and timer tick sound
-  CALL(PlaySqu2Sfx, 0xf52b);
+  PlaySqu2Sfx();
   
 ContinueCGrabTTick:
   a = ram[Squ2_SfxLenCounter]; // check for time to play second tone yet
@@ -15645,7 +15645,7 @@ ContinuePowerUpGrab:
   y = 0x7f;
   
 LoadSqu2Regs:
-  CALL(PlaySqu2Sfx, 0xf567);
+  PlaySqu2Sfx();
   
 DecrementSfx2Length:
   ram[Squ2_SfxLenCounter]--; zero_flag = ram[Squ2_SfxLenCounter] == 0; // decrement length of sfx
@@ -15774,7 +15774,7 @@ ContinueGrowItems:
   if (!zero_flag) {
     apu_write(SND_SQUARE2_REG, 0x9d); // load contents of other reg directly
     a = ROM(PUp_VGrow_FreqData + y); // use secondary counter / 2 as offset for frequency regs
-    CALL(SetFreq_Squ2, 0xf626);
+    SetFreq_Squ2();
     return;
   }
   // StopGrowItems:
@@ -15858,8 +15858,8 @@ LoadEventMusic:
   { uint8_t m = DeathMusic; carry_flag = a >= m; zero_flag = a == m; } // is it death music?
   // Original branch: if not, jump elsewhere
   if (zero_flag) {
-    CALL(StopSquare1Sfx, 0xf6ad); // stop sfx in square 1 and 2
-    CALL(StopSquare2Sfx, 0xf6b0); // but clear only square 1's sfx buffer
+    StopSquare1Sfx(); // stop sfx in square 1 and 2
+    StopSquare2Sfx(); // but clear only square 1's sfx buffer
   }
   // NoStopSfx:
   x = ram[AreaMusicBuffer];
@@ -15962,7 +15962,7 @@ VictoryMLoopBack:
       goto LoadEventMusic;
     }
     // Squ2LengthHandler:
-    CALL(ProcessLengthData, 0xf77c); // store length of note
+    ProcessLengthData(); // store length of note
     ram[Squ2_NoteLenBuffer] = a;
     y = ram[MusicOffset_Square2]; // fetch another byte (MUST NOT BE LENGTH BYTE!)
     ram[MusicOffset_Square2]++;
@@ -15971,14 +15971,14 @@ VictoryMLoopBack:
 Squ2NoteHandler:
     x = ram[Square2SoundBuffer]; zero_flag = x == 0; // is there a sound playing on this channel?
     if (zero_flag) {
-      CALL(SetFreq_Squ2, 0xf78c); // no, then play the note
+      SetFreq_Squ2(); // no, then play the note
       // Original branch: check to see if note is rest
       if (!zero_flag) {
-        CALL(LoadControlRegs, 0xf791); // if not, load control regs for square 2
+        LoadControlRegs(); // if not, load control regs for square 2
       }
       // Rest:
       ram[Squ2_EnvelopeDataCtrl] = a; // save contents of A
-      CALL(Dump_Sq2_Regs, 0xf797); // dump X and Y into square 2 control regs
+      Dump_Sq2_Regs(); // dump X and Y into square 2 control regs
     }
     // SkipFqL1:
     ram[Squ2_NoteLenCounter] = ram[Squ2_NoteLenBuffer]; // save length in square 2 note counter
@@ -15994,7 +15994,7 @@ Squ2NoteHandler:
       ram[Squ2_EnvelopeDataCtrl]--; // decrement unless already zero
     }
     // NoDecEnv1:
-    CALL(LoadEnvelopeData, 0xf7b3); // do a load of envelope data to replace default
+    LoadEnvelopeData(); // do a load of envelope data to replace default
     apu_write(SND_SQUARE2_REG, a); // based on offset set by first load unless playing
     x = 0x7f; // death music or d4 set on secondary buffer
     apu_write((SND_SQUARE2_REG + 1), x);
@@ -16021,19 +16021,19 @@ FetchSqu1MusicData:
         goto FetchSqu1MusicData; // unconditional branch
       }
       // Squ1NoteHandler:
-      CALL(AlternateLengthHandler, 0xf7de);
+      AlternateLengthHandler();
       ram[Squ1_NoteLenCounter] = a; // save contents of A in square 1 note counter
       y = ram[Square1SoundBuffer]; zero_flag = y == 0; // is there a sound playing on square 1?
       if (!zero_flag) { goto HandleTriangleMusic; }
       a = x;
       a &= 0b00111110; // change saved data to appropriate note format
-      CALL(SetFreq_Squ1, 0xf7eb); // play the note
+      SetFreq_Squ1(); // play the note
       if (!zero_flag) {
-        CALL(LoadControlRegs, 0xf7f0);
+        LoadControlRegs();
       }
       // SkipCtrlL:
       ram[Squ1_EnvelopeDataCtrl] = a; // save envelope offset
-      CALL(Dump_Squ1_Regs, 0xf7f6);
+      Dump_Squ1_Regs();
     }
     // MiscSqu1MusicTasks:
     a = ram[Square1SoundBuffer]; zero_flag = a == 0; // is there a sound playing on square 1?
@@ -16046,7 +16046,7 @@ FetchSqu1MusicData:
         ram[Squ1_EnvelopeDataCtrl]--; // decrement unless already zero
       }
       // NoDecEnv2:
-      CALL(LoadEnvelopeData, 0xf80c); // do a load of envelope data
+      LoadEnvelopeData(); // do a load of envelope data
       apu_write(SND_SQUARE1_REG, a); // based on offset set by first load
     }
     // DeathMAltReg:
@@ -16070,7 +16070,7 @@ HandleTriangleMusic:
     if (!zero_flag) {
       // Original branch: if non-negative, data is note
       if (neg_flag) {
-        CALL(ProcessLengthData, 0xf82d); // otherwise, it is length data
+        ProcessLengthData(); // otherwise, it is length data
         ram[Tri_NoteLenBuffer] = a; // save contents of A
         apu_write(SND_TRIANGLE_REG, 0x1f); // load some default data for triangle control reg
         y = ram[MusicOffset_Triangle]; // fetch another byte
@@ -16079,7 +16079,7 @@ HandleTriangleMusic:
         if (zero_flag) { goto LoadTriCtrlReg; } // check once more for nonzero data
       }
       // TriNoteHandler:
-      CALL(SetFreq_Tri, 0xf840);
+      SetFreq_Tri();
       x = ram[Tri_NoteLenBuffer]; // save length in triangle note counter
       ram[Tri_NoteLenCounter] = x;
       a = ram[EventMusicBuffer];
@@ -16135,7 +16135,7 @@ HandleNoiseMusic:
   } while (!zero_flag); // unconditional branch
   
 NoiseBeatHandler:
-  CALL(AlternateLengthHandler, 0xf88c);
+  AlternateLengthHandler();
   ram[Noise_BeatLenCounter] = a; // store length in noise beat counter
   a = x;
   a &= 0b00111110; zero_flag = a == 0; // reload data and erase length bits
@@ -16196,8 +16196,8 @@ LoadEventMusic:
   { uint8_t m = DeathMusic; carry_flag = a >= m; zero_flag = a == m; } // is it death music?
   // Original branch: if not, jump elsewhere
   if (zero_flag) {
-    CALL(StopSquare1Sfx, 0xf6ad); // stop sfx in square 1 and 2
-    CALL(StopSquare2Sfx, 0xf6b0); // but clear only square 1's sfx buffer
+    StopSquare1Sfx(); // stop sfx in square 1 and 2
+    StopSquare2Sfx(); // but clear only square 1's sfx buffer
   }
   // NoStopSfx:
   x = ram[AreaMusicBuffer];
@@ -16215,7 +16215,7 @@ LoadAreaMusic:
   { uint8_t m = 0x4; carry_flag = a >= m; zero_flag = a == m; } // is it underground music?
   // Original branch: no, do not stop square 1 sfx
   if (zero_flag) {
-    CALL(StopSquare1Sfx, 0xf6ce);
+    StopSquare1Sfx();
   }
   // NoStop1:
   y = 0x10; // start counter used only by ground level music
@@ -16308,7 +16308,7 @@ VictoryMLoopBack:
       goto LoadEventMusic;
     }
     // Squ2LengthHandler:
-    CALL(ProcessLengthData, 0xf77c); // store length of note
+    ProcessLengthData(); // store length of note
     ram[Squ2_NoteLenBuffer] = a;
     y = ram[MusicOffset_Square2]; // fetch another byte (MUST NOT BE LENGTH BYTE!)
     ram[MusicOffset_Square2]++;
@@ -16317,14 +16317,14 @@ VictoryMLoopBack:
 Squ2NoteHandler:
     x = ram[Square2SoundBuffer]; zero_flag = x == 0; // is there a sound playing on this channel?
     if (zero_flag) {
-      CALL(SetFreq_Squ2, 0xf78c); // no, then play the note
+      SetFreq_Squ2(); // no, then play the note
       // Original branch: check to see if note is rest
       if (!zero_flag) {
-        CALL(LoadControlRegs, 0xf791); // if not, load control regs for square 2
+        LoadControlRegs(); // if not, load control regs for square 2
       }
       // Rest:
       ram[Squ2_EnvelopeDataCtrl] = a; // save contents of A
-      CALL(Dump_Sq2_Regs, 0xf797); // dump X and Y into square 2 control regs
+      Dump_Sq2_Regs(); // dump X and Y into square 2 control regs
     }
     // SkipFqL1:
     ram[Squ2_NoteLenCounter] = ram[Squ2_NoteLenBuffer]; // save length in square 2 note counter
@@ -16340,7 +16340,7 @@ Squ2NoteHandler:
       ram[Squ2_EnvelopeDataCtrl]--; // decrement unless already zero
     }
     // NoDecEnv1:
-    CALL(LoadEnvelopeData, 0xf7b3); // do a load of envelope data to replace default
+    LoadEnvelopeData(); // do a load of envelope data to replace default
     apu_write(SND_SQUARE2_REG, a); // based on offset set by first load unless playing
     x = 0x7f; // death music or d4 set on secondary buffer
     apu_write((SND_SQUARE2_REG + 1), x);
@@ -16367,19 +16367,19 @@ FetchSqu1MusicData:
         goto FetchSqu1MusicData; // unconditional branch
       }
       // Squ1NoteHandler:
-      CALL(AlternateLengthHandler, 0xf7de);
+      AlternateLengthHandler();
       ram[Squ1_NoteLenCounter] = a; // save contents of A in square 1 note counter
       y = ram[Square1SoundBuffer]; zero_flag = y == 0; // is there a sound playing on square 1?
       if (!zero_flag) { goto HandleTriangleMusic; }
       a = x;
       a &= 0b00111110; // change saved data to appropriate note format
-      CALL(SetFreq_Squ1, 0xf7eb); // play the note
+      SetFreq_Squ1(); // play the note
       if (!zero_flag) {
-        CALL(LoadControlRegs, 0xf7f0);
+        LoadControlRegs();
       }
       // SkipCtrlL:
       ram[Squ1_EnvelopeDataCtrl] = a; // save envelope offset
-      CALL(Dump_Squ1_Regs, 0xf7f6);
+      Dump_Squ1_Regs();
     }
     // MiscSqu1MusicTasks:
     a = ram[Square1SoundBuffer]; zero_flag = a == 0; // is there a sound playing on square 1?
@@ -16392,7 +16392,7 @@ FetchSqu1MusicData:
         ram[Squ1_EnvelopeDataCtrl]--; // decrement unless already zero
       }
       // NoDecEnv2:
-      CALL(LoadEnvelopeData, 0xf80c); // do a load of envelope data
+      LoadEnvelopeData(); // do a load of envelope data
       apu_write(SND_SQUARE1_REG, a); // based on offset set by first load
     }
     // DeathMAltReg:
@@ -16416,7 +16416,7 @@ HandleTriangleMusic:
     if (!zero_flag) {
       // Original branch: if non-negative, data is note
       if (neg_flag) {
-        CALL(ProcessLengthData, 0xf82d); // otherwise, it is length data
+        ProcessLengthData(); // otherwise, it is length data
         ram[Tri_NoteLenBuffer] = a; // save contents of A
         apu_write(SND_TRIANGLE_REG, 0x1f); // load some default data for triangle control reg
         y = ram[MusicOffset_Triangle]; // fetch another byte
@@ -16425,7 +16425,7 @@ HandleTriangleMusic:
         if (zero_flag) { goto LoadTriCtrlReg; } // check once more for nonzero data
       }
       // TriNoteHandler:
-      CALL(SetFreq_Tri, 0xf840);
+      SetFreq_Tri();
       x = ram[Tri_NoteLenBuffer]; // save length in triangle note counter
       ram[Tri_NoteLenCounter] = x;
       a = ram[EventMusicBuffer];
@@ -16481,7 +16481,7 @@ HandleNoiseMusic:
   } while (!zero_flag); // unconditional branch
   
 NoiseBeatHandler:
-  CALL(AlternateLengthHandler, 0xf88c);
+  AlternateLengthHandler();
   ram[Noise_BeatLenCounter] = a; // store length in noise beat counter
   a = x;
   a &= 0b00111110; zero_flag = a == 0; // reload data and erase length bits

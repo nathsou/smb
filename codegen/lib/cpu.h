@@ -15,8 +15,9 @@ extern bool carry_flag, zero_flag, neg_flag;
 extern bool overflow_flag, interrupt_disabled, decimal_flag;
 extern uint16_t cpu_resume_pc;
 
-void cpu_call_begin(uint16_t return_address);
-void cpu_call_end(uint16_t expected_return_address);
+// Inline-table dispatchers read their table through the JSR return address,
+// so they push it on the guest stack themselves. Other calls are C calls.
+void cpu_push_return_address(uint16_t return_address);
 void cpu_yield(uint16_t pc);
 void cpu_unresolved_jump(uint16_t pc);
 void cpu_unsupported_io(uint16_t addr);
@@ -26,18 +27,6 @@ void php(void);
 void plp(void);
 uint16_t cpu_return_target(void);
 extern uint16_t cpu_dispatch_target;
-
-// JSR. By default the original return address is pushed on the guest stack
-// and checked on return, so code that reads or rewrites return addresses
-// behaves as on hardware (or traps). Define NATIVE_CALLS for plain C calls
-// when the program never observes them; dispatch helpers push their own.
-#ifdef NATIVE_CALLS
-#define CALL(routine, return_address) routine()
-#else
-#define CALL(routine, return_address) do { \
-    cpu_call_begin(return_address); routine(); cpu_call_end(return_address); \
-} while (0)
-#endif
 
 // memory
 extern uint8_t ram[RAM_SIZE];
