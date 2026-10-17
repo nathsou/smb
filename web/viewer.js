@@ -4,8 +4,8 @@
 //   are in the DOM, so the 12,000 lines of code.c scroll smoothly.
 // - The map is editable (a textarea over a highlighted copy of its text);
 //   Recompile regenerates the game and the C from it.
-// - Search with the box or Ctrl+F (Enter, Shift+Enter); click a routine name
-//   to go to its definition, Alt+Left to come back.
+// - Search with the box or Ctrl+F (Enter, Shift+Enter); click a routine, a
+//   variable or a table to go to its definition, Alt+Left to come back.
 
 const LINE_HEIGHT = 18;
 const OVERSCAN = 20;
@@ -20,6 +20,9 @@ const MACHINE = new Set([
     'interrupt_disabled', 'decimal_flag', 'ram', 'data', 'ROM', 'read_byte',
     'dynamic_ram_write', 'video', 'return_address',
 ]);
+
+// The map's variables and tables, as code.c names them (vars.h).
+let viewNames = new Set();
 
 function escape(text) {
     return text.replace(/[&<>]/g, c => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'));
@@ -51,6 +54,7 @@ export function highlightC(line) {
             if (C_KEYWORDS.has(text)) out += span('keyword', text);
             else if (C_TYPES.has(text)) out += span('type', text);
             else if (MACHINE.has(text)) out += span('machine', text);
+            else if (viewNames.has(text)) out += `<span class="view" data-name="${text}">${text}</span>`;
             else if (call) out += `<span class="call" data-name="${text}">${text}</span>`;
             else if (/^[A-Z][A-Z0-9_]+$/.test(text)) out += span('const', text);
             else out += escape(text);
@@ -59,15 +63,26 @@ export function highlightC(line) {
     return out;
 }
 
-const MAP_LINE = /^(\s*)(routine|table|var|io)(\s+)(\$[0-9a-fA-F]+)(\s+)(\S+)((?:\s+\d+)?)(\s*)(;.*)?$/;
+const MAP_LINE = /^(\s*)(routine|table|var|io)(\s+)(\$[0-9a-fA-F]+)(\s+)(\S+)((?:\s+\d+)?)((?:\s+:\s*\w+)?)(\s*)(;.*)?$/;
+const MAP_TYPE = /^(\s*)(enum|flags)(\s+)(\w+)([^;]*)(;.*)?$/;
 
 export function highlightMap(line) {
     if (/^\s*#/.test(line)) return span('comment', line);
+    const t = MAP_TYPE.exec(line);
+    if (t) {
+        const [, lead, kind, s1, name, values, comment] = t;
+        return escape(lead) + span('kind kind-type', kind) + escape(s1) + span('type', name) +
+            values.split(/(\s+)/).map(part => {
+                const value = /^(\w+)=(\S+)$/.exec(part);
+                return value ? span('const', value[1]) + '=' + span('number', value[2]) : escape(part);
+            }).join('') + (comment ? span('comment', comment) : '');
+    }
     const m = MAP_LINE.exec(line);
     if (!m) return escape(line);
-    const [, lead, kind, s1, address, s2, name, length, s3, comment] = m;
+    const [, lead, kind, s1, address, s2, name, length, type, s3, comment] = m;
     return escape(lead) + span(`kind kind-${kind}`, kind) + escape(s1) + span('number', address) + escape(s2) +
-        span(kind === 'routine' ? 'call' : 'const', name) + span('number', length) + escape(s3) +
+        span(kind === 'routine' ? 'call' : 'const', name) + span('number', length) +
+        type.replace(/\w+/, word => span('type', word)) + escape(s3) +
         (comment ? span('comment', comment) : '');
 }
 
@@ -101,7 +116,7 @@ export function createViewer(root, { onRecompile, onResetMap }) {
     const history = [];
 
     function definitionOf(name) {
-        const pattern = new RegExp(`^(?:void|static uint16_t) ${name}\\(`);
+        const pattern = new RegExp(`^(?:(?:void|static uint16_t) ${name}\\(|#define ${name}\\b)`);
         for (const file of files) {
             if (file.editable) continue;
             const lines = file.lines ?? (file.lines = file.contents.split('\n'));
@@ -150,7 +165,7 @@ export function createViewer(root, { onRecompile, onResetMap }) {
         viewport.addEventListener('scroll', render);
         new ResizeObserver(render).observe(viewport);
         content.addEventListener('click', event => {
-            const target = event.target.closest('.call');
+            const target = event.target.closest('.call, .view');
             if (!target) return;
             const found = definitionOf(target.dataset.name);
             if (found) goTo(found.file, found.line);
@@ -330,6 +345,8 @@ export function createViewer(root, { onRecompile, onResetMap }) {
         // edits to editable files are kept
         setFiles(next) {
             const previous = current?.file.name;
+            const vars = next.find(file => file.name === 'vars.h');
+            viewNames = new Set(vars ? [...vars.contents.matchAll(/^#define ([a-z_]\w*)/gm)].map(m => m[1]) : []);
             const kept = new Map(files.filter(f => f.editable).map(f => [f.name, f]));
             files = next.map(file => {
                 const old = kept.get(file.name);

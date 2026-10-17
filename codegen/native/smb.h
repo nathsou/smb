@@ -4,6 +4,55 @@
 #ifndef SMB_MAP_H
 #define SMB_MAP_H
 
+// game_mode values
+enum {
+  GAME_MODE_TITLE = 0,
+  GAME_MODE_PLAYING = 1,
+  GAME_MODE_VICTORY = 2,
+  GAME_MODE_GAME_OVER = 3,
+};
+
+// button bits: as read from a joypad
+enum {
+  BUTTON_A = 0x80,
+  BUTTON_B = 0x40,
+  BUTTON_SELECT = 0x20,
+  BUTTON_START = 0x10,
+  BUTTON_UP = 0x08,
+  BUTTON_DOWN = 0x04,
+  BUTTON_LEFT = 0x02,
+  BUTTON_RIGHT = 0x01,
+};
+
+// direction bits
+enum {
+  DIRECTION_RIGHT = 0x01,
+  DIRECTION_LEFT = 0x02,
+};
+
+// player_state values: jumping also while swimming up
+enum {
+  PLAYER_STATE_ON_GROUND = 0,
+  PLAYER_STATE_JUMPING = 1,
+  PLAYER_STATE_FALLING = 2,
+  PLAYER_STATE_CLIMBING = 3,
+};
+
+// power values
+enum {
+  POWER_SMALL = 0,
+  POWER_BIG = 1,
+  POWER_FIERY = 2,
+};
+
+// area_kind values
+enum {
+  AREA_KIND_WATER = 0,
+  AREA_KIND_GROUND = 1,
+  AREA_KIND_UNDERGROUND = 2,
+  AREA_KIND_CASTLE = 3,
+};
+
 #define PPU_CTRL 0x2000
 #define PPU_MASK 0x2001
 #define PPU_STATUS 0x2002
@@ -331,7 +380,7 @@
 #define CURRENT_PLAYER 0x753
 #define PLAYER_SMALL 0x754
 #define PLAYER_SCROLL_POS 0x755
-#define PLAYER_POWER 0x756 // 0 small, 1 big, 2 fiery
+#define PLAYER_POWER 0x756
 #define RELOAD_TIME_LIMIT 0x757
 #define JOYPAD_OVERRIDE 0x758
 #define TIME_UP 0x759
@@ -355,7 +404,7 @@
 #define SKIP_INTERMISSION 0x769
 #define HARD_MODE 0x76a
 #define WORLD_SELECT 0x76b
-#define GAME_MODE 0x770 // title, playing, victory, game over
+#define GAME_MODE 0x770 // what the main loop runs
 #define GAME_MODE_TASK 0x772
 #define VRAM_LIST_SELECT 0x773
 #define SCREEN_OFF 0x774

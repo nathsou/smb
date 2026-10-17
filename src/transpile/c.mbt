@@ -33,6 +33,7 @@ fn bin_symbol(op : @ir.BinOp) -> String {
 priv struct CFunc {
   f : @ir.Function
   names : Array[String]
+  views : Views
 }
 
 fn temp_names(f : @ir.Function) -> Array[String] {
@@ -99,6 +100,59 @@ fn CFunc::indirect(self : CFunc, e : @ir.Expr) -> String? {
   }
 }
 
+// A memory access by the name of what it reads or writes, or by address.
+fn CFunc::access(self : CFunc, space : @ir.Mem, a : @ir.Expr) -> String {
+  match self.views.place(a) {
+    Some({ view, offset, index }) if (view.kind == Table) == (space == Rom) => {
+      if view.kind == Scalar { return view.name }
+      let terms = index.map(fn(e) { self.paren(e, 4) }).join(" + ")
+      let at = if index.is_empty() {
+        show_number(offset)
+      } else if offset > 0 {
+        "\{show_number(offset)} + \{terms}"
+      } else if offset < 0 {
+        "\{terms} - \{show_number(-offset)}"
+      } else {
+        terms
+      }
+      match view.kind {
+        ZeroPageArray | MirroredArray => "\{view.name}(\{at})"
+        _ => "\{view.name}[\{at}]"
+      }
+    }
+    _ =>
+      match a {
+        Binary(Add, Const(0x100), i) if space == Ram && self.views.stack => "stack[\{self.expr(i)}]"
+        _ => if space == Rom { "ROM(\{self.expr(a)})" } else { "ram[\{self.expr(a)}]" }
+      }
+  }
+}
+
+// The map type of a value: a typed variable's, kept by masking and
+// combining it with others of its type.
+fn CFunc::type_of(self : CFunc, e : @ir.Expr) -> String {
+  match e {
+    Load(Ram, a) =>
+      match self.views.place(a) {
+        Some({ view, .. }) => view.type_name
+        None => ""
+      }
+    Binary(And | Or | Xor, l, r) => {
+      let t = self.type_of(l)
+      if t != "" { t } else { self.type_of(r) }
+    }
+    _ => ""
+  }
+}
+
+// `e`, a constant of the type `type_name` by name.
+fn CFunc::typed(self : CFunc, e : @ir.Expr, type_name : String, mask~ : Bool = false) -> String? {
+  match e {
+    Const(v) if type_name != "" => self.views.constant(type_name, v, mask~)
+    _ => None
+  }
+}
+
 fn CFunc::expr(self : CFunc, e : @ir.Expr) -> String {
   self.expr_prec(e).0
 }
@@ -126,8 +180,7 @@ fn CFunc::expr_prec(self : CFunc, e : @ir.Expr) -> (String, Int) {
     Var(v) => (v.c_name(), 0)
     Temp(t) => (self.names[t], 0)
     Param => ("return_address", 0)
-    Load(Ram, a) => ("ram[\{self.expr(a)}]", 0)
-    Load(Rom, a) => ("ROM(\{self.expr(a)})", 0)
+    Load(Ram | Rom as space, a) => (self.access(space, a), 0)
     Load(Bus, a) => ("read_byte(\{self.word(a)})", 0)
     Unary(Not, a) => ("!" + self.paren(a, 2), 2)
     Unary(Byte, a) => ("(uint8_t)" + self.paren(a, 0), 2)
@@ -135,6 +188,24 @@ fn CFunc::expr_prec(self : CFunc, e : @ir.Expr) -> (String, Int) {
     Unary(Hi, a) => ("HIGH_BYTE(\{self.expr(a)})", 0)
     Binary(op, l, r) => {
       let p = bin_prec(op)
+      // a constant beside a typed value is a value of that type
+      let typed = match op {
+        Eq | Ne | Lt | Ge | And | Or | Xor =>
+          match (self.typed(r, self.type_of(l), mask=op == And), self.typed(l, self.type_of(r), mask=op == And)) {
+            (Some(name), _) => Some((l, name, false))
+            (_, Some(name)) => Some((r, name, true))
+            _ => None
+          }
+        _ => None
+      }
+      if typed is Some((other, name, left)) {
+        let name = if name.contains(" ") { "(" + name + ")" } else { name }
+        let side = match other {
+          Binary(cop, _, _) if cop != op => "(" + self.expr(other) + ")"
+          _ => self.paren(other, p)
+        }
+        return (if left { "\{name} \{bin_symbol(op)} \{side}" } else { "\{side} \{bin_symbol(op)} \{name}" }, p)
+      }
       let side = fn(child : @ir.Expr, left : Bool) -> String {
         match child {
           Binary(cop, _, _) => {
@@ -190,13 +261,16 @@ fn CFunc::stmt(self : CFunc, s : @ir.Stmt) -> String {
       }
     }
     Store(Ram, a, value) => {
-      let target = "ram[\{self.expr(a)}]"
+      let target = self.access(Ram, a)
+      let type_name = self.type_of(Load(Ram, a))
       match value {
         Binary(Add, Load(Ram, b), Const(1)) if b == a => "\{target}++;"
         Binary(Sub, Load(Ram, b), Const(1)) if b == a => "\{target}--;"
-        Binary(And | Or | Xor as op, Load(Ram, b), r) if b == a && self.narrow(r) =>
-          "\{target} \{bin_symbol(op)}= \{self.expr(r)};"
-        _ => "\{target} = \{self.byte(value)};"
+        Binary(And | Or | Xor as op, Load(Ram, b), r) if b == a && self.narrow(r) => {
+          let operand = self.typed(r, type_name, mask=op == And).unwrap_or(self.expr(r))
+          "\{target} \{bin_symbol(op)}= \{operand};"
+        }
+        _ => "\{target} = \{self.typed(value, type_name).unwrap_or(self.byte(value))};"
       }
     }
     Store(_, a, value) => "dynamic_ram_write(\{self.word(a)}, \{self.byte(value)});"
@@ -396,8 +470,8 @@ fn Structurer::range(self : Structurer, s : Int, e : Int, follow : Int, skip_loo
   }
 }
 
-fn function_body(f : @ir.Function) -> Array[Line] {
-  let c : CFunc = { f, names: temp_names(f) }
+fn function_body(f : @ir.Function, views : Views) -> Array[Line] {
+  let c : CFunc = { f, names: temp_names(f), views }
   let pos = f.blocks.map(fn(_) { -1 })
   let layout = []
   // only blocks reachable from the entry are printed
@@ -453,7 +527,7 @@ fn interface_names(mask : Int) -> String {
   if names.is_empty() { "none" } else { names.join(", ") }
 }
 
-fn Emitter::emit_function(self : Emitter, program : @ir.Program, f : @ir.Function) -> Unit {
+fn Emitter::emit_function(self : Emitter, program : @ir.Program, f : @ir.Function, views : Views) -> Unit {
   let info = program.info.unwrap()
   self.indentation = 0
   if f.native {
@@ -474,7 +548,7 @@ fn Emitter::emit_function(self : Emitter, program : @ir.Program, f : @ir.Functio
     }
     self.emit("void \{f.name}(void) {")
   }
-  for line in function_body(f) {
+  for line in function_body(f, views) {
     match line {
       Text(indent, text) => {
         self.indentation = indent
@@ -487,14 +561,15 @@ fn Emitter::emit_function(self : Emitter, program : @ir.Program, f : @ir.Functio
   self.emit("}\n")
 }
 
-fn Emitter::emit_program_c(self : Emitter, program : @ir.Program, preamble : Array[String]) -> Unit {
+fn Emitter::emit_program_c(self : Emitter, program : @ir.Program, preamble : Array[String], views : Views) -> Unit {
   self.emit("#include \"code.h\"")
+  if !views.list.is_empty() { self.emit("#include \"vars.h\"") }
   self.emit("")
   if !preamble.is_empty() {
     for line in preamble { self.emit("// \{line}") }
     self.emit("")
   }
-  for f in program.functions { self.emit_function(program, f) }
+  for f in program.functions { self.emit_function(program, f, views) }
   self.emit("void cpu_reset_entry(void) { \{program.reset}(); }")
   self.emit("void cpu_nmi_entry(void) { \{program.nmi}(); }")
 }

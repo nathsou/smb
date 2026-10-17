@@ -116,3 +116,62 @@ test "read-modify-write outside RAM goes through the bus" {
   assert_eq(code.contains("dynamic_ram_write(0x6000, (uint8_t)(read_byte(0x6000) + 1));"), true)
   assert_eq(code.contains("dynamic_ram_write(0x6001, (uint8_t)(read_byte(0x6001) << 1));"), true)
 }
+
+fn transpile_rom(source: String, map_text: String) -> Map[String, String] raise {
+  let items = @parse.Parser::new(@parse.Lexer::new(source).tokenize()).parse()
+  let image = @image.assemble(items)
+  let map = @image.parse_map(map_text)
+  let program = @image.discover_rom(@image.rom_image({ prg: image.bytes, chr: [] }, map), map)
+  program.validate_stacks()
+  let low = @lower.AsmLowering::new(program.source, program=Some(program))
+  low.lower()
+  let files : Map[String, String] = Map([])
+  for file in transpile_low(low).files { files[file.name] = file.contents }
+  files
+}
+
+test "map names read and write memory as views" {
+  let files = transpile_rom(
+    ".org $c000\nBoot:\n ldx $20\n ldy $21\n lda $10,x\n sta $0300\n lda $c040,x\n sta $07f0,x\n lda $0302,y\n sta $40\n pha\n pla\n sta $0301\nIdle:\n jmp Idle\nTick:\n rti\n.org $c040\n.db 1, 2, 3, 4\n.org $fffa\n.dw Tick, Boot, Tick\n",
+    "routine $c000 boot\nroutine $c01c tick\nvar $0010 enemy_y 6\nvar $0020 slot\nvar $0021 row\nvar $0300 score\nvar $0301 list 8\nvar $0302 list_second\nvar $07f0 tail 16 ; near the end of RAM\nvar $0040 boot_flag\nvar $0041 tick 2\ntable $c040 steps 4\n",
+  )
+  let code = files["code.c"]
+  let vars = files["vars.h"]
+  // page zero wraps, the end of RAM mirrors to its start
+  assert_eq(vars.contains("#define enemy_y(i) ram[(uint8_t)(ENEMY_Y + (i))]"), true)
+  assert_eq(vars.contains("#define tail(i) ram[(TAIL + (i)) & 0x7ff] // near the end of RAM"), true)
+  assert_eq(vars.contains("#define score ram[SCORE]"), true)
+  assert_eq(vars.contains("#define list (&ram[LIST])"), true)
+  assert_eq(vars.contains("#define steps (&ROM(STEPS))"), true)
+  assert_eq(code.contains("score = enemy_y(x);"), true)
+  assert_eq(code.contains("tail(x) = steps[x];"), true)
+  // a scalar read with an index is the array holding it
+  assert_eq(code.contains("x = slot;\n  y = row;"), true)
+  assert_eq(code.contains("a = list[1 + y];\n  boot_flag = a;"), true)
+  assert_eq(code.contains("stack[sp] = a;"), true)
+  // a name the generated code already uses (a routine) is no view
+  assert_eq(vars.contains("#define tick"), false)
+  assert_eq(code.contains("#include \"vars.h\""), true)
+}
+
+test "assembly input keeps addresses" {
+  let output = transpile_fixture(".org $c000\nBoot:\n lda $10\n sta $0300\nIdle:\n jmp Idle\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n")
+  for file in output.files { assert_eq(file.name == "vars.h", false) }
+  assert_eq(code_c(output).contains("#include \"vars.h\""), false)
+}
+
+test "constants beside typed variables are written by name" {
+  let files = transpile_rom(
+    ".org $c000\nBoot:\n lda $06fc\n and #$c0\n beq Skip\n lda #$01\n sta $0770\nSkip:\n lda $06fc\n and #$7f\n sta $0300\n lda $0770\n cmp #$03\n bne Boot\nIdle:\n jmp Idle\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n",
+    "enum game_mode title=0 playing=1 victory=2 game_over=3\nflags button a=$80 b=$40 select=$20 start=$10 up=$08 down=$04 left=$02 right=$01\nroutine $c000 boot\nvar $06fc joypad1 : button\nvar $0770 game_mode : game_mode\nvar $0300 kept\n",
+  )
+  let code = files["code.c"]
+  let vars = files["vars.h"]
+  assert_eq(vars.contains("enum {\n  GAME_MODE_TITLE = 0,\n  GAME_MODE_PLAYING = 1,"), true)
+  assert_eq(vars.contains("  BUTTON_A = 0x80,\n"), true)
+  assert_eq(code.contains("(joypad1 & (BUTTON_A | BUTTON_B)) != 0"), true)
+  assert_eq(code.contains("game_mode = GAME_MODE_PLAYING;"), true)
+  // a mask with most bits set names those it clears
+  assert_eq(code.contains("kept = joypad1 & ~BUTTON_A;"), true)
+  assert_eq(code.contains("game_mode != GAME_MODE_GAME_OVER"), true)
+}

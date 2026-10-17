@@ -18,7 +18,10 @@ gives to the program:
 ```
 routine $8e04 dispatch                  ; jump through the address table that follows the call, indexed by A
 table $8218 game_mode_tasks 8
-var $0770 game_mode
+enum game_mode title=0 playing=1 victory=2 game_over=3
+flags button a=$80 b=$40 select=$20 start=$10 up=$08 down=$04 left=$02 right=$01
+var $0770 game_mode : game_mode
+var $06fc joypad1 : button
 var $0780 timers 36
 io $4015 apu_status
 ```
@@ -28,7 +31,12 @@ io $4015 apu_status
 - `table`: data inside PRG ROM with its length, including the inline jump
   tables after each call to the dispatcher (nothing else marks where those
   instruction streams stop).
-- `var`/`io`: RAM and hardware registers; a length makes an array.
+- `var`/`io`: RAM and hardware registers; a length makes an array, and a
+  type (`: game_mode`) names the variable's values.
+- `enum`/`flags`: the named values of variables, or bits that combine. Each
+  is a C constant named after the type and the value (`GAME_MODE_PLAYING`,
+  `BUTTON_A`); the names share the map's namespace, so a value cannot shadow
+  a variable or a table.
 - `rom`: a dump the map was written for, by the SHA-256 of its PRG then CHR
   ROM (without a header) and their sizes.
 
@@ -39,13 +47,14 @@ does not name still recompiles, with a warning (on the command line, and
 under the game on the page), since its code may differ from what the names
 describe.
 
-Data names become upper-case address constants (`ram[GAME_MODE]`,
-`ROM(VRAM_LISTS_LOW + y)`), so they never collide with functions, struct
-fields or library names. The front end decodes the image with the same
+Data names become upper-case address constants (`GAME_MODE`,
+`VRAM_LISTS_LOW`), so they never collide with functions, struct fields or
+library names; the C reads and writes memory through lower-case views of
+them (see [The C backend](#the-c-backend)). The front end decodes the image with the same
 exploration as assembly input and rebuilds the source view the lowering
 consumes, choosing for each operand an array or a scalar at the same address
 depending on whether the access is indexed. An indexed read just before a
-table is written as that table minus an offset (`ROM((DEMO_BUTTONS - 1) + x)`).
+table is written as that table minus an offset (`demo_buttons[x - 1]`).
 
 The names and descriptions are this project's own; the repository holds no
 game code or data, and the generated C goes to `codegen/game/` (`make
@@ -179,10 +188,10 @@ Forwarding subsumes the earlier load/store fusion and compare/branch folding,
 and also folds flag computations into the branches that read them:
 
 ```c
-if ((ram[(uint8_t)(ENEMY_STATE + x)] & 0x20) != 0) {
+if ((enemy_state(x) & 0x20) != 0) {
   move_defeated_enemy(); return;
 }
-ram[(uint8_t)(ENEMY_Y + x)] = (uint8_t)(ram[CANNON_Y + y] - 8);
+enemy_y(x) = (uint8_t)(cannon_y[y] - 8);
 ```
 
 ## The C backend
@@ -194,6 +203,49 @@ stay gotos. Blocks that only return, tail-call, yield or trap are printed
 where they are reached. Casts to `uint8_t` and `uint16_t` appear only where
 a value is not evidently in range, and the output compiles without warnings
 under `-Wconversion`.
+
+With a ROM map, memory is read and written by name. `vars.h` defines each
+variable and table of the map as a view of `ram` or `data`, and the backend
+writes an access through the view of the name the front end gave its
+address:
+
+```c
+ram[WORLD_NUMBER]++;              ->  world_number++;
+ram[VRAM_LIST1 + 1 + y] = a;      ->  vram_list1[1 + y] = a;
+ram[(uint8_t)(ENEMY_Y + x)] = a;  ->  enemy_y(x) = a;
+a = ROM(POPUP_TILES + 1 + x);     ->  a = popup_tiles[1 + x];
+ram[0x100 + sp] = a;              ->  stack[sp] = a;
+```
+
+The views keep the machine's memory: SMB indexes across neighbouring arrays
+(one object index runs over the player's, the enemies' and the fireballs'
+entries) and clears ranges of them, so the bytes stay where they are and the
+names only read them. A variable is the byte at its address and an array or
+table the bytes from it. Arrays an index can carry out of their page are
+function-like, `enemy_y(x)`: in page zero the address wraps within the page,
+as indexed zero-page addressing does, and near the end of RAM to its start,
+as RAM's mirrors do. A scalar read with an index is the array that holds it.
+A name the generated code already uses as an identifier (a routine, a
+temporary, a register) gets no view, and its accesses keep their address;
+so do addresses the map does not name, such as the scratch bytes `$00-$07`.
+The compiled code behaves identically (per-frame traces, routine diff) and
+runs at the same speed. Assembly input has no map, and its C keeps
+addresses.
+
+A constant beside a typed variable is written as the type's value: one it
+is compared with, stored to it, or used to mask or combine it (also when
+the variable is combined with others of its type first). Bits are the names
+of those set; a mask with most of them set names those it clears.
+
+```c
+game_mode = 1;                             ->  game_mode = GAME_MODE_PLAYING;
+if (((joypad1 | joypad2) & 0x40) == 0)     ->  if (((joypad1 | joypad2) & BUTTON_B) == 0)
+a = joypad1 & 0x7f;                        ->  a = joypad1 & ~BUTTON_A;
+if (area_kind == 0)                        ->  if (area_kind == AREA_KIND_WATER)
+```
+
+The types are anonymous C enums in `vars.h` and in `codegen/native/smb.h`,
+and the variables stay bytes.
 
 JSRs are plain C calls: SMB's replay was identical with and without the
 emulated return-address stack, and the generator's static stack checks reject
@@ -380,7 +432,9 @@ previous frame's pixels, never occurs in SMB.
 
 - Registers as C locals and parameters: the interfaces give each routine's
   inputs and outputs, but callers and callees still share global registers.
-- Typed game state: a struct over RAM with named, sized fields, keeping the
-  flat byte array underneath for SMB's out-of-bounds idioms.
+- Scratch bytes as C locals, parameters and return values: `$00-$07` are
+  most of the remaining `ram[...]` accesses.
+- Records: the sprite table and the object slots as structures over the
+  same bytes (`sprite_x[4 + y]` is the X of the sprite after `y / 4`).
 - The status-bar split is decided after the frame's game logic, as before;
   hardware decides it at the sprite 0 hit, earlier in the frame.

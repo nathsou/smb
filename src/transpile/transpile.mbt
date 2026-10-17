@@ -293,15 +293,16 @@ pub fn Transpiler::transpile(
     is_lib: true,
   }
 
-  let code_c = {
-    name: "code.c",
-    contents: {
-      let emitter = Emitter::new()
-      emitter.emit_program_c(program, low.preamble)
-      emitter.output.to_string()
-    },
-    is_lib: true,
+  fn program_c(views : Views) -> String {
+    let emitter = Emitter::new()
+    emitter.emit_program_c(program, low.preamble, views)
+    emitter.output.to_string()
   }
+  // Names of the map become views (vars.h) unless the generated code
+  // already uses them as identifiers.
+  let views = Views::from_map(low, identifiers(program_c(Views::empty())))
+  let code_c = { name: "code.c", contents: program_c(views), is_lib: true }
+  let vars_h = { name: "vars.h", contents: views.header(), is_lib: true }
 
   let code_h = {
     name: "code.h",
@@ -318,6 +319,6 @@ pub fn Transpiler::transpile(
       constants_h,
       data_h, data_c,
       code_h, code_c,
-    ],
+    ] + (if views.list.is_empty() { [] } else { [vars_h] }),
   }
 }
