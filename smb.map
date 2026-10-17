@@ -1,0 +1,1371 @@
+# Super Mario Bros. (NROM-256): names for the recompiler.
+#
+# Each line is "kind $address name [length] [: type] ; description".
+# Routines are entry points, tables are data inside PRG ROM (including the
+# inline jump tables that follow calls to the dispatcher), and var/io name
+# RAM and hardware registers; a length makes an array. A type names the
+# values of a variable: "enum NAME VALUE=N ..." or, for bits that combine,
+# "flags NAME BIT=N ...", which the C writes as NAME_VALUE. The names are
+# this project's own.
+#
+# The dump the map was written for: SHA-256 of PRG then CHR ROM, without the
+# iNES header (so it matches headered and raw dumps), and their sizes. It is
+# the dump tests/golden/warpless.trace was recorded with.
+rom fcb6a0ef3a20c19b356005fbb21dc8009563b1cb5a9aaebc8e9386b4a8c5912e 32768 8192 ; Super Mario Bros. (NES)
+
+# Types of variables
+enum game_mode title=0 playing=1 victory=2 game_over=3
+flags button a=$80 b=$40 select=$20 start=$10 up=$08 down=$04 left=$02 right=$01 ; as read from a joypad
+flags direction right=$01 left=$02
+enum player_state on_ground=0 jumping=1 falling=2 climbing=3 ; jumping also while swimming up
+enum power small=0 big=1 fiery=2
+enum area_kind water=0 ground=1 underground=2 castle=3
+
+# Hardware registers
+io $2000 ppu_ctrl
+io $2001 ppu_mask
+io $2002 ppu_status
+io $2003 oam_address
+io $2004 oam_data
+io $2005 ppu_scroll
+io $2006 ppu_address
+io $2007 ppu_data
+io $4000 apu 22                ; APU registers, indexed by channel
+io $4000 apu_pulse1_control    ; duty, length halt, envelope
+io $4001 apu_pulse1_sweep
+io $4002 apu_pulse1_period_low
+io $4003 apu_pulse1_period_high ; and length; restarts the note
+io $4004 apu_pulse2_control
+io $4005 apu_pulse2_sweep
+io $4006 apu_pulse2_period_low
+io $4007 apu_pulse2_period_high
+io $4008 apu_triangle_control  ; length halt, linear counter
+io $400a apu_triangle_period_low
+io $400b apu_triangle_period_high
+io $400c apu_noise_control     ; length halt, envelope
+io $400e apu_noise_period      ; mode and period
+io $400f apu_noise_length      ; restarts the envelope
+io $4010 apu_dmc_control
+io $4011 apu_dmc_level
+io $4012 apu_dmc_address
+io $4013 apu_dmc_length
+io $4014 oam_dma
+io $4015 apu_status            ; channel enables
+io $4016 joypad_ports 2
+io $4016 joypad1_port
+io $4017 apu_frame_counter     ; written: sequencer mode and reset; read: joypad 2
+
+# Zero page
+var $0008 slot                  ; object slot being processed
+var $0009 frame_count
+var $000a buttons_ab : button   ; A and B, as joypad bits
+var $000b buttons_vertical : button
+var $000c buttons_horizontal : button
+var $000d buttons_ab_previous : button
+var $000e player_task           ; which player routine runs this frame
+var $000f enemy_active 7
+var $0016 enemy_kind 7
+var $001d obj_state 22
+var $001d player_state : player_state
+var $001e enemy_state 6
+var $0024 fireball_state 2
+var $0026 block_state 4
+var $002a misc_state 9
+var $0033 player_facing : direction
+var $0034 target_page
+var $0035 victory_walk_step
+var $0039 powerup_kind
+var $003a fireball_bouncing 2
+var $003c hammer_jump_timer 6
+var $0045 obj_dir 18
+var $0045 player_dir : direction
+var $0046 enemy_dir 6 : direction
+var $0057 obj_x_speed 22
+var $0057 player_x_speed
+var $0058 enemy_x_speed 6
+var $005e fireball_x_speed 2
+var $0060 block_x_speed 4
+var $0064 misc_x_speed 9
+var $006d obj_page 25
+var $006d player_page
+var $006e enemy_page 6
+var $0074 fireball_page 2
+var $0076 block_page 4
+var $007a misc_page 9
+var $0083 bubble_page 3
+var $0086 obj_x 25
+var $0086 player_x
+var $0087 enemy_x 6
+var $008d fireball_x 2
+var $008f block_x 4
+var $0093 misc_x 9
+var $009c bubble_x 3
+var $009f obj_y_speed 22
+var $009f player_y_speed
+var $00a0 enemy_y_speed 6
+var $00a6 fireball_y_speed 2
+var $00a8 block_y_speed 4
+var $00ac misc_y_speed 9
+var $00b5 obj_y_page 25
+var $00b5 player_y_page
+var $00b6 enemy_y_page 6
+var $00bc fireball_y_page 2
+var $00be block_y_page 4
+var $00c2 misc_y_page 9
+var $00cb bubble_y_page 3
+var $00ce obj_y 25
+var $00ce player_y
+var $00cf enemy_y 6
+var $00d5 fireball_y 2
+var $00d7 block_y 4
+var $00db misc_y 9
+var $00e4 bubble_y 3
+var $00e7 area_data_ptr 2       ; level layout being decoded
+var $00e9 enemy_data_ptr 2      ; enemy list being decoded
+var $00f0 note_length_offset
+var $00f1 pulse1_sfx_playing
+var $00f2 pulse2_sfx_playing
+var $00f3 noise_sfx_playing
+var $00f4 area_music_playing
+var $00f5 music_ptr 2
+var $00f7 pulse2_music_pos
+var $00f8 pulse1_music_pos
+var $00f9 triangle_music_pos
+var $00fa pause_sound_request
+var $00fb area_music_request
+var $00fc event_music_request
+var $00fd noise_sfx_request
+var $00fe pulse2_sfx_request
+var $00ff pulse1_sfx_request
+
+# Stack page
+var $0109 flip_vertically
+var $010d flag_score_y
+var $010e flag_score_y_fraction
+var $010f flag_score_kind
+var $0110 popup_kind 7          ; floating score numbers
+var $0117 popup_x 7
+var $011e popup_y 7
+var $0125 shell_chain 7
+var $012c popup_timer 7
+var $0134 score_add 6           ; digits added to a score
+
+# Sprites and VRAM update lists
+var $0200 sprite_y 256
+var $0201 sprite_tile 255
+var $0202 sprite_attr 254
+var $0203 sprite_x 253
+var $0300 vram_list1_length
+var $0301 vram_list1 63
+var $0340 vram_list2_length
+var $0341 vram_list2 34
+
+# Enemy-specific state
+var $0363 bowser_body
+var $0364 bowser_feet
+var $0365 bowser_speed
+var $0366 bowser_home_x
+var $0367 bowser_flame_timer
+var $0368 bowser_slot
+var $0369 bridge_collapse_pos
+var $036a bowser_gfx_flag
+var $0388 firebar_speed 6
+var $0398 vine_flag_slot
+var $0399 vine_height
+var $039a vine_slots 3
+var $039d vine_start_y
+var $03a0 balance_alignment 6
+var $03a1 platform_x_scroll
+var $03a2 platform_contact 6
+
+# Positions relative to the screen, sprite attributes, offscreen bits
+var $03ad obj_screen_x 11
+var $03ad player_screen_x
+var $03ae enemy_screen_x
+var $03af fireball_screen_x
+var $03b0 bubble_screen_x
+var $03b1 block_screen_x 2
+var $03b3 misc_screen_x
+var $03b8 obj_screen_y 11
+var $03b8 player_screen_y
+var $03b9 enemy_screen_y
+var $03ba fireball_screen_y
+var $03bb bubble_screen_y
+var $03bc block_screen_y 2
+var $03be misc_screen_y
+var $03c4 obj_sprite_attr 7
+var $03c4 player_sprite_attr
+var $03c5 enemy_sprite_attr 6
+var $03d0 obj_offscreen 8
+var $03d0 player_offscreen
+var $03d1 enemy_offscreen
+var $03d2 fireball_offscreen
+var $03d3 bubble_offscreen
+var $03d4 block_offscreen 2
+var $03d6 misc_offscreen
+var $03d8 enemy_offscreen_masked
+
+# Bricks and blocks hit from below
+var $03e4 block_origin_y 2
+var $03e6 block_buffer_low 2
+var $03e8 block_metatile 2
+var $03ea block_page2 2
+var $03ec block_replace 2
+var $03ee sprite_slot_ctrl
+var $03f0 block_residue
+var $03f1 block_origin_x 2
+var $03f9 attribute_buffer 7
+
+# Sub-pixel motion
+var $0400 obj_x_force 22
+var $0401 enemy_x_force 6
+var $0416 obj_y_fraction 23
+var $0416 player_y_fraction
+var $0417 enemy_y_fraction 6
+var $042c bubble_y_fraction 3
+var $0433 obj_y_force 10
+var $0433 player_y_force
+var $0434 enemy_y_force 6
+var $043c block_y_force 2
+var $0450 max_left_speed
+var $0456 max_right_speed
+
+# Cannons and whirlpools (shared slots)
+var $046a cannon_slot
+var $046b cannon_page 6
+var $0471 cannon_x 6
+var $0477 cannon_y 6
+var $047d cannon_timer 6
+var $0483 bowser_health
+var $0484 stomp_chain
+
+# Collision
+var $0490 obj_collision 2
+var $0490 player_collision
+var $0491 enemy_collision 6
+var $0499 obj_box_kind 10
+var $0499 player_box_kind
+var $049a enemy_box_kind 6
+var $04a0 fireball_box_kind 2
+var $04a2 misc_box_kind 9
+var $04ac boxes 84              ; bounding boxes: left, top, right, bottom
+var $04ac box_left
+var $04ad box_top
+var $04ae box_right
+var $04af box_bottom
+var $04b0 enemy_boxes 80
+
+# Level
+var $0500 block_buffer1 208     ; metatiles of the two screens around the player
+var $05d0 block_buffer2 208
+var $06a0 block_column_pos
+var $06a1 metatile_column 13
+var $06ae hammer_slot
+var $06b7 coin_jump_slot
+var $06bc brick_coin_active
+var $06be misc_contact 9
+var $06cb frenzy_enemy
+var $06cc hard_mode_late
+var $06cd frenzy_queue
+var $06ce fireball_count
+var $06cf copy_slot
+var $06d1 lakitu_return_timer
+var $06d3 group_enemy_count
+var $06d4 palette_cycle_pos
+var $06d5 player_gfx_offset
+var $06d6 warp_zone
+var $06d7 fireworks_count
+var $06d9 loop_check_count
+var $06da loop_pass_count
+var $06db spring_force
+var $06dc max_range
+var $06dd move_bit_filter
+var $06de change_area_timer
+var $06e0 shuffle_pos
+var $06e1 shuffle_steps 3
+var $06e4 sprite_slots 15       ; first OAM entry of each object's sprites
+var $06e4 player_sprite_slot
+var $06e5 enemy_sprite_slot 6
+var $06ec block_sprite_slot 2
+var $06ee bubble_sprite_slot 3
+var $06f1 fireball_sprite_slot 2
+var $06f3 misc_sprite_slot 9
+var $06fc joypads 2 : button
+var $06fc joypad1 : button
+var $06fd joypad2 : button
+var $06ff player_scroll_x
+
+# Player physics
+var $0700 player_abs_speed
+var $0701 friction_high
+var $0702 friction_low
+var $0703 running_speed
+var $0704 swimming
+var $0705 player_x_force
+var $0706 jump_cut_speed
+var $0707 jump_origin_y_page
+var $0708 jump_origin_y
+var $0709 gravity
+var $070a gravity_falling
+var $070b player_changing_size
+var $070c player_anim_period
+var $070d player_anim_frame
+var $070e spring_anim_step
+var $070f flagpole_contact_y
+var $0710 entrance_kind
+var $0711 fireball_throw_timer
+var $0712 death_music_queued
+var $0713 flagpole_sound
+var $0714 crouching
+var $0715 time_limit
+var $0716 collisions_off
+var $0717 demo_action
+var $0718 demo_action_timer
+var $0719 message_step
+var $071a screen_left_page
+var $071b screen_right_page
+var $071c screen_left_x
+var $071d screen_right_x
+var $071e column_sets
+var $071f parser_task
+var $0720 nt_address_high
+var $0721 nt_address_low
+var $0722 status_bar_split
+var $0723 scroll_locked
+var $0725 parser_page
+var $0726 parser_column
+var $0727 terrain_kind
+var $0728 backloading
+var $0729 parser_behind
+var $072a area_obj_page
+var $072b area_obj_page_set
+var $072c area_data_pos
+var $072d area_obj_pos 3
+var $0730 area_obj_length 3
+var $0733 area_style
+var $0734 staircase_step
+var $0735 area_obj_height
+var $0736 ledge_half_length
+var $0739 enemy_data_pos
+var $073a enemy_obj_page
+var $073b enemy_obj_page_set
+var $073c screen_task
+var $073d scrolled_32
+var $073f scroll_x
+var $0740 scroll_y
+var $0741 foreground_scenery
+var $0742 background_scenery
+var $0743 cloud_override
+var $0744 background_color
+var $0745 loop_command
+var $0746 star_flag_task
+var $0747 timers_paused
+var $0748 coins_for_1ups
+var $0749 message_step2
+var $074a joypad_masks 2
+var $074e area_kind : area_kind
+var $074f area_pointer_offset
+var $0750 area_pointer
+var $0751 entrance_page
+var $0752 alt_entrance
+var $0753 current_player
+var $0754 player_small
+var $0755 player_scroll_pos
+var $0756 player_power : power
+var $0757 reload_time_limit
+var $0758 joypad_override : button
+var $0759 time_up
+var $075a player_info 7         ; lives, halfway page, level, hidden 1-up, coins, world, area
+var $075a lives
+var $075b halfway_page
+var $075c level_number
+var $075d hidden_1up
+var $075e coins
+var $075f world_number
+var $0760 area_number
+var $0761 other_player_info 7
+var $0761 other_lives
+var $0762 other_halfway_page
+var $0763 other_level_number
+var $0764 other_hidden_1up
+var $0765 other_coins
+var $0766 other_world_number
+var $0767 other_area_number
+var $0768 scroll_fraction
+var $0769 skip_intermission
+var $076a hard_mode
+var $076b world_select
+var $0770 game_mode : game_mode ; what the main loop runs
+var $0772 game_mode_task
+var $0773 vram_list_select
+var $0774 screen_off
+var $0775 scroll_amount
+var $0776 pause_state
+var $0777 pause_timer
+var $0778 ppu_ctrl_copy
+var $0779 ppu_mask_copy
+var $077a player_count
+var $077f interval_timer_period
+
+# Timers (count down every frame or every interval)
+var $0780 timers 36
+var $0780 select_timer
+var $0781 player_anim_timer
+var $0782 jump_swim_timer
+var $0783 running_timer
+var $0784 block_bounce_timer
+var $0785 side_contact_timer
+var $0786 spring_timer
+var $0787 tick_timer
+var $0789 climb_side_timer
+var $078a enemy_frame_timer 5
+var $078f frenzy_timer
+var $0790 bowser_breath_timer
+var $0791 stomp_timer
+var $0792 air_bubble_timer 3
+var $0795 scroll_timer
+var $0796 enemy_interval_timer 7
+var $079d brick_coin_timer
+var $079e injury_timer
+var $079f star_timer
+var $07a0 screen_timer
+var $07a1 world_end_timer
+var $07a2 demo_timer
+var $07a7 random 7
+
+# Sound engine
+var $07b0 noise_music_pos
+var $07b1 event_music_playing
+var $07b2 pause_sound_playing
+var $07b3 pulse2_note_length
+var $07b4 pulse2_note_counter
+var $07b5 pulse2_envelope
+var $07b6 pulse1_note_counter
+var $07b7 pulse1_envelope
+var $07b8 triangle_note_length
+var $07b9 triangle_note_counter
+var $07ba noise_beat_counter
+var $07bb pulse1_sfx_counter
+var $07bd pulse2_sfx_counter
+var $07be sfx_step
+var $07bf noise_sfx_counter
+var $07c0 dmc_counter
+var $07c1 noise_loop_pos
+var $07c4 note_length_add
+var $07c5 area_music_saved
+var $07c6 sound_paused
+var $07c7 ground_music_header
+var $07ca alt_registers
+
+# Score and status bar digits
+var $07d7 digits 36
+var $07d7 top_score 6
+var $07dd player_score 6
+var $07f8 time_digits 3
+var $07fc world_select_unlocked
+var $07fd continue_world
+var $07ff warm_boot_marker
+
+# Program ROM
+routine $8000 reset                     ; power-on and reset: clear memory, set up the display, then idle
+table $805a vram_lists_low 19
+table $806d vram_lists_high 19
+table $8080 vram_list_reset_offsets 2
+routine $8082 frame_interrupt           ; once per frame: present the display updates, then run the game
+routine $8182 handle_pause              ; start toggles pause while playing
+routine $81c6 shuffle_sprite_slots      ; rotate OAM slots so that dropped sprites flicker instead of vanishing
+routine $8212 run_game_mode             ; dispatch on the game mode (title, playing, victory, game over)
+table $8218 game_mode_tasks 8
+routine $8220 hide_all_sprites
+routine $8223 hide_sprites_but_zero
+routine $8225 hide_sprites_from
+routine $8231 title_mode
+table $8237 title_mode_tasks 8
+table $823f world_select_template 6
+routine $8245 title_menu                ; title screen input: start, world select, demo
+routine $830e start_continue
+table $831d player_select_icon_data 8
+routine $8325 draw_player_select_icon
+table $8340 demo_buttons 21
+table $8355 demo_durations 22
+routine $836b play_demo                 ; feed recorded buttons to the player in attract mode
+routine $838b victory_mode
+routine $83a0 run_victory_task
+table $83a6 victory_tasks 10
+routine $83b0 start_victory
+routine $83bd victory_walk
+routine $83f6 show_victory_messages
+routine $845d next_game_mode_task
+routine $8461 finish_world
+table $849f popup_tiles 24
+table $84b7 popup_score_digits 12
+routine $84c3 update_score_popups       ; floating score numbers after defeating enemies
+routine $8567 run_screen_task
+table $856d screen_tasks 30
+routine $858b clear_screen_task
+routine $859b intermission_setup
+table $85bb area_palette_lists 4
+routine $85bf queue_area_palette
+routine $85c5 select_vram_list
+routine $85c8 next_screen_task
+table $85cb background_color_lists 4
+table $85cf background_colors 8
+table $85d7 player_colors 12
+routine $85e3 queue_background_color
+routine $85f1 queue_player_colors
+routine $863f set_vram_list1_length
+routine $8643 queue_mushroom_palette
+routine $864c select_vram_list_b
+routine $864f skip_mushroom_palette
+routine $8652 draw_status_bar_top
+routine $865a draw_status_bar_bottom
+routine $8693 show_time_up
+routine $86a8 show_intermission
+routine $86c7 start_intermission
+routine $86e6 render_area_columns       ; build the screen column by column while the display is off
+routine $86ff draw_title_screen
+routine $8732 clear_lists_draw_icon
+routine $8745 next_screen_task_b
+routine $8749 draw_top_score
+routine $874e next_game_mode_task_b
+table $8752 text_status_bar 39
+table $8779 text_world_lives 31
+table $8798 text_time_up_2p 8
+table $87a0 text_time_up_1p 11
+table $87ab text_game_over_2p 8
+table $87b3 text_game_over_1p 13
+table $87c0 text_warp_zone 45
+table $87ed text_luigi 5
+table $87f2 text_warp_numbers 12
+table $87fe text_offsets 10
+routine $8808 queue_text                ; copy one of the text lists into the VRAM update list
+routine $889d wait_screen_timer
+routine $88a5 restart_screen_timer
+routine $88ae render_column             ; turn one column of metatiles into a VRAM update
+routine $896a render_attributes
+routine $89bd select_vram_list2
+table $89c3 cycling_palette_ids 6
+table $89c9 blank_palette 8
+table $89d1 cycling_palettes 16
+routine $89e1 cycle_palette             ; animate the question-block palette every eighth frame
+table $8a39 block_tile_offsets 20
+routine $8a4d erase_coin_or_axe
+routine $8a61 redraw_block
+routine $8a6b redraw_block_blank
+routine $8a6d queue_block_tiles
+routine $8a8f advance_vram_list
+routine $8a97 queue_metatile
+routine $8acd queue_metatile_tiles
+table $8b08 metatile_sets_low 4
+table $8b0c metatile_sets_high 4
+table $8b10 metatiles_palette0 156
+table $8bac metatiles_palette1 184
+table $8c64 metatiles_palette2 40
+table $8c8c metatiles_palette3 24
+table $8ca4 palettes_water 36
+table $8cc8 palettes_ground 36
+table $8cec palettes_underground 36
+table $8d10 palettes_castle 36
+table $8d34 palette_day_snow 8
+table $8d3c palette_night_snow 8
+table $8d44 palette_mushroom 8
+table $8d4c palette_bowser 8
+table $8d54 text_thanks_mario 20
+table $8d68 text_thanks_luigi 20
+table $8d7c text_other_castle 44
+table $8da8 text_quest_over 23
+table $8dbf text_new_quest 31
+table $8dde text_press_b 17
+table $8def text_select_world 21
+routine $8e04 dispatch                  ; jump through the address table that follows the call, indexed by A
+routine $8e19 clear_screens
+routine $8e2d clear_screen
+routine $8e5c read_joypads
+routine $8e6a read_joypad
+routine $8edd apply_vram_list
+routine $8ee6 set_scroll
+routine $8eed set_ppu_ctrl
+table $8ef4 counter_positions 12
+table $8f00 counter_offsets 6
+routine $8f06 queue_player_counters
+routine $8f11 queue_counter_digits      ; write a score, coin count or time to the VRAM update list
+routine $8f5f add_digits                ; decimal add with carry across score or time digits
+routine $8f97 update_top_score
+routine $8f9e check_top_score
+table $8fbc default_sprite_slots 15
+table $8fcb sprite_zero 4
+routine $8fcf start_game                ; clear game memory and enter the first area
+routine $8fe4 start_area                ; reset area state and position the player at the entrance
+routine $9061 setup_new_game
+routine $9071 setup_area_display
+routine $90cc clear_memory              ; clear RAM below the offset in Y, sparing the stack in use
+table $90e7 area_music_kinds 6
+routine $90ed queue_area_music
+table $9116 entrance_x_positions 4
+table $911a entrance_alt_y 2
+table $911c entrance_y_positions 9
+table $9125 entrance_priorities 8
+table $912d time_limits 4
+routine $9131 place_player              ; entrance kind, starting position and time limit
+table $91bd halfway_pages 16
+routine $91cd lose_life
+routine $9218 game_over_mode
+table $921e game_over_tasks 6
+routine $9224 start_game_over
+routine $9237 game_over_screen
+routine $9248 end_game
+routine $9264 continue_game
+routine $9282 switch_players
+routine $92aa set_unused_flag
+routine $92af do_nothing
+routine $92b0 run_parser_task
+routine $92c8 run_parser_subtask
+table $92cb parser_tasks 16
+routine $92db advance_column
+table $92f7 background_scene_offsets 3
+table $92fa background_scenes 144
+table $938a background_scene_metatiles 36
+table $93ae foreground_scene_offsets 3
+table $93b1 foreground_scenes 39
+table $93d8 terrain_metatiles 4
+table $93dc terrain_patterns 32
+routine $93fc parse_area_column         ; decode the level layout for one metatile column
+table $9504 block_buffer_limits 4
+routine $9508 process_area_objects
+routine $9589 next_area_object
+routine $9595 decode_area_object
+routine $9645 check_loop_object
+table $9667 area_object_handlers 94
+routine $96c5 change_area_attributes
+routine $96f2 warp_zone_lock
+routine $970d lock_scroll
+routine $9716 remove_enemies
+table $9728 frenzy_kinds 3
+routine $972b start_frenzy
+routine $9740 draw_area_style_object
+table $9746 area_style_handlers 6
+routine $974c draw_tree_ledge
+routine $9778 draw_mushroom_ledge
+routine $97aa draw_stem_full
+routine $97b0 draw_stem_none
+table $97b7 pulley_rope_metatiles 3
+routine $97ba draw_pulley_rope
+table $97cf castle_metatiles 55
+routine $9806 draw_castle
+routine $986f draw_water_pipe
+routine $9882 draw_intro_pipe
+table $989f side_pipe_shafts 4
+table $98a3 side_pipe_tops 4
+table $98a7 side_pipe_bottoms 4
+routine $98ab draw_exit_pipe
+routine $98b3 draw_side_pipe
+table $98dd vertical_pipe_metatiles 8
+routine $98e5 draw_vertical_pipe        ; may also spawn a piranha plant
+routine $9939 get_pipe_height
+routine $994a find_free_enemy_slot
+routine $9957 draw_water_hole
+routine $9968 draw_question_row_high
+routine $996b draw_question_row_low
+routine $996d draw_question_row
+routine $9979 draw_bridge_high
+routine $997c draw_bridge_middle
+routine $997e draw_bridge_at_row_middle
+routine $997f draw_bridge_low
+routine $9981 draw_bridge_at_row
+routine $9994 draw_flag_balls
+routine $999e draw_flagpole
+routine $99d0 draw_endless_rope
+routine $99d7 draw_balance_rope
+routine $99e9 draw_rope
+table $99ee coin_metatiles 4
+routine $99f2 draw_coin_row
+table $99fb small_object_rows 3
+table $99fe small_object_metatiles 3
+routine $9a01 draw_castle_bridge
+routine $9a09 draw_axe
+routine $9a0e draw_small_object
+routine $9a19 draw_empty_block
+routine $9a20 draw_single_column
+table $9a25 solid_block_metatiles 4
+table $9a29 brick_metatiles 5
+routine $9a2e draw_brick_row
+routine $9a3e draw_solid_row
+routine $9a44 draw_row_of
+routine $9a48 draw_row_height1
+routine $9a50 draw_brick_column
+routine $9a59 draw_solid_column
+routine $9a5f draw_column_of
+routine $9a69 draw_cannon
+table $9aa5 staircase_heights 9
+table $9aae staircase_rows 9
+routine $9ab7 draw_staircase
+routine $9ad3 place_spring
+routine $9b01 draw_hidden_1up
+routine $9b0e draw_question_block
+routine $9b14 draw_coin_brick
+routine $9b19 draw_item_brick
+routine $9b2c draw_block_metatile
+routine $9b36 get_area_object_kind
+table $9b3d hole_metatiles 4
+routine $9b41 draw_hole                 ; also sets up whirlpools in water areas
+routine $9b7d fill_column_down
+routine $9bac get_object_length
+routine $9baf get_object_fixed_length
+routine $9bbb get_object_row_size
+routine $9bcb get_object_x
+routine $9bd3 get_object_y
+table $9bdd block_buffer_addresses 4
+routine $9be1 get_block_buffer_address
+table $9bf8 loop_area_offsets 11
+routine $9c03 load_area_pointer
+routine $9c09 get_area_kind
+routine $9c13 find_area_pointer
+routine $9c22 load_area_data            ; level layout and enemy list pointers, header attributes
+table $9cb4 world_area_offsets 8
+table $9cbc areas_world1 5
+table $9cc1 areas_world2 5
+table $9cc6 areas_world3 4
+table $9cca areas_world4 5
+table $9ccf areas_world5 4
+table $9cd3 areas_world6 4
+table $9cd7 areas_world7 5
+table $9cdc areas_world8 4
+table $9ce0 enemy_list_kind_offsets 4
+table $9ce4 enemy_lists_low 34
+table $9d06 enemy_lists_high 34
+table $9d28 area_layout_kind_offsets 4
+table $9d2c area_layouts_low 34
+table $9d4e area_layouts_high 34
+table $9d70 castle_enemies_1 39
+table $9d97 castle_enemies_2 25
+table $9db0 castle_enemies_3 47
+table $9ddf castle_enemies_4 43
+table $9e0a castle_enemies_5 21
+table $9e1f castle_enemies_6 58
+table $9e59 ground_enemies_1 37
+table $9e7e ground_enemies_2 29
+table $9e9b ground_enemies_3 14
+table $9ea9 ground_enemies_4 39
+table $9ed0 ground_enemies_5 49
+table $9f01 ground_enemies_6 30
+table $9f1f ground_enemies_7 29
+table $9f3c ground_enemies_8 21
+table $9f51 ground_enemies_9 42
+table $9f7b ground_enemies_10 1
+table $9f7c ground_enemies_11 36
+table $9fa0 ground_enemies_12 9
+table $9fa9 ground_enemies_13 37
+table $9fce ground_enemies_14 35
+table $9ff1 ground_enemies_15 9
+table $9ffa ground_enemies_16 1
+table $9ffb ground_enemies_17 58
+table $a035 ground_enemies_18 43
+table $a060 ground_enemies_19 46
+table $a08e ground_enemies_20 28
+table $a0aa ground_enemies_21 9
+table $a0b3 ground_enemies_22 37
+table $a0d8 underground_enemies_1 45
+table $a105 underground_enemies_2 46
+table $a133 underground_enemies_3 45
+table $a160 water_enemies_1 17
+table $a171 water_enemies_2 42
+table $a19b water_enemies_3 20
+table $a1af castle_layout_1 97
+table $a210 castle_layout_2 127
+table $a28f castle_layout_3 115
+table $a302 castle_layout_4 109
+table $a36f castle_layout_5 139
+table $a3fa castle_layout_6 113
+table $a46b ground_layout_1 99
+table $a4ce ground_layout_2 105
+table $a537 ground_layout_3 83
+table $a58a ground_layout_4 143
+table $a619 ground_layout_5 117
+table $a68e ground_layout_6 101
+table $a6f3 ground_layout_7 85
+table $a748 ground_layout_8 133
+table $a7cd ground_layout_9 101
+table $a832 ground_layout_10 9
+table $a83b ground_layout_11 63
+table $a87a ground_layout_12 21
+table $a88f ground_layout_13 103
+table $a8f6 ground_layout_14 101
+table $a95b ground_layout_15 115
+table $a9ce ground_layout_16 49
+table $a9ff ground_layout_17 147
+table $aa92 ground_layout_18 115
+table $ab05 ground_layout_19 121
+table $ab7e ground_layout_20 89
+table $abd7 ground_layout_21 43
+table $ac02 ground_layout_22 51
+table $ac35 underground_layout_1 163
+table $acd8 underground_layout_2 161
+table $ad79 underground_layout_3 141
+table $ae06 water_layout_1 63
+table $ae45 water_layout_2 123
+table $aec0 water_layout_3 28
+routine $aedc playing_mode
+table $aee2 playing_mode_tasks 8
+routine $aeea run_game_frame            ; one frame of play: player, enemies, objects, scrolling, drawing
+routine $af6f update_scroll_column
+routine $af93 scroll_with_player
+routine $afc4 scroll_screen
+routine $b000 check_player_offscreen
+table $b034 screen_edge_offsets 2
+table $b036 offscreen_joypad_masks 2
+routine $b038 update_screen_edges
+routine $b04a run_player_task
+table $b04f player_tasks 26
+routine $b069 enter_area                ; walk in, come up a pipe or climb a vine
+routine $b0e6 drive_player
+routine $b0e9 control_player            ; joypad to movement, collisions, animation
+routine $b1c7 vine_climb_in
+routine $b1dd set_alt_entrance
+routine $b1e5 enter_down_pipe
+routine $b200 move_player_down
+routine $b206 enter_side_pipe_exit
+routine $b20b change_area_after_pipe
+routine $b213 change_area
+routine $b21f walk_into_side_pipe
+routine $b233 grow_or_shrink
+routine $b245 injury_blink
+routine $b255 start_size_change
+routine $b269 player_dying
+routine $b273 player_task_done
+routine $b27d get_fire_flower
+routine $b288 cycle_player_palette
+routine $b29a reset_player_palette
+routine $b2a4 slide_down_flagpole
+table $b2c2 hidden_1up_coin_counts 8
+routine $b2ca walk_to_castle
+routine $b315 next_area
+routine $b329 move_player
+table $b351 player_movement_states 9
+routine $b35a move_on_ground
+routine $b36d move_falling
+routine $b376 move_jumping_or_swimming
+routine $b3ac move_in_air
+table $b3c7 climb_steps_low 4
+table $b3cb climb_steps_high 4
+routine $b3cf move_climbing
+table $b424 jump_gravity 7
+table $b42b fall_gravity 7
+table $b432 jump_speeds 7
+table $b439 jump_initial_force 7
+table $b440 max_left_speeds 3
+table $b443 max_right_speeds 4
+table $b447 friction_amounts 3
+table $b44a climb_speeds 3
+table $b44d climb_forces 3
+routine $b450 player_physics            ; jumping, swimming, climbing and walking speeds
+table $b58c player_anim_periods 3
+routine $b58f set_player_anim_speed
+routine $b5cc apply_friction
+routine $b624 update_fireballs_and_bubbles
+table $b687 fireball_speeds 2
+routine $b689 update_fireball
+routine $b6f9 update_bubble
+routine $b70b spawn_bubble
+routine $b732 move_bubble
+table $b74b bubble_forces 2
+table $b74d bubble_intervals 2
+routine $b74f tick_time_limit
+routine $b7a4 warp_zone_trigger
+routine $b7b8 update_whirlpools
+table $b84b flagpole_score_bounds 5
+table $b850 flagpole_score_digits 5
+routine $b855 update_flagpole
+table $b8b6 spring_offsets 4
+routine $b8ba update_spring
+routine $b91e spawn_vine
+table $b949 vine_heights 2
+routine $b94b update_vine
+table $b9ba cannon_masks 2
+routine $b9bc update_cannons
+table $ba31 bullet_speeds 2
+routine $ba33 update_bullet
+table $ba89 hammer_slots 9
+table $ba92 hammer_speeds 2
+routine $ba94 spawn_hammer
+routine $bac3 update_hammer
+routine $bb38 spawn_block_coin
+routine $bb51 spawn_jumping_coin
+routine $bb6c launch_coin
+routine $bb84 find_free_misc_slot
+routine $bb96 update_misc_objects
+table $bbf8 coin_digit_offsets 2
+table $bbfa score_digit_offsets 2
+table $bbfc counter_selectors 2
+routine $bbfe give_coin
+routine $bc27 add_score
+routine $bc30 queue_counters_for_player
+routine $bc36 queue_counters
+routine $bc60 spawn_powerup
+routine $bc85 update_powerup
+table $bceb block_y_offsets 2
+routine $bced bump_head                 ; the player hit a block from below
+routine $bd84 place_block_object
+routine $bd9b bump_block
+table $bdc0 block_contents_handlers 18
+routine $bdd2 block_gives_mushroom
+routine $bdd5 block_gives_star
+routine $bdd7 block_gives_kind_star
+routine $bdd8 block_gives_1up
+routine $bdda block_gives_kind
+routine $bddf block_gives_vine
+table $bde8 bumpable_metatiles 14
+routine $bdf6 find_bumped_metatile
+routine $be02 shatter_brick
+routine $be1f collect_coin_above
+routine $be41 spawn_brick_chunks
+routine $be70 update_block_objects
+routine $bed4 update_block_metatiles
+routine $bf02 move_enemy_x
+routine $bf09 move_player_x
+routine $bf0f move_object_x             ; add speed (4.4 fixed point) to position and page
+routine $bf63 move_enemy_down_fast
+routine $bf6b move_falling_platform
+routine $bf6d move_vertically
+routine $bf88 move_drop_platform
+routine $bf8c move_enemy_down_slow
+routine $bf8e set_max_speed_mid
+routine $bf92 move_enemy_jumping
+routine $bf94 set_max_speed_high
+routine $bf96 apply_gravity_enemy
+table $bf9f block_max_speeds 2
+routine $bfa4 apply_gravity_block
+routine $bfad apply_gravity_object
+routine $bfb4 move_platform_down
+routine $bfb7 move_platform_up
+routine $bfb9 move_platform
+routine $bfd1 move_paratroopa_vertically
+routine $bfd7 apply_gravity             ; vertical speed, sub-pixel force and position with a speed cap
+routine $c047 update_enemies_and_loops
+table $c06b loop_worlds 11
+table $c076 loop_pages 11
+table $c081 loop_y_positions 11
+routine $c08c load_enemies_and_loops    ; loop commands and spawning enemies from the enemy list
+routine $c226 spawn_enemy
+routine $c26c init_enemy
+table $c282 enemy_initializers 110
+routine $c2f0 init_nothing
+routine $c2f1 init_goomba
+routine $c2f7 init_podoboo
+routine $c307 init_retainer
+table $c30c walk_speeds 2
+routine $c30e init_walker
+routine $c319 set_enemy_speed
+routine $c31e init_red_koopa
+table $c326 hammer_bro_walk_times 2
+routine $c328 init_hammer_bro
+routine $c33d init_flyer_or_swimmer
+routine $c342 init_blooper
+routine $c346 set_small_box
+routine $c34a init_red_paratroopa
+routine $c35a set_tall_box
+routine $c35c set_box_facing_left
+routine $c363 clear_vertical_motion
+routine $c36b init_bullet
+routine $c375 init_cheep_cheep
+routine $c385 init_lakitu
+routine $c38a setup_lakitu
+table $c398 lakitu_aim_offsets 12
+routine $c3a4 update_lakitu_spawner     ; bring Lakitu back and throw spinies
+table $c44f firebar_speeds 5
+table $c454 firebar_directions 5
+routine $c459 init_long_firebar
+routine $c45c init_firebar
+table $c488 flying_fish_x_offsets 16
+table $c498 flying_fish_speeds 12
+table $c4a4 flying_fish_intervals 4
+routine $c4a8 init_flying_fish
+routine $c549 init_bowser
+routine $c575 copy_enemy
+table $c59d flame_heights 4
+table $c5a1 flame_force_offsets 2
+routine $c5a3 init_bowser_flame
+routine $c5d8 place_flame
+routine $c61f finish_flame
+table $c631 firework_x_offsets 6
+table $c637 firework_y_offsets 6
+routine $c63d init_firework
+table $c68a bit_masks 8
+table $c692 frenzy_y_positions 8
+table $c69a swimming_fish_kinds 2
+routine $c69c spawn_frenzy_enemy        ; bullet bills or cheep cheeps arriving from the side
+routine $c787 init_piranha
+routine $c7a0 init_frenzy
+table $c7ab frenzy_initializers 12
+routine $c7b7 init_no_frenzy
+routine $c7b8 end_frenzy
+routine $c7d1 init_bouncing_paratroopa
+routine $c7d9 set_tall_box_b
+routine $c7db set_box_kind
+routine $c7df init_balance_platform
+routine $c803 init_drop_platform
+routine $c80b init_side_platform
+routine $c812 init_vertical_platform
+routine $c828 init_platform
+routine $c82b set_platform_box
+routine $c83f large_lift_up
+routine $c845 large_lift_down
+routine $c848 large_lift_box
+routine $c84b small_lift_up
+routine $c857 small_lift_down
+routine $c860 small_lift_common
+table $c86b platform_offset_low 3
+table $c86e platform_offset_high 3
+routine $c871 offset_platform
+routine $c881 finish_enemy_init
+table $c892 enemy_runners 68
+routine $c8d6 run_nothing
+routine $c8d7 run_retainer
+routine $c8e0 run_normal_enemy
+routine $c905 move_enemy
+table $c90a enemy_movers 42
+routine $c934 move_nothing
+routine $c935 run_bowser_flame
+routine $c947 run_firebar
+routine $c94d run_small_platform
+routine $c965 run_large_platform
+routine $c982 move_large_platform
+table $c98a large_platform_movers 14
+routine $c998 erase_enemy
+routine $c9b0 move_podoboo
+table $c9ce hammer_throw_masks 2
+table $c9d0 walk_speed_adders 4
+table $c9d4 revived_speeds 4
+routine $c9d8 update_hammer_bro
+table $ca10 hammer_bro_jump_lengths 2
+routine $ca37 hammer_bro_jump
+routine $ca58 hammer_bro_walk
+routine $ca77 move_walker
+routine $cae5 move_defeated_enemy
+routine $caf9 move_hopping_paratroopa
+routine $caff move_red_paratroopa
+routine $cb25 move_green_paratroopa
+routine $cb45 sway_green_paratroopa
+routine $cb47 sway_counters             ; oscillating primary/secondary counters for back-and-forth motion
+routine $cb66 sway_offset
+table $cb87 blooper_masks 2
+routine $cb89 move_blooper
+routine $cbdf blooper_swim
+routine $cc36 move_bullet
+table $cc46 swimming_fish_speeds 4
+routine $cc4a move_swimming_fish
+table $ccc7 firebar_offsets 99
+table $cd2a firebar_mirrors 4
+table $cd2e firebar_table_offsets 12
+table $cd3a firebar_y_positions 2
+routine $cd3c update_firebar
+routine $cdbb draw_firebar_ball
+routine $ce08 firebar_ball_collision
+routine $ce8e firebar_ball_position
+table $ced5 random_y_ranges 5
+table $ceda flying_fish_priorities 5
+routine $cedf move_flying_fish
+table $cf25 lakitu_speed_adjust 3
+routine $cf28 move_lakitu
+routine $cf6c lakitu_chase
+table $cfdd bridge_tile_columns 15
+routine $cfec collapse_bridge
+routine $d00f move_dying_bowser
+table $d061 bowser_move_ranges 4
+routine $d065 run_bowser
+routine $d071 kill_all_enemies
+routine $d17b draw_bowser
+routine $d1bc bowser_half
+table $d1d1 flame_timers 8
+routine $d1d9 next_flame_timer
+routine $d1eb update_bowser_flame
+routine $d295 run_firework
+table $d2cd star_flag_y_offsets 4
+table $d2d1 star_flag_x_offsets 4
+table $d2d5 star_flag_tiles 4
+routine $d2d9 run_star_flag
+table $d2e8 star_flag_tasks 10
+routine $d2f2 count_fireworks
+routine $d30e next_star_flag_task
+routine $d311 star_flag_done
+routine $d312 award_time_points
+routine $d336 award_area_points
+routine $d34e raise_star_flag
+routine $d365 draw_star_flag
+routine $d39e next_star_flag_task_b
+routine $d3a2 wait_area_end
+routine $d3b0 move_piranha
+routine $d410 spin_firebar
+routine $d432 update_balance_platform
+routine $d541 draw_platform_rope
+routine $d5b1 stop_balance_platforms
+routine $d5d3 move_vertical_platform
+routine $d5fe carry_player_vertically
+routine $d607 move_side_platform
+routine $d614 carry_player_horizontally
+routine $d631 drop_platform
+routine $d63d right_platform
+routine $d64f move_large_lift
+routine $d655 move_small_lift
+routine $d65b move_lift
+routine $d67a check_enemy_offscreen
+routine $d6d9 fireball_enemy_collision
+table $d736 bowser_lookalikes 8
+routine $d73e fireball_hit_enemy
+routine $d795 defeat_enemy
+routine $d7bc smack_enemy_score
+routine $d7c4 player_hammer_collision
+table $d84d leftover_speeds 2
+table $d84f kicked_shell_speeds 2
+table $d851 demoted_koopa_speeds 2
+routine $d853 player_enemy_collision
+table $d892 kicked_shell_points 3
+routine $d92c injure_player
+routine $d931 force_injury
+routine $d948 set_player_routine
+routine $d955 end_injury_check
+table $d965 stomp_points 4
+table $d9d2 revival_rates 2
+routine $da05 face_player
+routine $da11 spawn_floating_score
+table $da25 set_bit_masks 7
+table $da2c clear_bit_masks 7
+routine $da33 enemy_enemy_collisions
+routine $dab4 enemy_pair_collision
+routine $db1c turn_enemy_around
+routine $db36 reverse_enemy
+routine $db45 large_platform_collision
+routine $db5f player_on_large_platform
+routine $db78 large_platform_collision_done
+routine $db7b small_platform_collision
+routine $dbbc platform_landing
+table $dc17 small_platform_y_offsets 2
+routine $dc19 place_player_on_small_platform
+routine $dc21 place_player_on_vertical_platform
+routine $dc23 place_player_on_platform_y
+routine $dc41 check_player_vertical
+routine $dc52 enemy_box_offset
+routine $dc54 enemy_box_offset_for
+table $dc62 player_bg_top_extents 2
+routine $dc64 player_bg_collision
+table $de03 area_change_timers 2
+routine $de1c erase_metatile
+table $de25 climb_x_offsets 2
+table $de27 climb_page_offsets 2
+table $de29 flagpole_heights 5
+routine $debd is_hidden_block
+routine $dec4 check_spring_landing
+routine $dedd is_spring_metatile
+routine $dee8 enter_pipe
+routine $df4b block_player_side
+table $df8b solid_metatile_limits 4
+routine $df8f is_solid_metatile
+table $df96 climb_metatile_limits 4
+routine $df9a is_climb_metatile
+routine $dfa1 is_coin_metatile
+routine $dfb0 metatile_group
+table $dfb9 enemy_bg_states 6
+table $dfbf enemy_bg_speeds 2
+routine $dfc1 enemy_bg_collision
+routine $e01b check_stun_enemy
+routine $e02f stun_enemy
+routine $e0fe enemy_side_check
+routine $e124 enemy_bump
+routine $e143 player_enemy_distance
+routine $e14f land_enemy
+routine $e15b enemy_height_check
+routine $e163 enemy_jump_check
+routine $e18e kill_enemy_on_block
+routine $e1ae check_under_enemy
+routine $e1b5 is_passable_metatile
+routine $e1c8 fireball_bg_collision
+table $e1fd box_sizes 48                ; left, top, right and bottom offsets by box kind
+routine $e22d fireball_box
+routine $e236 misc_box
+routine $e23d fireball_box_common
+routine $e243 enemy_box
+routine $e24c small_platform_box
+routine $e252 enemy_box_offscreen_bits
+routine $e273 large_platform_box
+routine $e27c enemy_box_core
+routine $e289 hide_box
+routine $e29c compute_box
+routine $e2de clip_box_to_screen
+routine $e325 player_collides
+routine $e327 objects_collide           ; bounding box overlap test, carry set on collision
+routine $e388 enemy_block_check
+routine $e39c fireball_block_check
+routine $e3a5 block_check_common
+table $e3ad block_probe_starts 3
+table $e3b0 block_probe_x 28
+table $e3cc block_probe_y 28
+routine $e3e8 block_probe_feet
+routine $e3e9 block_probe_head
+routine $e3ec block_probe_side
+routine $e3ee block_probe_player
+routine $e3f0 block_probe               ; metatile at an object's probe point
+table $e433 vine_y_offsets 2
+routine $e435 draw_vine
+routine $e4ae stack_six_sprites
+table $e4c0 hammer_first_x 4
+table $e4c4 hammer_first_y 4
+table $e4c8 hammer_second_x 4
+table $e4cc hammer_second_y 4
+table $e4d0 hammer_first_tiles 4
+table $e4d4 hammer_second_tiles 4
+table $e4d8 hammer_attributes 4
+routine $e4dc draw_hammer
+table $e541 flagpole_score_tiles 10
+routine $e54b draw_flagpole_flag
+routine $e5b3 hide_six_sprites
+routine $e5b5 fill_six_sprites
+routine $e5bb fill_four_sprites
+routine $e5be fill_three_sprites
+routine $e5c1 fill_two_sprites
+routine $e5c8 draw_large_platform
+table $e682 jumping_coin_tiles 4
+routine $e686 draw_coin_or_score
+table $e6be powerup_tiles 16
+table $e6ce powerup_attributes 4
+routine $e6d2 draw_powerup
+table $e73e enemy_tiles 258
+table $e840 enemy_tile_offsets 27
+table $e85b enemy_attributes 27
+table $e876 enemy_animation_masks 2
+table $e878 spring_tile_offsets 5
+routine $e87d draw_enemy
+routine $eb64 clip_enemy_sprites
+routine $ebaa draw_enemy_row
+routine $ebb2 draw_sprite_row
+routine $ebb7 hide_enemy_row
+routine $ebc1 hide_enemy_column
+table $ebcd block_tiles 4
+routine $ebd1 draw_block
+routine $ec46 check_left_column
+routine $ec4a hide_column
+routine $ec53 draw_brick_chunks
+routine $eced draw_firebar_tile
+table $ed06 explosion_tiles 3
+routine $ed17 draw_explosion
+routine $ed66 draw_small_platform
+routine $ede1 draw_bubble
+table $ee07 player_tile_offsets 16
+table $ee17 player_tiles 208            ; two tiles per row, top to bottom
+table $eee7 swim_kick_tiles 2
+routine $eee9 draw_player
+routine $ef34 draw_player_action
+routine $ef45 draw_player_with_offset
+table $ef9e lives_screen_player 6
+routine $efa4 draw_lives_screen_player
+routine $efbe render_player
+routine $efdc draw_player_rows
+routine $efec player_action_offset
+routine $f062 animate_player
+routine $f091 size_offset
+table $f09c change_size_frames 20
+routine $f0b0 animate_size_change
+routine $f0d0 animation_offset
+routine $f0e9 fix_player_attributes
+routine $f12a player_screen_position
+routine $f131 bubble_screen_position
+routine $f13b fireball_screen_position
+routine $f142 screen_position_restore
+routine $f148 misc_screen_position
+routine $f152 enemy_screen_position
+routine $f159 block_screen_position
+routine $f165 screen_position_at
+routine $f171 screen_position           ; coordinates relative to the left edge of the screen
+routine $f180 player_offscreen_bits
+routine $f187 fireball_offscreen_bits
+routine $f191 bubble_offscreen_bits
+routine $f19b misc_offscreen_bits
+table $f1a5 object_slot_offsets 3
+routine $f1a8 object_slot
+routine $f1af enemy_offscreen_bits
+routine $f1b6 block_offscreen_bits
+routine $f1ba offset_slot
+routine $f1c0 offscreen_bits
+routine $f1d7 offscreen_bits_parts
+table $f1e3 x_offscreen_bits 16
+table $f1f3 x_edge_defaults 3
+routine $f1f6 compute_x_offscreen_bits
+table $f22b y_offscreen_bits 9
+table $f234 y_edge_defaults 3
+table $f237 high_position_units 2
+routine $f26d edge_distance_bits
+routine $f2d0 update_sound              ; per-frame sound engine entry point
+routine $f381 set_square1_regs
+routine $f388 play_square1
+routine $f38b set_square1_freq
+routine $f38d set_freq
+routine $f39f set_square2_regs
+routine $f3a6 play_square2
+routine $f3a9 set_square2_freq
+routine $f3ad set_triangle_freq
+table $f3b1 swim_stomp_envelope 14
+routine $f41b square1_sfx
+routine $f4a7 stop_square1_sfx
+table $f4d4 extra_life_notes 6
+table $f4da powerup_grab_notes 30
+table $f4f8 powerup_reveal_notes 32
+routine $f571 stop_square2_sfx
+routine $f57c square2_sfx
+table $f62b brick_shatter_notes 16
+routine $f667 noise_sfx
+routine $f691 continue_music
+routine $f694 update_music
+routine $f8c5 alternate_length
+routine $f8cb note_length
+routine $f8d8 load_square_envelope
+routine $f8f4 load_envelope_entry
+table $f90d song_header_offsets 49
+table $f93e hurry_up_header 5
+table $f943 star_header 6
+table $f949 level_clear_header 5
+table $f94e unused_header 5
+table $f953 underground_header 5
+table $f958 silence_header 4
+table $f95c castle_header 5
+table $f961 victory_header 5
+table $f966 game_over_header 5
+table $f96b water_header 6
+table $f971 castle_clear_header 5
+table $f976 overworld_1_header 6
+table $f97c overworld_2a_header 6
+table $f982 overworld_2b_header 6
+table $f988 overworld_2c_header 6
+table $f98e overworld_3a_header 6
+table $f994 overworld_3b_header 6
+table $f99a overworld_intro_header 6
+table $f9a0 overworld_4a_header 6
+table $f9a6 overworld_4b_header 6
+table $f9ac overworld_4c_header 6
+table $f9b2 death_header 6
+table $f9b8 star_notes 73
+table $fa01 overworld_1_notes 27
+table $fa1c silence_notes 45
+table $fa49 overworld_2a_notes 44
+table $fa75 overworld_2b_notes 40
+table $fa9d overworld_2c_notes 37
+table $fac2 overworld_3a_notes 25
+table $fadb overworld_3b_notes 30
+table $faf9 overworld_intro_notes 44
+table $fb25 overworld_4a_notes 38
+table $fb4b overworld_4b_notes 39
+table $fb72 death_notes 2
+table $fb74 overworld_4c_notes 48
+table $fba4 castle_notes 161
+table $fc45 game_over_notes 45
+table $fc72 hurry_up_notes 62
+table $fcb0 level_clear_notes 97
+table $fd11 underground_notes 65
+table $fd52 water_notes 255
+table $fe51 castle_clear_notes 119
+table $fec8 victory_notes 56
+table $ff00 note_periods 102
+table $ff66 note_lengths 48
+table $ff96 castle_clear_envelope 4
+table $ff9a area_music_envelope 8
+table $ffa2 water_music_envelope 40
+table $ffca bowser_flame_envelope 32
+table $ffea brick_shatter_envelope 16
+table $fffa vectors 6                   ; frame interrupt, reset, IRQ
