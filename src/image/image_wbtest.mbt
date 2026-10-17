@@ -185,3 +185,25 @@ test "raw dumps and iNES files load the same cartridge, identified by hash" {
   // a map that names no dump checks nothing
   assert_eq(parse_map("routine $8000 reset\n").warning(from_raw), None)
 }
+
+test "map types name the values of variables" {
+  let map = parse_map("enum mode title=0 playing=1 ; what runs\nflags button a=$80 b=$40\nvar $0770 game_mode : mode ; main loop\nvar $06fc joypads 2 :button\nvar $0010 plain 4\n")
+  assert_eq(map.types.length(), 2)
+  assert_eq(map.types[0].flags, false)
+  assert_eq(map.types[0].members, [("MODE_TITLE", 0), ("MODE_PLAYING", 1)])
+  assert_eq(map.types[0].description, "what runs")
+  assert_eq(map.types[1].members, [("BUTTON_A", 0x80), ("BUTTON_B", 0x40)])
+  assert_eq(map.entries.map(fn(e) { (e.name, e.length, e.type_name) }), [("GAME_MODE", 0, "mode"), ("JOYPADS", 2, "button"), ("PLAIN", 4, "")])
+  assert_eq(map.entries[0].description, "main loop")
+  // a value's constant is a name like any other
+  let rejected = [
+    "var $0000 mode_title\nenum mode title=0\n",
+    "var $0000 x : missing\n",
+    "flags f none=0\n",
+    "enum e big=256\n",
+    "routine $8000 reset : mode\nenum mode a=1\n",
+  ]
+  for text in rejected {
+    try parse_map(text) catch { _ => () } noraise { _ => fail("accepted: \{text}") }
+  }
+}

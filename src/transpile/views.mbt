@@ -38,6 +38,7 @@ priv struct View {
   kind : ViewKind
   address : Int
   length : Int
+  type_name : String // "" when untyped
   description : String
 }
 
@@ -46,10 +47,11 @@ priv struct Views {
   list : Array[View]
   origin : Int // of the PRG image
   stack : Bool // `stack` names page one
+  types : Map[String, @image.MapType]
 }
 
 fn Views::empty() -> Views {
-  { by_symbol: Map([]), list: [], origin: 0x8000, stack: false }
+  { by_symbol: Map([]), list: [], origin: 0x8000, stack: false, types: Map([]) }
 }
 
 // Identifiers a view must not shadow besides those of the generated code:
@@ -68,9 +70,9 @@ let c_reserved : Array[String] = [
 fn Views::from_map(low : @lower.AsmLowering, reserved : Set[String]) -> Views {
   guard low.program is Some(p) else { return Views::empty() }
   let taken = fn(name : String) { reserved.contains(name) || c_reserved.contains(name) }
-  let views = { ..Views::empty(), origin: p.image.origin }
+  let views = { ..Views::empty(), origin: p.image.origin, types: Map::from_array(p.map.types.map(fn(t) { (t.name, t) })) }
   let seen : Set[String] = Set([])
-  for entry in p.names {
+  for entry in p.map.entries {
     let name = entry.name.to_lower()
     if taken(name) || seen.contains(name) { continue }
     let end = entry.address + (if entry.length > 0 { entry.length } else { 1 })
@@ -83,7 +85,15 @@ fn Views::from_map(low : @lower.AsmLowering, reserved : Set[String]) -> Views {
       _ => continue
     }
     seen.add(name)
-    let view = { name, symbol: entry.name, kind, address: entry.address, length: entry.length, description: entry.description }
+    let view = {
+      name,
+      symbol: entry.name,
+      kind,
+      address: entry.address,
+      length: entry.length,
+      type_name: entry.type_name,
+      description: entry.description,
+    }
     views.by_symbol[entry.name] = view
     views.list.push(view)
   }
@@ -204,6 +214,7 @@ fn Views::header(self : Views) -> String {
   out.write_string("// indexed zero-page addressing does, and past the end of RAM to its\n")
   out.write_string("// start, as the mirrors of RAM do.\n")
   out.write_string("// Included by code.c only, after every other header.\n\n")
+  for t in self.types.values() { out.write_string(type_definition(t) + "\n") }
   if self.stack { out.write_string("#define stack (&ram[0x100]) // the 6502 stack, page one\n") }
   for v in self.list {
     let comment = if v.description == "" { "" } else { " // " + v.description }
@@ -218,4 +229,52 @@ fn Views::header(self : Views) -> String {
   }
   out.write_string("\n#endif\n")
   out.to_string()
+}
+
+// A type of the map as C constants: an anonymous enum, so that its name
+// stays free for the variable of the same name.
+pub fn type_definition(t : @image.MapType) -> String {
+  let out = StringBuilder::new()
+  let what = if t.flags { "bits" } else { "values" }
+  let about = if t.description == "" { "" } else { ": " + t.description }
+  out.write_string("// \{t.name} \{what}\{about}\n")
+  out.write_string("enum {\n")
+  for m in t.members {
+    let value = if t.flags { "0x" + m.1.to_string(radix=16).pad_start(2, '0') } else { m.1.to_string() }
+    out.write_string("  \{m.0} = \{value},\n")
+  }
+  out.write_string("};\n")
+  out.to_string()
+}
+
+// A constant as a value of a type: an enumeration's value by name, bits
+// as the names of those set or, for a mask with most set, of those clear.
+fn Views::constant(self : Views, type_name : String, v : Int, mask~ : Bool = false) -> String? {
+  guard self.types.get(type_name) is Some(t) else { return None }
+  if !t.flags {
+    return t.members.iter().find_first(fn(m) { m.1 == v }).map(fn(m) { m.0 })
+  }
+  fn bits(v : Int) -> String? {
+    let names = []
+    let mut rest = v
+    for m in t.members {
+      if (rest & m.1) == m.1 {
+        names.push(m.0)
+        rest = rest & m.1.lnot()
+      }
+    }
+    if rest == 0 && !names.is_empty() { Some(names.join(" | ")) } else { None }
+  }
+  if v <= 0 || v > 255 { return None }
+  let mut set = 0
+  let mut n = v
+  while n > 0 {
+    set += n & 1
+    n = n >> 1
+  }
+  if set <= 4 || !mask { return bits(v) }
+  match bits(v.lnot() & 0xff) {
+    Some(clear) => Some(if clear.contains("|") { "~(\{clear})" } else { "~" + clear })
+    None => bits(v)
+  }
 }

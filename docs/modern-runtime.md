@@ -18,7 +18,10 @@ gives to the program:
 ```
 routine $8e04 dispatch                  ; jump through the address table that follows the call, indexed by A
 table $8218 game_mode_tasks 8
-var $0770 game_mode
+enum game_mode title=0 playing=1 victory=2 game_over=3
+flags button a=$80 b=$40 select=$20 start=$10 up=$08 down=$04 left=$02 right=$01
+var $0770 game_mode : game_mode
+var $06fc joypad1 : button
 var $0780 timers 36
 io $4015 apu_status
 ```
@@ -28,7 +31,12 @@ io $4015 apu_status
 - `table`: data inside PRG ROM with its length, including the inline jump
   tables after each call to the dispatcher (nothing else marks where those
   instruction streams stop).
-- `var`/`io`: RAM and hardware registers; a length makes an array.
+- `var`/`io`: RAM and hardware registers; a length makes an array, and a
+  type (`: game_mode`) names the variable's values.
+- `enum`/`flags`: the named values of variables, or bits that combine. Each
+  is a C constant named after the type and the value (`GAME_MODE_PLAYING`,
+  `BUTTON_A`); the names share the map's namespace, so a value cannot shadow
+  a variable or a table.
 - `rom`: a dump the map was written for, by the SHA-256 of its PRG then CHR
   ROM (without a header) and their sizes.
 
@@ -223,6 +231,21 @@ so do addresses the map does not name, such as the scratch bytes `$00-$07`.
 The compiled code behaves identically (per-frame traces, routine diff) and
 runs at the same speed. Assembly input has no map, and its C keeps
 addresses.
+
+A constant beside a typed variable is written as the type's value: one it
+is compared with, stored to it, or used to mask or combine it (also when
+the variable is combined with others of its type first). Bits are the names
+of those set; a mask with most of them set names those it clears.
+
+```c
+game_mode = 1;                             ->  game_mode = GAME_MODE_PLAYING;
+if (((joypad1 | joypad2) & 0x40) == 0)     ->  if (((joypad1 | joypad2) & BUTTON_B) == 0)
+a = joypad1 & 0x7f;                        ->  a = joypad1 & ~BUTTON_A;
+if (area_kind == 0)                        ->  if (area_kind == AREA_KIND_WATER)
+```
+
+The types are anonymous C enums in `vars.h` and in `codegen/native/smb.h`,
+and the variables stay bytes.
 
 JSRs are plain C calls: SMB's replay was identical with and without the
 emulated return-address stack, and the generator's static stack checks reject

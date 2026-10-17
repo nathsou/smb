@@ -6,10 +6,15 @@
 //   table   $805a vram_lists_low 19      (length in bytes)
 //   var     $0770 game_mode              (RAM; optional length)
 //   io      $4015 apu_status             (hardware register)
+//   enum    game_mode title=0 playing=1  (named values of a variable)
+//   flags   button a=$80 b=$40           (named bits of a variable)
+//   var     $0770 game_mode : game_mode  (a variable of that type)
 //
 // Routines keep their names, which become C functions. Data names (tables,
 // RAM and registers) become address constants and are upper-cased so they
-// cannot collide with functions, struct fields or library names.
+// cannot collide with functions, struct fields or library names. A type's
+// values are constants named after the type and the value (GAME_MODE_TITLE,
+// BUTTON_A).
 //
 // Code is found by following execution from the vectors, as for assembly
 // input. Inline tables after a call (jump tables) must be listed as tables,
@@ -27,6 +32,15 @@ pub(all) struct MapEntry {
   address: Int
   name: String
   length: Int // bytes; 0 when not given
+  type_name: String // a type of the map for its bytes; "" when not given
+  description: String
+} derive(Debug)
+
+// Names for the values of a variable: an enumeration, or bits that combine.
+pub(all) struct MapType {
+  name: String
+  flags: Bool
+  members: Array[(String, Int)] // constant (TYPE_VALUE) and value
   description: String
 } derive(Debug)
 
@@ -42,7 +56,12 @@ pub(all) struct KnownRom {
 pub(all) struct RomMap {
   entries: Array[MapEntry]
   roms: Array[KnownRom]
+  types: Array[MapType]
 } derive(Debug)
+
+pub fn RomMap::empty() -> RomMap {
+  { entries: [], roms: [], types: [] }
+}
 
 fn parse_number(text: String) -> Int raise ImageError {
   let digits = if text.has_prefix("$") { text.view(start_offset=1).to_owned() } else if text.has_prefix("0x") { text.view(start_offset=2).to_owned() } else { text }
@@ -53,7 +72,12 @@ fn parse_number(text: String) -> Int raise ImageError {
 pub fn parse_map(text: String) -> RomMap raise ImageError {
   let entries = []
   let roms = []
+  let types: Array[MapType] = []
   let names: Set[String] = Set([])
+  fn claim(name: String) raise ImageError {
+    if names.contains(name) { raise InvalidImage("Duplicate map name: \{name}") }
+    names.add(name)
+  }
   for raw_line in text.split("\n") {
     let line = raw_line.to_owned()
     let (body, description) = match line.find(";") {
@@ -69,6 +93,25 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       roms.push({ sha256: fields[1].to_lower(), prg: parse_number(fields[2]), chr: parse_number(fields[3]), label: description })
       continue
     }
+    // enum NAME VALUE=N ... and flags NAME BIT=N ...
+    if fields[0] == "enum" || fields[0] == "flags" {
+      if fields.length() < 3 { raise InvalidImage("Map type needs a name and values: \{line}") }
+      let name = fields[1]
+      if types.iter().any(fn(t) { t.name == name }) { raise InvalidImage("Duplicate map type: \{name}") }
+      let members = []
+      for field in fields[2:] {
+        guard field.find("=") is Some(i) else { raise InvalidImage("Map type value needs NAME=VALUE: \{field}") }
+        let constant = name.to_upper() + "_" + field.view(end_offset=i).to_owned().to_upper()
+        let value = parse_number(field.view(start_offset=i + 1).to_owned())
+        if value < 0 || value > 255 || (fields[0] == "flags" && value == 0) {
+          raise InvalidImage("Map type value out of range: \{field}")
+        }
+        claim(constant)
+        members.push((constant, value))
+      }
+      types.push({ name, flags: fields[0] == "flags", members, description })
+      continue
+    }
     if fields.length() < 3 { raise InvalidImage("Map line needs a kind, an address and a name: \{line}") }
     let kind = match fields[0] {
       "routine" => Routine
@@ -79,13 +122,36 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
     }
     let address = parse_number(fields[1])
     let name = if kind == Routine { fields[2] } else { fields[2].to_upper() }
-    if names.contains(name) { raise InvalidImage("Duplicate map name: \{name}") }
-    names.add(name)
-    let length = if fields.length() > 3 { parse_number(fields[3]) } else { 0 }
+    claim(name)
+    // [LENGTH] [: TYPE]
+    let mut length = 0
+    let mut type_name = ""
+    let mut i = 3
+    while i < fields.length() {
+      let field = fields[i]
+      if field == ":" && i + 1 < fields.length() {
+        type_name = fields[i + 1]
+        i += 2
+      } else if field.has_prefix(":") {
+        type_name = field.view(start_offset=1).to_owned()
+        i += 1
+      } else if i == 3 && type_name == "" {
+        length = parse_number(field)
+        i += 1
+      } else {
+        raise InvalidImage("Unexpected map field: \{field}")
+      }
+    }
     if kind == Table && length <= 0 { raise InvalidImage("Table \{name} needs a length") }
-    entries.push({ kind, address, name, length, description })
+    if type_name != "" && kind != Var { raise InvalidImage("Only variables have a type: \{line}") }
+    entries.push({ kind, address, name, length, type_name, description })
   }
-  { entries, roms }
+  for entry in entries {
+    if entry.type_name != "" && !types.iter().any(fn(t) { t.name == entry.type_name }) {
+      raise InvalidImage("Unknown map type: \{entry.type_name}")
+    }
+  }
+  { entries, roms, types }
 }
 
 pub(all) struct Cartridge {
@@ -357,5 +423,5 @@ pub fn discover_rom(image: Image, map: RomMap) -> Program raise ImageError {
     image.source.push(item)
     image.addresses.push(addresses[i])
   }
-  { image, instructions, dispatches, roots: roots.map(fn(pc) { address_name(image, pc) }), facts, idle, source, addresses, names: map.entries }
+  { image, instructions, dispatches, roots: roots.map(fn(pc) { address_name(image, pc) }), facts, idle, source, addresses, map }
 }

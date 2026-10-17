@@ -1,15 +1,25 @@
 # Super Mario Bros. (NROM-256): names for the recompiler.
 #
-# Each line is "kind $address name [length] ; description". Routines are
-# entry points, tables are data inside PRG ROM (including the inline jump
-# tables that follow calls to the dispatcher), and var/io name RAM and
-# hardware registers; a length makes an array. The names are this
-# project's own.
+# Each line is "kind $address name [length] [: type] ; description".
+# Routines are entry points, tables are data inside PRG ROM (including the
+# inline jump tables that follow calls to the dispatcher), and var/io name
+# RAM and hardware registers; a length makes an array. A type names the
+# values of a variable: "enum NAME VALUE=N ..." or, for bits that combine,
+# "flags NAME BIT=N ...", which the C writes as NAME_VALUE. The names are
+# this project's own.
 #
 # The dump the map was written for: SHA-256 of PRG then CHR ROM, without the
 # iNES header (so it matches headered and raw dumps), and their sizes. It is
 # the dump tests/golden/warpless.trace was recorded with.
 rom fcb6a0ef3a20c19b356005fbb21dc8009563b1cb5a9aaebc8e9386b4a8c5912e 32768 8192 ; Super Mario Bros. (NES)
+
+# Types of variables
+enum game_mode title=0 playing=1 victory=2 game_over=3
+flags button a=$80 b=$40 select=$20 start=$10 up=$08 down=$04 left=$02 right=$01 ; as read from a joypad
+flags direction right=$01 left=$02
+enum player_state on_ground=0 jumping=1 falling=2 climbing=3 ; jumping also while swimming up
+enum power small=0 big=1 fiery=2
+enum area_kind water=0 ground=1 underground=2 castle=3
 
 # Hardware registers
 io $2000 ppu_ctrl
@@ -48,28 +58,28 @@ io $4017 apu_frame_counter     ; written: sequencer mode and reset; read: joypad
 # Zero page
 var $0008 slot                  ; object slot being processed
 var $0009 frame_count
-var $000a buttons_ab            ; A and B, as joypad bits
-var $000b buttons_vertical
-var $000c buttons_horizontal
-var $000d buttons_ab_previous
+var $000a buttons_ab : button   ; A and B, as joypad bits
+var $000b buttons_vertical : button
+var $000c buttons_horizontal : button
+var $000d buttons_ab_previous : button
 var $000e player_task           ; which player routine runs this frame
 var $000f enemy_active 7
 var $0016 enemy_kind 7
 var $001d obj_state 22
-var $001d player_state
+var $001d player_state : player_state
 var $001e enemy_state 6
 var $0024 fireball_state 2
 var $0026 block_state 4
 var $002a misc_state 9
-var $0033 player_facing
+var $0033 player_facing : direction
 var $0034 target_page
 var $0035 victory_walk_step
 var $0039 powerup_kind
 var $003a fireball_bouncing 2
 var $003c hammer_jump_timer 6
 var $0045 obj_dir 18
-var $0045 player_dir
-var $0046 enemy_dir 6
+var $0045 player_dir : direction
+var $0046 enemy_dir 6 : direction
 var $0057 obj_x_speed 22
 var $0057 player_x_speed
 var $0058 enemy_x_speed 6
@@ -280,9 +290,9 @@ var $06ec block_sprite_slot 2
 var $06ee bubble_sprite_slot 3
 var $06f1 fireball_sprite_slot 2
 var $06f3 misc_sprite_slot 9
-var $06fc joypads 2
-var $06fc joypad1
-var $06fd joypad2
+var $06fc joypads 2 : button
+var $06fc joypad1 : button
+var $06fd joypad2 : button
 var $06ff player_scroll_x
 
 # Player physics
@@ -353,7 +363,7 @@ var $0747 timers_paused
 var $0748 coins_for_1ups
 var $0749 message_step2
 var $074a joypad_masks 2
-var $074e area_kind
+var $074e area_kind : area_kind
 var $074f area_pointer_offset
 var $0750 area_pointer
 var $0751 entrance_page
@@ -361,9 +371,9 @@ var $0752 alt_entrance
 var $0753 current_player
 var $0754 player_small
 var $0755 player_scroll_pos
-var $0756 player_power          ; 0 small, 1 big, 2 fiery
+var $0756 player_power : power
 var $0757 reload_time_limit
-var $0758 joypad_override
+var $0758 joypad_override : button
 var $0759 time_up
 var $075a player_info 7         ; lives, halfway page, level, hidden 1-up, coins, world, area
 var $075a lives
@@ -385,7 +395,7 @@ var $0768 scroll_fraction
 var $0769 skip_intermission
 var $076a hard_mode
 var $076b world_select
-var $0770 game_mode             ; title, playing, victory, game over
+var $0770 game_mode : game_mode ; what the main loop runs
 var $0772 game_mode_task
 var $0773 vram_list_select
 var $0774 screen_off

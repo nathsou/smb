@@ -63,15 +63,26 @@ export function highlightC(line) {
     return out;
 }
 
-const MAP_LINE = /^(\s*)(routine|table|var|io)(\s+)(\$[0-9a-fA-F]+)(\s+)(\S+)((?:\s+\d+)?)(\s*)(;.*)?$/;
+const MAP_LINE = /^(\s*)(routine|table|var|io)(\s+)(\$[0-9a-fA-F]+)(\s+)(\S+)((?:\s+\d+)?)((?:\s+:\s*\w+)?)(\s*)(;.*)?$/;
+const MAP_TYPE = /^(\s*)(enum|flags)(\s+)(\w+)([^;]*)(;.*)?$/;
 
 export function highlightMap(line) {
     if (/^\s*#/.test(line)) return span('comment', line);
+    const t = MAP_TYPE.exec(line);
+    if (t) {
+        const [, lead, kind, s1, name, values, comment] = t;
+        return escape(lead) + span('kind kind-type', kind) + escape(s1) + span('type', name) +
+            values.split(/(\s+)/).map(part => {
+                const value = /^(\w+)=(\S+)$/.exec(part);
+                return value ? span('const', value[1]) + '=' + span('number', value[2]) : escape(part);
+            }).join('') + (comment ? span('comment', comment) : '');
+    }
     const m = MAP_LINE.exec(line);
     if (!m) return escape(line);
-    const [, lead, kind, s1, address, s2, name, length, s3, comment] = m;
+    const [, lead, kind, s1, address, s2, name, length, type, s3, comment] = m;
     return escape(lead) + span(`kind kind-${kind}`, kind) + escape(s1) + span('number', address) + escape(s2) +
-        span(kind === 'routine' ? 'call' : 'const', name) + span('number', length) + escape(s3) +
+        span(kind === 'routine' ? 'call' : 'const', name) + span('number', length) +
+        type.replace(/\w+/, word => span('type', word)) + escape(s3) +
         (comment ? span('comment', comment) : '');
 }
 

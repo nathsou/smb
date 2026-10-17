@@ -128,6 +128,31 @@ fn CFunc::access(self : CFunc, space : @ir.Mem, a : @ir.Expr) -> String {
   }
 }
 
+// The map type of a value: a typed variable's, kept by masking and
+// combining it with others of its type.
+fn CFunc::type_of(self : CFunc, e : @ir.Expr) -> String {
+  match e {
+    Load(Ram, a) =>
+      match self.views.place(a) {
+        Some({ view, .. }) => view.type_name
+        None => ""
+      }
+    Binary(And | Or | Xor, l, r) => {
+      let t = self.type_of(l)
+      if t != "" { t } else { self.type_of(r) }
+    }
+    _ => ""
+  }
+}
+
+// `e`, a constant of the type `type_name` by name.
+fn CFunc::typed(self : CFunc, e : @ir.Expr, type_name : String, mask~ : Bool = false) -> String? {
+  match e {
+    Const(v) if type_name != "" => self.views.constant(type_name, v, mask~)
+    _ => None
+  }
+}
+
 fn CFunc::expr(self : CFunc, e : @ir.Expr) -> String {
   self.expr_prec(e).0
 }
@@ -163,6 +188,24 @@ fn CFunc::expr_prec(self : CFunc, e : @ir.Expr) -> (String, Int) {
     Unary(Hi, a) => ("HIGH_BYTE(\{self.expr(a)})", 0)
     Binary(op, l, r) => {
       let p = bin_prec(op)
+      // a constant beside a typed value is a value of that type
+      let typed = match op {
+        Eq | Ne | Lt | Ge | And | Or | Xor =>
+          match (self.typed(r, self.type_of(l), mask=op == And), self.typed(l, self.type_of(r), mask=op == And)) {
+            (Some(name), _) => Some((l, name, false))
+            (_, Some(name)) => Some((r, name, true))
+            _ => None
+          }
+        _ => None
+      }
+      if typed is Some((other, name, left)) {
+        let name = if name.contains(" ") { "(" + name + ")" } else { name }
+        let side = match other {
+          Binary(cop, _, _) if cop != op => "(" + self.expr(other) + ")"
+          _ => self.paren(other, p)
+        }
+        return (if left { "\{name} \{bin_symbol(op)} \{side}" } else { "\{side} \{bin_symbol(op)} \{name}" }, p)
+      }
       let side = fn(child : @ir.Expr, left : Bool) -> String {
         match child {
           Binary(cop, _, _) => {
@@ -219,12 +262,15 @@ fn CFunc::stmt(self : CFunc, s : @ir.Stmt) -> String {
     }
     Store(Ram, a, value) => {
       let target = self.access(Ram, a)
+      let type_name = self.type_of(Load(Ram, a))
       match value {
         Binary(Add, Load(Ram, b), Const(1)) if b == a => "\{target}++;"
         Binary(Sub, Load(Ram, b), Const(1)) if b == a => "\{target}--;"
-        Binary(And | Or | Xor as op, Load(Ram, b), r) if b == a && self.narrow(r) =>
-          "\{target} \{bin_symbol(op)}= \{self.expr(r)};"
-        _ => "\{target} = \{self.byte(value)};"
+        Binary(And | Or | Xor as op, Load(Ram, b), r) if b == a && self.narrow(r) => {
+          let operand = self.typed(r, type_name, mask=op == And).unwrap_or(self.expr(r))
+          "\{target} \{bin_symbol(op)}= \{operand};"
+        }
+        _ => "\{target} = \{self.typed(value, type_name).unwrap_or(self.byte(value))};"
       }
     }
     Store(_, a, value) => "dynamic_ram_write(\{self.word(a)}, \{self.byte(value)});"
