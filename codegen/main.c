@@ -141,8 +141,8 @@ void handle_inputs(int gamepad, GamepadMapping *mapping) {
 }
 
 void audio_input_callback(void* output_buffer, unsigned int frames) {
-    uint8_t *samples = (uint8_t*)output_buffer;
-    apu_fill_buffer(samples, (size_t)frames);
+    float *samples = (float*)output_buffer;
+    apu_render(samples, (size_t)frames); // on raylib's audio thread
 }
 
 void read_save_state(char *path, uint8_t *buffer) {
@@ -187,7 +187,7 @@ int main(int argc, char **argv) {
     SetAudioStreamBufferSizeDefault(128);
 
     InitAudioDevice();
-    AudioStream stream = LoadAudioStream(AUDIO_SAMPLE_RATE, 8, 1);
+    AudioStream stream = LoadAudioStream(AUDIO_SAMPLE_RATE, 32, 1); // float samples
     SetAudioStreamCallback(stream, audio_input_callback);
     PlayAudioStream(stream);
 
@@ -234,7 +234,7 @@ int main(int argc, char **argv) {
             render_frame();
             UpdateTexture(texture, frame);
         }
-        apu_step_frame();
+        sound_end_frame(); // this frame's APU writes, for the audio thread
 
         BeginDrawing();
             ClearBackground(WHITE);

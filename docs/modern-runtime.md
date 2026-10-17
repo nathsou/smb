@@ -86,6 +86,17 @@ frame. The ROM-free suite replays both call conventions, and
 
 The replay executes about 66% of the generated code.
 
+### Audio
+
+`tests/golden/warpless.audio` holds two hashes per frame of the replay: the
+APU register writes the game made (address and value, in order) and the
+samples rendered from them at 48 kHz, one frame's worth. `./hash
+--audio-trace tests/golden/warpless.audio` reports the first frame where
+either differs; `tests/web/replay_split.mjs` checks the WebAssembly build the
+same way. The game never reads the APU, so the write hash pins down
+everything the game asks of the sound hardware, independently of how it is
+synthesised.
+
 ### Routine-level differential test
 
 `tests/check_routines.py` generates the program a second time from the
@@ -258,6 +269,65 @@ routine names link to their definitions), the hand-written `display.c`, and
 the map, which is editable: Recompile regenerates the game and the C with the
 edited names and restarts the game.
 
+## Sound
+
+The game drives the sound hardware by writing the APU registers and never
+reads them back, so sound is one-way: the game side (`codegen/lib/sound.c`)
+collects each frame's writes, and the synthesizer (`codegen/lib/apu.c`)
+takes them through a single-producer, single-consumer queue of frames.
+`apu_render` applies the next frame's writes at each frame boundary in
+sample time (every sample rate / 60 samples) and resumes rendering wherever
+the previous call stopped, so it serves any callback size. When the game is
+late, the channels keep sounding; when it is ahead, older frames are applied
+at once to keep latency within a few frames, and writes that do not fit the
+queue join the next frame rather than being dropped.
+
+- Desktop: the game pushes a frame per frame on the main thread; raylib's
+  audio callback renders on its own thread. (The previous code ran the APU
+  from both threads at once.)
+- Web: the synthesizer is its own small WebAssembly module (`web/apu.wasm`)
+  inside the AudioWorklet (`web/audio-worklet.js`). The page posts each
+  frame's writes, so audio no longer depends on the main thread pushing
+  samples in time. Audio can only start after a key press; the page keeps
+  the last value of every register and the worklet starts from them, so the
+  channels the game enabled at power-on are not lost.
+
+The synthesizer (`codegen/lib/apu.c`) follows the NESdev descriptions of
+the channels, the frame sequencer and the mixer:
+
+- channels are event-driven: each timer is scheduled at its next step in
+  CPU cycles, so the cost follows the notes (about 0.4 ms per second of
+  audio, against 6.9 ms when every CPU cycle was stepped);
+- whenever the mixed output changes, a band-limited step (a
+  Blackman-windowed sinc, 64 phases of 16 taps) is added at that exact time;
+  integrating gives samples without the aliasing of point sampling. On
+  sustained notes the energy outside the harmonics is 50-56 dB below them,
+  against 10-37 dB before (the higher the note, the worse it was);
+- the NES's output filters (high passes at 90 and 440 Hz, a low pass at
+  14 kHz) follow, and samples are floats in [-1, 1];
+- the frame sequencer is the hardware's, with 4- and 5-step modes and the
+  reset on $4017 writes (SMB writes $FF there at the start of every sound
+  update, which re-synchronises it with each frame).
+
+Rewriting it fixed several faults of the previous model: the pulse channels,
+SMB's melody and harmony, played an octave too high (their timers count APU
+cycles, two CPU cycles each); the noise length counter loaded `value >> 3`
+instead of the length table, and halting it cleared it; the triangle dropped
+to 0 when stopped instead of holding its level (a pop); and the mixer's
+lookup table could be read past its end for DMC levels above 2. Only the
+DMC's output level is kept, as SMB plays no samples.
+
+The new output was checked against the previous one over the recording:
+per-frame loudness correlates at 0.965, and pitch classes (octave-invariant,
+since the pulses moved down an octave) agree with a median cosine similarity
+of 0.96. The register writes in the audio oracle are unchanged on every
+frame; the sample hashes were recorded again from the new synthesizer.
+
+`tests/web/worklet.mjs` runs the worklet processor in Node on the recorded
+game and matches the golden samples at the browsers' 128-sample quantum;
+`./hash --audio-chunk N` checks other chunk sizes natively, and
+`tests/audio_queue.c` the queue's edges.
+
 ## Hand-written routines
 
 `--native FILE` (for SMB, `codegen/native/routines.txt`) lists routines whose
@@ -314,4 +384,3 @@ previous frame's pixels, never occurs in SMB.
   flat byte array underneath for SMB's out-of-bounds idioms.
 - The status-bar split is decided after the frame's game logic, as before;
   hardware decides it at the sprite 0 hit, earlier in the frame.
-- Audio still runs on an APU model driven by register writes.

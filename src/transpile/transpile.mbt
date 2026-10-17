@@ -220,7 +220,7 @@ fn Emitter::emit_code_h(self: Emitter, program: @ir.Program, uses_ppu_bus~: Bool
   self.emit("#include \"data.h\"")
   self.emit("#include \"cpu.h\"")
   if uses_ppu_bus { self.emit("#include \"ppu_bus.h\"") }
-  self.emit("#include \"apu.h\"")
+  self.emit("#include \"sound.h\"")
   self.emit("")
 
   self.emit("// PRG ROM read; images smaller than 32 KiB are mirrored.")

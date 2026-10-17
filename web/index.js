@@ -6,7 +6,6 @@ import { splitDump } from './cartridge.js';
 
 const SCREEN_WIDTH = 256;
 const SCREEN_HEIGHT = 240;
-const AUDIO_CHUNK_SIZE = 1024;
 const SAVE_STATE_SIZE = 4384; // RAM_SIZE + NAMETABLE_SIZE + PALETTE_SIZE + OAM_SIZE
 const SAVE_STATE_LOCAL_STORAGE_KEY = 'save_state';
 
@@ -377,12 +376,13 @@ async function main() {
         boot();
     });
 
-    const [defaultMap, native, display, runtimeBytes, recompiler] = await Promise.all([
+    const [defaultMap, native, display, runtimeBytes, recompiler, apuWasm] = await Promise.all([
         fetch('smb.map').then(r => r.text()),
         fetch('routines.txt').then(r => r.text()),
         fetch('display.c').then(r => r.text()),
         fetch('runtime.wasm').then(r => r.arrayBuffer()),
         fetch('recompiler.js').then(r => r.arrayBuffer()),
+        fetch('apu.wasm').then(r => r.arrayBuffer()),
     ]);
     const version = await store.digest(new Uint8Array(recompiler));
 
@@ -410,22 +410,21 @@ async function main() {
         else audioContext.resume();
     });
     let audioWorklet = null;
-    let lastAudioTime = 0;
     let session = null;
+    // The last value the game wrote to each APU register ($4000-$4017, -1
+    // when never written): audio can only start after a key press, and the
+    // synthesizer then starts from these instead of from silence.
+    const registers = new Int16Array(0x18).fill(-1);
 
     const initAudio = async () => {
         if (audioWorklet !== null) return;
         await audioContext.resume();
         await audioContext.audioWorklet.addModule('audio-worklet.js');
-        audioWorklet = new AudioWorkletNode(audioContext, 'apu-audio-processor', {
+        audioWorklet = new AudioWorkletNode(audioContext, 'apu-processor', {
             outputChannelCount: [1],
-            processorOptions: { sampleRate: audioContext.sampleRate },
+            processorOptions: { wasm: apuWasm.slice(0), registers: Array.from(registers) },
         });
-        audioWorklet.port.onmessage = event => {
-            if (event.data.type === 'bufferLow') session?.processAudio();
-        };
         audioWorklet.connect(audioContext.destination);
-        lastAudioTime = audioContext.currentTime;
     };
 
     let shouldSaveState = false;
@@ -458,8 +457,6 @@ async function main() {
         ]);
 
         const uint8View = () => new Uint8Array(memory.buffer);
-        const audioBufferSize = readUint16(uint8View(), runtime.audio_buffer_size.value);
-        const samples = new Uint8Array(memory.buffer, runtime.web_audio_buffer.value, audioBufferSize);
         const lastSaveState = new Uint8Array(memory.buffer, runtime.last_save_state.value, SAVE_STATE_SIZE);
         let saveStateReady = false;
 
@@ -470,7 +467,6 @@ async function main() {
         runtime.cpu_init();
         runtime.video_init(chrRomPtr);
         runtime.render_init();
-        runtime.apu_init(audioContext.sampleRate);
 
         // Draw with WebGL2 unless unavailable or ?software is in the URL.
         let renderer = null;
@@ -490,19 +486,17 @@ async function main() {
         }
         updateSize();
 
-        const normalizedSamples = new Float32Array(AUDIO_CHUNK_SIZE);
         let running = true;
         const current = {
             stop() { running = false; },
-            processAudio() {
-                if (audioWorklet === null || !running) return;
-                const currentTime = audioContext.currentTime;
-                const samplesNeeded = Math.floor((currentTime - lastAudioTime) * audioContext.sampleRate);
-                const chunkSize = Math.min(AUDIO_CHUNK_SIZE, samplesNeeded);
-                runtime.apu_fill_buffer(samples.byteOffset, chunkSize);
-                for (let i = 0; i < chunkSize; i++) normalizedSamples[i] = (samples[i] / 255) * 2 - 1;
-                audioWorklet.port.postMessage({ type: 'samples', samples: normalizedSamples, chunkSize });
-                lastAudioTime = currentTime;
+            // This frame's APU writes go to the synthesizer on the audio thread.
+            sendSound() {
+                const count = readUint16(uint8View(), runtime.sound_event_count.value);
+                const events = uint8View().slice(runtime.sound_events.value, runtime.sound_events.value + 2 * count);
+                for (let i = 0; i < events.length; i += 2) registers[events[i]] = events[i + 1];
+                // every frame, empty or not: each marks a frame boundary
+                audioWorklet?.port.postMessage({ type: 'frame', events }, [events.buffer]);
+                new DataView(memory.buffer).setUint16(runtime.sound_event_count.value, 0, true);
             },
         };
         session = current;
@@ -522,8 +516,7 @@ async function main() {
             if (currentFrameTime >= targetFrameTime) {
                 runtime.update_controller1(joypad1.getState());
                 runtime.next_frame();
-                runtime.apu_step_frame();
-                current.processAudio();
+                current.sendSound();
                 renderer.draw();
                 currentFrameTime -= targetFrameTime;
 

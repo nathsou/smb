@@ -2,7 +2,7 @@
 #ifdef PPU_BUS
 #include "ppu_bus.h" // generic programs only: tests/support/ppu_bus.c
 #endif
-#include "apu.h"
+#include "sound.h"
 
 uint8_t a;
 uint8_t x;

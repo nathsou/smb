@@ -48,7 +48,7 @@ def check(source, harness, rom_map=None):
             if path.name not in GENERATED and path.suffix in {".h", ".c"}:
                 shutil.copyfile(path, lib / path.name)
         shutil.copyfile(ROOT / harness, output / "main.c")
-        sources = ["cpu", "code", "data", "video", "ppu_bus", "apu"]
+        sources = ["cpu", "code", "data", "video", "ppu_bus", "apu", "sound"]
         executable = str(output / "fixture")
         run("cc", "-std=c99", "-O2", "-DPPU_BUS", "-o", executable, str(output / "main.c"),
             *(str(lib / (name + ".c")) for name in sources))
@@ -59,7 +59,7 @@ def check(source, harness, rom_map=None):
             "-I", str(ROOT / "tests/web/shim"), "-I", str(output), "-I", str(lib),
             "-Wl,--import-memory", "-Wl,--export-all", "-Wl,--no-entry", "-Wl,--allow-undefined",
             "-o", str(runtime), str(output / "main.c"),
-            *(str(lib / (name + ".c")) for name in ["cpu", "video", "ppu_bus", "apu", "prg"]))
+            *(str(lib / (name + ".c")) for name in ["cpu", "video", "ppu_bus", "apu", "sound", "prg"]))
         for variant in WASM_VARIANTS:
             game = output / "game.wasm"
             run("moon", "run", "src/main", "--", *program, "--output", str(output / "unused"),

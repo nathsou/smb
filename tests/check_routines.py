@@ -16,7 +16,7 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 LIB = ROOT / "codegen/lib"
 GAME = ROOT / "codegen/game"  # make codegen
-RUNTIME = ["cpu", "video", "render", "apu", "state", "debug_chr", "rec", "common"]
+RUNTIME = ["cpu", "video", "render", "apu", "sound", "state", "debug_chr", "rec", "common"]
 INTERFACE = re.compile(r"^// in: (.*); out: (.*)$")
 FUNCTION = re.compile(r"^(?:void|static uint16_t) (\w+)\(", re.M)
 

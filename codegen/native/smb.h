@@ -13,16 +13,29 @@
 #define PPU_ADDRESS 0x2006
 #define PPU_DATA 0x2007
 #define APU 0x4000 // APU registers, indexed by channel
-#define APU_PULSE1 0x4000
-#define APU_PULSE2 0x4004
-#define APU_TRIANGLE 0x4008
-#define APU_NOISE 0x400c
-#define APU_DMC 0x4010
+#define APU_PULSE1_CONTROL 0x4000 // duty, length halt, envelope
+#define APU_PULSE1_SWEEP 0x4001
+#define APU_PULSE1_PERIOD_LOW 0x4002
+#define APU_PULSE1_PERIOD_HIGH 0x4003 // and length; restarts the note
+#define APU_PULSE2_CONTROL 0x4004
+#define APU_PULSE2_SWEEP 0x4005
+#define APU_PULSE2_PERIOD_LOW 0x4006
+#define APU_PULSE2_PERIOD_HIGH 0x4007
+#define APU_TRIANGLE_CONTROL 0x4008 // length halt, linear counter
+#define APU_TRIANGLE_PERIOD_LOW 0x400a
+#define APU_TRIANGLE_PERIOD_HIGH 0x400b
+#define APU_NOISE_CONTROL 0x400c // length halt, envelope
+#define APU_NOISE_PERIOD 0x400e // mode and period
+#define APU_NOISE_LENGTH 0x400f // restarts the envelope
+#define APU_DMC_CONTROL 0x4010
+#define APU_DMC_LEVEL 0x4011
+#define APU_DMC_ADDRESS 0x4012
+#define APU_DMC_LENGTH 0x4013
 #define OAM_DMA 0x4014
-#define APU_STATUS 0x4015
+#define APU_STATUS 0x4015 // channel enables
 #define JOYPAD_PORTS 0x4016
 #define JOYPAD1_PORT 0x4016
-#define JOYPAD2_PORT 0x4017
+#define APU_FRAME_COUNTER 0x4017 // written: sequencer mode and reset; read: joypad 2
 #define SLOT 0x8 // object slot being processed
 #define FRAME_COUNT 0x9
 #define BUTTONS_AB 0xa // A and B, as joypad bits

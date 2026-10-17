@@ -4,7 +4,7 @@
 #include "external.h"
 #include "cpu.h"
 #include "video.h"
-#include "apu.h"
+#include "sound.h"
 #include <stdint.h>
 
 #define SAVE_STATE_SIZE (RAM_SIZE + NAMETABLE_SIZE + PALETTE_SIZE + OAM_SIZE)
