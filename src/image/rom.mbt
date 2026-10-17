@@ -357,5 +357,5 @@ pub fn discover_rom(image: Image, map: RomMap) -> Program raise ImageError {
     image.source.push(item)
     image.addresses.push(addresses[i])
   }
-  { image, instructions, dispatches, roots: roots.map(fn(pc) { address_name(image, pc) }), facts, idle, source, addresses }
+  { image, instructions, dispatches, roots: roots.map(fn(pc) { address_name(image, pc) }), facts, idle, source, addresses, names: map.entries }
 }

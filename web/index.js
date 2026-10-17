@@ -346,7 +346,7 @@ function showWarning(text) {
 }
 
 // Generated files in reading order, then the hand-written display code.
-const FILE_ORDER = ['code.c', 'code.h', 'constants.h', 'data.h', 'data.c'];
+const FILE_ORDER = ['code.c', 'code.h', 'vars.h', 'constants.h', 'data.h', 'data.c'];
 const MAP_OVERRIDE_KEY = 'map';
 const DEBUG_TILES_KEY = 'debug_tiles';
 

@@ -20,7 +20,7 @@ import subprocess
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-GENERATED = {"code.c", "code.h", "data.c", "data.h", "constants.h"}
+GENERATED = {"code.c", "code.h", "vars.h", "data.c", "data.h", "constants.h"}
 # Generic programs reach the PPU through its register interface.
 SUPPORT = ROOT / "tests/support"
 WASM_VARIANTS = [[], ["--wasm-dispatch", "--wasm-memory-vars"]]

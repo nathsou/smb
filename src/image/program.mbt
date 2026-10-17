@@ -22,6 +22,7 @@ pub(all) struct Program {
   idle: Set[Int]
   source: Array[@parse.SourceItem]
   addresses: Array[Int]
+  names: Array[MapEntry] // the map's entries, for a ROM; empty for assembly
 } derive(Debug)
 
 pub fn address_name(image: Image, pc: Int) -> String {
@@ -253,5 +254,5 @@ pub fn discover(image: Image) -> Program raise ImageError {
       }
     }
   }
-  { image, instructions, dispatches, roots: roots.map(fn(pc) { address_name(image, pc) }), facts, idle, source, addresses }
+  { image, instructions, dispatches, roots: roots.map(fn(pc) { address_name(image, pc) }), facts, idle, source, addresses, names: [] }
 }
