@@ -1,0 +1,103 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "nathsou/smb/wasm"
+
+import {
+  "moonbitlang/core/debug",
+  "nathsou/smb/ir",
+}
+
+// Values
+pub const BLOCK : Int32 = 0x02
+
+pub const BR : Int32 = 0x0c
+
+pub const BR_TABLE : Int32 = 0x0e
+
+pub const CALL : Int32 = 0x10
+
+pub const DROP : Int32 = 0x1a
+
+pub const ELSE : Int32 = 0x05
+
+pub const END : Int32 = 0x0b
+
+pub const GLOBAL_GET : Int32 = 0x23
+
+pub const I32 : Int32 = 0x7f
+
+pub const I32_ADD : Int32 = 0x6a
+
+pub const I32_AND : Int32 = 0x71
+
+pub const I32_CONST : Int32 = 0x41
+
+pub const I32_EQ : Int32 = 0x46
+
+pub const I32_EQZ : Int32 = 0x45
+
+pub const I32_GE_S : Int32 = 0x4e
+
+pub const I32_LOAD8_U : Int32 = 0x2d
+
+pub const I32_LT_S : Int32 = 0x48
+
+pub const I32_NE : Int32 = 0x47
+
+pub const I32_OR : Int32 = 0x72
+
+pub const I32_SHL : Int32 = 0x74
+
+pub const I32_SHR_S : Int32 = 0x75
+
+pub const I32_SHR_U : Int32 = 0x76
+
+pub const I32_STORE8 : Int32 = 0x3a
+
+pub const I32_SUB : Int32 = 0x6b
+
+pub const I32_XOR : Int32 = 0x73
+
+pub const IF : Int32 = 0x04
+
+pub const LOCAL_GET : Int32 = 0x20
+
+pub const LOCAL_SET : Int32 = 0x21
+
+pub const LOCAL_TEE : Int32 = 0x22
+
+pub const LOOP : Int32 = 0x03
+
+pub const RETURN : Int32 = 0x0f
+
+pub const UNREACHABLE : Int32 = 0x00
+
+pub const VOID : Int32 = 0x40
+
+pub fn emit(@ir.Program, layout? : Map[String, Int32], force_dispatch? : Bool, memory_vars? : Bool) -> Output raise WasmError
+
+// Errors
+pub suberror WasmError {
+  WasmError(String)
+} derive(@debug.Debug)
+
+// Types and methods
+pub(all) struct Buf {
+  bytes : Array[Int32]
+}
+pub fn Buf::append(Self, Self) -> Unit
+pub fn Buf::byte(Self, Int32) -> Unit
+pub fn Buf::i32(Self, Int32) -> Unit
+pub fn Buf::name(Self, String) -> Unit
+pub fn Buf::new() -> Self
+pub fn Buf::section(Self, Int32, Self) -> Unit
+pub fn Buf::to_bytes(Self) -> Bytes
+pub fn Buf::u32(Self, Int32) -> Unit
+
+pub(all) struct Output {
+  bytes : Bytes
+  irreducible : Array[String]
+}
+
+// Type aliases
+
+// Traits

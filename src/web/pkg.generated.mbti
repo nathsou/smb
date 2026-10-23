@@ -1,0 +1,23 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "nathsou/smb/web"
+
+// Values
+pub fn file_contents(Int32) -> String
+
+pub fn file_count() -> Int32
+
+pub fn file_name(Int32) -> String
+
+pub fn recompile(Bytes, String, String, String) -> String
+
+pub fn warning() -> String
+
+pub fn wasm() -> Bytes
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits

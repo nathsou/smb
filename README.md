@@ -83,7 +83,7 @@ DEBUG TILES draws with generated placeholder tiles instead of the ROM's, and
 1. Install [Moonbit](https://www.moonbitlang.com/):
 
 ```bash
-$ curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s '0.10.9+6e6c44045'
+$ curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s '0.10.17+d971670cd'
 ```
 
 2. Place your `smb.nes` in the root folder and run `make codegen`; the C goes

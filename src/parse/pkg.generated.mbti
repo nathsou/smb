@@ -1,0 +1,156 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "nathsou/smb/parse"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+
+// Errors
+pub suberror LexerError {
+  UnexpectedChar(char~ : Char, index~ : Int32)
+  InvalidConstant(lexeme~ : String, base~ : ConstantBase)
+} derive(@debug.Debug)
+
+pub suberror ParserError {
+  UnexpectedToken(expected~ : Token, received~ : Token)
+  ExpectedExpr(Token)
+  Unreachable(String)
+} derive(@debug.Debug)
+
+// Types and methods
+pub(all) enum BinaryOp {
+  Add
+  Sub
+} derive(@debug.Debug)
+
+pub(all) enum ConstantBase {
+  Binary
+  Decimal
+  Hexadecimal
+} derive(Eq, @debug.Debug)
+
+pub(all) enum ConstantSize {
+  Byte
+  Word
+} derive(Eq, @debug.Debug)
+pub fn ConstantSize::byte_size(Self) -> Int32
+
+pub(all) struct Lexer {
+  input : String
+  mut index : Int32
+}
+pub fn Lexer::new(String) -> Self
+pub fn Lexer::tokenize(Self) -> Array[Token] raise LexerError
+
+pub(all) enum OpCode {
+  ADC
+  AND
+  ASL
+  BCC
+  BCS
+  BEQ
+  BIT
+  BMI
+  BNE
+  BPL
+  BRK
+  BVC
+  BVS
+  CLC
+  CLD
+  CLI
+  CLV
+  CMP
+  CPX
+  CPY
+  DEC
+  DEX
+  DEY
+  EOR
+  INC
+  INX
+  INY
+  JMP
+  JSR
+  LDA
+  LDX
+  LDY
+  LSR
+  NOP
+  ORA
+  PHA
+  PHP
+  PLA
+  PLP
+  ROL
+  ROR
+  RTI
+  RTS
+  SBC
+  SEC
+  SED
+  SEI
+  STA
+  STX
+  STY
+  TAX
+  TAY
+  TSX
+  TXA
+  TXS
+  TYA
+} derive(Eq, Hash, @debug.Debug)
+pub fn OpCode::is_branching(Self) -> Bool
+pub fn OpCode::is_implied(Self) -> Bool
+pub fn OpCode::is_relative(Self) -> Bool
+pub fn OpCode::is_unconditional_branch(Self) -> Bool
+pub fn OpCode::supports_accumulator_addr_mode(Self) -> Bool
+
+pub(all) struct Parser {
+  tokens : Array[Token]
+  defines : Map[String, ConstantSize]
+  mut index : Int32
+}
+pub fn Parser::new(Array[Token]) -> Self
+pub fn Parser::parse(Self) -> Array[SourceItem] raise ParserError
+
+pub(all) enum SourceAddressingMode {
+  Accumulator
+  Implied
+  Immediate(SourceExpr)
+  Relative(addr~ : SourceExpr)
+  AbsoluteOrZeroPage(addr~ : SourceExpr)
+  AbsoluteOrZeroPageX(addr~ : SourceExpr)
+  AbsoluteOrZeroPageY(addr~ : SourceExpr)
+  Indirect(addr~ : SourceExpr)
+  IndexedIndirect(addr~ : SourceExpr)
+  IndirectIndexed(addr~ : SourceExpr)
+} derive(@debug.Debug)
+
+pub(all) enum SourceExpr {
+  Const(base~ : ConstantBase, value~ : Int32, size~ : ConstantSize)
+  Ident(String)
+  Unary(op~ : UnaryOp, expr~ : SourceExpr)
+  Binary(op~ : BinaryOp, lhs~ : SourceExpr, rhs~ : SourceExpr)
+} derive(@debug.Debug)
+
+pub(all) enum SourceItem {
+  Label(String)
+  Inst(op~ : OpCode, mode~ : SourceAddressingMode)
+  Define(name~ : String, rhs~ : SourceExpr)
+  Directive(name~ : String, args~ : Array[SourceExpr])
+  Comment(comment~ : String, is_inline~ : Bool)
+} derive(@debug.Debug)
+
+type Token derive(Eq, @debug.Debug)
+
+pub(all) enum UnaryOp {
+  GetLowByte
+  GetHighByte
+} derive(@debug.Debug)
+
+// Type aliases
+
+// Traits

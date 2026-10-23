@@ -1,0 +1,11 @@
+import {
+  "nathsou/smb/parse",
+  "nathsou/smb/lower",
+  "moonbitlang/x/fs",
+  "nathsou/smb/image",
+  "nathsou/smb/ir",
+}
+
+options(
+  "is-main": false,
+)

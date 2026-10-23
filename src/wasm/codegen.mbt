@@ -540,7 +540,7 @@ fn Gen::do_tree(self : Gen, sh : Shape, x : Int, ctx : @list.List[Ctx]) -> Unit 
   if sh.header[x] {
     self.op(LOOP)
     self.code.byte(VOID)
-    self.node_within(sh, x, merges, 0, ctx.add(LoopHeadedBy(x)))
+    self.node_within(sh, x, merges, 0, ctx.prepend(LoopHeadedBy(x)))
     self.op(END)
   } else {
     self.node_within(sh, x, merges, 0, ctx)
@@ -552,7 +552,7 @@ fn Gen::node_within(self : Gen, sh : Shape, x : Int, merges : Array[Int], i : In
     let y = merges[i]
     self.op(BLOCK)
     self.code.byte(VOID)
-    self.node_within(sh, x, merges, i + 1, ctx.add(BlockFollowedBy(y)))
+    self.node_within(sh, x, merges, i + 1, ctx.prepend(BlockFollowedBy(y)))
     self.op(END)
     self.do_tree(sh, y, ctx)
     return
@@ -566,9 +566,9 @@ fn Gen::node_within(self : Gen, sh : Shape, x : Int, merges : Array[Int], i : In
       self.expr(c)
       self.op(IF)
       self.code.byte(VOID)
-      self.do_branch(sh, x, t, ctx.add(IfThenElse))
+      self.do_branch(sh, x, t, ctx.prepend(IfThenElse))
       self.op(ELSE)
-      self.do_branch(sh, x, e, ctx.add(IfThenElse))
+      self.do_branch(sh, x, e, ctx.prepend(IfThenElse))
       self.op(END)
     }
     term => self.exit(term)
@@ -806,7 +806,7 @@ pub fn emit(
     // the variables live on entry start in their locals
     gen.reload(gen.block_in[f.entry])
     match (if force_dispatch { None } else { shape(f) }) {
-      Some(sh) => gen.do_tree(sh, f.entry, @list.empty())
+      Some(sh) => gen.do_tree(sh, f.entry, @list.List([]))
       None => {
         if !force_dispatch { irreducible.push(f.name) }
         gen.dispatch_loop()

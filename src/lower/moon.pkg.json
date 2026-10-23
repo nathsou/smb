@@ -1,8 +1,0 @@
-{
-  "is-main": false,
-  "import": [
-    "nathsou/smb/parse",
-    "moonbitlang/core/debug",
-    "nathsou/smb/image"
-  ]
-}

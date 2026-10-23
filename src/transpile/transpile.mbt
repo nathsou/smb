@@ -5,7 +5,7 @@ pub(all) struct Emitter {
 }
 
 pub fn Emitter::new() -> Emitter {
-  { output: StringBuilder::new(), indentation: 0 }
+  { output: StringBuilder(), indentation: 0 }
 }
 
 fn Emitter::emit(self: Emitter, s: String, newline~: Bool = true) -> Unit {
@@ -19,7 +19,7 @@ fn Emitter::emit(self: Emitter, s: String, newline~: Bool = true) -> Unit {
 
 fn hex(n: Int) -> String {
   let mut n = n
-  let h = StringBuilder::new()
+  let h = StringBuilder()
 
   if n == 0 {
     return "0"
@@ -47,7 +47,7 @@ fn hex(n: Int) -> String {
 
 fn bin(n: Int) -> String {
   let mut n = n
-  let b = StringBuilder::new()
+  let b = StringBuilder()
 
   if n == 0 {
     return "0"

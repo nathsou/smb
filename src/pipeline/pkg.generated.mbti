@@ -1,0 +1,46 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "nathsou/smb/pipeline"
+
+import {
+  "moonbitlang/core/debug",
+  "nathsou/smb/image",
+  "nathsou/smb/transpile",
+}
+
+// Values
+pub fn from_assembly(String) -> @image.Program raise PipelineError
+
+pub fn from_rom(Bytes, String) -> (@image.Program, String?) raise PipelineError
+
+pub fn map_header(String, source~ : String) -> String raise PipelineError
+
+pub fn parse_names(String) -> Array[String]
+
+pub fn recompile(@image.Program, Options) -> Output raise PipelineError
+
+// Errors
+pub suberror PipelineError {
+  PipelineError(String)
+} derive(@debug.Debug)
+
+// Types and methods
+pub(all) struct Options {
+  native : Array[String]
+  reference : Bool
+  wasm : Bool
+  layout : Map[String, Int32]
+  force_dispatch : Bool
+  memory_vars : Bool
+  inline : Bool
+}
+pub fn Options::default() -> Self
+
+pub(all) struct Output {
+  files : Array[@transpile.File]
+  wasm : Bytes?
+  irreducible : Array[String]
+}
+
+// Type aliases
+
+// Traits

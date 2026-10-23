@@ -109,7 +109,7 @@ fn identifiers(text : String) -> Set[String] {
       Some(i) => line.view(end_offset=i).to_owned()
       None => line
     }
-    let word = StringBuilder::new()
+    let word = StringBuilder()
     let mut length = 0
     for ch in code {
       if ch.is_ascii_alphabetic() || ch == '_' || (length > 0 && ch >= '0' && ch <= '9') {
@@ -205,7 +205,7 @@ fn Views::place(self : Views, address : @ir.Expr) -> Place? {
 }
 
 fn Views::header(self : Views) -> String {
-  let out = StringBuilder::new()
+  let out = StringBuilder()
   out.write_string("#ifndef SMB_VARS_H\n#define SMB_VARS_H\n\n")
   out.write_string("// RAM variables and ROM tables by name, as views of ram[] and data[]:\n")
   out.write_string("// a variable is the byte at its address, an array or a table the bytes\n")
@@ -234,7 +234,7 @@ fn Views::header(self : Views) -> String {
 // A type of the map as C constants: an anonymous enum, so that its name
 // stays free for the variable of the same name.
 pub fn type_definition(t : @image.MapType) -> String {
-  let out = StringBuilder::new()
+  let out = StringBuilder()
   let what = if t.flags { "bits" } else { "values" }
   let about = if t.description == "" { "" } else { ": " + t.description }
   out.write_string("// \{t.name} \{what}\{about}\n")

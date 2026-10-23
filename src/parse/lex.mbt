@@ -71,7 +71,7 @@ fn Lexer::skip_whitespaces(self: Lexer) -> Unit {
 }
 
 fn Lexer::parse_identifier(self: Lexer) -> String {
-  let identifier = StringBuilder::new()
+  let identifier = StringBuilder()
   
   for i in self.index..<self.input.length() {
     let char = self.input[i].to_char().unwrap()
@@ -88,7 +88,7 @@ fn Lexer::parse_identifier(self: Lexer) -> String {
 }
 
 fn Lexer::parse_constant(self: Lexer, base~: ConstantBase) -> LexerResult {
-  let lexeme = StringBuilder::new()
+  let lexeme = StringBuilder()
 
   for i in self.index..<self.input.length() {
     let char = self.input[i].to_char().unwrap()
@@ -284,7 +284,7 @@ priv enum LexerResult {
 }
 
 fn Lexer::parse_comment(self: Lexer) -> String {
-  let comment = StringBuilder::new()
+  let comment = StringBuilder()
 
   for i in self.index..<self.input.length() {
     let char = self.input[i].to_char().unwrap()

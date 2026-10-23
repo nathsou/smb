@@ -1,0 +1,44 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "nathsou/smb/transpile"
+
+import {
+  "moonbitlang/core/debug",
+  "nathsou/smb/image",
+  "nathsou/smb/ir",
+  "nathsou/smb/lower",
+}
+
+// Values
+pub fn type_definition(@image.MapType) -> String
+
+// Errors
+pub(all) suberror EmitterError {
+  EmitterError(String)
+} derive(@debug.Debug)
+
+pub(all) suberror TranspileError {
+  UnknownNativeRoutine(String)
+} derive(@debug.Debug)
+
+// Types and methods
+pub(all) struct Emitter {
+  output : StringBuilder
+  mut indentation : Int32
+}
+pub fn Emitter::new() -> Self
+
+pub(all) struct File {
+  name : String
+  contents : String
+  is_lib : Bool
+}
+pub fn File::write(Self, dir~ : String) -> Unit raise
+
+pub(all) struct Transpiler {
+  files : Array[File]
+}
+pub fn Transpiler::transpile(@lower.AsmLowering, @ir.Program, native? : Array[String]) -> Self raise TranspileError
+
+// Type aliases
+
+// Traits
