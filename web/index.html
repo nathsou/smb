@@ -83,6 +83,18 @@
         button:disabled { opacity: 0.4; cursor: default; }
         button[hidden] { display: none; }
 
+        select {
+            font-family: var(--pixel);
+            font-size: 8px;
+            color: var(--ink);
+            background: var(--panel);
+            border: 2px solid var(--ink);
+            padding: 4px;
+            cursor: pointer;
+        }
+
+        select:disabled { opacity: 0.4; cursor: default; }
+
         label.toggle {
             display: flex;
             align-items: center;
@@ -326,6 +338,7 @@
 <body class="code-hidden">
     <header>
         <h1>SUPER MARIO BROS. <small>RECOMPILED</small></h1>
+        <label class="toggle">THEME <select id="theme"></select></label>
         <label class="toggle"><input type="checkbox" id="debug-tiles"> DEBUG TILES</label>
         <button id="load-rom">LOAD ROM</button>
         <button id="toggle-code">SHOW CODE</button>

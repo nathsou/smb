@@ -1,4 +1,4 @@
-import { createGpuRenderer } from './gpu.js';
+import { createGpuRenderer, THEMES } from './gpu.js';
 import { link } from './link.js';
 import { createViewer } from './viewer.js';
 import * as store from './store.js';
@@ -9,7 +9,8 @@ const SCREEN_HEIGHT = 240;
 const SAVE_STATE_SIZE = 4384; // RAM_SIZE + NAMETABLE_SIZE + PALETTE_SIZE + OAM_SIZE
 const SAVE_STATE_LOCAL_STORAGE_KEY = 'save_state';
 
-function createCanvas() {
+// onScale gets the device pixels per NES pixel the canvas is shown at.
+function createCanvas(onScale) {
     const canvas = document.createElement('canvas');
     const screen = document.getElementById('screen');
 
@@ -21,6 +22,7 @@ function createCanvas() {
             Math.min(Math.floor(width / SCREEN_WIDTH), Math.floor(height / SCREEN_HEIGHT)), 1);
         canvas.style.width = `${SCREEN_WIDTH * scalingFactor}px`;
         canvas.style.height = `${SCREEN_HEIGHT * scalingFactor}px`;
+        onScale(scalingFactor * window.devicePixelRatio);
     };
 
     canvas.width = SCREEN_WIDTH;
@@ -349,6 +351,7 @@ function showWarning(text) {
 const FILE_ORDER = ['code.c', 'code.h', 'vars.h', 'constants.h', 'data.h', 'data.c'];
 const MAP_OVERRIDE_KEY = 'map';
 const DEBUG_TILES_KEY = 'debug_tiles';
+const THEME_KEY = 'theme';
 
 async function main() {
     const viewer = createViewer(document.getElementById('code'), {
@@ -376,6 +379,28 @@ async function main() {
         boot();
     });
 
+    // The renderer of the current run, for the theme menu and the canvas size.
+    let renderer = null;
+    const themeMenu = document.getElementById('theme');
+    for (const [name, label] of Object.entries(THEMES)) themeMenu.add(new Option(label, name));
+    themeMenu.value = localStorage.getItem(THEME_KEY) ?? 'original';
+    if (themeMenu.value === '') themeMenu.value = 'original';
+    const applyTheme = async () => {
+        if (!renderer?.setTheme) return;
+        try {
+            await renderer.setTheme(themeMenu.value);
+        } catch (error) {
+            console.error(error);
+            viewer.setStatus(`THEME UNAVAILABLE: ${error.message}`.toUpperCase(), 'error');
+        }
+        themeMenu.value = renderer.theme;
+    };
+    themeMenu.addEventListener('change', () => {
+        localStorage.setItem(THEME_KEY, themeMenu.value);
+        applyTheme();
+    });
+    const onScale = scale => renderer?.setDisplayScale?.(scale);
+
     const [defaultMap, native, display, runtimeBytes, recompiler, apuWasm] = await Promise.all([
         fetch('smb.map').then(r => r.text()),
         fetch('routines.txt').then(r => r.text()),
@@ -401,7 +426,7 @@ async function main() {
         boot();
     });
 
-    let { canvas, updateSize } = createCanvas();
+    let { canvas, updateSize } = createCanvas(onScale);
     document.getElementById('screen').prepend(canvas);
 
     const audioContext = new AudioContext({ latencyHint: 'interactive' });
@@ -469,21 +494,25 @@ async function main() {
         runtime.render_init();
 
         // Draw with WebGL2 unless unavailable or ?software is in the URL.
-        let renderer = null;
+        await renderer?.setTheme?.('original'); // frees the last run's theme
+        renderer = null;
         if (!new URLSearchParams(window.location.search).has('software')) {
             try {
-                renderer = await createGpuRenderer(canvas, runtime, memory);
+                renderer = await createGpuRenderer(canvas, runtime, memory, 'video.frag', { map });
             } catch (error) {
                 console.error('WebGL renderer unavailable:', error);
                 // a canvas keeps its first context type: start over with a 2D one
                 canvas.remove();
-                ({ canvas, updateSize } = createCanvas());
+                ({ canvas, updateSize } = createCanvas(onScale));
                 document.getElementById('screen').prepend(canvas);
             }
         }
         if (renderer === null) {
             renderer = createSoftwareRenderer(canvas, runtime.render_frame, uint8View(), runtime.frame.value);
         }
+        // the themes are WebGL2 only
+        themeMenu.disabled = renderer.setTheme === undefined;
+        await applyTheme();
         updateSize();
 
         let running = true;

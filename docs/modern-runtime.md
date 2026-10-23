@@ -428,6 +428,46 @@ frames: natively with Mesa under Xvfb (`make gpu-check`, then
 difference, a masked left column showing the backdrop rather than the
 previous frame's pixels, never occurs in SMB.
 
+## Themes
+
+A theme (`web/themes`) draws the `Video` state its own way; the page's THEME
+menu switches between them while the game runs. Theme shaders include
+`video.frag` as a library (`#define NES_LIBRARY` leaves out its `main`), so
+they decode tiles, attributes and sprites exactly as the original picture
+does.
+
+Both themes start from the scene (`scene.frag`): the frame as a background
+and a sprite layer, 16 pixels wider on each side, each pixel with a
+material. The materials come from the game, not from the picture: the block
+buffer (`block_buffer1`, `block_buffer2`) holds the metatiles of the two
+screens around the player that the player can touch, because the level parser
+leaves scenery out (`block_buffer_limits`). A metatile there is solid unless
+`climb_metatile_limits` makes it climbable, or it is a coin or an invisible
+block; the rest of the opaque background is scenery. Lava is the castle's
+water tiles, and fire is the fireball and flame sprite tiles. The scene reads
+these by the map's names, so a map without them leaves everything scenery.
+
+- 2D global illumination (`light.js`): a jump flood (`jfa.frag`) gives every
+  pixel its nearest occluder and nearest free pixel; radiance cascades
+  (`cascade.frag`) march rays through that distance field, from the top
+  cascade down, each merging the one above; rays that leave the scene see the
+  sky, which dark areas (a black backdrop) do not have. Occluders return
+  their own light and last frame's light on them, reflected once (shifted by
+  the scroll). An occluder pixel takes the light of its nearest free pixel.
+  The backdrop is the sky and is not lit.
+- 2.5D ray tracing (`voxel.js`): each opaque pixel is a column of voxels
+  over the depths its material gives, seen through a cabinet projection, so
+  the play plane is where the game draws it. Rays walk the pixel grid
+  checking the depths they cross each cell at. The sun and fire sprites
+  (point lights, merged per flame) cast shadow rays, five short rays give
+  ambient occlusion, and the 2D global illumination is the light from
+  everywhere else.
+
+The status bar is drawn as it is. `tests/web/themes.cjs` draws replay frames
+with every theme and fails on WebGL errors. The themes are a presentation
+layer only: the game, the Video state and the pixel-exact checks of the
+original renderer are unchanged.
+
 ## Remaining work
 
 - Registers as C locals and parameters: the interfaces give each routine's

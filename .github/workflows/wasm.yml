@@ -54,6 +54,7 @@ jobs:
         run: |
           mkdir -p dist
           cp web/*.html web/*.js web/*.frag web/runtime.wasm web/apu.wasm web/smb.map web/routines.txt web/display.c dist/
+          cp -r web/themes dist/
       - name: Deploy to GitHub Pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: JamesIves/github-pages-deploy-action@v4

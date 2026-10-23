@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Theme check</title></head>
+<body>
+<script type="module">
+// Replays rec/warpless.rec with web/smb.wasm and draws chosen frames with
+// every theme (web/gpu.js), checking that each draws without WebGL errors.
+// Serve the repository root; see themes.cjs.
+//
+// ?frames=100,2000  frames to draw
+// &rom=1            the ROM's tiles (smb.nes in the root) instead of debug tiles
+// &poke=500:075f:3  write RAM at a frame (frame:address:value, hex; ';' between)
+import { createGpuRenderer, THEMES } from '../../web/gpu.js';
+
+const params = new URLSearchParams(location.search);
+const frames = (params.get('frames') ?? '200,1500,3000').split(',').map(Number);
+const pokes = (params.get('poke') ?? '').split(';').filter(Boolean).map(poke => {
+    const [frame, address, value] = poke.split(':');
+    return { frame: Number(frame), address: parseInt(address, 16), value: parseInt(value, 16) };
+});
+
+async function run() {
+    const memory = new WebAssembly.Memory({ initial: 10 });
+    const view = () => new Uint8Array(memory.buffer);
+    const { instance } = await WebAssembly.instantiateStreaming(fetch('../../web/smb.wasm'), {
+        env: {
+            memory,
+            memset: (ptr, value, num) => (view().fill(value, ptr, ptr + num), ptr),
+            memcpy: (dest, src, num) => (view().copyWithin(dest, src, src + num), dest),
+        },
+    });
+    const wasm = instance.exports;
+    const map = await (await fetch('../../maps/smb.map')).text();
+
+    // rec format: "frame:state" lines, each state held until the next line
+    const inputs = [];
+    for (const line of (await (await fetch('../../rec/warpless.rec')).text()).split('\n')) {
+        const match = /^(\d+):(\d+)$/.exec(line.trim());
+        if (match) inputs.push([Number(match[1]), Number(match[2])]);
+    }
+
+    wasm.cpu_init();
+    if (params.has('rom')) {
+        const rom = new Uint8Array(await (await fetch('../../smb.nes')).arrayBuffer());
+        view().set(rom.subarray(16 + 0x8000, 16 + 0xa000), wasm.chr_rom.value);
+    } else {
+        wasm.debug_chr_generate(wasm.chr_rom.value);
+    }
+    wasm.video_init(wasm.chr_rom.value);
+
+    const renderers = {};
+    for (const theme of Object.keys(THEMES)) {
+        const canvas = document.createElement('canvas');
+        const renderer = await createGpuRenderer(canvas, wasm, memory, '../../web/video.frag', { map });
+        if (renderer === null) return { error: 'WebGL2 unavailable' };
+        await renderer.setTheme(theme);
+        renderer.setDisplayScale(2);
+        renderers[theme] = { renderer, canvas };
+    }
+
+    wasm.cpu_reset_entry();
+    const images = [];
+    const errors = [];
+    const last = Math.max(...frames);
+    let state = 0, next = 0;
+    for (let frame = 0; frame <= last; frame++) {
+        while (next < inputs.length && inputs[next][0] <= frame) state = inputs[next++][1];
+        for (const poke of pokes) if (poke.frame === frame) view()[wasm.ram.value + poke.address] = poke.value;
+        wasm.update_controller1(state);
+        wasm.next_frame();
+        // the themes keep state between frames (last frame's light)
+        for (const [theme, { renderer, canvas }] of Object.entries(renderers)) {
+            if (theme !== 'original' && !frames.some(f => f - frame >= 0 && f - frame < 3)) continue;
+            renderer.draw();
+            const error = renderer.gl.getError();
+            if (error !== 0) errors.push({ frame, theme, error });
+            if (frames.includes(frame)) images.push({ frame, theme, url: canvas.toDataURL('image/png') });
+        }
+    }
+    return { errors, images };
+}
+
+window.result = run().catch(error => ({ error: String(error.stack ?? error) }));
+</script>
+</body>
+</html>
