@@ -588,15 +588,21 @@ async function main() {
 
         game.cpu_reset_entry();
 
+        // The game runs at 60 frames per second whatever the display's rate:
+        // a frame when 1/60 s has built up. Past a few frames' worth (the tab
+        // was hidden, the page stalled), the backlog is dropped rather than
+        // caught up, which a faster display would do at its own rate.
         let lastUpdateTime = performance.now();
-        let currentFrameTime = lastUpdateTime;
+        let currentFrameTime = 0;
         const targetFrameTime = 1000 / 60;
+        const maxBacklog = 3 * targetFrameTime;
 
         const update = () => {
             if (!running) return;
             const currentTime = performance.now();
             currentFrameTime += currentTime - lastUpdateTime;
             lastUpdateTime = currentTime;
+            if (currentFrameTime > maxBacklog) currentFrameTime = targetFrameTime;
 
             if (currentFrameTime >= targetFrameTime) {
                 runtime.update_controller1(joypad1.getState());
