@@ -101,15 +101,25 @@ export async function createGpuRenderer(canvas, exports, memory, shaderUrl = 'vi
     gl.useProgram(program);
 
     const bytes = () => new Uint8Array(memory.buffer);
-    const words = new Uint32Array(memory.buffer, exports.video_layout.value, 7);
+    const words = new Uint32Array(memory.buffer, exports.video_layout.value, 10);
     const videoPtr = exports.video.value;
-    const [nametable, palette, oam, ctrl, mask, scrollX, statusBar] =
+    const [nametable, palette, oam, ctrl, mask, scrollX, statusBar, scrollY, mirroring, chrVersion] =
         Array.from(words, offset => videoPtr + offset);
 
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     const patterns = createByteTexture(gl, 128, 256);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 128, 256, gl.RED, gl.UNSIGNED_BYTE,
-        decodePatterns(bytes().subarray(exports.chr_rom.value, exports.chr_rom.value + 8192)));
+    // The pattern tables, again whenever the game rewrites them (CHR RAM).
+    let patternsVersion = -1;
+    const uploadPatterns = () => {
+        const version = new DataView(memory.buffer).getUint32(chrVersion, true);
+        if (version === patternsVersion) return;
+        patternsVersion = version;
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, patterns);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 128, 256, gl.RED, gl.UNSIGNED_BYTE,
+            decodePatterns(bytes().subarray(exports.chr_rom.value, exports.chr_rom.value + 8192)));
+    };
+    uploadPatterns();
     const nametableTexture = createByteTexture(gl, 32, 64);
 
     const colorBytes = bytes().subarray(exports.COLOR_PALETTE.value, exports.COLOR_PALETTE.value + 64 * 3);
@@ -122,10 +132,13 @@ export async function createGpuRenderer(canvas, exports, memory, shaderUrl = 'vi
         ctrl: 0,
         mask: 0,
         scrollX: 0,
+        scrollY: 0,
+        mirroring: 0,
         statusBar: 0,
     };
 
     const readFrame = () => {
+        uploadPatterns();
         const view = bytes();
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, patterns);
@@ -138,6 +151,8 @@ export async function createGpuRenderer(canvas, exports, memory, shaderUrl = 'vi
         frame.ctrl = view[ctrl];
         frame.mask = view[mask];
         frame.scrollX = view[scrollX];
+        frame.scrollY = view[scrollY];
+        frame.mirroring = view[mirroring];
         frame.statusBar = view[statusBar];
     };
 
@@ -156,6 +171,8 @@ export async function createGpuRenderer(canvas, exports, memory, shaderUrl = 'vi
                 ctrl: location('u_ctrl'),
                 mask: location('u_mask'),
                 scrollX: location('u_scroll_x'),
+                scrollY: location('u_scroll_y'),
+                mirroring: location('u_mirroring'),
                 statusBar: location('u_status_bar'),
                 flipY: location('u_flip_y'),
             };
@@ -171,6 +188,8 @@ export async function createGpuRenderer(canvas, exports, memory, shaderUrl = 'vi
         gl.uniform1i(uniforms.ctrl, frame.ctrl);
         gl.uniform1i(uniforms.mask, frame.mask);
         gl.uniform1i(uniforms.scrollX, frame.scrollX);
+        gl.uniform1i(uniforms.scrollY, frame.scrollY);
+        gl.uniform1i(uniforms.mirroring, frame.mirroring);
         gl.uniform1i(uniforms.statusBar, frame.statusBar);
         gl.uniform1i(uniforms.flipY, flipY);
     };

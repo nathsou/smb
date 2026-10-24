@@ -33,6 +33,9 @@ pub fn Analysis::term_live(self : Analysis, f : Function, term : Term, block_in 
     ReturnValue(e) => self.demand.get(f.name).unwrap_or(0) | SP_BIT | e.vars()
     TailCall(g) => self.get_in(g)
     Dispatch(h, _, _) => self.get_in(h)
+    Jump(e, cases) => cases.fold(init=e.vars(), fn(acc, c) { acc | self.get_in(c.1) })
+    Switch(e, _, _) => term.successors().fold(init=e.vars(), fn(acc, b) { acc | block_in[b] })
+    Suspend(b) => self.root_demand | SP_BIT | block_in[b]
     Yield(_) => self.root_demand | SP_BIT
     Trap(_) => 0
   }
@@ -40,7 +43,7 @@ pub fn Analysis::term_live(self : Analysis, f : Function, term : Term, block_in 
 
 pub fn Analysis::stmt_live(self : Analysis, s : Stmt, after : Int) -> Int {
   match s {
-    Call(g) => self.get_in(g)
+    Call(g) | CallValue(_, g, _) => self.get_in(g)
     _ => (after & s.defs().lnot()) | s.uses()
   }
 }
@@ -77,6 +80,7 @@ pub fn Analysis::blocks_live_out(self : Analysis, f : Function, block_in : Array
     match block.term {
       Goto(b) => block_in[b]
       Branch(_, t, e) => block_in[t] | block_in[e]
+      Switch(_, _, _) as other => other.successors().fold(init=0, fn(acc, b) { acc | block_in[b] })
       other => self.term_live(f, other, block_in)
     }
   })
@@ -109,6 +113,10 @@ fn Program::liveness(self : Program, info : Analysis) -> Unit {
         let d = info.demand.get(f.name).unwrap_or(0)
         match block.term {
           TailCall(g) => if add(info.demand, g, d) { changed = true }
+          Jump(_, cases) =>
+            for c in cases {
+              if add(info.demand, c.1, d) { changed = true }
+            }
           Dispatch(h, _, cases) => {
             let mut after = 0
             for c in cases {
@@ -121,7 +129,7 @@ fn Program::liveness(self : Program, info : Analysis) -> Unit {
         }
         let mut k = block.stmts.length() - 1
         while k >= 0 {
-          if block.stmts[k] is Call(g) && add(info.demand, g, live) { changed = true }
+          if block.stmts[k] is (Call(g) | CallValue(_, g, _)) && add(info.demand, g, live) { changed = true }
           live = info.stmt_live(block.stmts[k], live)
           k -= 1
         }
@@ -150,10 +158,12 @@ fn Program::summaries(self : Program, info : Analysis) -> Unit {
       for block in f.blocks {
         for s in block.stmts {
           w = w | s.defs()
-          if s is Call(g) { w = w | info.may_write.get(g).unwrap_or(everything) }
+          if s is (Call(g) | CallValue(_, g, _)) { w = w | info.may_write.get(g).unwrap_or(everything) }
         }
         match block.term {
           TailCall(g) => w = w | info.may_write.get(g).unwrap_or(everything)
+          Jump(_, cases) =>
+            for c in cases { w = w | info.may_write.get(c.1).unwrap_or(everything) }
           Dispatch(h, _, cases) => {
             w = w | info.may_write.get(h).unwrap_or(everything)
             for c in cases { w = w | info.may_write.get(c.1).unwrap_or(everything) }
@@ -186,7 +196,7 @@ fn Program::summaries(self : Program, info : Analysis) -> Unit {
           }
           for s in block.stmts {
             w = w | s.defs()
-            if s is Call(g) { w = w | info.must_write.get(g).unwrap_or(0) }
+            if s is (Call(g) | CallValue(_, g, _)) { w = w | info.must_write.get(g).unwrap_or(0) }
           }
           if w != out[b] {
             out[b] = w
@@ -199,6 +209,11 @@ fn Program::summaries(self : Program, info : Analysis) -> Unit {
         match block.term {
           Return | ReturnValue(_) => must = must & out[b]
           TailCall(g) => must = must & (out[b] | info.must_write.get(g).unwrap_or(0))
+          Jump(_, cases) => {
+            let mut cases_must = everything
+            for c in cases { cases_must = cases_must & info.must_write.get(c.1).unwrap_or(0) }
+            must = must & (out[b] | cases_must)
+          }
           Dispatch(h, _, cases) => {
             let mut cases_must = everything
             for c in cases { cases_must = cases_must & info.must_write.get(c.1).unwrap_or(0) }
@@ -231,6 +246,9 @@ fn Program::summaries(self : Program, info : Analysis) -> Unit {
             Branch(c, t, e) => c.vars() | block_in[t] | block_in[e]
             ReturnValue(e) => e.vars()
             TailCall(g) => info.reads.get(g).unwrap_or(everything)
+            Jump(e, cases) => cases.fold(init=e.vars(), fn(acc, c) { acc | info.reads.get(c.1).unwrap_or(everything) })
+            Switch(e, _, _) as term => term.successors().fold(init=e.vars(), fn(acc, t) { acc | block_in[t] })
+            Suspend(t) => block_in[t]
             Dispatch(h, _, cases) => {
               let mut after = 0
               for c in cases { after = after | info.reads.get(c.1).unwrap_or(everything) }
@@ -242,7 +260,7 @@ fn Program::summaries(self : Program, info : Analysis) -> Unit {
           let mut k = block.stmts.length() - 1
           while k >= 0 {
             l = match block.stmts[k] {
-              Call(g) =>
+              Call(g) | CallValue(_, g, _) =>
                 info.reads.get(g).unwrap_or(everything) |
                 (l & info.must_write.get(g).unwrap_or(0).lnot())
               s => (l & s.defs().lnot()) | s.uses()

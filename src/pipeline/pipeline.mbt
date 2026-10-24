@@ -61,6 +61,7 @@ pub fn recompile(program : @image.Program, options : Options) -> Output raise Pi
   let ir = @ir.build(low, native=Set::from_array(options.native)) catch {
     err => raise fail("IR", err)
   }
+  ir.make_resumable() catch { err => raise fail("IR", err) }
   if options.reference { ir.analyze() |> ignore } else { ir.optimize() }
   let c = @transpile.Transpiler::transpile(low, ir, native=options.native) catch {
     err => raise fail("C", err)

@@ -19,6 +19,12 @@
 #define VIDEO_CTRL_BACKGROUND_BANK 0x10 // background uses pattern table $1000
 #define VIDEO_CTRL_NMI 0x80
 
+// How the four nametables of the address space map onto the two screens.
+#define MIRROR_VERTICAL 0 // $2000 = $2800, $2400 = $2C00 (screens side by side)
+#define MIRROR_HORIZONTAL 1 // $2000 = $2400, $2800 = $2C00 (screens stacked)
+#define MIRROR_SINGLE_LOWER 2 // all four are the first screen
+#define MIRROR_SINGLE_UPPER 3 // all four are the second screen
+
 #define VIDEO_MASK_BACKGROUND_LEFT 0x02 // draw background in the left 8 pixels
 #define VIDEO_MASK_SPRITES_LEFT 0x04    // draw sprites in the left 8 pixels
 #define VIDEO_MASK_BACKGROUND 0x08
@@ -38,12 +44,19 @@ typedef struct {
     uint8_t scroll_x;
     uint8_t scroll_y;
     bool status_bar; // top 32 pixels are a fixed, unscrolled status bar
+    uint8_t mirroring; // MIRROR_*
+    uint32_t chr_version; // changes whenever the pattern tables do
 } Video;
 
 extern Video video;
 extern uint8_t chr_rom[CHR_ROM_SIZE]; // pattern tables (8 KiB)
+// The pattern tables are RAM (the game writes its tiles through the PPU).
+extern bool chr_ram;
 
 void video_init(const uint8_t *chr);
+
+// The offset in `video.nametable` of a nametable address ($2000-$3EFF).
+uint16_t video_nametable_offset(uint16_t addr);
 
 // VRAM address space: pattern tables, nametables (vertical mirroring), palette.
 uint8_t video_read(uint16_t addr);

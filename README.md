@@ -2,11 +2,12 @@
 
 [Play it online](https://nathsou.github.io/smb/)
 
-Static recompilation of Super Mario Bros. from the ROM into C and
-WebAssembly. The repository contains no game code or data: the recompiler
-reads your own copy of the ROM, and `maps/smb.map` gives its routines, tables
-and variables this project's own names. The page recompiles the ROM in the
-browser and shows the generated C next to the game.
+Static recompilation of Super Mario Bros. and Metroid from the ROM into C
+and WebAssembly. The repository contains no game code or data: the
+recompiler reads your own copy of the ROM, and `maps/smb.map` and
+`maps/metroid.map` give its routines, tables and variables this project's
+own names. The page recompiles the ROM in the browser and shows the
+generated C next to the game.
 
 [![SMB C port running in the browser](res/smb-demo.png)](https://nathsou.github.io/smb)
 
@@ -34,11 +35,13 @@ browser and shows the generated C next to the game.
 - [x] An IR shared by a C and a WebAssembly backend, with optimisation passes
 - [x] Recompile in the browser, with a code viewer
 - [x] Synthesise sound on the audio thread, band-limited, from per-frame register writes
+- [x] A second game: Metroid (MMC1 banks, waits for the interrupt, return-address tricks)
 - [ ] Registers as C locals and parameters
 - [ ] Manually rewrite portions of the code to higher level C
 
 See [toward a modern C program](docs/modern-runtime.md) for how these steps are
-done and checked.
+done and checked, and [recompiling Metroid](docs/metroid.md) for the second
+game.
 
 ## Building
 
@@ -62,6 +65,11 @@ $ make build
    renderer's shader; `./smb --software` uses the software renderer;
    `--debug-chr` draws with generated placeholder tiles)
 
+For Metroid, place a legally obtained dump called `metroid.nes` in the root
+folder and add `GAME=metroid`: `make codegen GAME=metroid` recompiles it into
+`codegen/metroid/` and `make build GAME=metroid` builds `./metroid` (it saves
+states to `metroid.sav`).
+
 ## WebAssembly
 
 The page recompiles your ROM in the browser: the recompiler (MoonBit compiled
@@ -71,16 +79,17 @@ shows next to the game (SHOW CODE; the map tab is editable and recompiles).
 1. Install a recent `clang` with the `wasm32` target and MoonBit (see Codegen)
 2. Run `make web`
 3. Serve the `web/` folder over HTTP and open `index.html`
-4. Load a legally obtained dump of SMB, an iNES file or a raw dump of the
-   cartridge; it stays in your browser. An unrecognised dump (by SHA-256)
-   still loads, with a warning
+4. Load a legally obtained dump of SMB or Metroid, an iNES file (or for SMB
+   a raw dump of the cartridge); it stays in your browser. An MMC1 dump is
+   recompiled as Metroid. An unrecognised dump (by SHA-256) still loads,
+   with a warning
 
-DEBUG TILES draws with generated placeholder tiles instead of the ROM's, and
-`?software` in the URL selects the software renderer instead of WebGL2.
+DEBUG TILES draws SMB with generated placeholder tiles instead of the ROM's,
+and `?software` in the URL selects the software renderer instead of WebGL2.
 
 ### Themes
 
-THEME draws the same frames differently (WebGL2; ORIGINAL is the game's own
+THEME draws SMB's frames differently (WebGL2; ORIGINAL is the game's own
 picture):
 
 - 2D GLOBAL ILLUMINATION: fire, lava, coins and question blocks light the
@@ -125,17 +134,24 @@ iNES image) through both backends, natively and in WebAssembly. With your
 7,987 frames natively against `tests/golden/warpless.trace` (debug and ROM
 tiles), run the differential test of every generated routine
 (`tests/check_routines.py`) and replay the WebAssembly build
-(`tests/web/replay_split.mjs`). These checks do not require Raylib.
+(`tests/web/replay_split.mjs`). With your `metroid.nes`, `--metroid`
+recompiles Metroid and replays `rec/metroid.rec` (4,601 frames) natively and
+in WebAssembly against `tests/golden/metroid.trace`, which an independent
+6502 interpreter (`tests/interpreter.c`) wrote and is checked to reproduce.
+These checks do not require Raylib.
 
 The GPU renderers can be compared with the software renderer pixel for pixel:
-`make gpu-check && xvfb-run ./gpu_check --debug-chr` (desktop) and
+`make gpu-check && xvfb-run ./gpu_check --debug-chr` (desktop; for Metroid
+`make gpu-check GAME=metroid && xvfb-run ./gpu_check --every 25 --variations`) and
 `NODE_PATH=$(npm root -g) node tests/web/gpu_check.cjs` (WebGL2 in headless
 Chromium, needs Playwright). `tests/web/themes.cjs` draws frames of the
 replay with every theme and fails on WebGL errors; with a query and a
 directory it saves them, e.g. `'frames=7800&rom=1' /tmp/themes`.
 
-Calls are plain C calls. Return addresses are not kept on the emulated stack,
-except by the inline-table dispatchers, which read their table through it.
+In SMB, calls are plain C calls. Return addresses are not kept on the
+emulated stack, except by the inline-table dispatchers, which read their
+table through it. Metroid reads and drops return addresses, so its calls
+push them as the 6502 does (see [return addresses](docs/metroid.md#return-addresses)).
 
 To compile another compatible assembly input into a separate directory:
 

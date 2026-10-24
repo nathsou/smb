@@ -170,20 +170,26 @@ do not create a fictitious guest call frame.
 
 Static per-entry stack checking rejects negative/unbalanced data depth,
 unrecognized return-token pops, stack-pointer replacement in called routines,
-ordinary callees using RTI, and called idle loops needing suspended C frames.
+ordinary callees using RTI, and called idle loops needing suspended C frames
+(wait loops, below, suspend instead).
 Entry contracts are keyed by both address and role. If an interrupt handler is
 also reached by JSR, its ordinary-call context is checked separately and RTI is
 rejected there; vector status cannot leak into the ordinary call contract.
 Runtime token checks catch unsupported return-address modifications through RAM.
 This is a checked function-backend contract, not arbitrary continuation support.
 
-NMI is delivered only at the idle yield, so a loop waiting for an interrupt
-(`Wait: lda flag / beq Wait`) would hang. Discovery rejects any loop that can
-return to an instruction without writing memory, reading I/O or through a
-pointer, using the stack or calls, and without changing a register or flag it
-consumed on the way. Every later iteration would then repeat the same path, so
-only an interrupt could end it. Counting loops and I/O polling are unaffected.
-Implementation: `src/image/loops.mbt`.
+NMI is delivered only where the foreground yields, so a loop waiting for an
+interrupt (`Wait: lda flag / beq Wait`) would hang. A loop entered only at its
+start, whose every decision depends on memory read since the start, is a wait
+loop: its transfer back to the start suspends the foreground, which resumes
+there after the interrupt (resumable functions, see
+[recompiling Metroid](metroid.md#waiting-for-the-interrupt)). Discovery still
+rejects any other loop that can return to an instruction without writing
+memory, reading I/O or through a pointer, using the stack or calls, and
+without changing a register or flag it consumed on the way: every later
+iteration would repeat the same path, so only an interrupt could end it.
+Counting loops and I/O polling are unaffected.
+Implementation: `src/image/loops.mbt`, `src/ir/escape.mbt`.
 
 Implementation: `src/image/stack.mbt`, generated vector wrappers, and
 `codegen/lib/cpu.c`.
@@ -250,8 +256,9 @@ required to annotate this source:
    through separate tables.
    Prove bounds and target sets across callers. Keep unknown targets explicit.
 2. **Continuation fallback.** Add a resumable guest-PC backend for unproven
-   indirect jumps, nonstandard stack use, BRK/IRQ, and wait-for-interrupt
-   foreground loops (currently rejected).
+   indirect jumps, nonstandard stack use and BRK/IRQ (currently rejected).
+   Wait-for-interrupt loops and return-address manipulation are supported
+   (see [recompiling Metroid](metroid.md)).
    Integrate it at proven boundaries without turning all generated code into
    one large PC switch. Differential tests must cover fallback/native crossings.
 3. **Broader value recovery.** Build register SSA and memory-effect summaries for

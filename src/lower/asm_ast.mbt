@@ -51,6 +51,9 @@ pub(all) enum AsmItem {
   Label(String)
   Inst(id~: Int, op~: @parse.OpCode, mode~: AsmAddressingMode, comment~: String?)
   JumpEngine(jump_table~: Array[String], site~: Int)
+  // A computed jump (through RAM, or returning through a pushed address)
+  // to one of these routines.
+  ComputedJump(targets~: Array[String], site~: Int)
   DoWhile(cond~: @parse.OpCode, body~: Array[AsmItem], comment~: String?)
   If(comparison~: (String, TypedExpr)?, cond~: @parse.OpCode, then~: Array[AsmItem], otherwise~: Array[AsmItem]?, comment~: String?)
   Comment(String)

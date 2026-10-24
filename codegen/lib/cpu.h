@@ -22,6 +22,23 @@ void cpu_yield(uint16_t pc);
 void cpu_unresolved_jump(uint16_t pc);
 void cpu_unsupported_io(uint16_t addr);
 
+// Exact returns (programs that read their return addresses): JSR pushes the
+// return address and RTS pulls it; `cpu_return` is where the last return
+// went, which the caller compares with where it called from.
+extern uint16_t cpu_return;
+void cpu_returned(uint8_t low, uint8_t high);
+
+// Suspension in wait loops: the functions on the way to a wait push their
+// resume points and return, down to the reset routine, which next_frame
+// calls again after the interrupt (see the IR's escape.mbt).
+#define CPU_RESUME_STACK 64
+extern uint8_t cpu_suspended;
+extern uint8_t cpu_resume_depth;
+extern uint8_t cpu_resume_point;
+extern uint8_t cpu_resume_stack[CPU_RESUME_STACK];
+void cpu_suspend(uint8_t point);
+void cpu_resume_pop(void);
+
 // PHP/PLP
 void php(void);
 void plp(void);

@@ -25,11 +25,16 @@ pub(all) struct Dispatch {
 } derive(Debug)
 
 pub fn show_pc(pc: Int) -> String {
-  "$" + pc.to_string(radix=16).pad_start(4, '0')
+  let address = "$" + (pc & 0xffff).to_string(radix=16).pad_start(4, '0')
+  match bank_of(pc) {
+    Some(bank) => "\{address} (bank \{bank})"
+    None => address
+  }
 }
 
 priv struct Machine {
   image: Image
+  context: Int // the call's location: ROM in the window is read from its bank
   regs: Array[Int?] // A, X, Y
   mut c: Bool?
   mut z: Bool?
@@ -52,8 +57,9 @@ fn Machine::load(self: Machine, address: Int) -> Int? raise Unproven {
     if ram >= 0x100 && ram < 0x200 { return None }
     self.ram.get(ram).unwrap_or(None)
   } else if address >= 0x8000 {
-    let value = try self.image.read(address) catch { _ => raise Unproven }
-    self.reads.push(address)
+    let location = rebase(self.context, address)
+    let value = try self.image.read(location) catch { _ => raise Unproven }
+    self.reads.push(location)
     Some(value)
   } else { None } // MMIO and open bus
 }
@@ -128,9 +134,9 @@ priv struct Run {
 // Execute one index. Returns None when any needed value is unknown or the
 // helper leaves through anything other than a transfer that consumed the
 // call's own return token.
-fn evaluate(image: Image, helper: Int, return_pc: Int, carrier: Int, index: Int) -> Run? {
+fn evaluate(image: Image, helper: Int, return_pc: Int, carrier: Int, index: Int, context~: Int) -> Run? {
   let m: Machine = {
-    image, regs: [None, None, None], c: None, z: None, n: None, v: None,
+    image, context, regs: [None, None, None], c: None, z: None, n: None, v: None,
     ram: Map([]), stack: Map([]), sp: 0, max_sp: 0, reads: [],
   }
   m.regs[carrier] = Some(index)
@@ -237,12 +243,12 @@ fn evaluate(image: Image, helper: Int, return_pc: Int, carrier: Int, index: Int)
           taken = match inst.op { BCS | BEQ | BMI | BVS => set; _ => !set }
           if taken { next = branch_target(inst) }
         }
-        JMP if inst.mode == "abs" => next = inst.arg
+        JMP if inst.mode == "abs" => next = jump_target(inst)
         JMP => {
           let high = (inst.arg & 0xff00) | ((inst.arg + 1) & 255)
           let target = known(m.load(inst.arg)) | (known(m.load(high)) << 8)
           if m.sp != 2 { raise Unproven }
-          return Some({ target, steps, exit: IndirectJump(inst.arg), reads: m.reads })
+          return Some({ target: rebase(context, target), steps, exit: IndirectJump(inst.arg), reads: m.reads })
         }
         RTS => {
           // The helper must have consumed the call token before pushing the
@@ -251,7 +257,7 @@ fn evaluate(image: Image, helper: Int, return_pc: Int, carrier: Int, index: Int)
           let lo = known(m.pull())
           let hi = known(m.pull())
           if m.sp != 2 { raise Unproven }
-          return Some({ target: ((lo | (hi << 8)) + 1) & 0xffff, steps, exit: ReturnJump, reads: m.reads })
+          return Some({ target: rebase(context, (lo | (hi << 8)) + 1), steps, exit: ReturnJump, reads: m.reads })
         }
         JSR | RTI | BRK | TXS => raise Unproven
       }
@@ -273,22 +279,25 @@ fn same_path(a: Array[DispatchStep], b: Array[DispatchStep]) -> Bool {
 // Other indices are left to the emitted runtime trap.
 fn dispatch_at(image: Image, call: Instruction, table_end: Int) -> Dispatch? {
   let within = fn(address: Int) { address >= call.next && address < table_end }
+  // a target outside ROM (an unused entry) is left to the trap
+  let code = fn(address: Int) { (address & 0xffff) >= 0x8000 }
   for carrier in 0..<3 {
-    let first = match evaluate(image, call.arg, call.next - 1, carrier, 0) {
-      Some(run) if run.reads.iter().all(within) && !within(run.target) => run
+    let return_pc = ((call.next & 0xffff) - 1) & 0xffff
+    let first = match evaluate(image, jump_target(call), return_pc, carrier, 0, context=call.pc) {
+      Some(run) if run.reads.iter().all(within) && !within(run.target) && code(run.target) => run
       _ => continue
     }
     let targets = []
     for index in 0..<256 {
-      match evaluate(image, call.arg, call.next - 1, carrier, index) {
+      match evaluate(image, jump_target(call), return_pc, carrier, index, context=call.pc) {
         Some(run) if run.exit == first.exit && same_path(run.steps, first.steps) &&
-          run.reads.iter().all(within) && !within(run.target) => {
+          run.reads.iter().all(within) && !within(run.target) && code(run.target) => {
           if !targets.contains(run.target) { targets.push(run.target) }
         }
         _ => ()
       }
     }
-    return Some({ call_pc: call.pc, helper: call.arg, steps: first.steps, exit: first.exit, targets, table_end })
+    return Some({ call_pc: call.pc, helper: jump_target(call), steps: first.steps, exit: first.exit, targets, table_end })
   }
   None
 }

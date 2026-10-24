@@ -1,8 +1,11 @@
 #include "cpu.h"
 #ifdef PPU_BUS
-#include "ppu_bus.h" // generic programs only: tests/support/ppu_bus.c
+#include "ppu_bus.h" // programs that drive the PPU registers: ppu_bus.c
 #endif
 #include "sound.h"
+#ifdef MAPPER
+#include "mapper.h" // cartridges that switch banks (MMC1)
+#endif
 
 uint8_t a;
 uint8_t x;
@@ -26,6 +29,28 @@ void cpu_push_return_address(uint16_t return_address) {
 
 void cpu_yield(uint16_t pc) {
     cpu_resume_pc = pc;
+}
+
+uint16_t cpu_return;
+
+void cpu_returned(uint8_t low, uint8_t high) {
+    cpu_return = (uint16_t)(((high << 8) | low) + 1);
+}
+
+uint8_t cpu_suspended;
+uint8_t cpu_resume_depth;
+uint8_t cpu_resume_point;
+uint8_t cpu_resume_stack[CPU_RESUME_STACK];
+
+void cpu_suspend(uint8_t point) {
+    if (cpu_resume_depth == CPU_RESUME_STACK) __builtin_trap();
+    cpu_resume_stack[cpu_resume_depth++] = point;
+    cpu_suspended = 1;
+}
+
+// The outermost pending point: the reset routine pushed it last.
+void cpu_resume_pop(void) {
+    cpu_resume_point = cpu_resume_stack[--cpu_resume_depth];
 }
 
 uint16_t cpu_dispatch_target;
@@ -79,6 +104,9 @@ void cpu_init(void) {
     interrupt_disabled = true;
     decimal_flag = false;
     cpu_resume_pc = 0;
+    cpu_return = 0;
+    cpu_suspended = 0;
+    cpu_resume_depth = 0;
 
     // controller
     controller1_state = 0;
@@ -117,9 +145,21 @@ uint8_t read_byte(uint16_t addr) {
         // APU
     }
 
+#ifdef MAPPER
+    if (addr >= 0xc000) {
+        return data[prg_image_size - 0x4000 + (addr - 0xc000)]; // the last bank, fixed
+    }
+    if (addr >= 0x8000) {
+        return prg_window[addr - 0x8000];
+    }
+    if (addr >= 0x6000) {
+        return wram[addr - 0x6000];
+    }
+#else
     if (addr >= 0x8000) {
         return data[(addr - 0x8000) % prg_image_size];
     }
+#endif
 
     return 0;
 }
@@ -155,6 +195,13 @@ void dynamic_ram_write(uint16_t addr, uint8_t value) {
     } else if (addr < 0x4020) {
         apu_write(addr, value);
     }
+#ifdef MAPPER
+    else if (addr >= 0x8000) {
+        mapper_write(addr, value);
+    } else if (addr >= 0x6000) {
+        wram[addr - 0x6000] = value;
+    }
+#endif
 }
 
 uint16_t read_word(uint16_t addr) {
@@ -260,12 +307,17 @@ void plp(void) {
 }
 
 inline void next_frame(void) {
-    // NMI is delivered while the foreground is at a proven idle yield, which
-    // reads no registers or flags. Like RTI, restore the status flags.
+    // NMI is delivered while the foreground is at a proven idle yield or
+    // suspended in a wait loop. Like RTI, restore the status flags.
     bool c = carry_flag, z = zero_flag, n = neg_flag, v = overflow_flag;
     bool i = interrupt_disabled, d = decimal_flag;
     interrupt_disabled = true;
     cpu_nmi_entry();
     carry_flag = c; zero_flag = z; neg_flag = n; overflow_flag = v;
     interrupt_disabled = i; decimal_flag = d;
+    // A suspended foreground resumes and runs to its next wait.
+    if (cpu_resume_depth != 0) {
+        cpu_suspended = 0;
+        cpu_reset_entry();
+    }
 }

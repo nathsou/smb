@@ -17,6 +17,9 @@ priv struct Builder {
   program : @image.Program
   f : Function
   stmts : Array[Stmt]
+  // the location of the instruction being built: code of a bank reads the
+  // window from its bank
+  mut at : Int
 }
 
 fn rename(label : String) -> String {
@@ -107,14 +110,24 @@ fn pointer(p : Expr) -> Expr {
 }
 
 // An absolute address, classified by the range of values it can take.
-fn absolute(addr : Expr, base : Int, indexed : Bool) -> Operand {
+// With a mapper, ROM is the fixed bank from $C000; the window is the
+// bank of the code reading it (`at`), or the bank mapped when fixed-bank
+// code reads it; $6000-$7FFF is the cartridge's RAM.
+fn absolute(addr : Expr, base : Int, indexed : Bool, banked~ : Bool = false, at~ : Int = 0) -> Operand {
   let lo = base
   let hi = if indexed { base + 0xff } else { base }
   if lo >= 0 && hi < 0x800 {
     At(Ram, addr)
   } else if lo >= 0 && hi < 0x2000 {
     At(Ram, Binary(And, addr, Const(0x7ff)))
-  } else if lo >= 0x8000 && hi < 0x10000 {
+  } else if banked && lo >= 0x6000 && hi < 0x8000 {
+    At(Wram, addr)
+  } else if banked && lo >= 0x8000 && hi < 0xc000 {
+    match @image.bank_of(at) {
+      Some(bank) => At(Bank(bank), addr)
+      None => At(Window, addr)
+    }
+  } else if lo >= (if banked { 0xc000 } else { 0x8000 }) && hi < 0x10000 {
     At(Rom, addr)
   } else {
     At(Bus, addr)
@@ -133,10 +146,11 @@ fn Builder::operand(self : Builder, mode : @lower.AsmAddressingMode) -> Operand 
         Some(v) => v
         None => raise BuildError("Unknown address")
       }
+      let banked = self.program.image.banked()
       match mode {
-        AbsoluteX(_) => absolute(Binary(Add, base, Var(X)), value, true)
-        AbsoluteY(_) => absolute(Binary(Add, base, Var(Y)), value, true)
-        _ => absolute(base, value, false)
+        AbsoluteX(_) => absolute(Binary(Add, base, Var(X)), value, true, banked~, at=self.at)
+        AbsoluteY(_) => absolute(Binary(Add, base, Var(Y)), value, true, banked~, at=self.at)
+        _ => absolute(base, value, false, banked~, at=self.at)
       }
     }
     IndirectIndexed(e) => At(Bus, Binary(Add, pointer(self.expr(e)), Var(Y)))
@@ -173,6 +187,9 @@ fn Builder::nz(self : Builder, value : Expr) -> Unit {
 fn Builder::store(self : Builder, mode : @lower.AsmAddressingMode, value : Expr) -> Unit raise BuildError {
   match self.operand(mode) {
     At(Ram, addr) => self.emit(Store(Ram, addr, value))
+    At(Wram, addr) => self.emit(Store(Wram, addr, value))
+    // writes to ROM configure the mapper
+    At(Rom | Bank(_) | Window, addr) => self.emit(Effect("mapper_write", [addr, value]))
     At(_, addr) =>
       match addr.value() {
         Some(a) if a >= 0x2000 && a < 0x4000 =>
@@ -201,6 +218,8 @@ fn Builder::place(self : Builder, mode : @lower.AsmAddressingMode) -> Place rais
     _ =>
       match self.operand(mode) {
         At(Ram, addr) => InRam(addr)
+        At(_, addr) if self.program.image.banked() && addr.value() is Some(a) && a >= 0x8000 =>
+          raise BuildError("Read-modify-write of the mapper at \{a} is not supported")
         At(_, addr) => OnBus(self.temp("address", U16, addr))
         Imm(_) => raise BuildError("Read-modify-write of an immediate")
       }
@@ -259,6 +278,17 @@ fn register_of(op : @parse.OpCode) -> Var {
 
 fn bit_set(value : Expr, mask : Int) -> Expr {
   Binary(Ne, Binary(And, value, Const(mask)), Const(0))
+}
+
+// The status byte with bits 4 and 5 from `base`: PHP sets the break bit, an
+// interrupt does not.
+fn push_status(b : Builder, base : Int) -> Unit {
+  let mut status = Const(base)
+  for pair in [(C, 0), (Z, 1), (I, 2), (D, 3), (V, 6), (N, 7)] {
+    let (flag, bit) = pair
+    status = Binary(Or, status, if bit == 0 { Var(flag) } else { Binary(Shl, Var(flag), Const(bit)) })
+  }
+  push(b, status)
 }
 
 fn push(b : Builder, value : Expr) -> Unit {
@@ -355,14 +385,7 @@ fn Builder::instruction(self : Builder, op : @parse.OpCode, mode : @lower.AsmAdd
       self.emit(Assign(A, value))
       self.nz(Var(A))
     }
-    PHP => {
-      let mut status = Const(0x30)
-      for pair in [(C, 0), (Z, 1), (I, 2), (D, 3), (V, 6), (N, 7)] {
-        let (flag, bit) = pair
-        status = Binary(Or, status, if bit == 0 { Var(flag) } else { Binary(Shl, Var(flag), Const(bit)) })
-      }
-      push(self, status)
-    }
+    PHP => push_status(self, 0x30)
     PLP => {
       let p = self.temp("p", U8, pull(self))
       for pair in [(C, 1), (Z, 2), (I, 4), (D, 8), (V, 0x40), (N, 0x80)] {
@@ -400,11 +423,47 @@ fn new_function(name : String, doc : Array[String], native : Bool, helper : Bool
 }
 
 // Blocks for terminators reached by edges (returns, tail calls, traps).
+// With exact returns, `ret` leaves without pulling a return address (to the
+// caller a callee's return went past) and `rts` pulls it.
 priv struct Exits {
   f : Function
   tails : Map[String, Int]
   traps : Map[Int, Int]
+  suspends : Map[Int, Int]
   mut ret : Int?
+  mut rts : Int?
+}
+
+// RTS keeping return addresses: pull it, and tell the caller where it goes.
+fn exact_return(b : Builder) -> Unit {
+  let low_byte = b.temp("low", U8, pull(b))
+  let high_byte = b.temp("high", U8, pull(b))
+  b.emit(Effect("cpu_returned", [low_byte, high_byte]))
+}
+
+fn Exits::rts(self : Exits, low : @lower.AsmLowering, program : @image.Program) -> Int {
+  match self.rts {
+    Some(b) => b
+    None => {
+      let builder : Builder = { low, program, f: self.f, stmts: [], at: 0 }
+      exact_return(builder)
+      self.f.blocks.push({ label: "", stmts: builder.stmts, term: Return })
+      self.rts = Some(self.f.blocks.length() - 1)
+      self.f.blocks.length() - 1
+    }
+  }
+}
+
+// A wait loop's way back to its start.
+fn Exits::suspend(self : Exits, start : Int) -> Int {
+  match self.suspends.get(start) {
+    Some(b) => b
+    None => {
+      self.f.blocks.push({ label: "", stmts: [], term: Suspend(start) })
+      self.suspends[start] = self.f.blocks.length() - 1
+      self.f.blocks.length() - 1
+    }
+  }
 }
 
 fn Exits::ret(self : Exits) -> Int {
@@ -469,16 +528,24 @@ fn build_routine(
     for item in bb.items {
       match item {
         Label(name) => { label = rename(name); break }
-        Inst(id~, ..) if id >= 0 => { label = "loc_" + hex4(id); break }
+        Inst(id~, ..) if id >= 0 => {
+          label = match @image.bank_of(id) {
+            Some(bank) => "loc_\{program.image.banks.names[bank]}_\{hex4(id & 0xffff)}"
+            None => "loc_" + hex4(id)
+          }
+          break
+        }
         _ => ()
       }
     }
     f.blocks.push({ label, stmts: [], term: Return })
   }
   f.entry = index[sub.entry.id]
-  let exits : Exits = { f, tails: Map([]), traps: Map([]), ret: None }
+  let exact = program.exact.val
+  let exits : Exits = { f, tails: Map([]), traps: Map([]), suspends: Map([]), ret: None, rts: None }
   fn target(label : String) -> Int raise BuildError {
-    if label == "__ret__" { return exits.ret() }
+    if label == "__ret__" { return if exact { exits.rts(low, program) } else { exits.ret() } }
+    if @image.trap_address(label) is Some(pc) { return exits.trap(pc) }
     match low.bb_by_label.get(label) {
       Some(bb) if index.contains(bb.id) => index[bb.id]
       _ =>
@@ -504,57 +571,121 @@ fn build_routine(
     raise BuildError("Execution falls out of \{sub.name}")
   }
   for i, bb in blocks {
-    let builder : Builder = { low, program, f, stmts: [] }
+    // the block taking statements: a call that keeps its return address
+    // ends one, as the return may go past this routine
+    let mut current = i
+    let mut builder : Builder = { low, program, f, stmts: [], at: 0 }
     let mut term : Term? = None
     for item in bb.items {
+      if term is Some(_) { continue } // after a fallthrough made a tail call
       match item {
         Label(_) | Comment(_) => ()
-        Inst(id~, op~, mode~, ..) =>
+        Inst(id~, op~, mode~, ..) => {
+          if id >= 0 { builder.at = id }
           match op {
             BCC | BCS | BEQ | BNE | BMI | BPL | BVC | BVS => {
               let label = match mode {
                 Relative(Ident(name~, ..)) => name
                 _ => raise BuildError("Unresolved branch")
               }
-              term = Some(Branch(cond_of(op), target(label), fallthrough(bb)))
+              let mut taken = target(label)
+              let mut not_taken = fallthrough(bb)
+              // a wait loop's branch back to its start waits there
+              if program.waits.get(id) is Some(start) {
+                if start == @image.branch_target(program.instructions[id]) {
+                  taken = exits.suspend(taken)
+                } else {
+                  not_taken = exits.suspend(not_taken)
+                }
+              }
+              term = Some(Branch(cond_of(op), taken, not_taken))
             }
             JMP =>
               if program.idle.contains(id) {
                 term = Some(Yield(id))
               } else {
                 match mode {
-                  Absolute(Ident(name~, ..)) => term = Some(Goto(target(name)))
+                  Absolute(Ident(name~, ..)) =>
+                    term = Some(if program.waits.contains(id) { Suspend(target(name)) } else { Goto(target(name)) })
                   _ => raise BuildError("Unresolved jump")
                 }
               }
             JSR =>
               match mode {
+                // with exact returns, falling into another routine is a
+                // tail call: the routine returns for both
+                Absolute(Ident(name~, ..)) if exact && id < 0 => term = Some(TailCall(rename(name)))
+                Absolute(Ident(name~, ..)) if exact => {
+                  let return_address = (id & 0xffff) + 2
+                  push(builder, Const(return_address >> 8))
+                  push(builder, Const(return_address & 0xff))
+                  builder.emit(Call(rename(name)))
+                  f.blocks.push({ label: "", stmts: [], term: Return })
+                  let next = f.blocks.length() - 1
+                  f.blocks[current].stmts = builder.stmts
+                  // returned elsewhere: past this routine too
+                  f.blocks[current].term = Branch(Binary(Ne, Runtime("cpu_return"), Const(return_address + 1)), exits.ret(), next)
+                  current = next
+                  builder = { low, program, f, stmts: [], at: id }
+                }
                 Absolute(Ident(name~, ..)) => builder.emit(Call(rename(name)))
                 _ => raise BuildError("Unresolved call")
               }
+            RTS if exact && id >= 0 => {
+              exact_return(builder)
+              term = Some(Return)
+            }
+            RTI if exact => {
+              builder.instruction(PLP, Implied)
+              exact_return(builder)
+              term = Some(Return)
+            }
             RTS | RTI => term = Some(Return)
             BRK => raise BuildError("BRK is not supported")
             _ => builder.instruction(op, mode)
           }
+        }
         JumpEngine(jump_table~, site~) => {
           let dispatch = program.dispatches[site]
           let helper = @image.address_name(program.image, dispatch.helper)
           let cases = []
           let seen : Set[Int] = Set([])
           for k, label in jump_table {
-            let address = dispatch.targets[k]
+            let address = dispatch.targets[k] & 0xffff
             if !seen.contains(address) {
               seen.add(address)
               cases.push((address, rename(label)))
             }
           }
-          term = Some(Dispatch(helper, site + 2, cases))
+          term = Some(Dispatch(helper, (site & 0xffff) + 2, cases))
+        }
+        ComputedJump(targets~, site~) => {
+          builder.at = site
+          let inst = program.instructions[site]
+          let address = if inst.op == JMP {
+            // through a pointer (the high byte from the same page)
+            let p = inst.arg
+            let high = (p & 0xff00) | ((p + 1) & 0xff)
+            let space : Mem = if p < 0x800 && high < 0x800 { Ram } else { Bus }
+            Binary(Or, Load(space, Const(p)), Binary(Shl, Load(space, Const(high)), Const(8)))
+          } else {
+            // returning through the address the routine pushed
+            let low_byte = builder.temp("low", U8, pull(builder))
+            let high_byte = builder.temp("high", U8, pull(builder))
+            Binary(And, Binary(Add, Binary(Or, low_byte, Binary(Shl, high_byte, Const(8))), Const(1)), Const(0xffff))
+          }
+          let cases : Array[(Int, String)] = []
+          for k, label in targets {
+            let value = program.jumps[site][k] & 0xffff
+            if !cases.iter().any(fn(c) { c.0 == value }) { cases.push((value, rename(label))) }
+          }
+          term = Some(Jump(address, cases))
         }
         _ => raise BuildError("Unexpected structured item")
       }
     }
-    f.blocks[i].stmts = builder.stmts
-    f.blocks[i].term = match term {
+    f.blocks[current].stmts = builder.stmts
+    f.blocks[current].term = match term {
       Some(t) => t
       None => Goto(fallthrough(bb))
     }
@@ -571,8 +702,8 @@ fn build_helper(
   dispatch : @image.Dispatch,
 ) -> Function raise BuildError {
   let f = new_function(name, [], false, true)
-  let exits : Exits = { f, tails: Map([]), traps: Map([]), ret: None }
-  let mut builder : Builder = { low, program, f, stmts: [] }
+  let exits : Exits = { f, tails: Map([]), traps: Map([]), suspends: Map([]), ret: None, rts: None }
+  let mut builder : Builder = { low, program, f, stmts: [], at: dispatch.helper }
   // The table is read through the return address of the original call.
   push(builder, Unary(Hi, Param))
   push(builder, Unary(Lo, Param))
@@ -590,7 +721,7 @@ fn build_helper(
       let cond = if step.taken { cond_of(inst.op) } else { simplify(Unary(Not, cond_of(inst.op))) }
       let b = finish(builder, Return)
       pending.push((b, cond, exits.trap(other)))
-      builder = { low, program, f, stmts: [] }
+      builder = { low, program, f, stmts: [], at: dispatch.helper }
       continue
     }
     let mode = low.lower_mode(@image.source_mode(program.image, inst), op=Some(inst.op)) catch {
@@ -643,11 +774,49 @@ pub fn build(low : @lower.AsmLowering, native~ : Set[String]) -> Program raise B
   for sub in low.subroutines {
     functions.push(build_routine(low, program, sub, native.contains(rename(sub.name))))
   }
+  // Fixed-bank code reaching the window runs the routine of the bank mapped.
+  let windows = program.windows.keys().to_array()
+  windows.sort()
+  for address in windows {
+    let f = new_function(@image.address_name(program.image, address), [
+      "The routine at $\{hex4(address)} in the bank mapped there.",
+    ], false, false)
+    f.blocks.push({ label: "", stmts: [], term: Trap(address) })
+    let cases = []
+    for location in program.windows[address] {
+      guard @image.bank_of(location) is Some(bank) else { continue }
+      f.blocks.push({ label: "", stmts: [], term: TailCall(@image.address_name(program.image, location)) })
+      cases.push((bank, f.blocks.length() - 1))
+    }
+    f.blocks.push({ label: "", stmts: [], term: Switch(Runtime("prg_bank"), cases, 0) })
+    f.entry = f.blocks.length() - 1
+    functions.push(f)
+  }
   let by_name : Map[String, Int] = Map([])
   for i, f in functions { by_name[f.name] = i }
   let base = if program.image.bytes.length() == 16384 { program.image.origin + 0x3ffa } else { 0xfffa }
   let nmi = try @image.address_name(program.image, program.image.word(base)) catch {
     _ => raise BuildError("Missing NMI vector")
   }
-  { functions, by_name, reset: rename(program.roots[0]), nmi: rename(nmi), prg: program.image.bytes, info: None }
+  let nmi = rename(nmi)
+  // With exact returns the interrupt pushes the return address and the
+  // status, which RTI pulls.
+  if program.exact.val && by_name.get(nmi) is Some(i) {
+    let f = functions[i]
+    let builder : Builder = { low, program, f, stmts: [], at: 0 }
+    push(builder, Const(0))
+    push(builder, Const(0))
+    push_status(builder, 0x20)
+    f.blocks.push({ label: "", stmts: builder.stmts, term: Goto(f.entry) })
+    f.entry = f.blocks.length() - 1
+  }
+  {
+    functions,
+    by_name,
+    reset: rename(program.roots[0]),
+    nmi,
+    prg: program.image.bytes,
+    banks: program.image.banks.contents,
+    info: None,
+  }
 }

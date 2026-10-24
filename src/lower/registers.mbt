@@ -277,6 +277,7 @@ fn AsmLowering::collect_live_registers(
             live = self.inst_reads(id, op, mode).union(live.subtract(inst_writes(op, mode)))
           }
           JumpEngine(site~, ..) => live = self.dispatch_transfer(site, live)
+          ComputedJump(_) => live = Registers::all()
           _ => ()
         }
         i -= 1
@@ -396,6 +397,7 @@ fn AsmLowering::collect_routine_reads(
               }
               Inst(id~, op~, mode~, ..) => live = self.inst_reads(id, op, mode).union(live.subtract(inst_writes(op, mode)))
               JumpEngine(site~, ..) => live = self.dispatch_transfer(site, live)
+              ComputedJump(_) => live = Registers::all()
               _ => ()
             }
             i -= 1

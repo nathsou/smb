@@ -154,9 +154,9 @@ test "unsupported computed jumps are rejected with a specific reason" {
 }
 
 test "a loop that only an interrupt can end is rejected" {
-  assert_eq(rejection(with_vectors("Boot:\n lda #$80\n sta $2000\nMain:\n inc $10\nWait:\n lda $15\n beq Wait\n lda #$00\n sta $15\n jmp Main\n")).contains("can only exit through an interrupt"), true)
-  // Two-block wait with an unchanged register consumed each iteration.
-  assert_eq(rejection(with_vectors("Boot:\n ldx #$03\nWait:\n lda $15\n and #$01\n cpx #$03\n beq Wait\n rts\n")).contains("can only exit through an interrupt"), true)
+  // Entered in its middle, with an unchanged register consumed each
+  // iteration: no start to resume from, and nothing it reads decides.
+  assert_eq(rejection(with_vectors("Boot:\n ldx $20\n jmp Inside\nWait:\n lda $15\n and #$01\nInside:\n cpx #$03\n beq Wait\n rts\n")).contains("can only exit through an interrupt"), true)
 }
 
 test "counting, I/O polling and idle loops are accepted" {
@@ -206,4 +206,17 @@ test "map types name the values of variables" {
   for text in rejected {
     try parse_map(text) catch { _ => () } noraise { _ => fail("accepted: \{text}") }
   }
+}
+
+test "a loop deciding on memory alone waits for the interrupt" {
+  let image = fixture(".org $8000\nBoot:\n lda #$80\n sta $2000\nMain:\n inc $10\n lda #$00\n sta $15\nWait:\n lda $15\n beq Wait\n jmp Main\nNmi:\n inc $15\n rti\n.org $fffa\n.dw Nmi, Boot, Nmi\n")
+  let p = discover(image)
+  assert_eq(p.waits.length(), 1)
+  assert_eq(p.waits[image.symbols["Wait"] + 2], image.symbols["Wait"])
+  // entered in its middle, a loop does not wait: what it read decides
+  // a loop that never exits idles there, as the machine does
+  let idle = discover(fixture(with_vectors("Boot:\n ldx #$03\nWait:\n lda $15\n and #$01\n cpx #$03\n beq Wait\n rts\n")))
+  assert_eq(idle.waits.length(), 1)
+  let entered = discover(fixture(".org $8000\nBoot:\n ldy $20\n jsr Next\nIdle:\n jmp Idle\nRetry:\n ldy $21\nNext:\n lda $8100,y\n cmp #$ff\n beq Retry\n rts\nNmi:\n rti\n.org $fffa\n.dw Nmi, Boot, Nmi\n"))
+  assert_eq(entered.waits.length(), 0)
 }

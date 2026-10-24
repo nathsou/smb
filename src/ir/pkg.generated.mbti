@@ -20,6 +20,8 @@ pub let all_vars : Array[Var]
 
 pub fn build(@lower.AsmLowering, native~ : @set.Set[String]) -> Program raise BuildError
 
+pub fn runtime_width(String) -> Width
+
 pub fn simplify(Expr) -> Expr
 
 pub fn vars_of(Int32) -> Array[Var]
@@ -70,6 +72,7 @@ pub(all) enum Expr {
   Var(Var)
   Temp(Int32)
   Param
+  Runtime(String)
   Load(Mem, Expr)
   Unary(UnOp, Expr)
   Binary(BinOp, Expr, Expr)
@@ -103,6 +106,9 @@ pub fn Function::new_temp(Self, String, Width) -> Int32
 pub(all) enum Mem {
   Ram
   Rom
+  Bank(Int32)
+  Window
+  Wram
   Bus
 } derive(Eq, @debug.Debug)
 
@@ -112,12 +118,14 @@ pub(all) struct Program {
   reset : String
   nmi : String
   prg : Array[Int32]
+  banks : Array[Array[Int32]]
   mut info : Analysis?
 } derive(@debug.Debug)
 pub fn Program::analyze(Self) -> Analysis
 pub fn Program::function(Self, String) -> Function?
 pub fn Program::inline_leaves(Self, limit? : Int32) -> Int32
 pub fn Program::is_root(Self, String) -> Bool
+pub fn Program::make_resumable(Self) -> Unit raise BuildError
 pub fn Program::optimize(Self) -> Unit
 pub fn Program::outputs(Self, Analysis, String) -> Int32
 pub fn Program::roots(Self) -> Array[String]
@@ -134,7 +142,9 @@ pub(all) enum Stmt {
   Effect(String, Array[Expr])
   Eval(Expr)
   Call(String)
+  CallValue(Int32, String, Int32)
 } derive(Eq, @debug.Debug)
+pub fn Stmt::callee(Self) -> String?
 pub fn Stmt::defs(Self) -> Int32
 pub fn Stmt::exprs(Self) -> Array[Expr]
 pub fn Stmt::has_effects(Self) -> Bool
@@ -155,11 +165,15 @@ pub(all) enum Term {
   Dispatch(String, Int32, Array[(Int32, String)])
   Yield(Int32)
   Trap(Int32)
+  Jump(Expr, Array[(Int32, String)])
+  Switch(Expr, Array[(Int32, Int32)], Int32)
+  Suspend(Int32)
 } derive(Eq, @debug.Debug)
 pub fn Term::exprs(Self) -> Array[Expr]
 pub fn Term::map_exprs(Self, (Expr) -> Expr) -> Self
 pub fn Term::map_targets(Self, (Int32) -> Int32) -> Self
 pub fn Term::successors(Self) -> Array[Int32]
+pub fn Term::tail_calls(Self) -> Array[String]
 
 pub(all) enum UnOp {
   Not

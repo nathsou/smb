@@ -7,7 +7,13 @@
 //
 //   Ram: an address proven to be in internal RAM ($0000-$07FF, after
 //        masking mirrors), a plain array access;
-//   Rom: an address proven to be in PRG ROM, a constant table read;
+//   Rom: an address proven to be in PRG ROM, a constant table read (the
+//        fixed bank's, with a mapper);
+//   Bank(k): an address in the switchable window read by code of bank k,
+//        which is mapped while it runs: bank k's bytes, a constant read;
+//   Window: an address in the window read by fixed-bank code, from the
+//        bank mapped at run time;
+//   Wram: an address proven to be in the cartridge's RAM ($6000-$7FFF);
 //   Bus: anything else (I/O, pointers), through the runtime's bus functions.
 //
 // Expressions have integer semantics: loads and 8-bit variables produce
@@ -61,7 +67,7 @@ pub fn vars_of(mask : Int) -> Array[Var] {
 }
 
 pub(all) enum Mem {
-  Ram; Rom; Bus
+  Ram; Rom; Bank(Int); Window; Wram; Bus
 } derive(Debug, Eq)
 
 pub(all) enum Width {
@@ -86,6 +92,7 @@ pub(all) enum Expr {
   Var(Var)
   Temp(Int)
   Param // the dispatcher helper's return address
+  Runtime(String) // a byte (or word, see runtime_width) of the runtime's state
   Load(Mem, Expr)
   Unary(UnOp, Expr)
   Binary(BinOp, Expr, Expr)
@@ -101,6 +108,9 @@ pub(all) enum Stmt {
   Effect(String, Array[Expr])
   Eval(Expr) // a read kept for its side effects
   Call(String)
+  // A temporary takes the jump target a dispatcher helper returns for the
+  // return address of the original call.
+  CallValue(Int, String, Int)
 } derive(Debug, Eq)
 
 pub(all) enum Term {
@@ -114,7 +124,22 @@ pub(all) enum Term {
   Dispatch(String, Int, Array[(Int, String)])
   Yield(Int) // idle until the next interrupt, resuming at this address
   Trap(Int) // an unproven transfer to this address
+  // A computed jump: the target, and the routines it can be; others trap.
+  Jump(Expr, Array[(Int, String)])
+  // A multiway branch: blocks by value of the expression, else the last.
+  Switch(Expr, Array[(Int, Int)], Int)
+  // Wait for the next interrupt, then continue at the block (a wait loop;
+  // `make_resumable` turns it into a suspension).
+  Suspend(Int)
 } derive(Debug, Eq)
+
+// The runtime state that `Runtime` reads.
+pub fn runtime_width(name : String) -> Width {
+  match name {
+    "cpu_return" => U16 // where the last return went (exact returns)
+    _ => U8
+  }
+}
 
 pub(all) struct Block {
   label : String
@@ -142,7 +167,8 @@ pub(all) struct Program {
   by_name : Map[String, Int]
   reset : String
   nmi : String
-  prg : Array[Int] // the PRG ROM image, for folding constant reads
+  prg : Array[Int] // the PRG ROM image, for folding constant reads (the fixed bank, with a mapper)
+  banks : Array[Array[Int]] // the switchable banks, for reads of Bank(k)
   // Filled by `analyze`.
   mut info : Analysis?
 } derive(Debug)
@@ -166,8 +192,16 @@ pub fn Function::new_temp(self : Function, hint : String, width : Width) -> Int 
 // Successor block indices of a terminator.
 pub fn Term::successors(self : Term) -> Array[Int] {
   match self {
-    Goto(b) => [b]
+    Goto(b) | Suspend(b) => [b]
     Branch(_, t, f) => if t == f { [t] } else { [t, f] }
+    Switch(_, cases, other) => {
+      let out = []
+      for c in cases {
+        if !out.contains(c.1) { out.push(c.1) }
+      }
+      if !out.contains(other) { out.push(other) }
+      out
+    }
     _ => []
   }
 }
@@ -175,7 +209,9 @@ pub fn Term::successors(self : Term) -> Array[Int] {
 pub fn Term::map_targets(self : Term, f : (Int) -> Int) -> Term {
   match self {
     Goto(b) => Goto(f(b))
+    Suspend(b) => Suspend(f(b))
     Branch(c, t, e) => Branch(c, f(t), f(e))
+    Switch(e, cases, other) => Switch(e, cases.map(fn(c) { (c.0, f(c.1)) }), f(other))
     other => other
   }
 }
@@ -218,11 +254,12 @@ pub fn Expr::temps(self : Expr, out : Array[Int]) -> Unit {
   }
 }
 
-// Reads RAM or the bus (ROM never changes).
+// Reads RAM or the bus (ROM never changes; the bank mapped and the
+// runtime's state do).
 pub fn Expr::reads_memory(self : Expr) -> Bool {
   match self {
-    Load(Rom, e) => e.reads_memory()
-    Load(_, _) => true
+    Load(Rom | Bank(_), e) => e.reads_memory()
+    Load(_, _) | Runtime(_) => true
     Unary(_, e) => e.reads_memory()
     Binary(_, l, r) => l.reads_memory() || r.reads_memory()
     _ => false
@@ -258,7 +295,7 @@ pub fn Expr::is_boolean(self : Expr) -> Bool {
 
 pub fn Expr::is_atom(self : Expr) -> Bool {
   match self {
-    Const(_) | Sym(_, _) | Var(_) | Temp(_) | Param => true
+    Const(_) | Sym(_, _) | Var(_) | Temp(_) | Param | Runtime(_) => true
     _ => false
   }
 }
@@ -353,6 +390,7 @@ pub fn Expr::range(self : Expr, temps : Array[Temp]) -> Range {
         Wide => unknown
       }
     Param => { lo: 0, hi: 0xffff }
+    Runtime(name) => if runtime_width(name) == U16 { { lo: 0, hi: 0xffff } } else { { lo: 0, hi: 255 } }
     Load(_, _) => { lo: 0, hi: 255 }
     Unary(Not, _) => { lo: 0, hi: 1 }
     Unary(_, _) => { lo: 0, hi: 255 }
@@ -490,7 +528,7 @@ pub fn Stmt::uses(self : Stmt) -> Int {
     Assign(_, e) | Let(_, e) | Eval(e) => e.vars()
     Store(_, a, v) => a.vars() | v.vars()
     Effect(_, args) => args.fold(init=0, fn(acc, e) { acc | e.vars() })
-    Call(_) => 0
+    Call(_) | CallValue(_, _, _) => 0
   }
 }
 
@@ -499,7 +537,7 @@ pub fn Stmt::exprs(self : Stmt) -> Array[Expr] {
     Assign(_, e) | Let(_, e) | Eval(e) => [e]
     Store(_, a, v) => [a, v]
     Effect(_, args) => args
-    Call(_) => []
+    Call(_) | CallValue(_, _, _) => []
   }
 }
 
@@ -511,13 +549,22 @@ pub fn Stmt::map_exprs(self : Stmt, f : (Expr) -> Expr) -> Stmt {
     Store(m, a, v) => Store(m, f(a), f(v))
     Effect(name, args) => Effect(name, args.map(f))
     Call(name) => Call(name)
+    CallValue(t, name, arg) => CallValue(t, name, arg)
+  }
+}
+
+// The routine a statement calls.
+pub fn Stmt::callee(self : Stmt) -> String? {
+  match self {
+    Call(g) | CallValue(_, g, _) => Some(g)
+    _ => None
   }
 }
 
 // Writes memory or performs I/O.
 pub fn Stmt::has_effects(self : Stmt) -> Bool {
   match self {
-    Store(_, _, _) | Effect(_, _) | Eval(_) | Call(_) => true
+    Store(_, _, _) | Effect(_, _) | Eval(_) | Call(_) | CallValue(_, _, _) => true
     Assign(_, e) | Let(_, e) => !e.is_pure()
   }
 }
@@ -525,7 +572,7 @@ pub fn Stmt::has_effects(self : Stmt) -> Bool {
 pub fn Term::exprs(self : Term) -> Array[Expr] {
   match self {
     Branch(c, _, _) => [c]
-    ReturnValue(e) => [e]
+    ReturnValue(e) | Jump(e, _) | Switch(e, _, _) => [e]
     _ => []
   }
 }
@@ -534,6 +581,17 @@ pub fn Term::map_exprs(self : Term, f : (Expr) -> Expr) -> Term {
   match self {
     Branch(c, t, e) => Branch(f(c), t, e)
     ReturnValue(e) => ReturnValue(f(e))
+    Jump(e, cases) => Jump(f(e), cases)
+    Switch(e, cases, other) => Switch(f(e), cases, other)
     other => other
+  }
+}
+
+// Routines a terminator leaves to, as tail calls.
+pub fn Term::tail_calls(self : Term) -> Array[String] {
+  match self {
+    TailCall(g) => [g]
+    Dispatch(_, _, cases) | Jump(_, cases) => cases.map(fn(c) { c.1 })
+    _ => []
   }
 }

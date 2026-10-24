@@ -31,6 +31,7 @@ uint8_t COLOR_PALETTE[] = {
 
 typedef struct {
     bool is_ready;
+    uint32_t chr_version; // of the pattern tables it was decoded from
     uint8_t pixels[8 * 8 * 3];
     bool opaque_mask[8 * 8];
     uint32_t palette_mask; // mask of palette indices used in this tile
@@ -90,6 +91,7 @@ Tile* get_cached_background_tile(size_t n, size_t bank_offset, size_t palette_of
 
     if (
         tile->is_ready &&
+        tile->chr_version == video.chr_version &&
         tile->universal_color == video.palette.u8[0] &&
         tile->palette == (video.palette.u32[palette_idx] & tile->palette_mask)
     ) {
@@ -139,6 +141,7 @@ Tile* get_cached_background_tile(size_t n, size_t bank_offset, size_t palette_of
     tile->palette_mask = palette_mask;
     tile->palette = video.palette.u32[palette_idx] & palette_mask;
     tile->universal_color = video.palette.u8[0];
+    tile->chr_version = video.chr_version;
     tile->is_ready = true;
 
     return tile;
@@ -226,9 +229,51 @@ void render_nametable(size_t nametable_offset, size_t bank_offset, int shift_x, 
     }
 }
 
+// Any scroll and mirroring: each pixel from the nametable under it in the
+// 512x480 plane of the four nametables (a masked left column shows the
+// backdrop, as the GPU renderer does).
+static void render_background_plane(size_t bank_offset) {
+    int base_x = video.scroll_x + ((video.ctrl & 0x01) ? 256 : 0);
+    int base_y = video.scroll_y + ((video.ctrl & 0x02) ? 240 : 0);
+    bool left = video.mask & VIDEO_MASK_BACKGROUND_LEFT;
+    size_t first_row = video.status_bar ? 32 : 0;
+    for (size_t y = first_row; y < SCREEN_HEIGHT; y++) {
+        int wy = (base_y + (int)y) % 480;
+        int table_y = wy >= 240 ? 1 : 0;
+        size_t ny = (size_t)(wy - table_y * 240);
+        for (size_t x = 0; x < SCREEN_WIDTH; x++) {
+            size_t pixel = y * SCREEN_WIDTH + x;
+            if (!left && x < 8) {
+                set_pixel(x, y, video.palette.u8[0]);
+                opaque_bg_mask[pixel] = false;
+                continue;
+            }
+            int wx = (base_x + (int)x) % 512;
+            int table_x = wx >= 256 ? 1 : 0;
+            size_t nx = (size_t)(wx - table_x * 256);
+            uint16_t address = (uint16_t)(0x2000 + (table_y * 2 + table_x) * 0x400);
+            size_t nametable_offset = video_nametable_offset(address);
+            size_t tile_col = nx / 8, tile_row = ny / 8;
+            uint8_t tile = video.nametable[nametable_offset + tile_row * TILES_PER_ROW + tile_col];
+            size_t palette_index = get_background_palette_index(tile_col, tile_row, nametable_offset);
+            Tile *cached = get_cached_background_tile(tile, bank_offset, palette_index);
+            size_t tile_offset = (ny % 8) * 8 + nx % 8;
+            memcpy(&frame[pixel * 3], &cached->pixels[tile_offset * 3], 3);
+            opaque_bg_mask[pixel] = cached->opaque_mask[tile_offset];
+        }
+    }
+    if (video.status_bar) {
+        render_status_bar(bank_offset);
+    }
+}
+
 void render_background(void) {
     // https://austinmorlan.com/posts/nes_rendering_overview/
     size_t bank_offset = video.ctrl & 0b10000 ? 0x1000 : 0;
+    if (video.mirroring != MIRROR_VERTICAL || video.scroll_y != 0 || (video.ctrl & 0x02)) {
+        render_background_plane(bank_offset);
+        return;
+    }
     size_t nametable1_offset, nametable2_offset;
     bool status_bar_visible = video.status_bar;
     size_t min_tile_y = status_bar_visible ? 4 : 0;

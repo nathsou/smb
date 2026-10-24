@@ -2,7 +2,8 @@
 // Shared by the desktop (GLSL 330) and web (GLSL ES 3.00) renderers; the host
 // prepends the #version line. Matches the software renderer (render.c)
 // pixel for pixel, except that a masked left column shows the backdrop
-// (render.c leaves the previous frame there; SMB never masks it).
+// where render.c, scrolling horizontally only, leaves the previous frame
+// (SMB never masks it).
 // The themes (web/themes) prepend `#define NES_LIBRARY` to use its functions
 // without its main.
 
@@ -14,6 +15,8 @@ uniform vec3 u_colors[64];     // NES master palette
 uniform int u_ctrl;
 uniform int u_mask;
 uniform int u_scroll_x;
+uniform int u_scroll_y;
+uniform int u_mirroring;       // MIRROR_* of video.h
 uniform int u_status_bar;
 uniform int u_flip_y;          // 1 when the target's first row is the bottom
 
@@ -50,6 +53,15 @@ ivec3 background(int screen, int nx, int ny) {
 
     int entry = index == 0 ? u_palette[0] : u_palette[palette + index];
     return ivec3(entry, index != 0 ? 1 : 0, tile);
+}
+
+// The screen (0 or 1) that nametable `table` (0-3) of the address space
+// shows, by the mirroring.
+int screen_of(int table) {
+    if (u_mirroring == 1) return table / 2; // horizontal
+    if (u_mirroring == 2) return 0;
+    if (u_mirroring == 3) return 1;
+    return table % 2; // vertical
 }
 
 vec3 color(int entry) {
@@ -97,16 +109,14 @@ void main() {
         ivec2 bg;
         if (u_status_bar != 0 && y < 32) {
             bg = background(0, x, y).xy; // fixed status bar from the first screen
+        } else if ((u_mask & 0x02) == 0 && x < 8) {
+            bg = ivec2(u_palette[0], 0);
         } else {
-            int base = (u_ctrl & 0x01) != 0 ? 1 : 0;
-            int nx = x + u_scroll_x;
-            int screen = nx < 256 ? base : 1 - base;
-            nx = nx % 256;
-            if ((u_mask & 0x02) == 0 && nx < 8) {
-                bg = ivec2(u_palette[0], 0);
-            } else {
-                bg = background(screen, nx, y).xy;
-            }
+            // the 512x480 plane of the four nametables
+            int wx = (x + u_scroll_x + ((u_ctrl & 0x01) != 0 ? 256 : 0)) % 512;
+            int wy = (y + u_scroll_y + ((u_ctrl & 0x02) != 0 ? 240 : 0)) % 480;
+            int table = (wy >= 240 ? 2 : 0) + (wx >= 256 ? 1 : 0);
+            bg = background(screen_of(table), wx % 256, wy % 240).xy;
         }
         rgb = color(bg.x);
         background_opaque = bg.y != 0;

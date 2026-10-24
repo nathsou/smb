@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include "raylib.h"
+#include <stdint.h>
 
 // Draws the Video state with a fragment shader (web/video.frag): pattern
 // tables and nametables are textures, palette and sprites are uniforms, and
@@ -13,8 +14,9 @@ typedef struct {
     Texture2D patterns;
     Texture2D nametable;
     RenderTexture2D target; // 256x240, drawn scaled to the window
-    int ctrl_loc, mask_loc, scroll_x_loc, status_bar_loc, flip_y_loc;
+    int ctrl_loc, mask_loc, scroll_x_loc, scroll_y_loc, mirroring_loc, status_bar_loc, flip_y_loc;
     int patterns_loc, nametable_loc, palette_loc, oam_loc, colors_loc;
+    uint32_t chr_version; // of the pattern tables uploaded
     float colors[64 * 3];
 } GpuRenderer;
 

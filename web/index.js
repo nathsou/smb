@@ -6,8 +6,55 @@ import { splitDump } from './cartridge.js';
 
 const SCREEN_WIDTH = 256;
 const SCREEN_HEIGHT = 240;
-const SAVE_STATE_SIZE = 4384; // RAM_SIZE + NAMETABLE_SIZE + PALETTE_SIZE + OAM_SIZE
-const SAVE_STATE_LOCAL_STORAGE_KEY = 'save_state';
+
+// The games the page recompiles, told apart by their board: Super Mario
+// Bros. (NROM), with its hand-written display routines, and Metroid (MMC1),
+// which drives the PPU through its registers and switches banks, with the
+// runtime module for such cartridges. The themes read SMB's variables, and
+// Metroid writes its own tiles (CHR RAM): both are SMB's only.
+const GAMES = {
+    smb: {
+        title: 'SUPER MARIO BROS.',
+        pageTitle: 'SMB Recompiled',
+        map: 'smb.map',
+        runtime: 'runtime.wasm',
+        native: 'routines.txt',
+        display: 'display.c',
+        extras: true, // themes and debug tiles
+        mapKey: 'map',
+        saveKey: 'save_state',
+    },
+    metroid: {
+        title: 'METROID',
+        pageTitle: 'Metroid Recompiled',
+        map: 'metroid.map',
+        runtime: 'runtime-mmc1.wasm',
+        native: null,
+        display: null,
+        extras: false,
+        mapKey: 'map:metroid',
+        saveKey: 'save_state:metroid',
+    },
+};
+
+function gameOf(rom) {
+    return splitDump(rom).mapper === 1 ? GAMES.metroid : GAMES.smb;
+}
+
+// A game's files, fetched once.
+const gameFiles = new Map();
+function filesOf(game) {
+    if (!gameFiles.has(game)) {
+        const text = name => name ? fetch(name).then(r => r.text()) : Promise.resolve('');
+        gameFiles.set(game, Promise.all([
+            text(game.map),
+            text(game.native),
+            text(game.display),
+            fetch(game.runtime).then(r => r.arrayBuffer()),
+        ]).then(([map, native, display, runtime]) => ({ map, native, display, runtime })));
+    }
+    return gameFiles.get(game);
+}
 
 // onScale gets the device pixels per NES pixel the canvas is shown at.
 function createCanvas(onScale) {
@@ -264,10 +311,6 @@ function readUint16(buffer, ptr) {
     return buffer[ptr] + buffer[ptr + 1] * 256;
 }
 
-function chrOf(rom) {
-    return splitDump(rom).chr;
-}
-
 function checkRom(rom) {
     splitDump(rom); // throws with the reason
 }
@@ -349,18 +392,19 @@ function showWarning(text) {
 
 // Generated files in reading order, then the hand-written display code.
 const FILE_ORDER = ['code.c', 'code.h', 'vars.h', 'constants.h', 'data.h', 'data.c'];
-const MAP_OVERRIDE_KEY = 'map';
 const DEBUG_TILES_KEY = 'debug_tiles';
 const THEME_KEY = 'theme';
 
 async function main() {
+    // the game of the current run (its map, its save state)
+    let currentGame = GAMES.smb;
     const viewer = createViewer(document.getElementById('code'), {
         onRecompile: text => {
-            localStorage.setItem(MAP_OVERRIDE_KEY, text);
+            localStorage.setItem(currentGame.mapKey, text);
             boot();
         },
         onResetMap: () => {
-            localStorage.removeItem(MAP_OVERRIDE_KEY);
+            localStorage.removeItem(currentGame.mapKey);
             boot();
         },
     });
@@ -388,12 +432,12 @@ async function main() {
     const applyTheme = async () => {
         if (!renderer?.setTheme) return;
         try {
-            await renderer.setTheme(themeMenu.value);
+            await renderer.setTheme(currentGame.extras ? themeMenu.value : 'original');
         } catch (error) {
             console.error(error);
             viewer.setStatus(`THEME UNAVAILABLE: ${error.message}`.toUpperCase(), 'error');
         }
-        themeMenu.value = renderer.theme;
+        if (currentGame.extras) themeMenu.value = renderer.theme;
     };
     themeMenu.addEventListener('change', () => {
         localStorage.setItem(THEME_KEY, themeMenu.value);
@@ -401,11 +445,7 @@ async function main() {
     });
     const onScale = scale => renderer?.setDisplayScale?.(scale);
 
-    const [defaultMap, native, display, runtimeBytes, recompiler, apuWasm] = await Promise.all([
-        fetch('smb.map').then(r => r.text()),
-        fetch('routines.txt').then(r => r.text()),
-        fetch('display.c').then(r => r.text()),
-        fetch('runtime.wasm').then(r => r.arrayBuffer()),
+    const [recompiler, apuWasm] = await Promise.all([
         fetch('recompiler.js').then(r => r.arrayBuffer()),
         fetch('apu.wasm').then(r => r.arrayBuffer()),
     ]);
@@ -464,7 +504,13 @@ async function main() {
         session?.stop();
         session = null;
         while (!rom) rom = await askForRom();
-        const map = localStorage.getItem(MAP_OVERRIDE_KEY) ?? defaultMap;
+        currentGame = gameOf(rom);
+        document.title = currentGame.pageTitle;
+        document.getElementById('game-title').textContent = currentGame.title;
+        debugTiles.parentElement.hidden = !currentGame.extras;
+        themeMenu.parentElement.hidden = !currentGame.extras;
+        const { map: defaultMap, native, display, runtime: runtimeBytes } = await filesOf(currentGame);
+        const map = localStorage.getItem(currentGame.mapKey) ?? defaultMap;
         let files = null;
         const { memory, runtime, game } = await link(runtimeBytes, async layout => {
             const layoutText = Object.entries(layout).map(([name, address]) => `${name} ${address}`).join('\n');
@@ -477,21 +523,31 @@ async function main() {
         const ordered = FILE_ORDER.map(name => files.find(f => f.name === name)).filter(Boolean);
         viewer.setFiles([
             ...ordered,
-            { name: 'display.c', contents: display },
-            { name: 'smb.map', contents: map, editable: true, default: defaultMap },
+            ...(currentGame.display ? [{ name: currentGame.display, contents: display }] : []),
+            { name: currentGame.map, contents: map, editable: true, default: defaultMap },
         ]);
 
         const uint8View = () => new Uint8Array(memory.buffer);
-        const lastSaveState = new Uint8Array(memory.buffer, runtime.last_save_state.value, SAVE_STATE_SIZE);
+        // the runtime's size: cartridges also save their tiles, RAM and mapper
+        const saveStateSize = new DataView(memory.buffer).getUint32(runtime.save_state_size.value, true);
+        const lastSaveState = new Uint8Array(memory.buffer, runtime.last_save_state.value, saveStateSize);
         let saveStateReady = false;
 
         const chrRomPtr = runtime.chr_rom.value;
-        if (debugTiles.checked) runtime.debug_chr_generate(chrRomPtr);
-        else uint8View().set(chrOf(rom), chrRomPtr);
+        const { chr } = splitDump(rom);
+        if (debugTiles.checked && currentGame.extras) {
+            runtime.debug_chr_generate(chrRomPtr);
+        } else {
+            // CHR RAM (no CHR in the dump) starts blank: the game writes its tiles
+            uint8View().fill(0, chrRomPtr, chrRomPtr + 0x2000);
+            uint8View().set(chr, chrRomPtr);
+        }
+        if (runtime.chr_ram) uint8View()[runtime.chr_ram.value] = chr.length === 0 ? 1 : 0;
 
         runtime.cpu_init();
         runtime.video_init(chrRomPtr);
         runtime.render_init();
+        runtime.mapper_init?.();
 
         // Draw with WebGL2 unless unavailable or ?software is in the URL.
         await renderer?.setTheme?.('original'); // frees the last run's theme
@@ -551,14 +607,16 @@ async function main() {
 
                 if (shouldSaveState) {
                     runtime.save_state(lastSaveState.byteOffset);
-                    localStorage.setItem(SAVE_STATE_LOCAL_STORAGE_KEY, JSON.stringify(Array.from(lastSaveState)));
+                    localStorage.setItem(currentGame.saveKey, JSON.stringify(Array.from(lastSaveState)));
                     shouldSaveState = false;
                     saveStateReady = true;
                 } else if (shouldLoadState) {
                     if (!saveStateReady) {
-                        const saveStateData = localStorage.getItem(SAVE_STATE_LOCAL_STORAGE_KEY);
-                        if (saveStateData) {
-                            lastSaveState.set(JSON.parse(saveStateData));
+                        const saveStateData = localStorage.getItem(currentGame.saveKey);
+                        const saved = saveStateData ? JSON.parse(saveStateData) : [];
+                        // a state of an earlier runtime of another size is left alone
+                        if (saved.length === saveStateSize) {
+                            lastSaveState.set(saved);
                             saveStateReady = true;
                         }
                     }

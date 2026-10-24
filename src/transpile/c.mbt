@@ -51,6 +51,7 @@ fn CFunc::narrow(self : CFunc, e : @ir.Expr) -> Bool {
   match e {
     Const(v) | Sym(_, v) => v >= 0 && v <= 255
     Var(_) => true
+    Runtime(name) => @ir.runtime_width(name) == U8
     Temp(t) => self.f.temps[t].width == U8 || self.f.temps[t].width == Flag
     Load(_, _) => true
     Unary(_, _) => true
@@ -66,7 +67,7 @@ fn CFunc::narrow16(self : CFunc, e : @ir.Expr) -> Bool {
   match e {
     Const(v) | Sym(_, v) => v >= 0 && v <= 0xffff
     Temp(t) => self.f.temps[t].width != Wide
-    Param => true
+    Param | Runtime(_) => true
     _ => self.narrow(e) || self.indirect(e) is Some(_)
   }
 }
@@ -103,8 +104,8 @@ fn CFunc::indirect(self : CFunc, e : @ir.Expr) -> String? {
 // A memory access by the name of what it reads or writes, or by address.
 fn CFunc::access(self : CFunc, space : @ir.Mem, a : @ir.Expr) -> String {
   match self.views.place(a) {
-    Some({ view, offset, index }) if (view.kind == Table) == (space == Rom) => {
-      if view.kind == Scalar { return view.name }
+    Some({ view, offset, index }) if view.kind.names(space) => {
+      if view.kind == Scalar || view.kind == WramScalar { return view.name }
       let terms = index.map(fn(e) { self.paren(e, 4) }).join(" + ")
       let at = if index.is_empty() {
         show_number(offset)
@@ -121,9 +122,13 @@ fn CFunc::access(self : CFunc, space : @ir.Mem, a : @ir.Expr) -> String {
       }
     }
     _ =>
-      match a {
-        Binary(Add, Const(0x100), i) if space == Ram && self.views.stack => "stack[\{self.expr(i)}]"
-        _ => if space == Rom { "ROM(\{self.expr(a)})" } else { "ram[\{self.expr(a)}]" }
+      match (a, space) {
+        (Binary(Add, Const(0x100), i), Ram) if self.views.stack => "stack[\{self.expr(i)}]"
+        (_, Rom) => "ROM(\{self.expr(a)})"
+        (_, Bank(bank)) => "BANK_ROM(\{bank}, \{self.expr(a)})"
+        (_, Window) => "WINDOW_ROM(\{self.expr(a)})"
+        (_, Wram) => "WRAM(\{self.expr(a)})"
+        _ => "ram[\{self.expr(a)}]"
       }
   }
 }
@@ -180,8 +185,9 @@ fn CFunc::expr_prec(self : CFunc, e : @ir.Expr) -> (String, Int) {
     Var(v) => (v.c_name(), 0)
     Temp(t) => (self.names[t], 0)
     Param => ("return_address", 0)
-    Load(Ram | Rom as space, a) => (self.access(space, a), 0)
+    Runtime(name) => (name, 0)
     Load(Bus, a) => ("read_byte(\{self.word(a)})", 0)
+    Load(space, a) => (self.access(space, a), 0)
     Unary(Not, a) => ("!" + self.paren(a, 2), 2)
     Unary(Byte, a) => ("(uint8_t)" + self.paren(a, 0), 2)
     Unary(Lo, a) => ("LOW_BYTE(\{self.expr(a)})", 0)
@@ -273,16 +279,18 @@ fn CFunc::stmt(self : CFunc, s : @ir.Stmt) -> String {
         _ => "\{target} = \{self.typed(value, type_name).unwrap_or(self.byte(value))};"
       }
     }
+    Store(Wram, a, value) => "\{self.access(Wram, a)} = \{self.byte(value)};"
     Store(_, a, value) => "dynamic_ram_write(\{self.word(a)}, \{self.byte(value)});"
     Effect("write_joypads", args) => {
       let v = self.byte(args[0])
       "write_joypad1(\{v}); write_joypad2(\{v});"
     }
-    Effect("apu_write", args) => "apu_write(\{self.word(args[0])}, \{self.byte(args[1])});"
+    Effect("apu_write" | "mapper_write" as name, args) => "\{name}(\{self.word(args[0])}, \{self.byte(args[1])});"
     Effect("ppu_bus_write", args) => "ppu_bus_write(\{self.expr(args[0])}, \{self.byte(args[1])});"
     Effect(name, args) => name + "(" + args.map(fn(a) { self.byte(a) }).join(", ") + ");"
     Eval(e) => "(void)\{self.expr(e)};"
     Call(name) => "\{name}();"
+    CallValue(t, helper, return_address) => "uint16_t \{self.names[t]} = \{helper}(0x\{hex(return_address)});"
   }
 }
 
@@ -291,8 +299,11 @@ fn CFunc::exit_code(self : CFunc, term : @ir.Term) -> String? {
   match term {
     Return => Some("return;")
     TailCall(g) => Some("\{g}(); return;")
-    Yield(pc) => Some("cpu_yield(0x\{hex(pc)}); return;")
-    Trap(pc) => Some(if self.f.helper { "cpu_unresolved_jump(0x\{hex(pc)});" } else { "cpu_unresolved_jump(0x\{hex(pc)}); return;" })
+    Yield(pc) => Some("cpu_yield(0x\{hex(pc & 0xffff)}); return;")
+    Trap(pc) => {
+      let address = "0x\{hex(pc & 0xffff)}"
+      Some(if self.f.helper { "cpu_unresolved_jump(\{address});" } else { "cpu_unresolved_jump(\{address}); return;" })
+    }
     ReturnValue(e) => Some("return cpu_dispatch_target = \{self.word(e)};")
     _ => None
   }
@@ -461,6 +472,27 @@ fn Structurer::range(self : Structurer, s : Int, e : Int, follow : Int, skip_loo
           self.emit("case 0x\{hex(case.0)}: \{case.1}(); return;")
         }
         self.emit("default: cpu_unresolved_jump(cpu_dispatch_target); return; // index outside the proven table")
+        self.indent -= 1
+        self.emit("}")
+      }
+      Jump(target, cases) => {
+        let value = self.c.word(target)
+        self.emit("switch (\{value}) {")
+        self.indent += 1
+        for case in cases {
+          self.emit("case 0x\{hex(case.0)}: \{case.1}(); return;")
+        }
+        self.emit("default: cpu_unresolved_jump(\{value}); return; // not a code address of the map")
+        self.indent -= 1
+        self.emit("}")
+      }
+      Switch(value, cases, other) => {
+        self.emit("switch (\{self.c.expr(value)}) {")
+        self.indent += 1
+        for case in cases {
+          self.emit("case \{show_number(case.0)}: \{self.jump(case.1)}")
+        }
+        self.emit("default: \{self.jump(other)}")
         self.indent -= 1
         self.emit("}")
       }

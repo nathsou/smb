@@ -6,8 +6,10 @@
 //
 // - env.memory;
 // - the addresses of the runtime's machine state as i32 globals: `ram`
-//   (2 KiB), `data` (32 KiB of PRG ROM), and one byte per register and flag
-//   under the C names (`a`, `carry_flag`, ...);
+//   (2 KiB), `data` (the PRG ROM: 32 KiB, or every bank with a mapper), and
+//   one byte per register and flag under the C names (`a`, `carry_flag`,
+//   ...); with a mapper, `wram` (8 KiB) and `prg_window` (a pointer to the
+//   bank mapped at $8000); the runtime state the code reads (`Runtime`);
 // - the runtime functions it calls: bus access, APU and joypad writes, the
 //   idle yield and trap, and the native routines.
 //
@@ -46,8 +48,8 @@ let types : Array[(Array[Int], Array[Int])] = [
 fn runtime_type(name : String) -> Int {
   match name {
     "read_byte" => 3
-    "dynamic_ram_write" | "apu_write" | "ppu_bus_write" => 2
-    "write_joypad1" | "write_joypad2" | "cpu_yield" | "cpu_unresolved_jump" | "ppu_bus_oam_dma" => 1
+    "dynamic_ram_write" | "apu_write" | "ppu_bus_write" | "mapper_write" | "cpu_returned" => 2
+    "write_joypad1" | "write_joypad2" | "cpu_yield" | "cpu_unresolved_jump" | "ppu_bus_oam_dma" | "cpu_suspend" => 1
     _ => 0
   }
 }
@@ -67,6 +69,9 @@ priv struct Gen {
   block_in : Array[Int]
   assigned : Int
   read : Int
+  // with a mapper: where the fixed bank starts in `data`
+  banked : Bool
+  fixed_base : Int
 }
 
 fn var_slot(v : @ir.Var) -> Int {
@@ -185,9 +190,56 @@ fn Gen::ram_address(self : Gen, addr : @ir.Expr) -> Int raise WasmError {
   self.base("ram", rest) + offset
 }
 
+// The same for a byte of the cartridge's RAM, at $6000.
+fn Gen::wram_address(self : Gen, addr : @ir.Expr) -> Int raise WasmError {
+  let (rest, offset) = split_offset(addr)
+  if offset >= 0x6000 {
+    self.base("wram", rest) + offset - 0x6000
+  } else {
+    self.base("wram", Some(Binary(Sub, addr, Const(0x6000))))
+  }
+}
+
+// Pushes `addr - base` plus the value of the runtime pointer `name` (as an
+// address); returns the memory offset.
+fn Gen::relative(self : Gen, name : String, addr : @ir.Expr, base : Int) -> Int raise WasmError {
+  let (rest, offset) = split_offset(addr)
+  let offset = if offset >= base {
+    offset - base
+  } else {
+    // the constant part does not reach the base: subtract it at run time
+    let at = self.base(name, None)
+    self.code.byte(I32_LOAD)
+    self.code.u32(2)
+    self.code.u32(at)
+    self.expr(addr)
+    self.const_(base)
+    self.op(I32_SUB)
+    self.op(I32_ADD)
+    return 0
+  }
+  let at = self.base(name, None)
+  self.code.byte(I32_LOAD)
+  self.code.u32(2)
+  self.code.u32(at)
+  if rest is Some(e) {
+    self.expr(e)
+    self.op(I32_ADD)
+  }
+  offset
+}
+
 fn Gen::rom_address(self : Gen, addr : @ir.Expr) -> Int raise WasmError {
   let r = addr.range(self.f.temps)
   let (rest, offset) = split_offset(addr)
+  if self.banked {
+    // the fixed bank, at $C000
+    return if r.lo >= 0xc000 && r.hi <= 0xffff && offset >= 0xc000 {
+      self.base("data", rest) + offset - 0xc000 + self.fixed_base
+    } else {
+      self.base("data", Some(Binary(And, addr, Const(0x3fff)))) + self.fixed_base
+    }
+  }
   if r.lo >= 0x8000 && r.hi <= 0xffff && offset >= 0x8000 {
     self.base("data", rest) + offset - 0x8000
   } else {
@@ -217,6 +269,16 @@ fn Gen::expr(self : Gen, e : @ir.Expr) -> Unit raise WasmError {
         self.load8(offset)
       }
     Temp(-1) => self.local_get(self.scratch) // the scratch local
+    Runtime(name) => {
+      let offset = self.base(name, None)
+      if @ir.runtime_width(name) == U16 {
+        self.code.byte(I32_LOAD16_U)
+        self.code.u32(1)
+        self.code.u32(offset)
+      } else {
+        self.load8(offset)
+      }
+    }
     Temp(t) => {
       self.code.byte(LOCAL_GET)
       self.code.u32(t + (if self.f.helper { 1 } else { 0 }))
@@ -232,6 +294,59 @@ fn Gen::expr(self : Gen, e : @ir.Expr) -> Unit raise WasmError {
     Load(Rom, a) => {
       let offset = self.rom_address(a)
       self.load8(offset)
+    }
+    Load(Bank(bank), a) => {
+      // proven inside the window: bank `bank`'s bytes
+      let (rest, offset) = split_offset(a)
+      let at = if offset >= 0x8000 {
+        self.base("data", rest) + bank * 0x4000 + offset - 0x8000
+      } else {
+        self.base("data", Some(Binary(Sub, a, Const(0x8000)))) + bank * 0x4000
+      }
+      self.load8(at)
+    }
+    Load(Window, a) => {
+      let offset = self.relative("prg_window", a, 0x8000)
+      self.load8(offset)
+    }
+    Load(Wram, a) => {
+      let offset = self.wram_address(a)
+      self.load8(offset)
+    }
+    Load(Bus, a) if self.banked => {
+      // the fixed bank, the bank mapped, and RAM directly; the runtime's
+      // read_byte for everything else
+      self.masked(a, 0xffff)
+      self.code.byte(LOCAL_TEE)
+      self.code.u32(self.scratch)
+      self.const_(0xc000)
+      self.op(I32_GE_S)
+      self.op(IF)
+      self.code.byte(I32)
+      let rom = self.base("data", Some(Binary(And, Temp(-1), Const(0x3fff))))
+      self.load8(rom + self.fixed_base)
+      self.op(ELSE)
+      self.local_get(self.scratch)
+      self.const_(0x8000)
+      self.op(I32_GE_S)
+      self.op(IF)
+      self.code.byte(I32)
+      let window = self.relative("prg_window", Binary(And, Temp(-1), Const(0x3fff)), 0)
+      self.load8(window)
+      self.op(ELSE)
+      self.local_get(self.scratch)
+      self.const_(0x2000)
+      self.op(I32_LT_S)
+      self.op(IF)
+      self.code.byte(I32)
+      let ram = self.base("ram", Some(Binary(And, Temp(-1), Const(0x7ff))))
+      self.load8(ram)
+      self.op(ELSE)
+      self.local_get(self.scratch)
+      self.call("read_byte")
+      self.op(END)
+      self.op(END)
+      self.op(END)
     }
     Load(Bus, a) => {
       // ROM and RAM directly (pointers mostly read ROM tables); the
@@ -328,6 +443,11 @@ fn Gen::stmt(self : Gen, s : @ir.Stmt) -> Unit raise WasmError {
       self.expr(v)
       self.store8(offset)
     }
+    Store(Wram, a, v) => {
+      let offset = self.wram_address(a)
+      self.expr(v)
+      self.store8(offset)
+    }
     Store(_, a, v) => {
       self.masked(a, 0xffff)
       self.masked(v, 0xff)
@@ -341,10 +461,10 @@ fn Gen::stmt(self : Gen, s : @ir.Stmt) -> Unit raise WasmError {
       self.local_get(self.scratch)
       self.call("write_joypad2")
     }
-    Effect("apu_write", args) => {
+    Effect("apu_write" | "mapper_write" as name, args) => {
       self.masked(args[0], 0xffff)
       self.masked(args[1], 0xff)
-      self.call("apu_write")
+      self.call(name)
     }
     Effect("ppu_bus_write", args) => {
       self.expr(args[0])
@@ -364,6 +484,13 @@ fn Gen::stmt(self : Gen, s : @ir.Stmt) -> Unit raise WasmError {
       self.call(name)
       self.reload(self.info.may_write.get(name).unwrap_or(1023))
     }
+    CallValue(t, helper, return_address) => {
+      self.spill(self.live_in(helper))
+      self.const_(return_address)
+      self.call(helper)
+      self.local_set(t + (if self.f.helper { 1 } else { 0 }))
+      self.reload(self.info.may_write.get(helper).unwrap_or(1023))
+    }
   }
 }
 
@@ -373,6 +500,11 @@ fn Gen::exit(self : Gen, term : @ir.Term) -> Unit raise WasmError {
   match term {
     Dispatch(helper, _, cases) => {
       let mut mask = self.live_in(helper)
+      for c in cases { mask = mask | self.live_in(c.1) }
+      self.spill(mask)
+    }
+    Jump(_, cases) => {
+      let mut mask = 0
       for c in cases { mask = mask | self.live_in(c.1) }
       self.spill(mask)
     }
@@ -389,18 +521,35 @@ fn Gen::exit(self : Gen, term : @ir.Term) -> Unit raise WasmError {
       self.op(RETURN)
     }
     Yield(pc) => {
-      self.const_(pc)
+      self.const_(pc & 0xffff)
       self.call("cpu_yield")
       self.op(RETURN)
     }
     Trap(pc) => {
-      self.const_(pc)
+      self.const_(pc & 0xffff)
       self.call("cpu_unresolved_jump")
       self.op(UNREACHABLE)
     }
     Dispatch(helper, return_address, cases) => {
       self.const_(return_address)
       self.call(helper)
+      self.local_set(self.scratch)
+      for case in cases {
+        self.local_get(self.scratch)
+        self.const_(case.0)
+        self.op(I32_EQ)
+        self.op(IF)
+        self.code.byte(VOID)
+        self.call(case.1)
+        self.op(RETURN)
+        self.op(END)
+      }
+      self.local_get(self.scratch)
+      self.call("cpu_unresolved_jump")
+      self.op(UNREACHABLE)
+    }
+    Jump(target, cases) => {
+      self.masked(target, 0xffff)
       self.local_set(self.scratch)
       for case in cases {
         self.local_get(self.scratch)
@@ -571,6 +720,21 @@ fn Gen::node_within(self : Gen, sh : Shape, x : Int, merges : Array[Int], i : In
       self.do_branch(sh, x, e, ctx.prepend(IfThenElse))
       self.op(END)
     }
+    Switch(value, cases, other) => {
+      // each case leaves (a branch or a return), so a chain of ifs
+      self.expr(value)
+      self.local_set(self.scratch)
+      for case in cases {
+        self.local_get(self.scratch)
+        self.const_(case.0)
+        self.op(I32_EQ)
+        self.op(IF)
+        self.code.byte(VOID)
+        self.do_branch(sh, x, case.1, ctx.prepend(IfThenElse))
+        self.op(END)
+      }
+      self.do_branch(sh, x, other, ctx)
+    }
     term => self.exit(term)
   }
 }
@@ -623,6 +787,20 @@ fn Gen::dispatch_loop(self : Gen) -> Unit raise WasmError {
         goto(e, 1)
         self.op(END)
       }
+      Switch(value, cases, other) => {
+        self.expr(value)
+        self.local_set(self.scratch)
+        for case in cases {
+          self.local_get(self.scratch)
+          self.const_(case.0)
+          self.op(I32_EQ)
+          self.op(IF)
+          self.code.byte(VOID)
+          goto(case.1, 1)
+          self.op(END)
+        }
+        goto(other, 0)
+      }
       term => self.exit(term)
     }
   }
@@ -664,6 +842,25 @@ pub fn emit(
   }
   let objects = ["ram", "data"]
   for v in @ir.all_vars { objects.push(v.c_name()) }
+  // with a mapper: the cartridge's RAM, the bank mapped, the runtime state
+  let banked = !program.banks.is_empty()
+  if banked { objects.push("wram"); objects.push("prg_window") }
+  fn note_runtime(e : @ir.Expr) -> Unit {
+    match e {
+      Runtime(name) => if !objects.contains(name) { objects.push(name) }
+      Load(_, a) | Unary(_, a) => note_runtime(a)
+      Binary(_, l, r) => { note_runtime(l); note_runtime(r) }
+      _ => ()
+    }
+  }
+  for f in generated {
+    for block in f.blocks {
+      for s in block.stmts {
+        for e in s.exprs() { note_runtime(e) }
+      }
+      for e in block.term.exprs() { note_runtime(e) }
+    }
+  }
   for name in objects {
     if !layout.contains(name) {
       imports.global_index[name] = imports.globals.length()
@@ -695,7 +892,7 @@ pub fn emit(
       }
       match block.term {
         TailCall(g) => reached.push(g)
-        Dispatch(_, _, cases) => for c in cases { reached.push(c.1) }
+          Dispatch(_, _, cases) | Jump(_, cases) => for c in cases { reached.push(c.1) }
         _ => ()
       }
     }
@@ -802,6 +999,8 @@ pub fn emit(
       block_in: info.blocks_live(f),
       assigned,
       read,
+      banked,
+      fixed_base: if banked { (program.banks.length() - 1) * 0x4000 } else { 0 },
     }
     // the variables live on entry start in their locals
     gen.reload(gen.block_in[f.entry])
