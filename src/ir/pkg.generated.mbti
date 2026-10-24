@@ -4,6 +4,7 @@ package "nathsou/smb/ir"
 import {
   "moonbitlang/core/debug",
   "moonbitlang/core/set",
+  "nathsou/smb/image",
   "nathsou/smb/lower",
 }
 
@@ -119,6 +120,7 @@ pub(all) struct Program {
   nmi : String
   prg : Array[Int32]
   banks : Array[Array[Int32]]
+  layout : @image.Layout
   mut info : Analysis?
 } derive(@debug.Debug)
 pub fn Program::analyze(Self) -> Analysis

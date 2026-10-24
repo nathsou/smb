@@ -52,7 +52,7 @@ SOURCES += codegen/lib/state.c
 SOURCES += codegen/lib/debug_chr.c
 MAIN = codegen/main.c
 
-.PHONY: codegen header clean gpu-check runtime-wasm runtime-mmc1-wasm apu-wasm game-wasm web replay interpreter
+.PHONY: codegen header clean gpu-check runtime-wasm runtime-cartridge-wasm apu-wasm game-wasm web replay interpreter
 
 # The game is recompiled from your ROM into codegen/game, or codegen/metroid
 # with GAME=metroid (not in the repository).
@@ -94,11 +94,12 @@ runtime-wasm:
 	$(CC) -O3 -ffunction-sections -fdata-sections --target=wasm32 -nostdlib -Wl,--gc-sections -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined $(EXTRA_CFLAGS) -o web/runtime.wasm $(RUNTIME_SOURCES)
 
 # The runtime for cartridges that drive the PPU registers and switch banks
-# (Metroid): no native routines, the register interface and MMC1 instead.
+# (Metroid, SMB3): no native routines, the register interface and the
+# mappers (MMC1, MMC3) instead.
 CARTRIDGE_RUNTIME_SOURCES = codegen/lib/cpu.c codegen/lib/video.c codegen/lib/render.c codegen/lib/apu.c codegen/lib/apu_buffers.c codegen/lib/sound.c codegen/lib/state.c codegen/lib/debug_chr.c codegen/lib/prg.c codegen/lib/ppu_bus.c codegen/lib/mapper.c codegen/lib/state_hash.c
 
-runtime-mmc1-wasm:
-	$(CC) -O3 -ffunction-sections -fdata-sections --target=wasm32 -nostdlib -DPPU_BUS -DMAPPER -Wl,--gc-sections -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined $(EXTRA_CFLAGS) -o web/runtime-mmc1.wasm $(CARTRIDGE_RUNTIME_SOURCES)
+runtime-cartridge-wasm:
+	$(CC) -O3 -ffunction-sections -fdata-sections --target=wasm32 -nostdlib -DPPU_BUS -DMAPPER -Wl,--gc-sections -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined $(EXTRA_CFLAGS) -o web/runtime-cartridge.wasm $(CARTRIDGE_RUNTIME_SOURCES)
 
 # The synthesizer alone, for the page's AudioWorklet (its own memory).
 apu-wasm:
@@ -111,7 +112,7 @@ game-wasm: runtime-wasm
 
 # The page: the C runtime, the recompiler compiled to JavaScript, and the
 # inputs it recompiles the player's ROM with. Serve web/ over HTTP.
-web: runtime-wasm runtime-mmc1-wasm apu-wasm
+web: runtime-wasm runtime-cartridge-wasm apu-wasm
 	moon build --target js --release
 	cp _build/js/release/build/web/web.js web/recompiler.js
 	cp maps/smb.map web/smb.map

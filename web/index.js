@@ -28,7 +28,7 @@ const GAMES = {
         title: 'METROID',
         pageTitle: 'Metroid Recompiled',
         map: 'metroid.map',
-        runtime: 'runtime-mmc1.wasm',
+        runtime: 'runtime-cartridge.wasm',
         native: null,
         display: null,
         extras: false,
@@ -558,7 +558,7 @@ async function main() {
         let saveStateReady = false;
 
         const chrRomPtr = runtime.chr_rom.value;
-        const { chr } = splitDump(rom);
+        const { chr, mapper } = splitDump(rom);
         if (debugTiles.checked && currentGame.extras) {
             runtime.debug_chr_generate(chrRomPtr);
         } else {
@@ -570,8 +570,10 @@ async function main() {
 
         runtime.cpu_init();
         runtime.video_init(chrRomPtr);
+        // a cartridge's CHR ROM can be larger than the pattern tables (MMC3)
+        runtime.video_init_chr?.(Math.max(chr.length, 0x2000));
         runtime.render_init();
-        runtime.mapper_init?.();
+        runtime.mapper_init?.(mapper);
 
         // Draw with WebGL2 unless unavailable or ?software is in the URL.
         await renderer?.setTheme?.('original'); // frees the last run's theme

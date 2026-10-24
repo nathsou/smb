@@ -4,7 +4,7 @@
 #endif
 #include "sound.h"
 #ifdef MAPPER
-#include "mapper.h" // cartridges that switch banks (MMC1)
+#include "mapper.h" // cartridges that switch banks (MMC1, MMC3)
 #endif
 
 uint8_t a;
@@ -146,11 +146,8 @@ uint8_t read_byte(uint16_t addr) {
     }
 
 #ifdef MAPPER
-    if (addr >= 0xc000) {
-        return data[prg_image_size - 0x4000 + (addr - 0xc000)]; // the last bank, fixed
-    }
     if (addr >= 0x8000) {
-        return prg_window[addr - 0x8000];
+        return data[prg_slots[(addr >> 13) & 3] + (addr & 0x1fff)]; // the banks mapped
     }
     if (addr >= 0x6000) {
         return wram[addr - 0x6000];

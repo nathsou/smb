@@ -120,7 +120,7 @@ def check_banked(frames=200):
             run("moon", "run", "src/main", "--", "--rom", rom, "--map", rom_map,
                 "--output", str(output / "unused"), "--wasm", str(game), *variant)
             run("node", "tests/web/fixture.mjs", str(runtime), str(game), rom)
-            run("node", "tests/web/replay_cartridge.mjs", "web/runtime-mmc1.wasm", str(game), rom,
+            run("node", "tests/web/replay_cartridge.mjs", "web/runtime-cartridge.wasm", str(game), rom,
                 "/dev/null", trace)
 
 
@@ -129,5 +129,5 @@ if __name__ == "__main__":
     check("tests/nrom128.asm", "tests/nrom128.c", rom_map="tests/nrom128.map")
     print("Independent NROM-128 program passed from its iNES image")
     check("tests/semantics.asm", "tests/semantics.c")
-    run("make", "runtime-mmc1-wasm")
+    run("make", "runtime-cartridge-wasm")
     check_banked()

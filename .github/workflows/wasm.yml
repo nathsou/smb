@@ -53,7 +53,7 @@ jobs:
       - name: Prepare deployment
         run: |
           mkdir -p dist
-          cp web/*.html web/*.js web/*.frag web/runtime.wasm web/runtime-mmc1.wasm web/apu.wasm web/smb.map web/metroid.map web/routines.txt web/display.c dist/
+          cp web/*.html web/*.js web/*.frag web/runtime.wasm web/runtime-cartridge.wasm web/apu.wasm web/smb.map web/metroid.map web/routines.txt web/display.c dist/
           cp -r web/themes dist/
       - name: Deploy to GitHub Pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

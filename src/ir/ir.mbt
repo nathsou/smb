@@ -8,11 +8,12 @@
 //   Ram: an address proven to be in internal RAM ($0000-$07FF, after
 //        masking mirrors), a plain array access;
 //   Rom: an address proven to be in PRG ROM, a constant table read (the
-//        fixed bank's, with a mapper);
-//   Bank(k): an address in the switchable window read by code of bank k,
-//        which is mapped while it runs: bank k's bytes, a constant read;
-//   Window: an address in the window read by fixed-bank code, from the
-//        bank mapped at run time;
+//        fixed banks', with a mapper);
+//   Bank(k): an address in a switchable window read by code of bank k in
+//        that window, which is mapped while it runs: bank k's bytes, a
+//        constant read;
+//   Window: an address in a window read by code outside it, from the bank
+//        mapped at run time;
 //   Wram: an address proven to be in the cartridge's RAM ($6000-$7FFF);
 //   Bus: anything else (I/O, pointers), through the runtime's bus functions.
 //
@@ -167,8 +168,9 @@ pub(all) struct Program {
   by_name : Map[String, Int]
   reset : String
   nmi : String
-  prg : Array[Int] // the PRG ROM image, for folding constant reads (the fixed bank, with a mapper)
+  prg : Array[Int] // the PRG ROM image, for folding constant reads (the fixed banks, with a mapper)
   banks : Array[Array[Int]] // the switchable banks, for reads of Bank(k)
+  layout : @image.Layout // where the banks are at $8000-$FFFF
   // Filled by `analyze`.
   mut info : Analysis?
 } derive(Debug)

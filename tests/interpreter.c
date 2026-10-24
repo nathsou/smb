@@ -284,7 +284,7 @@ int main(int argc, char **argv) {
     cpu_init();
     apu_init(48000);
     if (load_cartridge(argv[1])) return 1;
-    mapper_init();
+    mapper_init(cartridge_mapper);
 
     NESInputRecording recording = {0};
     if (rec_path && rec_open(rec_path, "r", &recording) != 0) { fprintf(stderr, "Cannot open %s\n", rec_path); return 1; }

@@ -150,19 +150,27 @@ fn Emitter::emit_data_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
 
 // The PRG ROM's bytes: the image, or every bank with a mapper.
 fn prg_size(p: @image.Program) -> Int {
-  if p.image.banked() { p.image.banks.contents.length() * 0x4000 } else { p.image.bytes.length() }
+  if p.image.banked() { p.image.banks.contents.length() * @image.layout().bank_size } else { p.image.bytes.length() }
 }
 
 // The location of each byte of the PRG ROM in data.c order, for its labels:
-// with a mapper, the banks in the window, the last one at $C000.
+// with a mapper, a fixed bank where it is fixed, the others in their window.
 fn prg_location(p: @image.Program, offset: Int) -> Int {
   if !p.image.banked() { return p.image.origin + offset }
-  let bank = offset / 0x4000
-  if bank == p.image.banks.contents.length() - 1 { 0xc000 + offset % 0x4000 } else { @image.bank_location(bank, 0x8000 + offset % 0x4000) }
+  let layout = @image.layout()
+  let bank = offset / layout.bank_size
+  let within = offset % layout.bank_size
+  match layout.fixed.iter().find_first(fn(region) { region.1 == bank }) {
+    Some(region) => region.0 + within
+    None => @image.bank_location(bank, layout.windows[p.image.banks.homes[bank]] + within)
+  }
 }
 
 fn prg_byte(p: @image.Program, offset: Int) -> Int {
-  if p.image.banked() { p.image.banks.contents[offset / 0x4000][offset % 0x4000] } else { p.image.bytes[offset] }
+  if p.image.banked() {
+    let size = @image.layout().bank_size
+    p.image.banks.contents[offset / size][offset % size]
+  } else { p.image.bytes[offset] }
 }
 
 fn Emitter::emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
@@ -199,7 +207,8 @@ fn Emitter::emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
     let size = prg_size(p)
     while offset < size {
       let pc = prg_location(p, offset)
-      if p.image.banked() && offset % 0x4000 == 0 { self.emit("// bank \{offset / 0x4000}: \{p.image.banks.names[offset / 0x4000]}") }
+      let bank_size = @image.layout().bank_size
+      if p.image.banked() && offset % bank_size == 0 { self.emit("// bank \{offset / bank_size}: \{p.image.banks.names[offset / bank_size]}") }
       if labels.get(pc) is Some(names) { self.emit("// \{names.join(", ")}") }
       if notes.get(pc) is Some(comments) {
         for comment in comments { self.emit("// " + comment) }
@@ -208,7 +217,7 @@ fn Emitter::emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
       for _ in 0..<16 {
         bytes.push("0x" + hex(prg_byte(p, offset)).pad_start(2, '0'))
         offset += 1
-        if offset == size || offset % 0x4000 == 0 { break }
+        if offset == size || (p.image.banked() && offset % @image.layout().bank_size == 0) { break }
         let next = prg_location(p, offset)
         if labels.contains(next) || notes.contains(next) { break }
       }
@@ -247,12 +256,25 @@ fn Emitter::emit_code_h(self: Emitter, program: @ir.Program, uses_ppu_bus~: Bool
   self.emit("")
 
   if banked {
-    self.emit("// PRG ROM: 16 KiB banks, the last fixed at $C000 (ROM), one of them")
-    self.emit("// switched in at $8000; the cartridge's RAM at $6000.")
+    let layout = program.layout
+    let fixed = layout.fixed.map(fn(r) { "\{r.1} at $\{hex(r.0)}" }).join(", ")
+    let windows = layout.windows.map(fn(w) { "$\{hex(w)}" }).join(" and ")
+    // the data offset of each 8 KiB of $8000-$FFFF in a fixed bank
+    let slots = Array::makei(4, fn(i) {
+      let address = 0x8000 + i * 0x2000
+      match layout.fixed.iter().find_first(fn(r) { address >= r.0 && address < r.0 + layout.bank_size }) {
+        Some(r) => "0x\{hex(r.1 * layout.bank_size + address - r.0)}"
+        None => "0"
+      }
+    })
+    self.emit("// PRG ROM: banks of \{layout.bank_size / 1024} KiB, \{fixed} fixed (ROM), others")
+    self.emit("// switched into the windows at \{windows}; the cartridge's RAM at $6000.")
     self.emit("#define PRG_BANKS \{program.banks.length()}")
-    self.emit("#define ROM(addr) data[(PRG_BANKS - 1) * 0x4000 + (addr) - 0xc000]")
-    self.emit("#define BANK_ROM(bank, addr) data[(bank) * 0x4000 + (addr) - 0x8000]")
-    self.emit("#define WINDOW_ROM(addr) prg_window[(addr) - 0x8000]")
+    self.emit("#define PRG_BANK_SIZE 0x\{hex(layout.bank_size)}")
+    self.emit("static const uint32_t prg_fixed[4] = { \{slots.join(", ")} };")
+    self.emit("#define ROM(addr) data[prg_fixed[((addr) >> 13) & 3] + ((addr) & 0x1fff)]")
+    self.emit("#define BANK_ROM(bank, addr) data[(bank) * PRG_BANK_SIZE + ((addr) & (PRG_BANK_SIZE - 1))]")
+    self.emit("#define WINDOW_ROM(addr) data[prg_slots[((addr) >> 13) & 3] + ((addr) & 0x1fff)]")
     self.emit("#define WRAM(addr) wram[(addr) - 0x6000]")
   } else {
     self.emit("// PRG ROM read; images smaller than 32 KiB are mirrored.")

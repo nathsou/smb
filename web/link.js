@@ -10,8 +10,8 @@ import { splitDump } from './cartridge.js';
 // The runtime is instantiated first; its imports of game routines are
 // trampolines to the game module's exports, instantiated right after.
 // The ROM's PRG banks are copied into the runtime's PRG buffer.
-// A runtime built for cartridges with a mapper (web/runtime-mmc1.wasm) also
-// has the cartridge's RAM and the bank mapped.
+// A runtime built for cartridges with a mapper (web/runtime-cartridge.wasm)
+// also has the cartridge's RAM and the banks mapped.
 
 // `gameBytes` may be a function of the runtime's layout, to build the game
 // module once the runtime's addresses are known. `hostImports` provides
@@ -57,7 +57,8 @@ export async function link(runtimeBytes, gameBytes, rom, { pages = 20, hostImpor
 export const MACHINE_STATE = [
     'ram', 'data', 'a', 'x', 'y', 'sp', 'carry_flag', 'zero_flag', 'neg_flag',
     'overflow_flag', 'interrupt_disabled', 'decimal_flag',
-    'wram', 'prg_window', 'prg_bank', 'cpu_return', 'cpu_suspended', 'cpu_resume_depth', 'cpu_resume_point',
+    'wram', 'prg_slots', 'prg_bank', 'prg_bank1', 'cpu_return', 'cpu_suspended', 'cpu_resume_depth',
+    'cpu_resume_point',
 ];
 
 export function runtimeLayout(runtime) {

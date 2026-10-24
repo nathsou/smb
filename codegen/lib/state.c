@@ -13,10 +13,16 @@ static void cartridge_state(uint8_t *state, bool save) {
     uint8_t *p = state + SAVE_STATE_DISPLAY_SIZE;
     #define BYTES(object, size) do { if (save) memcpy(p, (object), (size)); else memcpy((object), p, (size)); p += (size); } while (0)
     #define BYTE(value, type) do { if (save) *p = (uint8_t)(value); else (value) = (type)*p; p++; } while (0)
-    BYTES(chr_rom, CHR_ROM_SIZE);
+    // CHR RAM (CHR ROM never changes: its place stays unused)
+    if (chr_ram) BYTES(chr_rom, CHR_ROM_SIZE); else p += CHR_ROM_SIZE;
     BYTES(wram, WRAM_SIZE);
     BYTE(mmc1.shift, uint8_t); BYTE(mmc1.count, uint8_t); BYTE(mmc1.control, uint8_t);
     BYTE(mmc1.chr0, uint8_t); BYTE(mmc1.chr1, uint8_t); BYTE(mmc1.prg, uint8_t);
+    BYTE(mmc3.select, uint8_t);
+    for (int i = 0; i < 8; i++) BYTE(mmc3.banks[i], uint8_t);
+    BYTE(mmc3.mirroring, uint8_t); BYTE(mmc3.irq_latch, uint8_t); BYTE(mmc3.irq_counter, uint8_t);
+    BYTE(mmc3.irq_reload, uint8_t); BYTE(mmc3.irq_enabled, uint8_t); BYTE(mmc3.irq_pending, uint8_t);
+    BYTE(mmc3.prg_mode, uint8_t);
     BYTE(video.ctrl, uint8_t); BYTE(video.mask, uint8_t); BYTE(video.scroll_x, uint8_t);
     BYTE(video.scroll_y, uint8_t); BYTE(video.status_bar, bool); BYTE(video.mirroring, uint8_t);
     uint8_t vram_low = (uint8_t)ppu_vram_addr, vram_high = (uint8_t)(ppu_vram_addr >> 8);

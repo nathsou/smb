@@ -20,8 +20,9 @@ pub(all) struct Program {
   roots: Array[String]
   facts: Map[Int, Facts]
   idle: Set[Int]
-  // Window addresses called or jumped to from fixed-bank code, with the
-  // locations of the routines that can be mapped there.
+  // Window addresses called or jumped to from outside their window (fixed
+  // banks, or another window), with the locations of the routines that can
+  // be mapped there.
   windows: Map[Int, Array[Int]]
   // Computed jumps through RAM, with the locations they can reach.
   jumps: Map[Int, Array[Int]]
@@ -109,9 +110,12 @@ priv struct Exploration {
 fn rom_vector(image: Image, inst: Instruction) -> Int? raise ImageError {
   let hi = (inst.arg & 0xff00) | ((inst.arg + 1) & 255)
   if image.banked() {
-    if inst.arg < 0x8000 || hi < 0x8000 || (in_window(inst.arg) && bank_of(inst.pc) is None) { return None }
     let pointer = rebase(inst.pc, inst.arg)
-    return Some(rebase(pointer, image.read(pointer) | (image.read(rebase(inst.pc, hi)) << 8)))
+    let high = rebase(inst.pc, hi)
+    // a window as mapped at run time is not known
+    if inst.arg < 0x8000 || hi < 0x8000 || (in_window(pointer) && bank_of(pointer) is None) ||
+      (in_window(high) && bank_of(high) is None) { return None }
+    return Some(rebase(pointer, image.read(pointer) | (image.read(high) << 8)))
   }
   if inst.arg >= image.origin && hi >= image.origin {
     Some(image.read(inst.arg) | (image.read(hi) << 8))
@@ -160,8 +164,8 @@ fn code_targets(image: Image, site: Int) -> Array[Int] raise ImageError {
 // address (from the assembly source, or from a ROM map).
 fn explore(image: Image) -> Exploration raise ImageError {
   if image.banked() {
-    if image.bytes.length() != 16384 || image.origin != 0xc000 {
-      raise InvalidImage("A banked image needs its fixed bank at $C000")
+    if image.origin + image.bytes.length() != 0x10000 || fixed_bank(image.origin) < 0 {
+      raise InvalidImage("A banked image needs its fixed banks up to $FFFF")
     }
   } else if !((image.bytes.length() == 32768 && image.origin == 0x8000) ||
        (image.bytes.length() == 16384 && (image.origin == 0x8000 || image.origin == 0xc000))) {
@@ -215,18 +219,18 @@ fn explore(image: Image) -> Exploration raise ImageError {
     let pc = address
     if !parents.contains(pc) { parents[pc] = from }
     if image.banked() && pc < 0x10000 && in_window(pc) {
-      // Fixed-bank code reaches the window: whichever bank is mapped, among
+      // Code outside a window reaches it: whichever bank is mapped, among
       // the routines the map names at this address.
       if windows.contains(pc) { continue }
       guard image.banks.windows.get(pc) is Some(banks) else {
-        raise InvalidImage("Fixed-bank code reaches \{show_pc(pc)} in the switchable window, from \{show_pc(from)}, but the map names no routine there in any bank (routine BANK:\{show_pc(pc)} NAME)")
+        raise InvalidImage("Code outside the window reaches \{show_pc(pc)} in a switchable window, from \{path(pc)}, but the map names no routine there in any bank (routine BANK:\{show_pc(pc)} NAME)")
       }
       windows[pc] = banks.map(fn(bank) { bank_location(bank, pc) })
       for target in windows[pc] { work.push((target, Facts::unknown().entry(), pc)) }
       continue
     }
     let inside = if image.banked() {
-      (bank_of(pc) is Some(bank) && bank < image.banks.contents.length()) || (pc >= image.origin && pc < 0x10000)
+      (bank_of(pc) is Some(bank) && bank < image.banks.contents.length()) || fixed_bank(pc) >= 0
     } else { pc >= image.origin && pc < image.origin + image.bytes.length() }
     if !inside {
       raise InvalidImage("Execution outside the source address window at \{show_pc(pc)}, reached from \{path(pc)}; mirrored code needs an explicit source view")

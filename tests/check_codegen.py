@@ -36,7 +36,7 @@ if __name__ == "__main__":
     run("python3", "tests/check_fixtures.py")
     run("make", "header")
     run("git", "diff", "--exit-code", "--", "codegen/native/smb.h")
-    run("make", "runtime-wasm", "runtime-mmc1-wasm", "apu-wasm")
+    run("make", "runtime-wasm", "runtime-cartridge-wasm", "apu-wasm")
     # The synthesizer's frame queue at its edges.
     run("cc", "-std=c99", "-O2", "-Wall", "-Icodegen/lib", "-o", "audio_queue",
         "tests/audio_queue.c", "codegen/lib/apu.c")
@@ -66,5 +66,5 @@ if __name__ == "__main__":
             for variant in WASM_VARIANTS:
                 run("moon", "run", "src/main", "--", "--rom", "metroid.nes", "--map", "maps/metroid.map",
                     "--output", str(pathlib.Path(directory) / "unused"), "--wasm", game, *variant)
-                run("node", "tests/web/replay_cartridge.mjs", "web/runtime-mmc1.wasm", game, "metroid.nes",
+                run("node", "tests/web/replay_cartridge.mjs", "web/runtime-cartridge.wasm", game, "metroid.nes",
                     "rec/metroid.rec", trace)

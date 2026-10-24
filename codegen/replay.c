@@ -76,7 +76,7 @@ int main(int argc, char **argv) {
     apu_init(48000);
     if (load_cartridge(argv[1])) return 1;
 #ifdef MAPPER
-    mapper_init();
+    mapper_init(cartridge_mapper);
 #endif
 
     NESInputRecording recording = {0};

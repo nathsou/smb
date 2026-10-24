@@ -1,5 +1,6 @@
 import {
   "nathsou/smb/ir",
+  "nathsou/smb/image",
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/list",
 }

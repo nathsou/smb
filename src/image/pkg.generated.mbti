@@ -33,9 +33,13 @@ pub fn discover_rom(Image, RomMap) -> Program raise ImageError
 
 pub fn encoding(@parse.OpCode, String) -> Int32?
 
+pub fn fixed_bank(Int32) -> Int32
+
 pub fn in_window(Int32) -> Bool
 
 pub fn jump_target(Instruction) -> Int32
+
+pub fn layout() -> Layout
 
 pub fn load_dump(Bytes, RomMap) -> Dump raise ImageError
 
@@ -48,6 +52,8 @@ pub fn parse_map(String) -> RomMap raise ImageError
 pub fn rebase(Int32, Int32) -> Int32
 
 pub fn rom_image(Cartridge, RomMap) -> Image raise ImageError
+
+pub fn set_layout(Layout) -> Unit
 
 pub fn sha256(Array[Int32]) -> String
 
@@ -63,6 +69,10 @@ pub fn trap_name(Int32) -> String
 
 pub fn width(String) -> Int32
 
+pub fn window_bank_variable(Int32) -> String
+
+pub fn window_of(Int32) -> Int32
+
 // Errors
 pub suberror ImageError {
   InvalidImage(String)
@@ -71,6 +81,7 @@ pub suberror ImageError {
 // Types and methods
 pub(all) struct Banks {
   contents : Array[Array[Int32]]
+  homes : Array[Int32]
   names : Array[String]
   windows : Map[Int32, Array[Int32]]
   window_names : Map[Int32, String]
@@ -153,6 +164,15 @@ pub(all) struct KnownRom {
   label : String
 } derive(@debug.Debug)
 
+pub(all) struct Layout {
+  bank_size : Int32
+  windows : Array[Int32]
+  fixed : Array[(Int32, Int32)]
+} derive(Eq, @debug.Debug)
+pub fn Layout::mmc1(Int32) -> Self
+pub fn Layout::mmc3(Int32, Int32) -> Self
+pub fn Layout::none() -> Self
+
 pub(all) struct MapBank {
   index : Int32
   name : String
@@ -209,6 +229,7 @@ pub(all) struct RomMap {
   roms : Array[KnownRom]
   types : Array[MapType]
   banks : Array[MapBank]
+  prg_mode : Int32
 } derive(@debug.Debug)
 pub fn RomMap::bank_name(Self, Int32) -> String
 pub fn RomMap::empty() -> Self

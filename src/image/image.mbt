@@ -1,13 +1,13 @@
 // Source addresses are semantic identity. Labels and comments are views over
 // the bytes, not boundaries that force a code/data partition or a C function.
 //
-// With a mapper, `bytes` is the fixed bank at $C000-$FFFF and the banks that
-// switch in at $8000-$BFFF are in `banks`. Code and data in the window are
-// then located by bank as well as address: a location is
-// `(bank + 1) << 16 | address` (see `bank_location`), and a window address
-// without a bank is the window as mapped at run time. Locations outside the
-// window, and every location of a cartridge without banks, are plain
-// addresses.
+// With a mapper, `bytes` holds the fixed banks from `origin` to $FFFF (see
+// `Layout`), and the banks that switch into the windows are in `banks`.
+// Code and data in a window are then located by bank as well as address: a
+// location is `(bank + 1) << 16 | address` (see `bank_location`), and a
+// window address without a bank is the window as mapped at run time.
+// Locations outside the windows, and every location of a cartridge without
+// banks, are plain addresses.
 pub(all) struct Image {
   origin: Int
   bytes: Array[Int]
@@ -25,7 +25,8 @@ pub fn Image::is_data(self: Image, location: Int) -> Bool {
 }
 
 pub(all) struct Banks {
-  contents: Array[Array[Int]] // 16 KiB each
+  contents: Array[Array[Int]] // `Layout.bank_size` bytes each
+  homes: Array[Int] // the window each bank's code and tables are at (the first by default)
   names: Array[String] // prefixes of the banks' names
   windows: Map[Int, Array[Int]] // window address -> the banks the map names routines at it in
   window_names: Map[Int, String] // window address -> the routine as fixed-bank code calls it
@@ -33,7 +34,7 @@ pub(all) struct Banks {
 } derive(Debug)
 
 pub fn Banks::none() -> Banks {
-  { contents: [], names: [], windows: Map([]), window_names: Map([]), code: [] }
+  { contents: [], homes: [], names: [], windows: Map([]), window_names: Map([]), code: [] }
 }
 
 pub fn Image::banked(self: Image) -> Bool {
@@ -49,15 +50,86 @@ pub fn bank_of(location: Int) -> Int? {
   if location >= 0x10000 { Some((location >> 16) - 1) } else { None }
 }
 
-pub fn in_window(address: Int) -> Bool {
-  let a = address & 0xffff
-  a >= 0x8000 && a < 0xc000
+// How a mapper lays PRG ROM out at $8000-$FFFF: regions of `bank_size`
+// bytes, each a switchable window or fixed to a bank.
+//
+//   MMC1: a 16 KiB window at $8000, the last bank fixed at $C000;
+//   MMC3: 8 KiB banks, windows at $8000 and $A000 and the last two banks
+//         fixed at $C000 and $E000, or (PRG mode 1) windows at $A000 and
+//         $C000 and those banks fixed at $8000 and $E000.
+//
+// The image's helpers read the layout of the image last made (a ROM's, or
+// none for NROM and assembly), so that locations need no image to resolve.
+pub(all) struct Layout {
+  bank_size: Int
+  windows: Array[Int] // the windows' start addresses, ascending
+  fixed: Array[(Int, Int)] // start address and bank of each fixed region
+} derive(Debug, Eq)
+
+pub fn Layout::none() -> Layout {
+  { bank_size: 0x8000, windows: [], fixed: [] }
 }
 
-// `address` as seen from code at `from`: window addresses are in its bank.
+pub fn Layout::mmc1(banks: Int) -> Layout {
+  { bank_size: 0x4000, windows: [0x8000], fixed: [(0xc000, banks - 1)] }
+}
+
+pub fn Layout::mmc3(banks: Int, prg_mode: Int) -> Layout {
+  if prg_mode == 0 {
+    { bank_size: 0x2000, windows: [0x8000, 0xa000], fixed: [(0xc000, banks - 2), (0xe000, banks - 1)] }
+  } else {
+    { bank_size: 0x2000, windows: [0xa000, 0xc000], fixed: [(0x8000, banks - 2), (0xe000, banks - 1)] }
+  }
+}
+
+let current_layout: Ref[Layout] = Ref(Layout::none())
+
+pub fn set_layout(layout: Layout) -> Unit {
+  current_layout.val = layout
+}
+
+pub fn layout() -> Layout {
+  current_layout.val
+}
+
+// The window an address is in, or -1.
+pub fn window_of(address: Int) -> Int {
+  let a = address & 0xffff
+  let l = current_layout.val
+  for i, start in l.windows {
+    if a >= start && a < start + l.bank_size { return i }
+  }
+  -1
+}
+
+pub fn in_window(address: Int) -> Bool {
+  window_of(address) >= 0
+}
+
+// The runtime variable holding the bank mapped in window `window`.
+pub fn window_bank_variable(window: Int) -> String {
+  if window == 0 { "prg_bank" } else { "prg_bank\{window}" }
+}
+
+// The fixed bank at an address, or -1.
+pub fn fixed_bank(address: Int) -> Int {
+  let a = address & 0xffff
+  let l = current_layout.val
+  for region in l.fixed {
+    if a >= region.0 && a < region.0 + l.bank_size { return region.1 }
+  }
+  -1
+}
+
+// `address` as seen from code at `from`: addresses in the window that code
+// is in are in its bank; those in another window are that window as mapped.
 pub fn rebase(from: Int, address: Int) -> Int {
   let address = address & 0xffff
-  if from >= 0x10000 && in_window(address) { (from & 0x7fff0000) | address } else { address }
+  if from >= 0x10000 {
+    let window = window_of(address)
+    if window >= 0 && window == window_of(from) { return (from & 0x7fff0000) | address }
+  }
+  address
 }
 
 pub suberror ImageError { InvalidImage(String) } derive(Debug)
@@ -227,6 +299,7 @@ pub fn assemble(source: Array[@parse.SourceItem]) -> Image raise ImageError {
       _ => ()
     }
   }
+  set_layout(Layout::none())
   { origin, bytes, symbols, addresses, source, banks: Banks::none(), data: [] }
 }
 
@@ -238,9 +311,9 @@ pub fn Image::read(self: Image, address: Int) -> Int raise ImageError {
     let a = address & 0xffff
     if in_window(a) {
       guard bank_of(address) is Some(bank) && bank < self.banks.contents.length() else {
-        raise InvalidImage("Address in the switchable window without a bank: \{a}")
+        raise InvalidImage("Address in a switchable window without a bank: \{show_pc(a)}")
       }
-      return self.banks.contents[bank][a - 0x8000]
+      return self.banks.contents[bank][a & (layout().bank_size - 1)]
     }
     return self.bytes.get(a - self.origin).unwrap_or_error(InvalidImage("Address outside image: \{a}"))
   }
