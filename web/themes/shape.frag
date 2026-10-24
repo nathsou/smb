@@ -23,8 +23,8 @@ const float BEVEL = 3.0;
 const float PIPE = 16.0;
 const float FLOOR_BACK = 40.0;
 const float SCENERY_DEPTH = 20.0;
-const float SCENERY_HALF = 10.0;
-const float SCENERY_ROUND = 12.0;
+const float SCENERY_HALF = 14.0;
+const float SCENERY_ROUND = 32.0;
 const float SPRITE_HALF = 5.0;
 const float SPRITE_ROUND = 6.0;
 

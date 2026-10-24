@@ -2,9 +2,13 @@
 // from above, ray traced. Each scene pixel is a column covering the depths of
 // its background shape and of its sprite shape; rays walk the pixel grid
 // (Amanatides & Woo) and check the depths they cross each column at.
-// Normals come from how the thickness changes across columns, so rounded
-// shapes shade smoothly. Lit as the 2.5D theme: the sun and fire with shadow
-// rays, ambient occlusion, and the 2D global illumination.
+// Inflated shapes (scenery, sprites) are refined between pixels: their
+// thickness is interpolated where the ray meets them, for the depth and the
+// normal, so they shade smoothly while their outlines stay pixel art. Blocks
+// and pipes keep their exact shapes. Lit as the 2.5D theme: the sun and fire
+// with shadow rays, ambient occlusion, and the 2D global illumination, with
+// more of it from above than from below, a soft highlight where the sun
+// glints, and the backdrop's colour a little over what is far back.
 
 uniform sampler2D u_background;
 uniform sampler2D u_sprite;
@@ -18,6 +22,7 @@ uniform vec3 u_down;            // unit vector down the screen
 uniform float u_focal;          // distance at which a pixel spans a NES pixel
 uniform vec3 u_sun;             // towards the sun
 uniform vec3 u_sun_color;
+uniform int u_jitter;           // 1: each pixel of a 2x2 square sees the sun from its own spot
 uniform float u_ambient;        // how much of the 2D light to use
 uniform int u_light_count;
 uniform vec4 u_lights[8];       // position, radius
@@ -26,6 +31,8 @@ uniform vec3 u_light_colors[8];
 out vec4 o_color;
 
 const float NEAR = -20.0; // in front of every shape
+const float HAZE_START = 18.0; // depth from which far shapes fade towards the backdrop
+const float HAZE_MAX = 0.12;
 const float FAR = 44.0;   // behind every shape
 
 const int NONE = 0;
@@ -34,10 +41,14 @@ const int SPRITE = 2;
 
 struct Hit {
     float t;
-    vec3 side;  // the face of the column the ray came in by, 0 when its front or back
+    float t_enter; // where the ray entered the column
+    float t_exit;  // and left it
+    vec3 side;     // the face of the column the ray came in by, 0 when its front or back
     ivec2 cell;
     int layer;
 };
+
+const ivec2 NO_CELL = ivec2(-100000);
 
 // The scene pixel of a column in screen coordinates. Rows below the screen
 // repeat the bottom row of blocks, so that the ground goes on down.
@@ -73,7 +84,8 @@ float enter(vec3 origin, vec3 direction, float t0, float t1, float z0, float z1,
     return t >= 0.0 && t <= t1 ? t : -1.0;
 }
 
-Hit trace(vec3 origin, vec3 direction, float t_max) {
+// The first column along a ray, up to t_max, other than `skip`.
+Hit trace(vec3 origin, vec3 direction, float t_max, ivec2 skip) {
     Hit hit;
     hit.layer = NONE;
     ivec2 cell = ivec2(floor(origin.xy));
@@ -88,7 +100,7 @@ Hit trace(vec3 origin, vec3 direction, float t_max) {
         if ((cell.y < 0 && step.y < 0.0) || (cell.x + u_origin < 0 && step.x < 0.0) ||
             (cell.x + u_origin >= SCENE_WIDTH && step.x > 0.0)) break;
         float t_exit = min(min(next.x, next.y), t_max);
-        vec4 shape = shape_at(cell);
+        vec4 shape = cell == skip ? vec4(0.0) : shape_at(cell);
         float best = 1e9;
         bool by_side;
         if (shape.y > 0.0) {
@@ -109,6 +121,8 @@ Hit trace(vec3 origin, vec3 direction, float t_max) {
         }
         if (hit.layer != NONE) {
             hit.t = best;
+            hit.t_enter = t;
+            hit.t_exit = t_exit;
             hit.cell = cell;
             return hit;
         }
@@ -128,8 +142,8 @@ Hit trace(vec3 origin, vec3 direction, float t_max) {
     return hit;
 }
 
-bool blocked(vec3 origin, vec3 direction, float t_max) {
-    return trace(origin, direction, t_max).layer != NONE;
+bool blocked(vec3 origin, vec3 direction, float t_max, ivec2 skip) {
+    return trace(origin, direction, t_max, skip).layer != NONE;
 }
 
 float half_thickness(ivec2 cell, int layer) {
@@ -137,15 +151,66 @@ float half_thickness(ivec2 cell, int layer) {
     return layer == SPRITE ? shape.w : shape.y;
 }
 
+// The half thickness of one shape at a column: 0 where another shape is
+// (another layer, or a background at another depth).
+float shape_half(ivec2 cell, int layer, float centre) {
+    vec4 shape = shape_at(cell);
+    if (layer == SPRITE) return shape.w;
+    return abs(shape.x - centre) < 0.5 ? shape.y : 0.0;
+}
+
+// The half thickness of a shape at any point, between the centres of the
+// four nearest columns.
+float smooth_half(vec2 p, int layer, float centre) {
+    vec2 a = p - 0.5;
+    ivec2 i = ivec2(floor(a));
+    vec2 f = a - floor(a);
+    return mix(
+        mix(shape_half(i, layer, centre), shape_half(i + ivec2(1, 0), layer, centre), f.x),
+        mix(shape_half(i + ivec2(0, 1), layer, centre), shape_half(i + ivec2(1, 1), layer, centre), f.x),
+        f.y);
+}
+
+bool inflated(Hit hit) {
+    return hit.layer == SPRITE || material_of(layer_color(hit.cell, BACKGROUND)) == M_SCENERY;
+}
+
+float centre_of(Hit hit) {
+    vec4 shape = shape_at(hit.cell);
+    return hit.layer == SPRITE ? shape.z : shape.x;
+}
+
+// Where a ray that reached an inflated shape's column meets its smooth
+// surface, within the column.
+float refine(Hit hit, vec3 origin, vec3 direction) {
+    float centre = centre_of(hit);
+    float t = hit.t;
+    for (int i = 0; i < 4; i++) {
+        vec3 p = origin + direction * t;
+        float z = centre - smooth_half(p.xy, hit.layer, centre);
+        t = clamp((z - origin.z) / direction.z, hit.t_enter, hit.t_exit);
+    }
+    return t;
+}
+
 // The normal of a column's surface: from how its half thickness changes
 // across neighbouring columns (none: the edge, at the centre), facing the
 // viewer on the front half and away on the back half; a ray that came in by
-// a side leans it towards that side.
-vec3 surface_normal(Hit hit, float z) {
-    float centre = hit.layer == SPRITE ? shape_at(hit.cell).z : shape_at(hit.cell).x;
+// a side leans it towards that side. Inflated shapes take it from their
+// smooth surface at the point itself, whichever way the ray came in.
+vec3 surface_normal(Hit hit, vec3 p) {
+    float centre = centre_of(hit);
+    float facing = p.z < centre ? -1.0 : 1.0;
+    if (inflated(hit)) {
+        float dx = smooth_half(p.xy + vec2(0.5, 0.0), hit.layer, centre) -
+            smooth_half(p.xy - vec2(0.5, 0.0), hit.layer, centre);
+        float dy = smooth_half(p.xy + vec2(0.0, 0.5), hit.layer, centre) -
+            smooth_half(p.xy - vec2(0.0, 0.5), hit.layer, centre);
+        return normalize(vec3(-dx, -dy, facing));
+    }
     float dx = half_thickness(hit.cell + ivec2(1, 0), hit.layer) - half_thickness(hit.cell - ivec2(1, 0), hit.layer);
     float dy = half_thickness(hit.cell + ivec2(0, 1), hit.layer) - half_thickness(hit.cell - ivec2(0, 1), hit.layer);
-    vec3 n = normalize(vec3(-dx * 0.5, -dy * 0.5, z < centre ? -1.0 : 1.0));
+    vec3 n = normalize(vec3(-dx * 0.5, -dy * 0.5, facing));
     return normalize(n + 2.0 * hit.side);
 }
 
@@ -179,16 +244,28 @@ vec4 block_face_color(Hit hit, float z) {
 }
 
 // The share of five short rays around the normal that get out.
-float ambient_occlusion(vec3 origin, vec3 normal) {
+float ambient_occlusion(vec3 origin, vec3 normal, ivec2 skip) {
     vec3 u = normalize(abs(normal.z) > 0.7 ? cross(normal, vec3(0.0, 1.0, 0.0)) : cross(normal, vec3(0.0, 0.0, 1.0)));
     vec3 v = cross(normal, u);
     float open = 0.0;
-    open += blocked(origin, normal, 6.0) ? 0.0 : 1.0;
-    open += blocked(origin, normalize(normal + u), 6.0) ? 0.0 : 1.0;
-    open += blocked(origin, normalize(normal - u), 6.0) ? 0.0 : 1.0;
-    open += blocked(origin, normalize(normal + v), 6.0) ? 0.0 : 1.0;
-    open += blocked(origin, normalize(normal - v), 6.0) ? 0.0 : 1.0;
+    open += blocked(origin, normal, 6.0, skip) ? 0.0 : 1.0;
+    open += blocked(origin, normalize(normal + u), 6.0, skip) ? 0.0 : 1.0;
+    open += blocked(origin, normalize(normal - u), 6.0, skip) ? 0.0 : 1.0;
+    open += blocked(origin, normalize(normal + v), 6.0, skip) ? 0.0 : 1.0;
+    open += blocked(origin, normalize(normal - v), 6.0, skip) ? 0.0 : 1.0;
     return 0.3 + 0.7 * open / 5.0;
+}
+
+// The sun's direction for this pixel: with u_jitter, each pixel of a 2x2
+// square sees it from a corner of a small disc, so that averaging the square
+// softens the edges of shadows.
+vec3 sun_direction() {
+    if (u_jitter == 0) return u_sun;
+    ivec2 corner = ivec2(gl_FragCoord.xy) & 1;
+    vec3 u = normalize(cross(u_sun, vec3(0.0, 0.0, 1.0)));
+    vec3 v = cross(u_sun, u);
+    vec2 offset = (vec2(corner) * 2.0 - 1.0) * 0.06;
+    return normalize(u_sun + u * offset.x + v * offset.y);
 }
 
 void main() {
@@ -204,14 +281,20 @@ void main() {
     vec3 right = cross(u_down, u_forward);
     vec3 direction = normalize(u_forward * u_focal + right * (screen.x - 128.0) + u_down * (screen.y - 120.0));
     vec3 origin = u_camera + direction * ((NEAR - u_camera.z) / direction.z);
-    Hit hit = trace(origin, direction, (FAR - NEAR) / direction.z);
+    Hit hit = trace(origin, direction, (FAR - NEAR) / direction.z, NO_CELL);
     if (hit.layer == NONE) {
         o_color = vec4((u_mask & 0x08) != 0 ? color(u_palette[0]) : vec3(0.0), 1.0);
         return;
     }
 
+    // a smooth surface is lit as a whole: its own column does not shade it
+    ivec2 skip = NO_CELL;
+    if (inflated(hit)) {
+        hit.t = refine(hit, origin, direction);
+        skip = hit.cell;
+    }
     vec3 p = origin + direction * hit.t;
-    vec3 n = surface_normal(hit, p.z);
+    vec3 n = surface_normal(hit, p);
     vec4 layer = layer_color(hit.cell, hit.layer);
     int material = material_of(layer);
     if (hit.side != vec3(0.0)) {
@@ -222,23 +305,34 @@ void main() {
     vec3 surface = p + n * 0.05;
 
     ivec2 at = scene_at(hit.cell);
-    vec3 light = (texelFetch(u_light, at, 0).rgb + u_floor) * u_ambient * ambient_occlusion(surface, n);
-    float sun = dot(n, u_sun);
-    if (sun > 0.0 && !blocked(surface, u_sun, 64.0)) light += u_sun_color * sun;
+    float from_above = 0.8 - 0.3 * n.y; // y is down
+    vec3 light = (texelFetch(u_light, at, 0).rgb + u_floor) * u_ambient * from_above *
+        ambient_occlusion(surface, n, skip);
+    vec3 to_sun = sun_direction();
+    float sun = dot(n, to_sun);
+    vec3 glint = vec3(0.0);
+    if (sun > 0.0 && !blocked(surface, to_sun, 64.0, skip)) {
+        light += u_sun_color * sun;
+        // blocks, pipes and characters are glossier than scenery
+        float gloss = hit.layer == SPRITE ? 0.25 : inflated(hit) ? 0.06 : 0.2;
+        glint = u_sun_color * gloss * pow(max(dot(n, normalize(to_sun - direction)), 0.0), 40.0);
+    }
     for (int i = 0; i < 8; i++) {
         if (i >= u_light_count) break;
         vec3 to = u_lights[i].xyz - p;
         float d = length(to);
         vec3 l = to / d;
         float facing = dot(n, l);
-        if (facing <= 0.0 || blocked(surface, l, d)) continue;
+        if (facing <= 0.0 || blocked(surface, l, d, skip)) continue;
         float r = u_lights[i].w;
         light += u_light_colors[i] * facing / (1.0 + d * d / (r * r));
     }
 
-    vec3 c = albedo * light;
+    vec3 c = albedo * light + glint;
     if (hit.layer == SPRITE && material == S_FIRE) c += albedo * 2.5;
     else if (hit.layer == BACKGROUND && material == M_LAVA) c += albedo * 1.2;
     else if (hit.layer == BACKGROUND && material == M_COIN) c += albedo * 0.3;
+    vec3 backdrop = to_linear((u_mask & 0x08) != 0 ? color(u_palette[0]) : vec3(0.0));
+    c = mix(c, backdrop, clamp((p.z - HAZE_START) / 80.0, 0.0, HAZE_MAX));
     o_color = vec4(to_display(c), 1.0);
 }

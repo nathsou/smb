@@ -481,10 +481,19 @@ level slid across them and the light shimmered while scrolling.
   Coins and climbables are thin. Scenery and sprites are inflated: a jump
   flood (`edges.frag`) gives each pixel its distance to the edge of its
   silhouette, and the thickness rises from it as a quarter circle.
+  `smooth.frag` then blurs their thickness (outside the shape counting as 0),
+  which rounds off the creases a distance field leaves along the middle.
   `model.frag` traces those columns as `voxel.frag` does, but from a
-  perspective camera tilted down, with normals from how the thickness changes
-  between columns, so rounded shapes shade smoothly; a block's top and sides
-  show its own tile, as a cube's faces. The lighting is the 2.5D theme's.
+  perspective camera tilted down. Where a ray reaches an inflated shape it
+  meets the thickness interpolated between pixels, for the depth and the
+  normal, so the shape shades smoothly while its outline stays pixel art;
+  its own column does not shadow it. A block's top and sides show its own
+  tile, as a cube's faces. The lighting is the 2.5D theme's, with more
+  ambient light from above than below, a highlight where the sun glints and
+  a little haze far back. The picture is drawn at up to 4 times the NES
+  resolution and scaled to the canvas (2x2 samples per pixel at the usual
+  2x), each sample seeing the sun from its own point, which softens shadow
+  edges.
 
 The status bar is drawn as it is. `tests/web/themes.cjs` draws replay frames
 with every theme and fails on WebGL errors. The themes are a presentation
