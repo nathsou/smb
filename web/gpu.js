@@ -99,8 +99,12 @@ export async function createGpuRenderer(canvas, exports, memory, shaderUrl = 'vi
     const gl = canvas.getContext('webgl2', { antialias: false, depth: false });
     if (gl === null) return null;
 
-    const videoSource = await (await fetch(shaderUrl)).text();
+    // (revalidated: a shader of another version than this file draws nothing)
+    const videoSource = await (await fetch(shaderUrl, { cache: 'no-cache' })).text();
     const program = createProgram(gl, videoSource);
+    if (gl.getUniformLocation(program, 'u_lines') === null) {
+        throw new Error(`${shaderUrl} is of another version than gpu.js`);
+    }
     gl.useProgram(program);
 
     const bytes = () => new Uint8Array(memory.buffer);
@@ -203,7 +207,7 @@ export async function createGpuRenderer(canvas, exports, memory, shaderUrl = 'vi
     };
 
     const themeUrl = path => new URL(`themes/${path}`, import.meta.url);
-    const fetchText = async path => (await fetch(themeUrl(path))).text();
+    const fetchText = async path => (await fetch(themeUrl(path), { cache: 'no-cache' })).text();
     let commonSource = null;
     // What a theme module gets: the frame, the game's memory, and programs
     // compiled with video.frag and common.glsl as libraries.

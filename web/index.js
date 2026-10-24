@@ -55,16 +55,21 @@ function gameOf(rom) {
     return BOARDS[splitDump(rom).mapper] ?? GAMES.smb;
 }
 
+// The page's files, revalidated with the server on each load: a reload may
+// otherwise take some from the browser's cache and others not, and files
+// of different versions do not work together.
+const fetchFresh = url => fetch(url, { cache: 'no-cache' });
+
 // A game's files, fetched once.
 const gameFiles = new Map();
 function filesOf(game) {
     if (!gameFiles.has(game)) {
-        const text = name => name ? fetch(name).then(r => r.text()) : Promise.resolve('');
+        const text = name => name ? fetchFresh(name).then(r => r.text()) : Promise.resolve('');
         gameFiles.set(game, Promise.all([
             text(game.map),
             text(game.native),
             text(game.display),
-            fetch(game.runtime).then(r => r.arrayBuffer()),
+            fetchFresh(game.runtime).then(r => r.arrayBuffer()),
         ]).then(([map, native, display, runtime]) => ({ map, native, display, runtime })));
     }
     return gameFiles.get(game);
@@ -477,8 +482,8 @@ async function main() {
     const onScale = scale => renderer?.setDisplayScale?.(scale);
 
     const [recompiler, apuWasm] = await Promise.all([
-        fetch('recompiler.js').then(r => r.arrayBuffer()),
-        fetch('apu.wasm').then(r => r.arrayBuffer()),
+        fetchFresh('recompiler.js').then(r => r.arrayBuffer()),
+        fetchFresh('apu.wasm').then(r => r.arrayBuffer()),
     ]);
     const version = await store.digest(new Uint8Array(recompiler));
 
@@ -658,8 +663,24 @@ async function main() {
         const targetFrameTime = 1000 / 60;
         const maxBacklog = 3 * targetFrameTime;
 
+        // A frame that fails stops the game and says why under the screen,
+        // rather than leave the last picture (or none).
+        const runError = document.getElementById('run-error');
+        runError.hidden = true;
         const update = () => {
             if (!running) return;
+            try {
+                frame();
+            } catch (error) {
+                running = false;
+                console.error(error);
+                runError.textContent = `THE GAME STOPPED: ${error.message}`.toUpperCase();
+                runError.hidden = false;
+                return;
+            }
+            requestAnimationFrame(update);
+        };
+        const frame = () => {
             const currentTime = performance.now();
             currentFrameTime += currentTime - lastUpdateTime;
             lastUpdateTime = currentTime;
@@ -691,8 +712,6 @@ async function main() {
                     shouldLoadState = false;
                 }
             }
-
-            requestAnimationFrame(update);
         };
 
         update();
