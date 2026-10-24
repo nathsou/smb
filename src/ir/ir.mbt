@@ -168,6 +168,7 @@ pub(all) struct Program {
   by_name : Map[String, Int]
   reset : String
   nmi : String
+  irq : String? // the IRQ handler, when code enables interrupts (a mapper raises them)
   prg : Array[Int] // the PRG ROM image, for folding constant reads (the fixed banks, with a mapper)
   banks : Array[Array[Int]] // the switchable banks, for reads of Bank(k)
   layout : @image.Layout // where the banks are at $8000-$FFFF
@@ -183,7 +184,12 @@ pub fn Program::function(self : Program, name : String) -> Function? {
 }
 
 pub fn Program::roots(self : Program) -> Array[String] {
-  if self.reset == self.nmi { [self.reset] } else { [self.reset, self.nmi] }
+  let roots = if self.reset == self.nmi { [self.reset] } else { [self.reset, self.nmi] }
+  match self.irq {
+    Some(irq) if !roots.contains(irq) => roots.push(irq)
+    _ => ()
+  }
+  roots
 }
 
 pub fn Function::new_temp(self : Function, hint : String, width : Width) -> Int {

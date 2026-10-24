@@ -26,15 +26,17 @@ pub fn Image::is_data(self: Image, location: Int) -> Bool {
 
 pub(all) struct Banks {
   contents: Array[Array[Int]] // `Layout.bank_size` bytes each
-  homes: Array[Int] // the window each bank's code and tables are at (the first by default)
+  homes: Array[Int] // the window each bank's code and tables are at (-1 when unknown)
+  companions: Array[Int] // the bank always in the other window while each runs (-1 when none)
   names: Array[String] // prefixes of the banks' names
   windows: Map[Int, Array[Int]] // window address -> the banks the map names routines at it in
   window_names: Map[Int, String] // window address -> the routine as fixed-bank code calls it
-  code: Array[(Int, Int)] // locations of the code addresses in the map's code tables, and what to add to them
+  code: Array[(Int, Int, Int)] // locations of the code addresses in the map's code tables, what to add to them, and the table's address
+  shadows: Array[(Int, Int)] // a window and the RAM byte holding its bank, where nothing else tells
 } derive(Debug)
 
 pub fn Banks::none() -> Banks {
-  { contents: [], homes: [], names: [], windows: Map([]), window_names: Map([]), code: [] }
+  { contents: [], homes: [], companions: [], names: [], windows: Map([]), window_names: Map([]), code: [], shadows: [] }
 }
 
 pub fn Image::banked(self: Image) -> Bool {

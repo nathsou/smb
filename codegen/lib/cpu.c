@@ -303,15 +303,42 @@ void plp(void) {
     neg_flag = (p & 0x80) != 0;
 }
 
-inline void next_frame(void) {
-    // NMI is delivered while the foreground is at a proven idle yield or
-    // suspended in a wait loop. Like RTI, restore the status flags.
+uint8_t cpu_interrupts_were_enabled;
+
+void cpu_interrupts_enabled(void) {
+    cpu_interrupts_were_enabled = 1;
+}
+
+// An interrupt handler, entered with interrupts disabled. Like RTI,
+// restores the status flags. Whether the handler enabled interrupts.
+static bool cpu_interrupt(void (*handler)(void)) {
     bool c = carry_flag, z = zero_flag, n = neg_flag, v = overflow_flag;
     bool i = interrupt_disabled, d = decimal_flag;
     interrupt_disabled = true;
-    cpu_nmi_entry();
+    cpu_interrupts_were_enabled = 0;
+    handler();
+    bool enabled = cpu_interrupts_were_enabled || !interrupt_disabled;
     carry_flag = c; zero_flag = z; neg_flag = n; overflow_flag = v;
     interrupt_disabled = i; decimal_flag = d;
+    return enabled;
+}
+
+#ifdef MAPPER
+static void cpu_irq(void) {
+    (void)cpu_interrupt(cpu_irq_entry);
+}
+#endif
+
+inline void next_frame(void) {
+    // NMI is delivered while the foreground is at a proven idle yield or
+    // suspended in a wait loop, then the frame's scanlines raise the
+    // mapper's IRQ.
+    bool enabled = cpu_interrupt(cpu_nmi_entry);
+#ifdef MAPPER
+    mapper_frame(cpu_irq, enabled || !interrupt_disabled);
+#else
+    (void)enabled;
+#endif
     // A suspended foreground resumes and runs to its next wait.
     if (cpu_resume_depth != 0) {
         cpu_suspended = 0;

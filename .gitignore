@@ -36,3 +36,5 @@ codegen/metroid/
 replay
 interpreter
 metroid
+codegen/smb3/
+smb3

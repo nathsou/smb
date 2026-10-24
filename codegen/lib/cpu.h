@@ -54,6 +54,12 @@ extern const uint8_t data[];
 extern const unsigned prg_image_size;
 void cpu_reset_entry(void);
 void cpu_nmi_entry(void);
+// The IRQ handler (cartridges whose mapper raises it: MMC3).
+void cpu_irq_entry(void);
+// CLI: interrupts enabled, which the frame model notes (an NMI handler that
+// enables them is interrupted by the IRQ on the hardware).
+extern uint8_t cpu_interrupts_were_enabled;
+void cpu_interrupts_enabled(void);
 
 uint8_t read_byte(uint16_t addr);
 void dynamic_ram_write(uint16_t addr, uint8_t value);

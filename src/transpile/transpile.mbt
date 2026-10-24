@@ -162,7 +162,7 @@ fn prg_location(p: @image.Program, offset: Int) -> Int {
   let within = offset % layout.bank_size
   match layout.fixed.iter().find_first(fn(region) { region.1 == bank }) {
     Some(region) => region.0 + within
-    None => @image.bank_location(bank, layout.windows[p.image.banks.homes[bank]] + within)
+    None => @image.bank_location(bank, layout.windows[if p.image.banks.homes[bank] < 0 { 0 } else { p.image.banks.homes[bank] }] + within)
   }
 }
 
@@ -283,6 +283,7 @@ fn Emitter::emit_code_h(self: Emitter, program: @ir.Program, uses_ppu_bus~: Bool
   self.emit("")
   self.emit("void cpu_reset_entry(void);")
   self.emit("void cpu_nmi_entry(void);")
+  if banked { self.emit("void cpu_irq_entry(void);") }
   for f in program.functions {
     if !f.helper { self.emit("void \{f.name}(void);") }
   }

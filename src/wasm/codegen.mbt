@@ -14,7 +14,8 @@
 // - the runtime functions it calls: bus access, APU and joypad writes, the
 //   idle yield and trap, and the native routines.
 //
-// It exports every routine, and `cpu_reset_entry` / `cpu_nmi_entry`.
+// It exports every routine, and `cpu_reset_entry` / `cpu_nmi_entry` (and
+// `cpu_irq_entry` when code enables interrupts).
 //
 // Control flow is structured with the algorithm of Ramsey, "Beyond
 // Relooper" (ICFP 2022): on a reducible CFG, each block is emitted once under
@@ -901,7 +902,7 @@ pub fn emit(
   for f in program.functions {
     if f.native { natives.add(f.name) }
   }
-  let reached = [program.reset, program.nmi]
+  let reached = program.roots()
   for f in generated {
     for block in f.blocks {
       for s in block.stmts {
@@ -979,6 +980,7 @@ pub fn emit(
   }
   exports.push(("cpu_reset_entry", index_of(program.reset)))
   exports.push(("cpu_nmi_entry", index_of(program.nmi)))
+  if program.irq is Some(irq) { exports.push(("cpu_irq_entry", index_of(irq))) }
   let section = Buf::new()
   section.u32(exports.length())
   for e in exports {

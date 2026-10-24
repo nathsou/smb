@@ -14,12 +14,14 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
   // The same address can be reached under more than one machine contract.
   // Keep those contexts separate: being an interrupt vector must not make an
   // ordinary JSR to that address eligible to return with RTI.
-  let entries: Array[(Int, Int)] = []
-  fn add_entry(entry: Int, kind: Int) {
-    if !entries.contains((entry, kind)) { entries.push((entry, kind)) }
+  // (and the data a jump into a window leaves on the stack for the routine
+  // it continues in: an interrupt handler's saved registers, say)
+  let entries: Array[(Int, Int, Int)] = []
+  fn add_entry(entry: Int, kind: Int, depth: Int) {
+    if !entries.contains((entry, kind, depth)) { entries.push((entry, kind, depth)) }
   }
   for i, root in self.roots {
-    add_entry(self.image.symbols[root], if i == 0 { 0 } else { 1 })
+    add_entry(self.image.symbols[root], if i == 0 { 0 } else { 1 }, 0)
   }
   // A call into the window from the fixed bank calls whichever routine is
   // mapped there; a computed jump continues in its target.
@@ -29,28 +31,30 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
   for inst in self.instructions.values() {
     if inst.op == JSR {
       if self.dispatches.get(inst.pc) is Some(dispatch) {
-        for target in dispatch.targets { add_entry(target, 2) }
+        for target in dispatch.targets {
+          for callee in callees(target) { add_entry(callee, 2, 0) }
+        }
       } else {
-        for target in callees(jump_target(inst)) { add_entry(target, 2) }
+        for target in callees(jump_target(inst)) { add_entry(target, 2, 0) }
       }
     }
     if self.jumps.get(inst.pc) is Some(targets) {
       for target in targets {
-        for callee in callees(target) { add_entry(callee, 2) }
+        for callee in callees(target) { add_entry(callee, 2, 0) }
       }
-    }
-    if inst.op == JMP && inst.mode == "abs" && self.windows.contains(jump_target(inst)) {
-      for target in callees(jump_target(inst)) { add_entry(target, 2) }
     }
   }
   // Routines a jump with the token dropped leaves to, as a call.
   let routines: Set[Int] = Set(entries.map(fn(e) { e.0 }))
-  for entry_and_kind in entries {
-    let (entry, kind) = entry_and_kind
+  let leaks: Array[String] = []
+  let mut index = 0
+  while index < entries.length() {
+    let (entry, kind, start) = entries[index]
+    index += 1
     let is_reset = kind == 0
     let is_interrupt = kind == 1
     let states: Map[(Int, Int), Facts] = Map([])
-    let work = [(entry, 0, self.facts[entry])]
+    let work = [(entry, start, self.facts[entry])]
     while !work.is_empty() {
       let (pc, depth, incoming) = work.pop().unwrap()
       let state = match states.get((pc, depth)) {
@@ -87,7 +91,12 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
       if inst.op == RTS && depth == 2 && self.jumps.contains(pc) { continue } // a computed jump
       if inst.op == RTS || inst.op == RTI {
         if depth > 0 && inst.op == RTS {
-          raise InvalidImage("RTS at \{show_pc(pc)} returns through \{depth} byte(s) pushed by the routine (computed jump); only proven inline dispatchers are supported")
+          // with exact returns, it returns where the bytes pulled say, as
+          // the machine does (a path games take only by mistake)
+          if leaks.is_empty() {
+            leaks.push("RTS at \{show_pc(pc)} returns through \{depth} byte(s) pushed by the routine (computed jump); only proven inline dispatchers are supported")
+          }
+          continue
         }
         // a return through part of a return address goes nowhere known
         if depth > 0 || depth % 2 != 0 || (inst.op == RTI && depth != 0) { raise InvalidImage("Unbalanced return at \{show_pc(pc)}") }
@@ -101,7 +110,14 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
         if depth != 0 { raise InvalidImage("Inline dispatch with pending data stack at \{show_pc(pc)}") }
         // The helper consumes only its own return token; selected handlers
         // return on this entry's incoming token and are checked independently.
-        for target in dispatch.targets { work.push((target, depth, self.facts[target])) }
+        for target in dispatch.targets {
+          // (one in another window is the routine of the bank mapped there)
+          if self.windows.contains(target) {
+            for callee in callees(target) { add_entry(callee, 2, 0) }
+          } else {
+            work.push((target, depth, self.facts[target]))
+          }
+        }
       } else if inst.mode == "rel" {
         let condition = condition(inst.op, state)
         if condition != Some(false) { work.push((branch_target(inst), next_depth, assume_condition(inst.op, true, after))) }
@@ -115,7 +131,12 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
             Some(callees(jump_target(inst)))
           } else { None }
         } else { self.jumps.get(pc) }
+        let window = inst.mode == "abs" && self.windows.contains(jump_target(inst))
         match tail {
+          // the routines of the window continue this entry, with its data
+          Some(targets) if window && next_depth > 0 =>
+            for target in targets { add_entry(target, kind, next_depth) }
+          Some(targets) if window => for target in targets { add_entry(target, 2, 0) }
           Some(_) => if next_depth > 0 { raise InvalidImage("Tail jump with pending data stack at \{show_pc(pc)}") }
           None =>
             if inst.mode == "abs" { work.push((jump_target(inst), next_depth, after)) }
@@ -130,4 +151,5 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
       } else { work.push((inst.next, next_depth, after)) }
     }
   }
+  if !self.exact.val && leaks.length() > 0 { raise InvalidImage(leaks[0]) }
 }

@@ -8,8 +8,14 @@
 // the recompiled program's (codegen/replay.c); the wait loops come from the
 // recompiler.
 //
-// usage: ./interpreter ROM.nes --waits FROM:TO,... [--rec FILE] [--frames N]
-//                     [--write-trace FILE]
+// usage: ./interpreter ROM.nes --waits [BANK:]FROM:TO,... [--rec FILE]
+//                     [--frames N] [--write-trace FILE] [--dump N,...]
+//                     [--profile FILE]
+//   a wait in a bank names it (the bank must be mapped there);
+//   --dump writes those frames as frame_N.ppm;
+//   --profile writes what ran, for writing a map: the instructions run
+//   (by bank), calls and jumps into a window from outside it with the bank
+//   mapped, and the largest index of each jump table after a dispatcher.
 //
 // Like the recompiled program it calls the interrupt with the return address
 // zero and the status as the hardware pushes it, and returns from it to
@@ -21,6 +27,7 @@
 #include "rec.h"
 #include "mapper.h"
 #include "state_hash.h"
+#include "render.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,11 +37,50 @@ void prg_load(const uint8_t *bytes, unsigned size); // prg.c
 // cpu.c's next_frame calls these; the interpreter runs frames itself.
 void cpu_reset_entry(void) {}
 void cpu_nmi_entry(void) {}
+void cpu_irq_entry(void) {}
 
 static uint16_t pc;
+static bool left_enabled; // the interrupt handler enabled interrupts (as cpu.c's cpu_interrupt)
 #define MAX_WAITS 64
 static uint16_t wait_from[MAX_WAITS], wait_to[MAX_WAITS];
+static int wait_bank[MAX_WAITS]; // -1: a fixed bank
 static int wait_count;
+
+// The bank mapped at an address of PRG ROM (8 KiB banks).
+static int bank_at(uint16_t addr) {
+    return addr >= 0x8000 ? (int)(prg_slots[(addr >> 13) & 3] / 0x2000) : -1;
+}
+
+// --profile: what ran.
+static FILE *profile;
+static uint8_t ran[64][0x2000]; // by 8 KiB bank and offset
+#define MAX_EDGES 8192
+typedef struct { uint16_t site; int site_bank; uint16_t target; int bank; } Edge;
+static Edge edges[MAX_EDGES];
+static int edge_count;
+typedef struct { uint16_t site; int bank; int max; } DispatchSite;
+static DispatchSite dispatches[1024];
+static int dispatch_count;
+static uint16_t dispatcher = 0; // --dispatcher: the jump-table helper
+
+static void note_edge(uint16_t site, uint16_t target) {
+    int site_bank = bank_at(site), bank = bank_at(target);
+    for (int i = 0; i < edge_count; i++) {
+        if (edges[i].site == site && edges[i].site_bank == site_bank && edges[i].target == target && edges[i].bank == bank) return;
+    }
+    if (edge_count < MAX_EDGES) edges[edge_count++] = (Edge){ site, site_bank, target, bank };
+}
+
+static void note_dispatch(uint16_t site, int index) {
+    int bank = bank_at(site);
+    for (int i = 0; i < dispatch_count; i++) {
+        if (dispatches[i].site == site && dispatches[i].bank == bank) {
+            if (index > dispatches[i].max) dispatches[i].max = index;
+            return;
+        }
+    }
+    if (dispatch_count < 1024) dispatches[dispatch_count++] = (DispatchSite){ site, bank, index };
+}
 
 static uint8_t rd(uint16_t addr) { return read_byte(addr); }
 static void wr(uint16_t addr, uint8_t v) { dynamic_ram_write(addr, v); }
@@ -145,6 +191,7 @@ static uint8_t dec(uint8_t v) { return (uint8_t)(v - 1); }
 // One instruction. Returns false at an RTI (the end of the interrupt).
 static bool step(void) {
     uint16_t at = pc;
+    if (profile && at >= 0x8000) ran[bank_at(at)][at & 0x1fff] = 1;
     uint8_t code = rd(pc++);
     Op op = ops[code];
     if (!op.name) { fprintf(stderr, "Unsupported opcode %02x at %04x\n", code, at); exit(2); }
@@ -165,12 +212,18 @@ static bool step(void) {
         uint16_t target = word_at(pc);
         uint16_t ret = (uint16_t)(pc + 1);
         push((uint8_t)(ret >> 8)); push((uint8_t)ret);
+        if (profile && (target >> 13) != (at >> 13) && target >= 0x8000) note_edge(at, target);
+        if (profile && dispatcher && target == dispatcher) note_dispatch(at, a);
         pc = target;
         return true;
     }
     if (!strcmp(n, "RTS")) { uint16_t lo = pull(); uint16_t hi = pull(); pc = (uint16_t)(((hi << 8) | lo) + 1); return true; }
-    if (!strcmp(n, "RTI")) { set_status(pull()); pull(); pull(); return false; }
-    if (!strcmp(n, "JMP")) { pc = address(op.mode); return true; }
+    if (!strcmp(n, "RTI")) { if (!interrupt_disabled) left_enabled = true; set_status(pull()); pull(); pull(); return false; }
+    if (!strcmp(n, "JMP")) {
+        pc = address(op.mode);
+        if (profile && (pc >> 13) != (at >> 13) && pc >= 0x8000) note_edge(at, pc);
+        return true;
+    }
     uint16_t addr = (op.mode == IMP || op.mode == ACC) ? 0 : address(op.mode);
     #define M (op.mode == IMM ? rd(addr) : rd(addr))
     if (!strcmp(n, "LDA")) { a = M; nz(a); }
@@ -210,7 +263,7 @@ static bool step(void) {
     else if (!strcmp(n, "PLP")) set_status(pull());
     else if (!strcmp(n, "CLC")) carry_flag = 0;
     else if (!strcmp(n, "SEC")) carry_flag = 1;
-    else if (!strcmp(n, "CLI")) interrupt_disabled = 0;
+    else if (!strcmp(n, "CLI")) { interrupt_disabled = 0; left_enabled = true; }
     else if (!strcmp(n, "SEI")) interrupt_disabled = 1;
     else if (!strcmp(n, "CLD")) decimal_flag = 0;
     else if (!strcmp(n, "SED")) decimal_flag = 1;
@@ -224,23 +277,47 @@ static void run_foreground(void) {
         uint16_t at = pc;
         step();
         for (int i = 0; i < wait_count; i++) {
-            if (wait_from[i] == at && wait_to[i] == pc) return;
+            if (wait_from[i] == at && wait_to[i] == pc && (wait_bank[i] < 0 || wait_bank[i] == bank_at(at))) return;
         }
         if (count > 50000000) { fprintf(stderr, "The foreground does not reach a wait (at %04x)\n", pc); exit(3); }
     }
 }
 
-// The interrupt, as next_frame and the generated prologue deliver it.
-static void interrupt(void) {
+// An interrupt through `vector`, as next_frame and the generated prologue
+// deliver it.
+static void interrupt_through(uint16_t vector) {
     bool c = carry_flag, z = zero_flag, n = neg_flag, v = overflow_flag, i = interrupt_disabled, d = decimal_flag;
     uint16_t resume = pc;
     interrupt_disabled = 1;
+    left_enabled = false;
     push(0); push(0);
     push(status(0x20));
-    pc = word_at(0xfffa);
+    pc = word_at(vector);
     while (step()) {}
     carry_flag = c; zero_flag = z; neg_flag = n; overflow_flag = v; interrupt_disabled = i; decimal_flag = d;
     pc = resume;
+}
+
+static void interrupt(void) { interrupt_through(0xfffa); }
+static void irq(void) { interrupt_through(0xfffe); }
+
+// Whether frame `i` is in the comma-separated list.
+static bool dumps(const char *list, uint32_t i) {
+    for (const char *p = list; *p;) {
+        if (strtoul(p, NULL, 10) == i) return true;
+        p = strchr(p, ',');
+        if (!p) break;
+        p++;
+    }
+    return false;
+}
+
+static void write_ppm(const char *path) {
+    FILE *file = fopen(path, "wb");
+    if (!file) return;
+    fprintf(file, "P6\n%d %d\n255\n", SCREEN_WIDTH, SCREEN_HEIGHT);
+    fwrite(frame, 1, FRAME_BUFFER_SIZE, file);
+    fclose(file);
 }
 
 static const char *option(int argc, char **argv, const char *name) {
@@ -255,19 +332,30 @@ int main(int argc, char **argv) {
     const char *rec_path = option(argc, argv, "--rec");
     const char *frames_option = option(argc, argv, "--frames");
     const char *write_trace_path = option(argc, argv, "--write-trace");
+    const char *dump = option(argc, argv, "--dump");
+    const char *profile_path = option(argc, argv, "--profile");
+    const char *dispatcher_option = option(argc, argv, "--dispatcher");
     if (argc < 2 || !waits) {
-        fprintf(stderr, "usage: %s ROM.nes --waits FROM:TO,... [--rec FILE] [--frames N] [--write-trace FILE]\n", argv[0]);
+        fprintf(stderr, "usage: %s ROM.nes --waits [BANK:]FROM:TO,... [--rec FILE] [--frames N] [--write-trace FILE] [--dump N,...] [--profile FILE]\n", argv[0]);
         return 1;
     }
     for (const char *p = waits; *p && wait_count < MAX_WAITS;) {
-        unsigned from, to;
-        if (sscanf(p, "%x:%x", &from, &to) != 2) break;
+        unsigned bank, from, to;
+        if (sscanf(p, "%u:%x:%x", &bank, &from, &to) == 3) {
+            wait_bank[wait_count] = (int)bank;
+        } else if (sscanf(p, "%x:%x", &from, &to) == 2) {
+            wait_bank[wait_count] = -1;
+        } else {
+            break;
+        }
         wait_from[wait_count] = (uint16_t)from;
         wait_to[wait_count++] = (uint16_t)to;
         p = strchr(p, ',');
         if (!p) break;
         p++;
     }
+    if (profile_path) profile = fopen(profile_path, "w");
+    if (dispatcher_option) dispatcher = (uint16_t)strtoul(dispatcher_option, NULL, 16);
     init_ops();
 
     // the PRG ROM from the file, into the runtime's buffer
@@ -297,11 +385,40 @@ int main(int argc, char **argv) {
     for (uint32_t i = 0; i < frames; i++) {
         update_controller1(rec_path ? rec_state_at_frame(&recording, i) : 0);
         interrupt();
+        mapper_frame(irq, left_enabled || !interrupt_disabled);
         run_foreground();
         sound_end_frame();
         if (trace) fprintf(trace, "%08x\n", hash_state());
+        if (dump && dumps(dump, i)) {
+            if (option(argc, argv, "--splits") || (argc > 0 && strcmp(argv[argc - 1], "--splits") == 0)) {
+                printf("frame %u: %u splits, irq latch %u enabled %u, mask %02x\n", i, video.split_count, mmc3.irq_latch, mmc3.irq_enabled, video.mask);
+                for (int k = 0; k < video.split_count; k++) {
+                    const VideoSplit *sp = &video.splits[k];
+                    printf("  line %u ctrl %02x mask %02x x %u y %u banks %u %u %u %u %u %u %u %u\n", sp->line, sp->ctrl, sp->mask, sp->x, sp->y,
+                           sp->chr_banks[0], sp->chr_banks[1], sp->chr_banks[2], sp->chr_banks[3], sp->chr_banks[4], sp->chr_banks[5], sp->chr_banks[6], sp->chr_banks[7]);
+                }
+            }
+            render_frame();
+            char name[64];
+            snprintf(name, sizeof name, "frame_%u.ppm", i);
+            write_ppm(name);
+        }
     }
     if (trace) fclose(trace);
+    if (profile) {
+        for (int bank = 0; bank < 64; bank++) {
+            for (int offset = 0; offset < 0x2000; offset++) {
+                if (ran[bank][offset]) fprintf(profile, "ran %d %04x\n", bank, offset);
+            }
+        }
+        for (int i = 0; i < edge_count; i++) {
+            fprintf(profile, "edge %d %04x %d %04x\n", edges[i].site_bank, edges[i].site, edges[i].bank, edges[i].target);
+        }
+        for (int i = 0; i < dispatch_count; i++) {
+            fprintf(profile, "dispatch %d %04x %d\n", dispatches[i].bank, dispatches[i].site, dispatches[i].max);
+        }
+        fclose(profile);
+    }
     printf("Interpreted %u frames\n", frames);
     return 0;
 }

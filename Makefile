@@ -5,7 +5,8 @@ CFLAGS += -I./raylib-quickstart/build/external/raylib-master/src
 CFLAGS += -O3 -std=c99
 CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -ferror-limit=0
-# The game: smb (Super Mario Bros.) or metroid, recompiled from your ROM.
+# The game: smb (Super Mario Bros.), metroid or smb3, recompiled from your
+# ROM.
 GAME ?= smb
 ifeq ($(GAME),metroid)
 ROM ?= metroid.nes
@@ -14,6 +15,14 @@ GAME_DIR = codegen/metroid
 NATIVE_ROUTINES =
 # it drives the PPU through its registers and switches banks (MMC1)
 GAME_FLAGS = -DPPU_BUS -DMAPPER -DGAME_TITLE='"Metroid"' -DROM_PATH='"$(ROM)"' -DSAVE_FILE='"metroid.sav"'
+GAME_SOURCES = codegen/lib/ppu_bus.c codegen/lib/mapper.c codegen/lib/cartridge.c
+else ifeq ($(GAME),smb3)
+ROM ?= smb3.nes
+MAP = maps/smb3.map
+GAME_DIR = codegen/smb3
+NATIVE_ROUTINES =
+# the PPU registers too, and MMC3's banks and scanline IRQ
+GAME_FLAGS = -DPPU_BUS -DMAPPER -DGAME_TITLE='"Super Mario Bros. 3"' -DROM_PATH='"$(ROM)"' -DSAVE_FILE='"smb3.sav"'
 GAME_SOURCES = codegen/lib/ppu_bus.c codegen/lib/mapper.c codegen/lib/cartridge.c
 else
 ROM ?= smb.nes
@@ -55,7 +64,7 @@ MAIN = codegen/main.c
 .PHONY: codegen header clean gpu-check runtime-wasm runtime-cartridge-wasm apu-wasm game-wasm web replay interpreter
 
 # The game is recompiled from your ROM into codegen/game, or codegen/metroid
-# with GAME=metroid (not in the repository).
+# or codegen/smb3 with GAME=metroid or GAME=smb3 (not in the repository).
 codegen:
 	moon run src/main -- --rom $(ROM) --map $(MAP) $(NATIVE_ROUTINES) --output $(GAME_DIR)
 
@@ -124,4 +133,4 @@ hash: clean
 	$(CC) $(CFLAGS) -o hash codegen/hash.c $(SOURCES) codegen/lib/rec.c codegen/lib/common.c $(GC_FLAGS)
 
 clean:
-	rm -f smb metroid hash gpu_check replay interpreter smb.wasm audio_queue
+	rm -f smb metroid smb3 hash gpu_check replay interpreter smb.wasm audio_queue

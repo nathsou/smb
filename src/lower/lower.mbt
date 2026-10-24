@@ -205,7 +205,9 @@ fn AsmLowering::collect_defines(self: AsmLowering) -> Unit raise LoweringError {
   }
 }
 
-pub fn AsmLowering::lower_mode(self: AsmLowering, mode: @parse.SourceAddressingMode, op~: @parse.OpCode? = None) -> AsmAddressingMode raise LoweringError {
+// `absolute`: the instruction is encoded with a 16-bit address even when it
+// is in page zero (the ROM's own encoding), so an index does not wrap.
+pub fn AsmLowering::lower_mode(self: AsmLowering, mode: @parse.SourceAddressingMode, op~: @parse.OpCode? = None, absolute~: Bool = false) -> AsmAddressingMode raise LoweringError {
   match mode {
             Accumulator => Accumulator
             Implied => Implied
@@ -223,6 +225,7 @@ pub fn AsmLowering::lower_mode(self: AsmLowering, mode: @parse.SourceAddressingM
               }
 
               let size = match numeric {
+                Some(_) if absolute => @parse.Word
                 Some(v) if v >= 0 && v < 256 => {
                   let kind = match mode { AbsoluteOrZeroPage(_) => "zp"; AbsoluteOrZeroPageX(_) => "zpx"; _ => "zpy" }
                   if op is Some(opcode) && @image.encoding(opcode, kind) == None { @parse.Word } else { @parse.Byte }
@@ -283,7 +286,11 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
           inside_table = true
           self.lowered.push(JumpEngine(jump_table~, site~))
         } else {
-          let addr_mode = self.lower_mode(mode, op=Some(op))
+          let absolute = match self.program {
+            Some(p) => p.instructions.get(p.addresses[item_idx]) is Some(inst) && inst.op == op && inst.mode.has_prefix("abs")
+            None => false
+          }
+          let addr_mode = self.lower_mode(mode, op=Some(op), absolute~)
 
           let comment = match self.items.get(item_idx + 1) {
             Some(Comment(comment~, is_inline=true)) => Some(comment)
@@ -534,7 +541,7 @@ fn AsmLowering::collect_basic_blocks(self: AsmLowering) -> Unit raise LoweringEr
               connect(bb, target_bb, false)
             }
             None => {
-              if label != "__ret__" { // allow special labels
+              if !self.bodiless(label) { // allow special labels
                 raise LoweringError("Unknown jump target: \{label}")
               }
             }

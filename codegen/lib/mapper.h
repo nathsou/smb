@@ -55,5 +55,16 @@ void mapper_prg_mode(uint8_t mode);
 // MMC3: clocks the scanline counter once (a rendered scanline); whether the
 // IRQ is raised.
 bool mapper_scanline(void);
+// The frame's scanlines, after the interrupt handler (the frame model:
+// rendering follows the NMI, nothing runs during it): clocks MMC3's
+// scanline counter on each rendered scanline, the pre-render one first,
+// and where it raises the IRQ, runs `irq` when `enabled`: interrupts are
+// enabled in the foreground, or the NMI handler enabled them (CLI) while it
+// ran (games run their frame in the NMI handler, where the IRQ interrupts
+// it on the hardware). What `irq` changes of the scroll, the control and mask
+// registers and the CHR banks applies from the next scanline on: the frame
+// is drawn in parts (`video.splits`). Its writes to $2006 set where the
+// frame continues, as on the hardware.
+void mapper_frame(void (*irq)(void), bool enabled);
 
 #endif

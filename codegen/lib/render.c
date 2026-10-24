@@ -364,9 +364,126 @@ void render_sprites(void) {
     }
 }
 
+// The general path, scanline by scanline, for what the paths above do not
+// draw: frames in parts (an interrupt handler changed the scroll, the
+// control or the CHR banks mid-frame: `video.splits`), CHR banks mapped
+// (MMC3) and sprites two tiles high. Sprite priority is the hardware's:
+// the lowest-numbered sprite with an opaque pixel decides, and when it is
+// behind an opaque background, the background shows.
+
+// The settings a scanline is drawn with: its part of the frame, or the
+// whole frame's.
+typedef struct {
+    uint8_t ctrl, mask;
+    const uint8_t *banks;
+    int x, y; // in the 512x480 plane of the nametables, at this scanline
+} LineSettings;
+
+static LineSettings line_settings(int line) {
+    if (video.split_count == 0) {
+        return (LineSettings){
+            video.ctrl, video.mask, video.chr_banks,
+            video.scroll_x + ((video.ctrl & 1) ? 256 : 0),
+            video.scroll_y + ((video.ctrl & 2) ? 240 : 0) + line,
+        };
+    }
+    const VideoSplit *split = &video.splits[0];
+    for (int i = 1; i < video.split_count; i++) {
+        if (video.splits[i].line <= line) split = &video.splits[i];
+    }
+    return (LineSettings){ split->ctrl, split->mask, split->chr_banks, split->x, split->y + (line - split->line) };
+}
+
+// The colour index (0-3) of pixel (col, row) of the tile at `address`.
+static uint8_t tile_pixel(const uint8_t *banks, uint16_t address, int col, int row) {
+    uint8_t low = video_pattern(banks, (uint16_t)(address + row));
+    uint8_t high = video_pattern(banks, (uint16_t)(address + row + 8));
+    int bit = 7 - col;
+    return (uint8_t)(((low >> bit) & 1) | (((high >> bit) & 1) << 1));
+}
+
+static void render_scanlines(void) {
+    for (int line = 0; line < SCREEN_HEIGHT; line++) {
+        LineSettings s = line_settings(line);
+        bool background = s.mask & VIDEO_MASK_BACKGROUND;
+        bool left = s.mask & VIDEO_MASK_BACKGROUND_LEFT;
+        int wy = ((s.y % 480) + 480) % 480;
+        int table_y = wy >= 240 ? 1 : 0;
+        int ny = wy - table_y * 240;
+        uint16_t pattern_table = (s.ctrl & VIDEO_CTRL_BACKGROUND_BANK) ? 0x1000 : 0;
+        for (int x = 0; x < SCREEN_WIDTH; x++) {
+            size_t pixel = (size_t)line * SCREEN_WIDTH + (size_t)x;
+            if (!background) {
+                memset(&frame[pixel * 3], 0, 3);
+                opaque_bg_mask[pixel] = false;
+                continue;
+            }
+            if (!left && x < 8) {
+                set_pixel((size_t)x, (size_t)line, video.palette.u8[0]);
+                opaque_bg_mask[pixel] = false;
+                continue;
+            }
+            int wx = (s.x + x) % 512;
+            int table_x = wx >= 256 ? 1 : 0;
+            int nx = wx - table_x * 256;
+            size_t nametable = video_nametable_offset((uint16_t)(0x2000 + (table_y * 2 + table_x) * 0x400));
+            size_t col = (size_t)nx / 8, row = (size_t)ny / 8;
+            uint8_t tile = video.nametable[nametable + row * TILES_PER_ROW + col];
+            size_t palette = get_background_palette_index(col, row, nametable);
+            uint8_t index = tile_pixel(s.banks, (uint16_t)(pattern_table + tile * 16), nx % 8, ny % 8);
+            set_pixel((size_t)x, (size_t)line, index == 0 ? video.palette.u8[0] : video.palette.u8[palette + index]);
+            opaque_bg_mask[pixel] = index != 0;
+        }
+        if (!(s.mask & VIDEO_MASK_SPRITES)) continue;
+        bool tall = s.ctrl & VIDEO_CTRL_SPRITE_8X16;
+        int height = tall ? 16 : 8;
+        bool sprites_left = s.mask & VIDEO_MASK_SPRITES_LEFT;
+        // the sprite that decides each pixel: the lowest-numbered opaque one
+        static bool decided[SCREEN_WIDTH];
+        memset(decided, 0, sizeof decided);
+        for (int i = 0; i < 64; i++) {
+            const uint8_t *sprite = &video.oam[i * 4];
+            int dy = line - (sprite[0] + 1);
+            if (dy < 0 || dy >= height) continue;
+            uint8_t tile = sprite[1], attributes = sprite[2];
+            int row = (attributes & 0x80) ? height - 1 - dy : dy;
+            uint16_t address;
+            if (tall) {
+                address = (uint16_t)(((tile & 1) ? 0x1000 : 0) + ((tile & 0xfe) + (row >= 8 ? 1 : 0)) * 16);
+                row &= 7;
+            } else {
+                address = (uint16_t)(((s.ctrl & VIDEO_CTRL_SPRITE_BANK) ? 0x1000 : 0) + tile * 16);
+            }
+            for (int col = 0; col < 8; col++) {
+                int x = sprite[3] + col;
+                if (x >= SCREEN_WIDTH || decided[x] || (!sprites_left && x < 8)) continue;
+                uint8_t index = tile_pixel(s.banks, address, (attributes & 0x40) ? 7 - col : col, row);
+                if (index == 0) continue;
+                decided[x] = true;
+                if ((attributes & 0x20) && opaque_bg_mask[(size_t)line * SCREEN_WIDTH + (size_t)x]) continue;
+                set_pixel((size_t)x, (size_t)line, video.palette.u8[0x10 + (attributes & 3) * 4 + index]);
+            }
+        }
+    }
+}
+
+// Whether the frame needs the general path.
+static bool needs_scanlines(void) {
+    if (video.split_count != 0 || (video.ctrl & VIDEO_CTRL_SPRITE_8X16)) return true;
+    for (int i = 0; i < 8; i++) {
+        if (video.chr_banks[i] != i) return true;
+    }
+    return false;
+}
+
 void render_frame(void) {
     bool render_bg = video.mask & 0b00001000;
     bool render_sp = video.mask & 0b00010000;
+
+    if (needs_scanlines()) {
+        render_scanlines();
+        return;
+    }
 
     clear_bg_mask();
 

@@ -214,6 +214,9 @@ fn Views::place(self : Views, address : @ir.Expr) -> Place? {
     }
   }
   if wraps is Some(kind) && v.kind != kind { return None }
+  // an index that does not wrap (an absolute encoding in page zero) is not
+  // what the wrapping views give
+  if wraps is None && !index.is_empty() && (v.kind == ZeroPageArray || v.kind == MirroredArray) { return None }
   let fits = match v.kind {
     Scalar | WramScalar => true
     ZeroPageArray | RamArray | MirroredArray | WramArray => offset >= 0 && offset < v.length

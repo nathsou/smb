@@ -1,0 +1,376 @@
+# Super Mario Bros. 3 (NES): the names this project gives to the program's
+# routines, tables and variables, and what code discovery cannot recover by
+# itself.
+#
+# The cartridge is an MMC3 board: 32 banks of 8 KiB of PRG ROM, the game in
+# PRG mode 1 (bank 30 fixed at $8000, bank 31 at $E000, others switched in
+# at $A000 and $C000), 8 KiB of RAM at $6000, and 128 KiB of CHR ROM in 1
+# and 2 KiB banks. See src/image/rom.mbt for the syntax.
+
+rom 959fdd32c71735d6fb2bd16a646d39f4ee65623273dd035e6a968e991bd13ef8 262144 131072 ; Super Mario Bros. 3 (USA)
+prg_mode 1
+
+# The banks, and the window each was made for. The tileset tables in bank 30
+# give the levels' banks (a tileset's bank at $A000 always runs with bank 14
+# at $C000); the others are from where their code jumps.
+bank 0 objects $c000      ; the objects' common code
+bank 1 objects1 $a000     ; objects, by group
+bank 2 objects2 $a000
+bank 3 objects3 $a000
+bank 4 objects4 $a000
+bank 5 objects5 $a000
+bank 6 bank6 $a000
+bank 7 bank7 $a000
+bank 8 bank8 $a000
+bank 9 bank9 $a000
+bank 10 map $c000         ; the world map
+bank 11 map_objects $a000 ; the world map's objects
+bank 12 bank12 $a000
+bank 13 tiles13 $a000 with 14 ; a tileset's level code and data (see tileset_a000_banks)
+bank 14 levels $c000      ; level loading, for most tilesets (see tileset_c000_banks)
+bank 15 tiles15 $a000 with 14
+bank 16 tiles16 $a000 with 14
+bank 17 tiles17 $a000 with 14
+bank 18 tiles18 $a000 with 14
+bank 19 tiles19 $a000 with 14
+bank 20 tiles20 $a000 with 14
+bank 21 tiles21 $a000 with 14
+bank 22 levels22 $c000    ; level loading for the last tilesets
+bank 23 tiles23 $a000 with 14
+bank 24 title $a000       ; the title screen
+bank 25 bank25 $a000
+bank 26 status $a000      ; the status bar, from the NMI
+bank 27 bank27 $a000
+bank 28 sound $a000       ; the sound engine
+bank 29 music $c000
+bank 30 fixed_8000        ; fixed at $8000
+bank 31 fixed_e000        ; fixed at $E000
+
+# The interrupt handlers check the cartridge's RAM signature and, when it is
+# gone, jump through the reset vector: a path a working cartridge never
+# takes.
+trap $f7a3 ; the IRQ handler finds the RAM signature gone
+
+# Branches always taken where discovery cannot tell
+trap 2:$a7f5  ; lda $7f,x / eor #1 / tay / bpl: the direction is 0 or 1
+trap 28:$a709 ; ora #$10 / bne
+
+# The game keeps the banks it wants in RAM and switches from there (lda
+# #bank / sta $0720 / jsr $ffc2): where nothing else tells, the windows
+# hold these.
+shadow $a000 $0720
+shadow $c000 $071f
+
+# Variables
+
+var $0100 nmi_mode              ; which NMI handler runs (and IRQ handler, $0101)
+var $0101 irq_mode
+var $070a level_tileset         ; the kind of level (0: the world map)
+var $0719 chr_banks 6           ; the CHR banks the NMI maps (R0-R5)
+var $071f bank_c000             ; the bank wanted at $C000
+var $0720 bank_a000             ; the bank wanted at $A000
+var $0721 bank_select           ; MMC3's bank select last written
+
+# Fixed bank 30 ($8000)
+
+table $83d6 tileset_c000_banks 19 ; by level_tileset
+table $83e9 tileset_a000_banks 19 ; by level_tileset
+
+# Jump tables: the code addresses after each call to jump_by_index
+# ($fe99), by the index in A
+
+routine $fe99 jump_by_index     ; jump to the A-th code address after the call
+table $9a23 jumps_9a23 38
+table 0:$ca90 jumps_ca90 18
+table 5:$bba3 jumps_bba3 18
+table 7:$afa4 jumps_afa4 46
+table 7:$bb9b jumps_bb9b 44
+table 9:$a1f0 jumps_a1f0 4
+table 9:$b928 jumps_b928 12
+table 12:$b204 jumps_b204 34
+table 22:$c6ec jumps_c6ec 8
+table 22:$c8a6 jumps_c8a6 20
+table 24:$a057 jumps_a057 6
+table 24:$a4b8 jumps_a4b8 14
+table 24:$a9bf jumps_a9bf 16
+table 24:$b8f2 jumps_b8f2 14
+table 24:$bd3f jumps_bd3f 4
+table 24:$bd4c jumps_bd4c 20
+table 26:$a088 jumps_a088 10
+table 26:$a99e jumps_a99e 12   ; the first entry unused
+table 26:$ad6e jumps_ad6e 8
+table 26:$ae73 jumps_ae73 8
+table 27:$a030 jumps_a030 10
+table 29:$d2b3 jumps_d2b3 10
+table 29:$dc85 jumps_dc85 50
+table $9a4f jumps_9a4f 38
+table $9a7b jumps_9a7b 38
+table 0:$cfcc jumps_cfcc 20
+table 0:$d52b jumps_d52b 30
+table 9:$a224 jumps_a224 24
+table 9:$a2cd jumps_a2cd 24
+table 9:$a44b jumps_a44b 8
+table 10:$c4b2 jumps_c4b2 30
+table 10:$ca92 jumps_ca92 14
+table 11:$a31f jumps_a31f 12
+table 11:$ae0e jumps_ae0e 34
+table 11:$b59c jumps_b59c 34
+table 11:$a464 jumps_a464 6
+table 11:$ac78 jumps_ac78 8
+table 11:$b772 jumps_b772 6
+table 21:$a478 jumps_a478 118
+table 22:$cd75 jumps_cd75 4
+table 22:$d030 jumps_d030 4
+table 24:$ab86 jumps_ab86 20
+table 24:$b3fd jumps_b3fd 12
+table 24:$b425 jumps_b425 12
+table 24:$ba30 jumps_ba30 6
+table 26:$a3a1 jumps_a3a1 16
+table 26:$a540 jumps_a540 28
+table 9:$ac5e jumps_ac5e 6
+table 9:$ad33 jumps_ad33 8
+table 10:$c500 jumps_c500 6
+table 14:$c447 jumps_c447 10
+table 14:$c496 jumps_c496 8   ; (the other words point into the data after it)
+table 22:$c492 jumps_c492 2
+table 22:$c49a jumps_c49a 14
+table 22:$d03a jumps_d03a 4
+table 22:$d055 jumps_d055 10
+table 24:$b55e jumps_b55e 10
+table 9:$ad89 jumps_ad89 24
+table 22:$d0f8 jumps_d0f8 12
+
+# Per-tileset routines: the tables at $9a23, $9a4f and $9a7b are indexed by
+# level_tileset, whose banks tileset_a000_banks and tileset_c000_banks give.
+routine 11:$a408 by_tileset_a408
+routine 13:$a408 by_tileset_a408
+routine 15:$a408 by_tileset_a408
+routine 16:$a408 by_tileset_a408
+routine 17:$a408 by_tileset_a408
+routine 18:$a408 by_tileset_a408
+routine 19:$a408 by_tileset_a408
+routine 20:$a408 by_tileset_a408
+routine 21:$a408 by_tileset_a408
+routine 23:$a408 by_tileset_a408
+routine 18:$a419 by_tileset_a419
+routine 19:$a419 by_tileset_a419
+routine 15:$a421 by_tileset_a421
+routine 23:$a421 by_tileset_a421
+routine 20:$a42b by_tileset_a42b
+routine 13:$a42d by_tileset_a42d
+routine 16:$a42d by_tileset_a42d
+routine 17:$a42f by_tileset_a42f
+routine 19:$a432 by_tileset_a432
+routine 21:$a45d by_tileset_a45d
+routine 18:$a475 by_tileset_a475
+routine 18:$a48b by_tileset_a48b
+routine 15:$a498 by_tileset_a498
+routine 23:$a4ae by_tileset_a4ae
+routine 19:$a4b5 by_tileset_a4b5
+routine 17:$a4b8 by_tileset_a4b8
+routine 20:$a4bc by_tileset_a4bc
+routine 13:$a4e4 by_tileset_a4e4
+routine 16:$a4e4 by_tileset_a4e4
+routine 21:$a4ee by_tileset_a4ee
+routine 18:$a51a by_tileset_a51a
+routine 11:$b3ca by_tileset_b3ca
+routine 22:$c400 by_tileset_c400
+routine 14:$c408 by_tileset_c408
+routine 14:$c42c by_tileset_c42c
+routine 22:$c485 by_tileset_c485
+routine 14:$c489 by_tileset_c489
+routine 22:$c494 by_tileset_c494
+
+# Routines code reaches in a window from outside it where discovery cannot
+# tell the bank (it knows most from the bank switches before): the bank,
+# from what the code around does and the profiles of the interpreter.
+
+# The world map: fixed-bank code with bank 10 at $C000
+routine 10:$c2c4 map_c2c4
+routine 10:$c315 map_c315
+routine 10:$c34d map_c34d
+routine 10:$c392 map_c392
+routine 10:$c3c3 map_c3c3
+routine 10:$c4e0 map_c4e0
+routine 10:$c6f2 map_c6f2
+routine 10:$ca8c map_ca8c
+routine 10:$c9d6 map_c9d6
+routine 10:$cf29 map_cf29
+routine 10:$d369 map_d369        ; the tile next to the player on the map, by direction (Y)
+
+# The special tilesets ($10, $11), which keep the banks mapped before: 22 at
+# $C000 and 26 at $A000
+routine 22:$c873 special_c873
+routine 22:$cbcb special_cbcb
+routine 22:$ce7d special_ce7d
+routine 22:$cecf special_nmi     ; the NMI handler of nmi_mode $40
+routine 22:$d576 special_d576
+routine 22:$d646 special_d646
+routine 22:$d782 special_d782
+routine 26:$b0c4 status_b0c4
+routine 26:$b108 status_b108
+routine 26:$b175 status_b175
+routine 26:$b44a status_b44a
+
+routine 24:$a826 title_irq       ; the IRQ handler of irq_mode $20 (the title's)
+routine 14:$dfb3 levels_dfb3
+
+# The objects' code in bank 0 ($C000), from the player's bank 8
+routine 0:$c843 objects_c843
+routine 0:$d499 objects_d499
+routine 0:$d9d3 objects_d9d3
+routine 0:$dc5f objects_dc5f
+routine 0:$dd4e objects_dd4e
+routine 0:$dda5 objects_dda5
+routine 0:$de3e objects_de3e
+
+# The object banks (1-5, at $A000): 36 objects each (id / 36 is the group,
+# the bank 1 + group), with their routines and attributes
+code 1-5:$a000 object_inits 36
+code 1-5:$a048 object_updates 36
+code 1-3:$a090 object_collisions 36
+code 5:$a090 object_collisions 36
+
+# Computed jumps (through a pointer in $00) elsewhere
+code 8:$a2a9 code_a2a9 8
+code 8:$a965 code_a965 15
+code 8:$b7d1 code_b7d1 12
+code 29:$d4a1 code_d4a1 6
+code 29:$d6b4 code_d6b4 4  ; by $f1
+table 1-5:$a0d8 object_attributes 36
+table 1-5:$a0fc object_attributes2 36
+table 1-5:$a120 object_attributes3 36  ; the low four bits index jumps_d52b
+# what jumps_d52b reaches in the banks whose attributes index it
+routine 1-3:$a859 object_a859
+routine 2:$a62b object_a62b
+routine 2:$ad9e object_ad9e
+routine 2:$af33 object_af33
+routine 2:$b138 object_b138
+routine 2:$bfa0 object_bfa0
+routine 4:$a1b0 object_a1b0
+routine 3:$a779 object_a779      ; for objects $50 and $55
+table 1:$aed9 jumps_aed9 16
+table 1:$b8eb jumps_b8eb 12
+table 2:$a37d jumps_a37d 8
+table 2:$b27a jumps_b27a 6
+table 2:$bb40 jumps_bb40 16
+table 3:$a6e2 jumps_a6e2 6
+table 3:$aade jumps_aade 12
+table 3:$af6b jumps_af6b 8
+table 3:$bdfd jumps_bdfd 6
+table 4:$a4c8 jumps_a4c8 8
+table 4:$a689 jumps_a689 6
+table 4:$a759 jumps_a759 6
+table 4:$a7fc jumps_a7fc 8
+table 4:$a95e jumps_a95e 8
+table 4:$aaec jumps_aaec 8
+table 4:$af9b jumps_af9b 6
+table 4:$b7ab jumps_b7ab 8
+table 4:$ba71 jumps_ba71 6
+table 5:$a7a1 jumps_a7a1 8
+table 5:$aa03 jumps_aa03 14
+table 5:$ad5b jumps_ad5b 14
+table 10:$c6f8 jumps_c6f8 18
+table 22:$d64c jumps_d64c 6
+table 22:$d798 jumps_d798 18
+# the tilesets' level object generators
+table 13:$a448 jumps_a448 156
+table 13:$a4f1 jumps_a4f1 134
+table 15:$a43c jumps_a43c 90   ; (the 46th word, $cfd0, would run into data)
+table 15:$a4a5 jumps_a4a5 84
+table 16:$a448 jumps_a448 156
+table 16:$a4f1 jumps_a4f1 134
+table 17:$a44a jumps_a44a 110
+table 17:$a4c5 jumps_a4c5 84
+table 18:$a4a6 jumps_a4a6 116
+table 18:$a527 jumps_a527 84
+table 19:$a44d jumps_a44d 104
+table 19:$a4c2 jumps_a4c2 84
+table 20:$a446 jumps_a446 118
+table 20:$a4c9 jumps_a4c9 84
+table 21:$a4fb jumps_a4fb 84
+table 23:$a43c jumps_a43c 114
+table 23:$a4bb jumps_a4bb 102
+table 1:$b94d jumps_b94d 8
+table 3:$ac89 jumps_ac89 4
+
+# Code of the objects (banks 1-5) and the player (7, 8) runs with the objects' common
+# code (bank 0) at $C000; the world map's (10) with its objects (11) at $A000;
+# bank 29's with the player's (8); bank 22's with the status bar's (26).
+routine 5:$b7f0 objects5_b7f0
+routine 10:$d3a9 map_d3a9
+routine 0:$c49b objects_c49b
+routine 11:$a5dd map_objects_a5dd
+routine 0:$c45e objects_c45e
+routine 0:$d15b objects_d15b
+routine 0:$d45e objects_d45e
+routine 0:$d83b objects_d83b
+routine 0:$dc09 objects_dc09
+routine 0:$dcb9 objects_dcb9
+routine 0:$dcd9 objects_dcd9
+routine 0:$c45a objects_c45a
+routine 0:$c467 objects_c467
+routine 0:$c4d6 objects_c4d6
+routine 0:$c4f6 objects_c4f6
+routine 0:$c515 objects_c515
+routine 0:$c899 objects_c899
+routine 0:$cda4 objects_cda4
+routine 0:$d3d8 objects_d3d8
+routine 0:$d564 objects_d564
+routine 0:$d56a objects_d56a
+routine 0:$d6c7 objects_d6c7
+routine 0:$d92f objects_d92f
+routine 0:$d955 objects_d955
+routine 0:$d97b objects_d97b
+routine 0:$d9b8 objects_d9b8
+routine 0:$da7c objects_da7c
+routine 0:$dccd objects_dccd
+routine 0:$dce4 objects_dce4
+routine 0:$dd2c objects_dd2c
+routine 8:$bfed player_bfed
+routine 11:$a73d map_objects_a73d
+routine 0:$c447 objects_c447
+routine 0:$c449 objects_c449
+routine 0:$c542 objects_c542
+routine 0:$cdd2 objects_cdd2
+routine 0:$d097 objects_d097
+routine 0:$d162 objects_d162
+routine 0:$d16d objects_d16d
+routine 0:$d3dc objects_d3dc
+routine 0:$d554 objects_d554
+routine 0:$d589 objects_d589
+routine 0:$d5e7 objects_d5e7
+routine 0:$d5f0 objects_d5f0
+routine 0:$d601 objects_d601
+routine 0:$d680 objects_d680
+routine 0:$d736 objects_d736
+routine 0:$d79e objects_d79e
+routine 0:$d7e2 objects_d7e2
+routine 0:$d7ed objects_d7ed
+routine 0:$d836 objects_d836
+routine 0:$dca2 objects_dca2
+routine 0:$dd3d objects_dd3d
+routine 0:$dd54 objects_dd54
+routine 11:$a728 map_objects_a728
+routine 0:$c48e objects_c48e
+routine 0:$c69d objects_c69d
+routine 0:$d1ba objects_d1ba
+routine 0:$d326 objects_d326
+routine 0:$d3e0 objects_d3e0
+routine 0:$d618 objects_d618
+routine 0:$d660 objects_d660
+routine 11:$a6bf map_objects_a6bf
+routine 8:$a38e player_a38e
+routine 26:$b293 status_b293
+routine 11:$b53b map_objects_b53b
+routine 11:$b76c map_objects_b76c
+routine 11:$a966 map_objects_a966
+routine 11:$a9eb map_objects_a9eb
+routine 11:$abcf map_objects_abcf
+routine 11:$ac53 map_objects_ac53
+routine 8:$b3c7 player_b3c7
+routine 11:$a919 map_objects_a919
+routine 26:$ac20 status_ac20
+routine 11:$a8c9 map_objects_a8c9
+routine 11:$a756 map_objects_a756
+routine 11:$a45e map_objects_a45e

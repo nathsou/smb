@@ -16,6 +16,16 @@ extern uint8_t ppu_write_toggle; // shared $2005/$2006 first/second write latch
 extern uint16_t ppu_vram_addr;
 extern uint8_t ppu_read_buffer;
 extern bool ppu_status_clear;
+// The PPU's temporary address (the scroll and nametable the next frame, or
+// a $2006 write mid-frame, starts from) and fine X scroll, as the hardware
+// keeps them: the splits of a frame (an interrupt handler scrolling
+// mid-frame) are read from them. `ppu_address_written`: a second $2006
+// write since it was cleared, which set the address the frame continues
+// from (`ppu_address_set`; later $2005 writes only change the next frame's).
+extern uint16_t ppu_temp_addr;
+extern uint8_t ppu_fine_x;
+extern bool ppu_address_written;
+extern uint16_t ppu_address_set;
 
 uint8_t ppu_bus_read(uint16_t addr);
 void ppu_bus_write(uint16_t addr, uint8_t value);

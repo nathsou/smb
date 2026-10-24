@@ -118,6 +118,7 @@ pub(all) struct Program {
   by_name : Map[String, Int32]
   reset : String
   nmi : String
+  irq : String?
   prg : Array[Int32]
   banks : Array[Array[Int32]]
   layout : @image.Layout
