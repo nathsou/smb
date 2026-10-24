@@ -13,8 +13,10 @@ tests/golden/metroid.trace over rec/metroid.rec, then the recompiled game
 natively (save states loaded back along the way) and in WebAssembly, with
 registers in locals and, structured as dispatch loops, in memory. With
 --smb3 (smb3.nes in the root): the same for Super Mario Bros. 3, over
-rec/smb3.rec against tests/golden/smb3.trace, and the GPU renderer
-against the software renderer (under Xvfb)."""
+rec/smb3.rec against tests/golden/smb3.trace. For both, the page's WebGL
+renderer is compared with the software renderer and the themes are drawn
+(tests/web/cartridge_gpu.cjs, Playwright), and for SMB3 the desktop GPU
+renderer too (under Xvfb)."""
 import argparse
 import pathlib
 import subprocess
@@ -72,6 +74,9 @@ if __name__ == "__main__":
                     "--output", str(pathlib.Path(directory) / "unused"), "--wasm", game, *variant)
                 run("node", "tests/web/replay_cartridge.mjs", "web/runtime-cartridge.wasm", game, "metroid.nes",
                     "rec/metroid.rec", trace)
+            # the page's WebGL renderer against the software one, and the themes
+            run("node", "tests/web/cartridge_gpu.cjs", game, "metroid.nes", "rec/metroid.rec",
+                "maps/metroid.map", "8", "1200,3000")
     if args.smb3:
         trace = "tests/golden/smb3.trace"
         run("make", "codegen", "replay", "interpreter", "GAME=smb3")
@@ -87,6 +92,8 @@ if __name__ == "__main__":
                     "--output", str(pathlib.Path(directory) / "unused"), "--wasm", game, *variant)
                 run("node", "tests/web/replay_cartridge.mjs", "web/runtime-cartridge.wasm", game, "smb3.nes",
                     "rec/smb3.rec", trace)
+            run("node", "tests/web/cartridge_gpu.cjs", game, "smb3.nes", "rec/smb3.rec",
+                "maps/smb3.map", "8", "1950,2600")
         # the GPU renderer (web/video.frag) against the software renderer
         run("make", "gpu-check", "GAME=smb3")
         run("xvfb-run", "-a", "./gpu_check", "--every", "4")

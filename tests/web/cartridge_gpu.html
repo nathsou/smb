@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Cartridge renderer check</title></head>
+<body>
+<script type="module">
+// Replays a recording of a cartridge game (Metroid, SMB3) with the page's
+// two modules (web/runtime-cartridge.wasm and the game module), compares the
+// WebGL renderer (web/gpu.js) with the wasm software renderer pixel for
+// pixel, and draws chosen frames with every theme, checking that each draws
+// without WebGL errors. Serve the repository root; see cartridge_gpu.cjs,
+// which serves the game module, the ROM, the recording and the map.
+//
+// ?every=4          compare every 4th frame
+// &frames=900,2000  frames to draw with the themes
+import { createGpuRenderer, THEMES } from '../../web/gpu.js';
+import { link } from '../../web/link.js';
+import { splitDump } from '../../web/cartridge.js';
+
+const WIDTH = 256, HEIGHT = 240;
+const params = new URLSearchParams(location.search);
+const every = Number(params.get('every') ?? 1);
+const frames = (params.get('frames') ?? '').split(',').filter(Boolean).map(Number);
+const fetchBytes = async url => new Uint8Array(await (await fetch(url)).arrayBuffer());
+
+async function run() {
+    const rom = await fetchBytes('/__rom');
+    const map = await (await fetch('/__map')).text();
+    const { memory, runtime: wasm, game } =
+        await link(await fetchBytes('../../web/runtime-cartridge.wasm'), await fetchBytes('/__game'), rom);
+    const view = () => new Uint8Array(memory.buffer);
+
+    // rec format: "frame:state" lines, each state held until the next line
+    const inputs = [];
+    for (const line of (await (await fetch('/__rec')).text()).split('\n')) {
+        const match = /^(\d+):(\d+)$/.exec(line.trim());
+        if (match) inputs.push([Number(match[1]), Number(match[2])]);
+    }
+    const last = inputs.length ? inputs[inputs.length - 1][0] : 0;
+
+    // as the page starts a cartridge
+    wasm.cpu_init();
+    wasm.apu_init(48000);
+    const { chr, mapper } = splitDump(rom);
+    view().fill(0, wasm.chr_rom.value, wasm.chr_rom.value + 0x2000);
+    view().set(chr, wasm.chr_rom.value);
+    view()[wasm.chr_ram.value] = chr.length === 0 ? 1 : 0;
+    wasm.video_init_chr(Math.max(chr.length, 0x2000));
+    wasm.render_init();
+    wasm.mapper_init(mapper);
+
+    const canvas = document.createElement('canvas');
+    const gpu = await createGpuRenderer(canvas, wasm, memory, '../../web/video.frag', { map });
+    if (gpu === null) return { error: 'WebGL2 unavailable' };
+    const gl = gpu.gl;
+    const themed = {};
+    for (const theme of Object.keys(THEMES)) {
+        if (theme === 'original' || frames.length === 0) continue;
+        const themeCanvas = document.createElement('canvas');
+        const renderer = await createGpuRenderer(themeCanvas, wasm, memory, '../../web/video.frag', { map });
+        await renderer.setTheme(theme);
+        renderer.setDisplayScale(2);
+        themed[theme] = { renderer, canvas: themeCanvas };
+    }
+    const pixels = new Uint8Array(WIDTH * HEIGHT * 4);
+
+    game.cpu_reset_entry();
+    let state = 0, next = 0, compared = 0, mismatched = 0, firstMismatch = -1;
+    const images = [];
+    const errors = [];
+    for (let frame = 0; frame <= last; frame++) {
+        while (next < inputs.length && inputs[next][0] <= frame) state = inputs[next++][1];
+        wasm.update_controller1(state);
+        wasm.next_frame();
+        wasm.sound_end_frame();
+        // the themes keep state between frames (last frame's light)
+        for (const [theme, { renderer, canvas: themeCanvas }] of Object.entries(themed)) {
+            if (!frames.some(f => f - frame >= 0 && f - frame < 3)) continue;
+            renderer.draw();
+            const error = renderer.gl.getError();
+            if (error !== 0) errors.push({ frame, theme, error });
+            if (frames.includes(frame)) images.push({ frame, theme, url: themeCanvas.toDataURL('image/png') });
+        }
+        if (frame % every !== 0 && !frames.includes(frame)) continue;
+
+        wasm.render_frame();
+        gpu.draw();
+        if (frames.includes(frame)) images.push({ frame, theme: 'original', url: canvas.toDataURL('image/png') });
+        gl.readPixels(0, 0, WIDTH, HEIGHT, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        const rgb = view().subarray(wasm.frame.value, wasm.frame.value + WIDTH * HEIGHT * 3);
+        let same = true;
+        for (let y = 0; y < HEIGHT && same; y++) {
+            const row = (HEIGHT - 1 - y) * WIDTH * 4; // readPixels starts at the bottom row
+            for (let x = 0; x < WIDTH; x++) {
+                const i = (y * WIDTH + x) * 3;
+                if (pixels[row + x * 4] !== rgb[i] || pixels[row + x * 4 + 1] !== rgb[i + 1] ||
+                    pixels[row + x * 4 + 2] !== rgb[i + 2]) { same = false; break; }
+            }
+        }
+        compared++;
+        if (!same) {
+            mismatched++;
+            if (firstMismatch < 0) firstMismatch = frame;
+        }
+    }
+    return { compared, mismatched, firstMismatch, errors, images, renderer: gl.getParameter(gl.RENDERER) };
+}
+
+window.result = run().catch(error => ({ error: String(error.stack ?? error) }));
+</script>
+</body>
+</html>

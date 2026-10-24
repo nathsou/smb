@@ -416,8 +416,14 @@ is a link error, and a computed access to $2000-$3FFF or $4014 traps.
 
 ## GPU rendering
 
-`web/video.frag` draws a frame from `Video`: pattern tables and nametables
-are textures, and the palette, sprites and master palette are uniforms. The
+`web/video.frag` draws a frame from `Video`: the CHR (decoded, a 1 KiB bank
+per row of tiles), the nametables and each scanline's settings are textures,
+and the palette, sprites and master palette are uniforms. The scanline
+settings (`render.c`'s `video_lines`: control and mask, the scanline's
+position in the plane of the nametables, the CHR banks, whether it is part
+of a status bar) are how a frame drawn in parts reaches the shader: SMB's
+fixed status bar, and the parts SMB3's interrupt handler sets mid-frame
+with MMC3's banks (see [SMB3](smb3.md#frames-in-parts)). The
 desktop build (`codegen/gpu.c`, raylib) and the web page (`web/gpu.js`,
 WebGL2) share the shader and use it by default; `--software` (desktop) and
 `?software` (web) select the software renderer, which remains the reference.
@@ -428,8 +434,10 @@ frames: natively with Mesa under Xvfb (`make gpu-check`, then
 (`NODE_PATH=$(npm root -g) node tests/web/gpu_check.cjs`). The only intended
 difference, a masked left column showing the backdrop rather than the
 previous frame's pixels, never occurs in SMB. Metroid's frames, with
-vertical scrolling and its own mirroring, are compared the same way
-(`make gpu-check GAME=metroid`, see [oracles](metroid.md#oracles)).
+vertical scrolling and its own mirroring, and SMB3's, in parts with CHR
+banks and 8x16 sprites, are compared the same way (`make gpu-check
+GAME=metroid`, `GAME=smb3`), and in headless Chromium through the page's
+two modules (`tests/web/cartridge_gpu.cjs`).
 
 ## Themes
 
@@ -441,18 +449,22 @@ does.
 
 Both themes start from the scene (`scene.frag`): the frame as a background
 and a sprite layer, at least 16 pixels wider on each side, each pixel with
-a material. The materials come from the game, not from the picture: the block
+a material. In SMB the materials come from the game, not from the picture: the block
 buffer (`block_buffer1`, `block_buffer2`) holds the metatiles of the two
 screens around the player that the player can touch, because the level parser
 leaves scenery out (`block_buffer_limits`). A metatile there is solid unless
 `climb_metatile_limits` makes it climbable, or it is a coin or an invisible
 block; the rest of the opaque background is scenery. Lava is the castle's
 water tiles, and fire is the fireball and flame sprite tiles. The scene reads
-these by the map's names, so a map without them leaves everything scenery.
-The scene is anchored to the level, not to the screen: its left edge moves
-in steps of 32 pixels, so that the light's probes (2 to 32 pixels apart) stay
-on the same spots of the level as it scrolls. Anchored to the screen, the
-level slid across them and the light shimmered while scrolling.
+these by the map's names. Other games' maps (Metroid, SMB3) do not name
+such level data: there every opaque background pixel is solid, and the
+themes know no lights but the sky.
+The scene is anchored to the level, not to the screen: its corner moves
+in steps of 32 pixels, horizontally and vertically, so that the light's
+probes (2 to 32 pixels apart) stay on the same spots of the level as it
+scrolls. Anchored to the screen, the level slid across them and the light
+shimmered while scrolling. The level's position comes from the scanline
+settings of the first scanline that is not a status bar.
 
 - 2D global illumination (`light.js`): a jump flood (`jfa.frag`) gives every
   pixel its nearest occluder and nearest free pixel; radiance cascades
@@ -462,7 +474,11 @@ level slid across them and the light shimmered while scrolling.
   reflected once (shifted by the scroll). An occluder pixel takes the light of
   its nearest free pixel. Light that reaches everywhere is added after, and
   is not reflected: daylight is even, as in the game, and dark areas (a black
-  backdrop) are dim. The backdrop is not lit.
+  backdrop) are dim. The backdrop is not lit. Without SMB's level data, half
+  the light comes from the sky beyond the scene and half from everywhere, so
+  that what faces open space is lit, what is enclosed shaded, and enclosed
+  rooms (Metroid's caverns, a screen-filling world map) stay lit; dark
+  backdrops do not dim them, since the theme knows none of their lights.
 - 2.5D ray tracing (`voxel.js`): each opaque pixel is a column of voxels
   over the depths its material gives, seen through a cabinet projection, so
   the play plane is where the game draws it. Rays walk the pixel grid
@@ -470,10 +486,13 @@ level slid across them and the light shimmered while scrolling.
   (point lights, merged per flame) cast shadow rays, five short rays give
   ambient occlusion, and the 2D global illumination is the light from
   everywhere else; here rays that leave the scene see the sky (in daylight),
-  so what is under something is shaded.
+  so what is under something is shaded. Without SMB's level data the solid
+  background is set behind the sprites, so that characters stay in front of
+  the walls they overlap.
 
-The status bar is drawn as it is. `tests/web/themes.cjs` draws replay frames
-with every theme and fails on WebGL errors. The themes are a presentation
+Status bars (any band the scanline settings mark) are drawn as they are.
+`tests/web/themes.cjs` (SMB) and `tests/web/cartridge_gpu.cjs` (Metroid,
+SMB3) draw replay frames with every theme and fail on WebGL errors. The themes are a presentation
 layer only: the game, the Video state and the pixel-exact checks of the
 original renderer are unchanged.
 
