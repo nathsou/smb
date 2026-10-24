@@ -20,8 +20,9 @@ pub(all) struct Program {
   roots: Array[String]
   facts: Map[Int, Facts]
   idle: Set[Int]
-  // Window addresses called or jumped to from fixed-bank code, with the
-  // locations of the routines that can be mapped there.
+  // Window addresses called or jumped to from outside their window (fixed
+  // banks, or another window), with the locations of the routines that can
+  // be mapped there.
   windows: Map[Int, Array[Int]]
   // Computed jumps through RAM, with the locations they can reach.
   jumps: Map[Int, Array[Int]]
@@ -62,9 +63,169 @@ pub fn branch_target(inst: Instruction) -> Int {
   rebase(inst.pc, (inst.next & 0xffff) + (if inst.arg >= 128 { inst.arg - 256 } else { inst.arg }))
 }
 
-// The location a JSR or JMP leads to.
+// The location a JSR or JMP leads to: a window address is in the caller's
+// bank, or the window as mapped, unless the explorer proved which bank is
+// mapped there (then the operand is that bank's location, see `resolve`).
 pub fn jump_target(inst: Instruction) -> Int {
-  rebase(inst.pc, inst.arg)
+  if inst.arg >= 0x10000 { inst.arg } else { rebase(inst.pc, inst.arg) }
+}
+
+// Whether discovery follows banks (MMC3: two windows).
+fn follows_banks() -> Bool {
+  layout().windows.length() >= 2
+}
+
+// A call or jump into a window from outside it, when the bank mapped there
+// is known: to that bank's routine instead of the window as mapped.
+fn resolve(image: Image, inst: Instruction, f: Facts) -> Instruction {
+  if !(inst.op == JSR || (inst.op == JMP && inst.mode == "abs")) { return inst }
+  let target = rebase(inst.pc, inst.arg & 0xffff)
+  match f.banking {
+    Some(b) if target < 0x10000 && in_window(target) =>
+      match b.mapped(window_of(target), image.banks.shadows) {
+        // (a bank the map does not name there and without code there is a
+        // path the program does not take: the window decides)
+        [bank] if bank < image.banks.contents.length() &&
+          (image.banks.windows.get(target).unwrap_or([]).contains(bank) || candidate(image, bank, target)) =>
+          { ..inst, arg: bank_location(bank, target) }
+        _ => { ..inst, arg: inst.arg & 0xffff }
+      }
+    _ => inst
+  }
+}
+
+// Whether bank `bank` can be what a window holds when code reaches `pc`
+// there: made for that window (when the map says), with bytes there that
+// look like code.
+fn candidate(image: Image, bank: Int, pc: Int) -> Bool {
+  bank < image.banks.contents.length() &&
+  (image.banks.homes[bank] < 0 || image.banks.homes[bank] == window_of(pc)) &&
+  fixed_bank_number(bank) < 0 &&
+  looks_like_code(image, bank_location(bank, pc))
+}
+
+// The fixed region a bank is fixed in, or -1 (fixed banks never switch in).
+fn fixed_bank_number(bank: Int) -> Int {
+  match layout().fixed.iter().find_first(fn(r) { r.1 == bank }) {
+    Some(r) => r.0
+    None => -1
+  }
+}
+
+// Whether a routine pulls its return address first thing (a dispatcher
+// reading the table after its call), before pushing anything.
+fn reads_return_address(image: Image, entry: Int) -> Bool {
+  let mut pc = entry
+  for _ in 0..<8 {
+    let inst = decode(image, pc) catch { _ => return false }
+    match inst.op {
+      PLA => return true
+      PHA | PHP | JSR | JMP | RTS | RTI | BRK => return false
+      _ => if inst.mode == "rel" { return false }
+    }
+    pc = inst.next
+  }
+  false
+}
+
+// Whether a location looks like code: the code it reaches in its bank and
+// the fixed banks (branches, jumps, calls, but not past a call that a table
+// of the map follows) decodes, for a while, without BRK or an opcode the
+// 6502 lacks. Data runs into one soon; games' code has none.
+let code_looks: Map[Int, Bool] = Map([])
+
+fn looks_like_code(image: Image, location: Int) -> Bool {
+  match code_looks.get(location) {
+    Some(known) => return known
+    None => ()
+  }
+  let seen: Set[Int] = Set([])
+  // with what is known of the flags, to skip branches always taken (over
+  // data, say)
+  let work = [(location, Facts::unknown())]
+  let mut verdict = true
+  while verdict && seen.length() < 512 && work.pop() is Some((pc, f)) {
+    if seen.contains(pc) || image.is_data(pc) { continue }
+    // only the bank of the location, and the fixed banks
+    if in_window(pc) && (pc < 0x10000 || bank_of(pc) != bank_of(location)) { continue }
+    seen.add(pc)
+    let inst = decode(image, pc) catch { _ => { verdict = false; continue } }
+    let after = transfer(inst, f)
+    match inst.op {
+      BRK => verdict = false
+      RTS | RTI => ()
+      JMP => if inst.mode == "abs" { work.push((jump_target(inst), after)) }
+      JSR => {
+        work.push((jump_target(inst), Facts::unknown()))
+        if !image.data.iter().any(fn(d) { d.0 == inst.next }) && !reads_return_address(image, jump_target(inst)) {
+          work.push((inst.next, after))
+        }
+      }
+      _ =>
+        if inst.mode == "rel" {
+          match condition(inst.op, f) {
+            Some(true) => work.push((branch_target(inst), after))
+            Some(false) => work.push((inst.next, after))
+            None => {
+              work.push((branch_target(inst), after))
+              work.push((inst.next, after))
+            }
+          }
+        } else {
+          work.push((inst.next, after))
+        }
+    }
+  }
+  code_looks[location] = verdict
+  verdict
+}
+
+// The bytes an indexed load at `pc` can read from ROM: those of the map's
+// table there, from its base to the table's end (none without a table).
+fn table_values(image: Image, inst: Instruction) -> Values {
+  let location = rebase(inst.pc, inst.arg)
+  match image.data.iter().find_first(fn(d) { location >= d.0 && location < d.0 + d.1 }) {
+    Some(d) => {
+      let bytes = []
+      for at in location..<(d.0 + d.1) {
+        bytes.push(image.read(at) catch { _ => return [] })
+      }
+      values_of(bytes)
+    }
+    None => []
+  }
+}
+
+// What a call leaves known of the banks, by evaluating the callee when it
+// is short and straight (a routine that switches banks), else nothing.
+fn call_effect(image: Image, target: Int, f: Facts, nesting: Int) -> Banking? {
+  let mut pc = target
+  let mut facts = { ..f, depth: Some(0) }
+  for _ in 0..<48 {
+    let inst = resolve(image, decode(image, pc) catch { _ => return None }, facts)
+    match inst.op {
+      RTS => return if facts.depth == Some(0) { facts.banking } else { None }
+      JSR => {
+        if nesting >= 3 { return None }
+        guard call_effect(image, jump_target(inst), facts, nesting + 1) is Some(b) else { return None }
+        facts = { ..transfer(inst, facts), banking: Some(b) }
+        pc = inst.next
+      }
+      JMP if inst.mode == "abs" => pc = jump_target(inst)
+      JMP | RTI | BRK => return None
+      _ if inst.mode == "rel" =>
+        match condition(inst.op, facts) {
+          Some(true) => pc = branch_target(inst)
+          Some(false) => pc = inst.next
+          None => return None
+        }
+      _ => {
+        facts = transfer(inst, facts, table=fn(_) { table_values(image, inst) })
+        pc = inst.next
+      }
+    }
+  }
+  None
 }
 
 pub fn source_mode(image: Image, inst: Instruction) -> @parse.SourceAddressingMode {
@@ -109,9 +270,12 @@ priv struct Exploration {
 fn rom_vector(image: Image, inst: Instruction) -> Int? raise ImageError {
   let hi = (inst.arg & 0xff00) | ((inst.arg + 1) & 255)
   if image.banked() {
-    if inst.arg < 0x8000 || hi < 0x8000 || (in_window(inst.arg) && bank_of(inst.pc) is None) { return None }
     let pointer = rebase(inst.pc, inst.arg)
-    return Some(rebase(pointer, image.read(pointer) | (image.read(rebase(inst.pc, hi)) << 8)))
+    let high = rebase(inst.pc, hi)
+    // a window as mapped at run time is not known
+    if inst.arg < 0x8000 || hi < 0x8000 || (in_window(pointer) && bank_of(pointer) is None) ||
+      (in_window(high) && bank_of(high) is None) { return None }
+    return Some(rebase(pointer, image.read(pointer) | (image.read(high) << 8)))
   }
   if inst.arg >= image.origin && hi >= image.origin {
     Some(image.read(inst.arg) | (image.read(hi) << 8))
@@ -144,24 +308,266 @@ fn always_unwinds(image: Image, entry: Int) -> Bool {
 // Where a computed jump at `site` (through RAM, or returning through an
 // address the routine pushed) can go: the addresses in the map's code tables
 // of its bank (the fixed bank's for code in the fixed bank).
+//
+// Following banks (MMC3), a jump in a bank can also read the code tables of
+// banks in the other window, as mapped: their addresses are that window's,
+// whichever of those banks is there (see the window's dispatcher).
 fn code_targets(image: Image, site: Int) -> Array[Int] raise ImageError {
   let targets = []
-  for code in image.banks.code {
-    let (location, adjust) = code
-    if bank_of(location) != bank_of(site) { continue }
-    let target = rebase(location, image.word(location) + adjust)
+  // the tables the pointer is loaded from (lda table,x or lda table,y just
+  // before the jump), when the map names them: those alone
+  let loaded = []
+  for back in 3..=24 {
+    let at = (site & 0xffff) - back
+    let op = try image.read(rebase(site, at)) catch { _ => continue }
+    if op == 0xb9 || op == 0xbd {
+      let operand = try image.word(rebase(site, at + 1)) catch { _ => continue }
+      loaded.push(operand)
+    }
+  }
+  let tables = image.banks.code.filter(fn(code) { loaded.contains(code.2) || loaded.contains(code.2 + 1) })
+  let from_loads = !tables.is_empty()
+  let entries = if from_loads { tables } else { image.banks.code }
+  // a bank without code tables of its own jumps to the other window's
+  let own = image.banks.code.iter().any(fn(code) { bank_of(code.0) == bank_of(site) })
+  for code in entries {
+    let (location, adjust, _) = code
+    let other_window = follows_banks() && (from_loads || !own) && bank_of(site) is Some(_) && bank_of(location) is Some(_) &&
+      window_of(location) != window_of(site)
+    if bank_of(location) != bank_of(site) && !other_window { continue }
+    let word = image.word(location)
+    if word < 0x8000 { continue } // an unused entry
+    let target = rebase(location, word + adjust)
+    let target = if other_window && bank_of(target) is Some(_) { target & 0xffff } else { target }
     if !targets.contains(target) { targets.push(target) }
   }
   targets
 }
 
+// Discovery stops at the first problem. The inspector can collect them
+// instead (`collect_problems`): those discovery can step over are recorded,
+// and exploration goes on without what they lead to.
+let collected: Ref[Array[String]?] = Ref(None)
+
+pub fn collect_problems() -> Unit {
+  collected.val = Some([])
+}
+
+pub fn problems() -> Array[String] {
+  collected.val.unwrap_or([])
+}
+
+// Records a problem when collecting (and returns true), else raises it.
+fn problem(message: String) -> Bool raise ImageError {
+  match collected.val {
+    Some(list) => {
+      if !list.contains(message) { list.push(message) }
+      true
+    }
+    None => raise InvalidImage(message)
+  }
+}
+
 // Follows execution from the reset and NMI vectors. Inline tables after a
 // call are the data directives in `image.source` that start at its return
 // address (from the assembly source, or from a ROM map).
+//
+// Following banks, the interrupts switch them where the foreground waits:
+// what is known of them is forgotten there (but the shadows). A call keeps
+// what it knows of the windows its callee never switches. The wait loops
+// and the windows each routine switches come from the exploration before,
+// until they settle (the first assumes every call switches everything).
 fn explore(image: Image) -> Exploration raise ImageError {
+  // both only grow, so that they settle; the last exploration assumed all
+  // it found
+  let waits: Map[Int, Int] = Map([])
+  let mut switching: Map[Int, Int]? = None
+  if !follows_banks() { return explore_with(image, waits, switching) }
+  // problems count in the last exploration only: the ones before knew less
+  let collecting = collected.val is Some(_)
+  fn settled(result: Exploration) -> Exploration raise ImageError {
+    if !collecting {
+      let found = problems()
+      collected.val = None
+      if found.length() > 0 { raise InvalidImage(found[0]) }
+    }
+    result
+  }
+  for _ in 0..<16 {
+    collected.val = Some([])
+    let result = explore_with(image, waits, switching)
+    let next = switching_reasons(flow_of(result), image.banks.shadows).0
+    let known_waits = result.waits.iter().all(fn(w) { waits.get(w.0) == Some(w.1) })
+    match switching {
+      Some(known) => {
+        let covered = next.iter().all(fn(r) { (known.get(r.0).unwrap_or(0) | r.1) == known.get(r.0).unwrap_or(0) })
+        if known_waits && covered { return settled(result) }
+        for entry, mask in next { known[entry] = known.get(entry).unwrap_or(0) | mask }
+      }
+      None => switching = Some(next)
+    }
+    for site, start in result.waits { waits[site] = start }
+  }
+  if !collecting { collected.val = None }
+  raise InvalidImage("The wait loops and bank switches do not settle while following banks")
+}
+
+// Why a routine of the program switches banks, for the inspector: the chain
+// of calls to a write to the mapper or a shadow.
+pub fn Program::switching_chain(self: Program, entry: Int) -> Array[String] {
+  let flow = { instructions: self.instructions, dispatches: self.dispatches, jumps: self.jumps, windows: self.windows, facts: self.facts }
+  let (switching, reasons) = switching_reasons(flow, self.image.banks.shadows)
+  let chain = []
+  let mut at = entry
+  while switching.contains(at) && chain.length() < 20 {
+    match reasons.get(at) {
+      Some((write, callee)) => {
+        let windows = "windows \{switching[at]}"
+        chain.push(show_pc(at) + " (\{windows})" + (if callee < 0 { " writes at " + show_pc(write) } else { " calls " + show_pc(callee) + " at " + show_pc(write) }))
+        if callee < 0 { break }
+        at = callee
+      }
+      None => break
+    }
+  }
+  chain
+}
+
+priv struct Flow {
+  instructions: Map[Int, Instruction]
+  dispatches: Map[Int, Dispatch]
+  jumps: Map[Int, Array[Int]]
+  windows: Map[Int, Array[Int]]
+  facts: Map[Int, Facts]
+}
+
+fn flow_of(e: Exploration) -> Flow {
+  { instructions: e.instructions, dispatches: e.dispatches, jumps: e.jumps, windows: e.windows, facts: e.facts }
+}
+
+// The windows (a bit each) an instruction may switch: a bank register
+// written (which the bank select known there names, else any), or a
+// shadow. (Stores through pointers, and indexed from below $8000, are taken
+// not to reach the mapper.)
+fn switched_windows(inst: Instruction, f: Facts?, shadows: Array[(Int, Int)]) -> Int {
+  let store = inst.op == STA || inst.op == STX || inst.op == STY || inst.op == INC ||
+    inst.op == DEC || inst.op == ASL || inst.op == LSR || inst.op == ROL || inst.op == ROR
+  if !store { return 0 }
+  let all = (1 << layout().windows.length()) - 1
+  let direct = inst.mode == "zp" || inst.mode == "abs"
+  if direct {
+    match shadows.iter().find_first(fn(s) { s.1 == inst.arg }) {
+      Some(s) => return 1 << s.0
+      None => ()
+    }
+  }
+  let mapper = (inst.mode == "abs" || inst.mode == "absx" || inst.mode == "absy") && inst.arg >= 0x8000 && inst.arg < 0xa000
+  if !mapper { return 0 }
+  if inst.mode != "abs" { return all }
+  if (inst.arg & 1) == 0 { return 0 } // the bank select itself
+  let select = match f { Some({ banking: Some(b), .. }) => b.select; _ => None }
+  match select {
+    Some(value) => {
+      let register = value & 7
+      if register < 6 { return 0 }
+      let start = if register == 7 { 0xa000 } else if (value & 0x40) != 0 { 0xc000 } else { 0x8000 }
+      let window = window_of(start)
+      if window < 0 { all } else { 1 << window }
+    }
+    None => all
+  }
+}
+
+// The routines (called locations) that may switch a PRG bank, with the
+// windows they switch: their code writes MMC3's bank registers or a shadow,
+// or calls one that does. For each, where: a write (callee -1) or a call.
+fn switching_reasons(flow: Flow, shadows: Array[(Int, Int)]) -> (Map[Int, Int], Map[Int, (Int, Int)]) {
+  let e = flow
+  // the code a routine runs without returning: its own, and what it jumps to
+  let bodies: Map[Int, (Int, Int, Array[(Int, Int)])] = Map([]) // windows written, a write, calls (site, callee)
+  fn body(entry: Int) -> (Int, Int, Array[(Int, Int)]) {
+    match bodies.get(entry) {
+      Some(b) => return b
+      None => ()
+    }
+    let seen: Set[Int] = Set([])
+    let work = [entry]
+    let calls = []
+    let mut mask = 0
+    let mut write = -1
+    while work.pop() is Some(pc) {
+      if seen.contains(pc) { continue }
+      seen.add(pc)
+      match e.windows.get(pc) {
+        Some(targets) => {
+          for t in targets { work.push(t) }
+          continue
+        }
+        None => ()
+      }
+      guard e.instructions.get(pc) is Some(inst) else { continue }
+      let windows = switched_windows(inst, e.facts.get(pc), shadows)
+      if windows != 0 {
+        mask = mask | windows
+        if write < 0 { write = pc }
+      }
+      match inst.op {
+        JSR => {
+          match e.dispatches.get(pc) {
+            Some(d) => for t in d.targets { work.push(t) }
+            None => {
+              calls.push((pc, jump_target(inst)))
+              work.push(inst.next)
+            }
+          }
+        }
+        JMP if inst.mode == "abs" => work.push(jump_target(inst))
+        JMP => for t in e.jumps.get(pc).unwrap_or([]) { work.push(t) }
+        RTS => for t in e.jumps.get(pc).unwrap_or([]) { work.push(t) }
+        RTI | BRK => ()
+        _ => {
+          if inst.mode == "rel" { work.push(branch_target(inst)) }
+          work.push(inst.next)
+        }
+      }
+    }
+    bodies[entry] = (mask, write, calls)
+    (mask, write, calls)
+  }
+  let entries: Set[Int] = Set([])
+  for _, inst in e.instructions {
+    if inst.op == JSR && !e.dispatches.contains(inst.pc) { entries.add(jump_target(inst)) }
+  }
+  let switching: Map[Int, Int] = Map([])
+  let reasons: Map[Int, (Int, Int)] = Map([])
+  let mut changed = true
+  while changed {
+    changed = false
+    for entry in entries {
+      let (own, write, calls) = body(entry)
+      let mut mask = own
+      let mut reason = if own != 0 { Some((write, -1)) } else { None }
+      for call in calls {
+        let callee = switching.get(call.1).unwrap_or(0)
+        if callee != 0 {
+          mask = mask | callee
+          if reason is None { reason = Some(call) }
+        }
+      }
+      if mask != switching.get(entry).unwrap_or(0) {
+        switching[entry] = mask
+        reasons[entry] = reason.unwrap()
+        changed = true
+      }
+    }
+  }
+  (switching, reasons)
+}
+
+fn explore_with(image: Image, waiting: Map[Int, Int], switching: Map[Int, Int]?) -> Exploration raise ImageError {
   if image.banked() {
-    if image.bytes.length() != 16384 || image.origin != 0xc000 {
-      raise InvalidImage("A banked image needs its fixed bank at $C000")
+    if image.origin + image.bytes.length() != 0x10000 || fixed_bank(image.origin) < 0 {
+      raise InvalidImage("A banked image needs its fixed banks up to $FFFF")
     }
   } else if !((image.bytes.length() == 32768 && image.origin == 0x8000) ||
        (image.bytes.length() == 16384 && (image.origin == 0x8000 || image.origin == 0xc000))) {
@@ -198,44 +604,92 @@ fn explore(image: Image) -> Exploration raise ImageError {
   let jumps: Map[Int, Array[Int]] = Map([])
   let traps: Set[Int] = Set([])
   let facts: Map[Int, Facts] = Map([])
+  // the dispatchers proven at each call (and its target), once
+  let proofs: Map[(Int, Int), Dispatch?] = Map([])
   // the first transfer to each location, to explain how bad code was reached
   let parents: Map[Int, Int] = Map([])
   fn path(pc: Int) -> String {
     let steps = []
     let mut at = pc
-    while steps.length() < 12 && parents.get(at) is Some(p) && p >= 0 {
+    while steps.length() < 4 && parents.get(at) is Some(p) && p >= 0 {
       steps.push(show_pc(p))
       at = p
     }
     steps.join(" <- ")
   }
-  let work = roots.map(fn(pc) { (pc, Facts::unknown().entry(), -1) })
+  let start = if follows_banks() { { ..Facts::unknown(), banking: Some(Banking::unknown()) } } else { Facts::unknown() }
+  // the transfer back to a wait loop's start: the interrupts run there
+  fn crossing(pc: Int, target: Int, facts: Facts) -> Facts {
+    if waiting.get(pc) == Some(target) { { ..facts, banking: facts.banking.map(fn(b) { b.kept(image.banks.shadows, switched=-1, keep_banks=false) }) } } else { facts }
+  }
+  let work = roots.map(fn(pc) { (pc, start.entry(), -1) })
   while !work.is_empty() {
     let (address, incoming, from) = work.pop().unwrap()
     let pc = address
     if !parents.contains(pc) { parents[pc] = from }
     if image.banked() && pc < 0x10000 && in_window(pc) {
-      // Fixed-bank code reaches the window: whichever bank is mapped, among
-      // the routines the map names at this address.
-      if windows.contains(pc) { continue }
-      guard image.banks.windows.get(pc) is Some(banks) else {
-        raise InvalidImage("Fixed-bank code reaches \{show_pc(pc)} in the switchable window, from \{show_pc(from)}, but the map names no routine there in any bank (routine BANK:\{show_pc(pc)} NAME)")
+      // Code outside a window reaches it: whichever bank is mapped, among
+      // those it can hold there (from what is known of the banks), else
+      // among the routines the map names at this address.
+      let derived = match incoming.banking {
+        Some(b) => b.mapped(window_of(pc), image.banks.shadows)
+        None => []
       }
-      windows[pc] = banks.map(fn(bank) { bank_location(bank, pc) })
-      for target in windows[pc] { work.push((target, Facts::unknown().entry(), pc)) }
+      // the map, when it names routines here, says which of them can be;
+      // else the banks whose bytes there look like code (the game never
+      // calls into data; if it did, the dispatcher traps)
+      let named = image.banks.windows.get(pc)
+      let derived = match (named, derived) {
+        // a bank known exactly, whose bytes there look like code
+        (Some(banks), [bank]) if !banks.contains(bank) && candidate(image, bank, pc) => [bank]
+        (Some(banks), _) => derived.filter(fn(b) { banks.contains(b) })
+        (None, _) => derived.filter(fn(b) { candidate(image, b, pc) })
+      }
+      let banks = if !derived.is_empty() { derived } else {
+        match named {
+          Some(banks) => banks
+          None => {
+            let plausible = Array::makei(image.banks.contents.length(), fn(b) { b }).filter(fn(b) { candidate(image, b, pc) })
+            problem("Code outside the window reaches \{show_pc(pc)} in a switchable window, from \{path(pc)}, but the map names no routine there in any bank (routine BANK:\{show_pc(pc)} NAME; banks with code-like bytes there: \{plausible.map(fn(b) { b.to_string() }).join(" ")})") |> ignore
+            continue
+          }
+        }
+      }
+      let targets = windows.get(pc).unwrap_or([])
+      for bank in banks {
+        if bank >= image.banks.contents.length() { continue }
+        let target = bank_location(bank, pc)
+        if !targets.contains(target) { targets.push(target) }
+        work.push((target, { ..start, banking: incoming.banking }.entry(), pc))
+      }
+      windows[pc] = targets
       continue
     }
     let inside = if image.banked() {
-      (bank_of(pc) is Some(bank) && bank < image.banks.contents.length()) || (pc >= image.origin && pc < 0x10000)
+      (bank_of(pc) is Some(bank) && bank < image.banks.contents.length()) || fixed_bank(pc) >= 0
     } else { pc >= image.origin && pc < image.origin + image.bytes.length() }
     if !inside {
-      raise InvalidImage("Execution outside the source address window at \{show_pc(pc)}, reached from \{path(pc)}; mirrored code needs an explicit source view")
+      problem("Execution outside the source address window at \{show_pc(pc)}, reached from \{path(pc)}; mirrored code needs an explicit source view") |> ignore
+      continue
     }
     if image.is_data(pc) {
       // A path the program never takes when its tables hold what they
       // should: it traps rather than run data.
       traps.add(pc)
       continue
+    }
+    // code of a bank runs while its bank is mapped
+    let incoming = match (incoming.banking, bank_of(pc)) {
+      (Some(b), Some(bank)) => {
+        let b = b.running(window_of(pc), bank)
+        // and its companion in the other window, unless the code switched
+        // that one to a bank known
+        let companion = image.banks.companions.get(bank).unwrap_or(-1)
+        let other = 1 - window_of(pc)
+        let b = if companion >= 0 && b.bank(other).length() != 1 { b.running(other, companion) } else { b }
+        { ..incoming, banking: Some(b) }
+      }
+      _ => incoming
     }
     let f = match facts.get(pc) {
       Some(previous) => {
@@ -246,35 +700,72 @@ fn explore(image: Image) -> Exploration raise ImageError {
       None => incoming
     }
     facts[pc] = f
-    let inst = decode(image, pc) catch {
-      InvalidImage(message) => raise InvalidImage("\{message}, reached from \{path(pc)}")
+    let decoded = decode(image, pc) catch {
+      InvalidImage(message) => {
+        problem("\{message}, reached from \{path(pc)}") |> ignore
+        facts.remove(pc)
+        continue
+      }
     }
+    let inst = resolve(image, decoded, f)
     instructions[pc] = inst
-    if inst.op == CLI || inst.op == PLP || inst.op == BRK {
+    // MMC3's scanline counter raises the IRQ once code enables interrupts
+    // (the runtime raises it for no other mapper)
+    if follows_banks() && (inst.op == CLI || inst.op == PLP) {
       let irq = image.word(canonical(0xfffe))
-      if !roots.contains(irq) { roots.push(irq); work.push((irq, Facts::unknown().entry(), pc)) }
+      if !roots.contains(irq) { roots.push(irq); work.push((irq, start.entry(), pc)) }
     }
-    let after = transfer(inst, f)
+    let after = transfer(inst, f, table=fn(_) { table_values(image, inst) })
+    let after = match (inst.op, f.banking) {
+      (JSR, Some(known)) =>
+        match call_effect(image, jump_target(inst), f, 0) {
+          Some(b) => { ..after, banking: Some(b) }
+          None =>
+            match switching {
+              // the windows the callee never switches keep their banks
+              Some(masks) =>
+                { ..after, banking: Some(known.kept(image.banks.shadows, switched=masks.get(jump_target(inst)).unwrap_or(0))) }
+              None => after
+            }
+        }
+      _ => after
+    }
     match (inst.op, inst.mode) {
       (JSR, _) => {
         let table = data_at.get(inst.next).map(fn(i) { inline_data_end(image, i) })
-        match table.map(fn(end) { dispatch_at(image, inst, end) }) {
+        let proven = match table {
+          Some(end) =>
+            match proofs.get((pc, inst.arg)) {
+              Some(known) => Some(known)
+              None => {
+                let found = dispatch_at(image, inst, end)
+                proofs[(pc, inst.arg)] = found
+                Some(found)
+              }
+            }
+          None => None
+        }
+        match proven {
           Some(Some(dispatch)) => {
             dispatches[pc] = dispatch
-            for target in dispatch.targets { work.push((target, Facts::unknown().entry(), pc)) }
+            // the targets run with what the call knows of the banks
+            for target in dispatch.targets { work.push((target, { ..start, banking: f.banking }.entry(), pc)) }
           }
           // a callee that returns past this routine: whatever follows the
           // call is not reached from it
           _ if always_unwinds(image, jump_target(inst)) => work.push((jump_target(inst), f.entry(), pc))
           // Returning into data is never decoded as a guess.
-          Some(None) => raise InvalidImage("Call at \{show_pc(pc)} returns into inline data at \{show_pc(inst.next)}, but \{address_name(image, jump_target(inst))} was not proven to be an inline dispatcher")
+          Some(None) => {
+            problem("Call at \{show_pc(pc)} returns into inline data at \{show_pc(inst.next)}, but \{address_name(image, jump_target(inst))} was not proven to be an inline dispatcher") |> ignore
+            work.push((jump_target(inst), f.entry(), pc))
+          }
           None => {
             work.push((jump_target(inst), f.entry(), pc)); work.push((inst.next, after, pc))
           }
         }
       }
       (JMP, "abs") => {
-        if jump_target(inst) == pc { idle.add(pc) } else { work.push((jump_target(inst), after, pc)) }
+        if jump_target(inst) == pc { idle.add(pc) } else { work.push((jump_target(inst), crossing(pc, jump_target(inst), after), pc)) }
       }
       (JMP, "ind") => {
         // Immutable ROM vectors are resolvable without a dispatcher summary;
@@ -283,9 +774,13 @@ fn explore(image: Image) -> Exploration raise ImageError {
           Some(target) => work.push((target, after, pc))
           None => {
             let targets = code_targets(image, pc)
-            if targets.is_empty() { raise InvalidImage("Unresolved indirect transfer at \{show_pc(pc)}") }
+            if targets.is_empty() {
+              problem("Unresolved indirect transfer at \{show_pc(pc)}, reached from \{path(pc)}") |> ignore
+              continue
+            }
             jumps[pc] = targets
-            for target in targets { work.push((target, Facts::unknown().entry(), pc)) }
+            // a jump keeps the banks mapped
+            for target in targets { work.push((target, { ..start, banking: f.banking }.entry(), pc)) }
           }
         }
       }
@@ -294,13 +789,13 @@ fn explore(image: Image) -> Exploration raise ImageError {
         let targets = code_targets(image, pc)
         if !targets.is_empty() {
           jumps[pc] = targets
-          for target in targets { work.push((target, Facts::unknown().entry(), pc)) }
+          for target in targets { work.push((target, { ..start, banking: f.banking }.entry(), pc)) }
         }
       }
       (RTS | RTI, _) => ()
-      (BRK, _) => raise InvalidImage("BRK requires interrupt scheduling at \{show_pc(pc)}")
+      (BRK, _) => problem("BRK requires interrupt scheduling at \{show_pc(pc)}, reached from \{path(pc)}") |> ignore
       (_, "rel") => {
-        if condition(inst.op, f) != Some(false) { work.push((branch_target(inst), assume_condition(inst.op, true, after), pc)) }
+        if condition(inst.op, f) != Some(false) { work.push((branch_target(inst), crossing(pc, branch_target(inst), assume_condition(inst.op, true, after)), pc)) }
         if condition(inst.op, f) != Some(true) { work.push((inst.next, assume_condition(inst.op, false, after), pc)) }
       }
       _ => work.push((inst.next, after, pc))
@@ -321,7 +816,7 @@ fn explore(image: Image) -> Exploration raise ImageError {
       if inst.mode == "ind" {
         match rom_vector(image, inst) {
           Some(target) => needed.add(target)
-          None => for target in jumps[pc] { needed.add(target) }
+          None => for target in jumps.get(pc).unwrap_or([]) { needed.add(target) }
         }
       } else { needed.add(jump_target(inst)) }
     }

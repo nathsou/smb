@@ -5,8 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define PATTERN_ATLAS_WIDTH 128  // 16 tiles per row
-#define PATTERN_ATLAS_HEIGHT 256 // 32 rows: bank 0 then bank 1
+// The CHR's tiles, a 1 KiB bank (64 tiles) per 8 rows (video.frag)
+#define PATTERN_ATLAS_WIDTH 512
+#define PATTERN_ATLAS_HEIGHT (CHR_MAX_SIZE / 1024 * 8)
 
 static Texture2D load_bytes(const void *data, int width, int height, int format) {
     Image image = {
@@ -23,10 +24,10 @@ static Texture2D load_bytes(const void *data, int width, int height, int format)
 
 // Decodes the 2-bit planar tiles into one byte (colour index 0-3) per pixel.
 static void decode_patterns(uint8_t *atlas) {
-    for (int index = 0; index < 512; index++) {
+    for (int index = 0; index < (int)(chr_size / 16); index++) {
         const uint8_t *tile = &chr_rom[index * 16];
-        int left = (index % 16) * 8;
-        int top = (index / 16) * 8;
+        int left = (index % 64) * 8;
+        int top = (index / 64) * 8;
         for (int row = 0; row < 8; row++) {
             for (int col = 0; col < 8; col++) {
                 int bit = 7 - col;
@@ -75,16 +76,14 @@ bool gpu_renderer_init(GpuRenderer *gpu, const char *shader_path) {
     gpu->patterns = load_bytes(atlas, PATTERN_ATLAS_WIDTH, PATTERN_ATLAS_HEIGHT, PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
     gpu->chr_version = video.chr_version;
     gpu->nametable = load_bytes(video.nametable, 32, NAMETABLE_SIZE / 32, PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
+    video_prepare_lines();
+    gpu->lines = load_bytes(video_lines, VIDEO_LINE_SIZE, SCREEN_HEIGHT, PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
     for (int i = 0; i < 64 * 3; i++) gpu->colors[i] = COLOR_PALETTE[i] / 255.0f;
     gpu->target = LoadRenderTexture(SCREEN_WIDTH, SCREEN_HEIGHT);
     SetTextureFilter(gpu->target.texture, TEXTURE_FILTER_POINT);
 
-    gpu->ctrl_loc = GetShaderLocation(gpu->shader, "u_ctrl");
-    gpu->mask_loc = GetShaderLocation(gpu->shader, "u_mask");
-    gpu->scroll_x_loc = GetShaderLocation(gpu->shader, "u_scroll_x");
-    gpu->scroll_y_loc = GetShaderLocation(gpu->shader, "u_scroll_y");
     gpu->mirroring_loc = GetShaderLocation(gpu->shader, "u_mirroring");
-    gpu->status_bar_loc = GetShaderLocation(gpu->shader, "u_status_bar");
+    gpu->lines_loc = GetShaderLocation(gpu->shader, "u_lines");
     gpu->flip_y_loc = GetShaderLocation(gpu->shader, "u_flip_y");
     gpu->patterns_loc = GetShaderLocation(gpu->shader, "u_patterns");
     gpu->nametable_loc = GetShaderLocation(gpu->shader, "u_nametable");
@@ -106,6 +105,8 @@ static void set_bytes(Shader shader, int loc, const uint8_t *bytes, int count) {
 
 void gpu_renderer_draw(GpuRenderer *gpu) {
     UpdateTexture(gpu->nametable, video.nametable);
+    video_prepare_lines();
+    UpdateTexture(gpu->lines, video_lines);
     if (gpu->chr_version != video.chr_version) {
         // the game rewrote its tiles (CHR RAM)
         static uint8_t atlas[PATTERN_ATLAS_WIDTH * PATTERN_ATLAS_HEIGHT];
@@ -116,16 +117,12 @@ void gpu_renderer_draw(GpuRenderer *gpu) {
 
     BeginTextureMode(gpu->target);
     BeginShaderMode(gpu->shader);
-    set_int(gpu->shader, gpu->ctrl_loc, video.ctrl);
-    set_int(gpu->shader, gpu->mask_loc, video.mask);
-    set_int(gpu->shader, gpu->scroll_x_loc, video.scroll_x);
-    set_int(gpu->shader, gpu->scroll_y_loc, video.scroll_y);
     set_int(gpu->shader, gpu->mirroring_loc, video.mirroring);
-    set_int(gpu->shader, gpu->status_bar_loc, video.status_bar ? 1 : 0);
     // Render textures store their first row at the bottom.
     set_int(gpu->shader, gpu->flip_y_loc, 1);
     SetShaderValueTexture(gpu->shader, gpu->patterns_loc, gpu->patterns);
     SetShaderValueTexture(gpu->shader, gpu->nametable_loc, gpu->nametable);
+    SetShaderValueTexture(gpu->shader, gpu->lines_loc, gpu->lines);
     set_bytes(gpu->shader, gpu->palette_loc, video.palette.u8, PALETTE_SIZE);
     set_bytes(gpu->shader, gpu->oam_loc, video.oam, OAM_SIZE);
     SetShaderValueV(gpu->shader, gpu->colors_loc, gpu->colors, SHADER_UNIFORM_VEC3, 64);
@@ -138,5 +135,6 @@ void gpu_renderer_unload(GpuRenderer *gpu) {
     UnloadRenderTexture(gpu->target);
     UnloadTexture(gpu->patterns);
     UnloadTexture(gpu->nametable);
+    UnloadTexture(gpu->lines);
     UnloadShader(gpu->shader);
 }

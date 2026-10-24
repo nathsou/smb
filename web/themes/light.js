@@ -1,12 +1,16 @@
 // 2D global illumination: the scene lit by what glows (fire, lava, coins,
 // question blocks), with soft shadows and one bounce, by radiance cascades
 // over the distance field of a jump flood. Daylight is even, as in the game.
+// In games whose lights the theme does not know (without SMB's level data),
+// half the light comes from the sky, beyond the scene, so that open space
+// lights what faces it and what is enclosed is in shade, and half is
+// everywhere, so that enclosed rooms (Metroid's caverns) stay lit.
 // The 2.5D theme (voxel.js) uses the same light with the sky as a light
 // source too, for shade under overhangs.
 
 import {
     SCENE_WIDTH, SCENE_HEIGHT, createScene, createFloatTexture, createFramebuffer, requireFloatTargets,
-    bindTextures, pass, backdrop, sizeCanvas,
+    bindTextures, pass, backdrop, sizeCanvas, levelKnown,
 } from './scene.js';
 
 const CASCADES = 5; // enough for rays to cross the scene: 2 * (4^5 - 1) / 3 pixels
@@ -23,6 +27,9 @@ const DARK_AMBIENT = [0.12, 0.12, 0.15];
 // reflected), with and without the sky.
 const FLOOR = { day: [0.04, 0.04, 0.05], dark: [0.2, 0.2, 0.24] };
 const FLOOR_WITHOUT_SKY = { day: [1, 1, 1], dark: [0.3, 0.3, 0.36] };
+// Without SMB's level data (both themes).
+const UNKNOWN_SKY_SHARE = 0.5;
+const UNKNOWN_FLOOR = [0.5, 0.5, 0.5];
 const BOUNCE = 0.5;
 
 // The light texture of every pixel of the scene, refreshed by draw(), and
@@ -34,6 +41,8 @@ export async function createGlobalIllumination(context, scene, { sky: withSky })
     requireFloatTargets(gl);
     const [seed, jumpFlood, cascade, surface] = await Promise.all(
         ['seed.frag', 'jfa.frag', 'cascade.frag', 'surface.frag'].map(path => context.compile(path)));
+    gl.useProgram(surface);
+    gl.uniform1i(gl.getUniformLocation(surface, 'u_level_known'), levelKnown(context) ? 1 : 0);
 
     const seeds = [createFloatTexture(gl), createFloatTexture(gl)];
     const seedTargets = seeds.map(texture => createFramebuffer(gl, [texture]));
@@ -52,6 +61,7 @@ export async function createGlobalIllumination(context, scene, { sky: withSky })
     gl.uniform1i(uniform(cascade, 'u_cascades'), CASCADES);
     gl.uniform1f(uniform(cascade, 'u_bounce'), BOUNCE);
 
+    const known = levelKnown(context);
     let current = 0; // the light being drawn; the other is last frame's
     const illumination = {
         get light() { return lights[current]; },
@@ -60,9 +70,13 @@ export async function createGlobalIllumination(context, scene, { sky: withSky })
         floor: [0, 0, 0],
         draw() {
             const { dark } = backdrop(context);
-            const sky = dark || !withSky ? [0, 0, 0] : SKY;
+            let sky = dark || !withSky ? [0, 0, 0] : SKY;
             const ambient = dark && withSky ? DARK_AMBIENT : [0, 0, 0];
             illumination.floor = (withSky ? FLOOR : FLOOR_WITHOUT_SKY)[dark ? 'dark' : 'day'];
+            if (!known) {
+                sky = SKY.map(s => s * UNKNOWN_SKY_SHARE);
+                illumination.floor = UNKNOWN_FLOOR;
+            }
             illumination.open = sky.map((s, i) => s * 0.536 + ambient[i]);
 
             gl.useProgram(seed);
@@ -81,7 +95,7 @@ export async function createGlobalIllumination(context, scene, { sky: withSky })
             gl.useProgram(cascade);
             gl.uniform3fv(uniform(cascade, 'u_sky'), sky);
             gl.uniform3fv(uniform(cascade, 'u_ambient'), ambient);
-            gl.uniform1i(uniform(cascade, 'u_shift'), scene.shift);
+            gl.uniform2i(uniform(cascade, 'u_shift'), scene.shift[0], scene.shift[1]);
             for (let n = CASCADES - 1; n >= 0; n--) {
                 bindTextures(gl, cascade, {
                     u_seeds: seeds[source],
@@ -96,6 +110,7 @@ export async function createGlobalIllumination(context, scene, { sky: withSky })
             }
 
             gl.useProgram(surface);
+            gl.uniform3fv(uniform(surface, 'u_open'), illumination.open);
             bindTextures(gl, surface, { u_cascade0: cascades[0], u_seeds: seeds[source] });
             pass(context, surface, lightTargets[current], SCENE_WIDTH, SCENE_HEIGHT);
         },

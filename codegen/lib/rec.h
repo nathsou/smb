@@ -28,4 +28,9 @@ uint8_t rec_state_at_frame(NESInputRecording* rec, uint32_t frame);
 // The frames up to the last one a recording names.
 uint32_t rec_length(const char* filename);
 
+// Applies the pokes of `list` due at `frame` ("FRAME:ADDR=VALUE,...", the
+// address and value in hex) through `write`: to start a recording where a
+// game would take long to reach.
+void rec_pokes(const char* list, uint32_t frame, void (*write)(uint16_t addr, uint8_t value));
+
 #endif

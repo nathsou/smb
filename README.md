@@ -2,11 +2,11 @@
 
 [Play it online](https://nathsou.github.io/smb/)
 
-Static recompilation of Super Mario Bros. and Metroid from the ROM into C
-and WebAssembly. The repository contains no game code or data: the
-recompiler reads your own copy of the ROM, and `maps/smb.map` and
-`maps/metroid.map` give its routines, tables and variables this project's
-own names. The page recompiles the ROM in the browser and shows the
+Static recompilation of Super Mario Bros., Metroid and Super Mario Bros. 3
+from the ROM into C and WebAssembly. The repository contains no game code or
+data: the recompiler reads your own copy of the ROM, and `maps/smb.map`,
+`maps/metroid.map` and `maps/smb3.map` give its routines, tables and
+variables this project's own names. The page recompiles the ROM in the browser and shows the
 generated C next to the game.
 
 [![SMB C port running in the browser](res/smb-demo.png)](https://nathsou.github.io/smb)
@@ -36,12 +36,13 @@ generated C next to the game.
 - [x] Recompile in the browser, with a code viewer
 - [x] Synthesise sound on the audio thread, band-limited, from per-frame register writes
 - [x] A second game: Metroid (MMC1 banks, waits for the interrupt, return-address tricks)
+- [x] A third game: Super Mario Bros. 3 (MMC3: two bank windows, CHR banks, frames split by the scanline IRQ)
 - [ ] Registers as C locals and parameters
 - [ ] Manually rewrite portions of the code to higher level C
 
 See [toward a modern C program](docs/modern-runtime.md) for how these steps are
-done and checked, and [recompiling Metroid](docs/metroid.md) for the second
-game.
+done and checked, [recompiling Metroid](docs/metroid.md) for the second
+game and [recompiling Super Mario Bros. 3](docs/smb3.md) for the third.
 
 ## Building
 
@@ -68,7 +69,8 @@ $ make build
 For Metroid, place a legally obtained dump called `metroid.nes` in the root
 folder and add `GAME=metroid`: `make codegen GAME=metroid` recompiles it into
 `codegen/metroid/` and `make build GAME=metroid` builds `./metroid` (it saves
-states to `metroid.sav`).
+states to `metroid.sav`). Likewise for Super Mario Bros. 3 with `smb3.nes`
+and `GAME=smb3` (`codegen/smb3/`, `./smb3`).
 
 ## WebAssembly
 
@@ -79,18 +81,19 @@ shows next to the game (SHOW CODE; the map tab is editable and recompiles).
 1. Install a recent `clang` with the `wasm32` target and MoonBit (see Codegen)
 2. Run `make web`
 3. Serve the `web/` folder over HTTP and open `index.html`
-4. Load a legally obtained dump of SMB or Metroid, an iNES file (or for SMB
-   a raw dump of the cartridge); it stays in your browser. An MMC1 dump is
-   recompiled as Metroid. An unrecognised dump (by SHA-256) still loads,
-   with a warning
+4. Load a legally obtained dump of SMB, Metroid or SMB3, an iNES file (or
+   for SMB a raw dump of the cartridge); it stays in your browser. An MMC1
+   dump is recompiled as Metroid and an MMC3 dump as SMB3; loading another
+   ROM switches games. An unrecognised dump (by SHA-256) still loads, with
+   a warning
 
 DEBUG TILES draws SMB with generated placeholder tiles instead of the ROM's,
 and `?software` in the URL selects the software renderer instead of WebGL2.
 
 ### Themes
 
-THEME draws SMB's frames differently (WebGL2; ORIGINAL is the game's own
-picture):
+THEME draws the frames differently (WebGL2; ORIGINAL is the game's own
+picture), in every game:
 
 - 2D GLOBAL ILLUMINATION: fire, lava, coins and question blocks light the
   scene, with soft shadows and a bounce, by radiance cascades; daylight
@@ -104,9 +107,10 @@ picture):
 
 ![The original picture and the three themes, in 1-1 and 1-4](res/themes.png)
 
-The themes know what is solid from the game's own level data (its block
-buffer, by the map's names), not from the picture. See
-[themes](docs/modern-runtime.md#themes).
+In SMB the themes know what is solid from the game's own level data (its
+block buffer, by the map's names), not from the picture. In Metroid and
+SMB3 the background is solid, the sprites stand in front of it, and the
+light comes from open space. See [themes](docs/modern-runtime.md#themes).
 
 ## Codegen
 
@@ -141,12 +145,17 @@ tiles), run the differential test of every generated routine
 (`tests/web/replay_split.mjs`). With your `metroid.nes`, `--metroid`
 recompiles Metroid and replays `rec/metroid.rec` (4,601 frames) natively and
 in WebAssembly against `tests/golden/metroid.trace`, which an independent
-6502 interpreter (`tests/interpreter.c`) wrote and is checked to reproduce.
-These checks do not require Raylib.
+6502 interpreter (`tests/interpreter.c`) wrote and is checked to reproduce;
+with your `smb3.nes`, `--smb3` does the same for SMB3 over `rec/smb3.rec`
+(3,201 frames, `tests/golden/smb3.trace`). Both also compare the page's
+WebGL renderer with the software renderer and draw the themes
+(`tests/web/cartridge_gpu.cjs`, Playwright). These checks do not require
+Raylib, except SMB3's desktop GPU check.
 
 The GPU renderers can be compared with the software renderer pixel for pixel:
 `make gpu-check && xvfb-run ./gpu_check --debug-chr` (desktop; for Metroid
-`make gpu-check GAME=metroid && xvfb-run ./gpu_check --every 25 --variations`) and
+`make gpu-check GAME=metroid && xvfb-run ./gpu_check --every 25 --variations`,
+for SMB3 `GAME=smb3`) and
 `NODE_PATH=$(npm root -g) node tests/web/gpu_check.cjs` (WebGL2 in headless
 Chromium, needs Playwright). `tests/web/themes.cjs` draws frames of the
 replay with every theme and fails on WebGL errors; with a query and a

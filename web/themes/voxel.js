@@ -2,7 +2,7 @@
 // resolution, lit by the sun and by fire with shadow rays and by the 2D
 // global illumination (light.js) as ambient light.
 
-import { createScene, bindTextures, pass, backdrop, sizeCanvas } from './scene.js';
+import { createScene, bindTextures, pass, backdrop, sizeCanvas, levelKnown } from './scene.js';
 import { createGlobalIllumination } from './light.js';
 
 const SUN = normalize([-0.45, -0.8, -0.55]); // up and to the left, towards the viewer
@@ -51,18 +51,21 @@ export function fireLights(oam) {
 
 // Sets the light uniforms of voxel.frag and model.frag: the sun (a faint key
 // light in dark areas), the 2D light as ambient, and fire as point lights at
-// `fireDepth`, in front of what they should light.
+// `fireDepth`, in front of what they should light (SMB's fire: other games
+// have none the themes know), and whether the game's level data is known.
 export function bindLighting(context, program, illumination, fireDepth = FIRE_DEPTH) {
     const { gl, frame } = context;
     const uniform = name => gl.getUniformLocation(program, name);
     const { dark } = backdrop(context);
-    const lights = fireLights(frame.oam);
+    const known = levelKnown(context);
+    const lights = known ? fireLights(frame.oam) : [];
     lights.forEach((light, i) => {
         positions.set([light.x, light.y, fireDepth, FIRE_RADIUS * Math.sqrt(light.count)], i * 4);
         colors.set(FIRE_COLOR, i * 3);
     });
     gl.useProgram(program);
     gl.uniform3fv(uniform('u_floor'), illumination.floor);
+    gl.uniform1i(uniform('u_level_known'), known ? 1 : 0);
     gl.uniform3fv(uniform('u_sun'), SUN);
     gl.uniform3fv(uniform('u_sun_color'), dark ? DARK_KEY_COLOR : SUN_COLOR);
     gl.uniform1f(uniform('u_ambient'), dark ? DARK_AMBIENT : DAY_AMBIENT);

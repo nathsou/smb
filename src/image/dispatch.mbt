@@ -275,7 +275,8 @@ fn same_path(a: Array[DispatchStep], b: Array[DispatchStep]) -> Bool {
 
 // The table extent is the inline data after the call, up to the next label or
 // instruction in the source. An index is accepted only when its evaluation
-// reads PRG data inside that extent and follows the same path as index 0.
+// reads PRG data inside that extent and follows the same path as the first
+// entry that is code.
 // Other indices are left to the emitted runtime trap.
 fn dispatch_at(image: Image, call: Instruction, table_end: Int) -> Dispatch? {
   let within = fn(address: Int) { address >= call.next && address < table_end }
@@ -283,10 +284,18 @@ fn dispatch_at(image: Image, call: Instruction, table_end: Int) -> Dispatch? {
   let code = fn(address: Int) { (address & 0xffff) >= 0x8000 }
   for carrier in 0..<3 {
     let return_pc = ((call.next & 0xffff) - 1) & 0xffff
-    let first = match evaluate(image, jump_target(call), return_pc, carrier, 0, context=call.pc) {
-      Some(run) if run.reads.iter().all(within) && !within(run.target) && code(run.target) => run
-      _ => continue
+    // the path of the first entry that is code (unused entries are zero)
+    let mut found = None
+    for index in 0..<4 {
+      match evaluate(image, jump_target(call), return_pc, carrier, index, context=call.pc) {
+        Some(run) if run.reads.iter().all(within) && !within(run.target) && code(run.target) => {
+          found = Some(run)
+          break
+        }
+        _ => ()
+      }
     }
+    guard found is Some(first) else { continue }
     let targets = []
     for index in 0..<256 {
       match evaluate(image, jump_target(call), return_pc, carrier, index, context=call.pc) {

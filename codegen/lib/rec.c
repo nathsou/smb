@@ -68,3 +68,14 @@ uint32_t rec_length(const char* filename) {
     if (file) fclose(file);
     return last + 1;
 }
+
+void rec_pokes(const char* list, uint32_t frame, void (*write)(uint16_t addr, uint8_t value)) {
+    while (list && *list) {
+        unsigned at, addr, value;
+        int length = 0;
+        if (sscanf(list, "%u:%x=%x%n", &at, &addr, &value, &length) != 3) return;
+        if (at == frame) write((uint16_t)addr, (uint8_t)value);
+        list += length;
+        if (*list == ',') list++;
+    }
+}

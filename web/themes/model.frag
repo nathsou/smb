@@ -28,6 +28,7 @@ uniform float u_ambient;        // how much of the 2D light to use
 uniform int u_light_count;
 uniform vec4 u_lights[8];       // position, radius
 uniform vec3 u_light_colors[8];
+uniform bool u_level_known;     // SMB's: the ground goes on below the screen
 
 out vec4 o_color;
 
@@ -61,15 +62,16 @@ struct Hit {
 
 const ivec2 NO_CELL = ivec2(-100000);
 
-// The scene pixel of a column in screen coordinates. Rows below the screen
-// repeat the bottom row of blocks, so that the ground goes on down.
+// The scene pixel of a column in screen coordinates. In SMB rows below the
+// screen repeat the bottom row of blocks, so that the ground goes on down.
 ivec2 scene_at(ivec2 cell) {
-    return ivec2(cell.x + u_origin, cell.y < 240 ? cell.y : 224 + (cell.y - 240) % 16);
+    return ivec2(cell.x, cell.y < 240 ? cell.y : 224 + (cell.y - 240) % 16) + u_origin;
 }
 
 vec4 shape_at(ivec2 cell) {
     ivec2 at = scene_at(cell);
     if (at.x < 0 || at.x >= SCENE_WIDTH || cell.y < 0) return vec4(0.0);
+    if (cell.y >= 240 && !u_level_known) return vec4(0.0);
     vec4 shape = texelFetch(u_shape, at, 0);
     if (cell.y >= 240) {
         int material = material_of(texelFetch(u_background, at, 0));
@@ -108,8 +110,8 @@ Hit trace(vec3 origin, vec3 direction, float t_max, ivec2 skip) {
     for (int i = 0; i < 128; i++) {
         float z = origin.z + direction.z * t;
         if ((direction.z >= 0.0 && z > FAR) || (direction.z <= 0.0 && z < NEAR)) break;
-        if ((cell.y < 0 && step.y < 0.0) || (cell.x + u_origin < 0 && step.x < 0.0) ||
-            (cell.x + u_origin >= SCENE_WIDTH && step.x > 0.0)) break;
+        if ((cell.y < 0 && step.y < 0.0) || (cell.x + u_origin.x < 0 && step.x < 0.0) ||
+            (cell.x + u_origin.x >= SCENE_WIDTH && step.x > 0.0)) break;
         float t_exit = min(min(next.x, next.y), t_max);
         vec4 shape = cell == skip ? vec4(0.0) : shape_at(cell);
         float best = 1e9;
@@ -322,7 +324,8 @@ vec3 sun_direction() {
 
 void main() {
     vec2 screen = vec2(gl_FragCoord.x, 240.0 * u_scale - gl_FragCoord.y) / u_scale; // y down
-    ivec2 pixel = ivec2(screen) + ivec2(u_origin, 0);
+    ivec2 pixel = ivec2(screen) + u_origin;
+    select_line(clamp(int(screen.y), 0, 239)); // for the backdrop
     vec4 status_bar = texelFetch(u_background, pixel, 0);
     if (material_of(status_bar) == M_HUD) {
         vec4 sprite = texelFetch(u_sprite, pixel, 0);
@@ -335,7 +338,7 @@ void main() {
     vec3 origin = u_camera + direction * ((NEAR - u_camera.z) / direction.z);
     Hit hit = trace(origin, direction, (FAR - NEAR) / direction.z, NO_CELL);
     if (hit.layer == NONE) {
-        o_color = vec4((u_mask & 0x08) != 0 ? color(u_palette[0]) : vec3(0.0), 1.0);
+        o_color = vec4((line_mask & 0x08) != 0 ? color(u_palette[0]) : vec3(0.0), 1.0);
         return;
     }
 
@@ -417,7 +420,7 @@ void main() {
     if (hit.layer == SPRITE && material == S_FIRE) c += albedo * 2.5;
     else if (hit.layer == BACKGROUND && material == M_LAVA) c += albedo * 1.2;
     else if (hit.layer == BACKGROUND && material == M_COIN) c += albedo * 0.3;
-    vec3 backdrop = to_linear((u_mask & 0x08) != 0 ? color(u_palette[0]) : vec3(0.0));
+    vec3 backdrop = to_linear((line_mask & 0x08) != 0 ? color(u_palette[0]) : vec3(0.0));
     c = mix(c, backdrop, clamp((p.z - HAZE_START) / 80.0, 0.0, HAZE_MAX));
     o_color = vec4(to_display(c), 1.0);
 }

@@ -16,10 +16,13 @@ fn Program::rom_byte(self : Program, address : Int) -> Int? {
   Some(self.prg[(address - 0x8000) % size])
 }
 
-// A byte of bank `bank` in the switchable window.
+// A byte of bank `bank` at an address in a switchable window.
 fn Program::bank_byte(self : Program, bank : Int, address : Int) -> Int? {
-  if bank >= self.banks.length() || address < 0x8000 || address >= 0xc000 { return None }
-  Some(self.banks[bank][address - 0x8000])
+  let a = address & 0xffff
+  if bank >= self.banks.length() || address != a || !self.layout.windows.iter().any(fn(w) { a >= w && a < w + self.layout.bank_size }) {
+    return None
+  }
+  Some(self.banks[bank][a & (self.layout.bank_size - 1)])
 }
 
 fn Program::fold(self : Program, e : Expr, known : Array[Int]) -> Expr {

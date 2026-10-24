@@ -357,6 +357,21 @@ fn Structurer::single_entry(self : Structurer, s : Int, e : Int) -> Bool {
   })
 }
 
+// Whether C text mentions an identifier.
+fn mentions(text : String, name : String) -> Bool {
+  let ident = fn(u : UInt16) { let c = u.to_int(); (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 }
+  let mut from = 0
+  while text[from:].find(name) is Some(k) {
+    let start = from + k
+    let end = start + name.length()
+    let before = start == 0 || !ident(text[start - 1])
+    let after = end >= text.length() || !ident(text[end])
+    if before && after { return true }
+    from = start + 1
+  }
+  false
+}
+
 fn Structurer::cond(self : Structurer, e : @ir.Expr) -> String {
   self.c.expr(e)
 }
@@ -390,13 +405,32 @@ fn Structurer::range(self : Structurer, s : Int, e : Int, follow : Int, skip_loo
       self.indent += 1
       self.range(i, j, latch, i)
       self.lines.push(Mark(latch))
+      let first = self.lines.length()
       self.stmts(latch)
-      self.indent -= 1
+      // the temporaries the latch declares, out of scope in the condition
+      let declared = []
+      for line in self.lines[first:] {
+        guard line is Text(_, text) else { continue }
+        for t in ["uint8_t ", "uint16_t ", "int ", "bool "] {
+          if text.has_prefix(t) {
+            let rest = text[t.length():].to_owned()
+            match rest.find(" ") { Some(k) => declared.push(rest[:k].to_owned()); None => () }
+          }
+        }
+      }
       let after = if j + 1 < e { self.layout[j + 1] } else { follow }
       match self.c.f.blocks[latch].term {
         Branch(c, t, f) => {
           let (cond, other) = if t == b { (c, f) } else { (@ir.simplify(Unary(Not, c)), t) }
-          self.emit("} while (\{self.cond(cond)});")
+          let text = self.cond(cond)
+          if declared.iter().any(fn(name) { mentions(text, name) }) {
+            self.emit("if (!(\{text})) break;")
+            self.indent -= 1
+            self.emit("} while (1);")
+          } else {
+            self.indent -= 1
+            self.emit("} while (\{text});")
+          }
           if other != after { self.emit(self.jump(other)) }
         }
         _ => ()
@@ -541,10 +575,11 @@ fn function_body(f : @ir.Function, views : Views) -> Array[Line] {
     match line {
       Mark(b) =>
         if st.used.contains(b) {
+          // (or before the end of a block)
           let declares = match st.lines.get(k + 1) {
             Some(Text(_, text)) =>
-              ["uint8_t ", "uint16_t ", "int ", "bool "].iter().any(fn(t) { text.has_prefix(t) })
-            _ => false
+              ["uint8_t ", "uint16_t ", "int ", "bool ", "}"].iter().any(fn(t) { text.has_prefix(t) })
+            _ => true
           }
           out.push(Text(0, "\n" + st.label(b) + (if declares { ":;" } else { ":" })))
         }
@@ -604,4 +639,12 @@ fn Emitter::emit_program_c(self : Emitter, program : @ir.Program, preamble : Arr
   for f in program.functions { self.emit_function(program, f, views) }
   self.emit("void cpu_reset_entry(void) { \{program.reset}(); }")
   self.emit("void cpu_nmi_entry(void) { \{program.nmi}(); }")
+  // cartridges with a mapper: the runtime runs the IRQ handler when the
+  // mapper raises it (MMC3)
+  if !program.banks.is_empty() {
+    match program.irq {
+      Some(irq) => self.emit("void cpu_irq_entry(void) { \{irq}(); }")
+      None => self.emit("void cpu_irq_entry(void) { cpu_unresolved_jump(0xfffe); } // never enabled")
+    }
+  }
 }

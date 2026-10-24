@@ -10,16 +10,33 @@
 //   flags   button a=$80 b=$40           (named bits of a variable)
 //   var     $0770 game_mode : game_mode  (a variable of that type)
 //
-// Cartridges with a mapper (MMC1) switch a 16 KiB bank of PRG ROM in at
-// $8000-$BFFF while the last bank stays at $C000-$FFFF. The map names the
-// banks and qualifies addresses in the window with the banks they are in:
+// Cartridges with a mapper switch banks of PRG ROM into windows while
+// others stay fixed (see `Layout`): MMC1 a 16 KiB bank at $8000-$BFFF, the
+// last bank staying at $C000-$FFFF; MMC3 8 KiB banks into two windows, the
+// last two banks fixed (`prg_mode 1` in the map for games that set PRG mode
+// 1, fixing them at $8000 and $E000). The map names the banks and qualifies
+// addresses in the windows with the banks they are in:
 //
 //   bank    1 brinstar                   (a name for bank 1's entries)
+//   bank    0 objects $c000              (and the window it was made for)
+//   bank   13 tiles $a000 with 14         (whose code runs with bank 14 in the
+//                                         other window)
 //   routine 1-5:$80b0 update_objects     (in banks 1 to 5)
 //   table   0:$9560 rooms 40             (in bank 0)
 //   code    $c51f area_inits 6           (6 code addresses, a word each)
 //   code    0-5:$b290 sound_defaults 9 5 (9 code addresses, 5 bytes apart)
 //   code    1-5:$8048 moves 8 2 rts      (addresses minus one, for RTS)
+//
+// Games keep the bank they want in each window in RAM and switch from
+// there; where discovery does not otherwise know the bank mapped in a
+// window, it is the one in its shadow (which the interrupt handlers keep):
+//
+//   shadow  $a000 $0720                  (the bank of the window at $A000)
+//
+// A path the game only takes when something went wrong (its RAM lost, say)
+// can be cut where it starts, which then traps:
+//
+//   trap    $f7a3                        ; optional description
 //
 // An entry in banks becomes one per bank, named after the bank
 // (brinstar_update_objects), and one for the window as fixed-bank code sees
@@ -46,6 +63,7 @@ pub(all) enum MapKind {
   Var
   Io
   Code // a table of code addresses
+  Trap // where execution traps instead of continuing
 } derive(Debug, Eq)
 
 pub(all) struct MapEntry {
@@ -80,6 +98,8 @@ pub(all) struct KnownRom {
 pub(all) struct MapBank {
   index: Int
   name: String
+  window: Int // the window the bank was made for, -1 when not given
+  companion: Int // the bank in the other window whenever this one runs, -1 when not given
   description: String
 } derive(Debug)
 
@@ -88,10 +108,12 @@ pub(all) struct RomMap {
   roms: Array[KnownRom]
   types: Array[MapType]
   banks: Array[MapBank]
+  prg_mode: Int // MMC3's PRG mode the game sets (bit 6 of its bank select)
+  shadows: Array[(Int, Int)] // window address, RAM address
 } derive(Debug)
 
 pub fn RomMap::empty() -> RomMap {
-  { entries: [], roms: [], types: [], banks: [] }
+  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [] }
 }
 
 // The name of a switchable bank, the prefix of its entries.
@@ -116,8 +138,9 @@ fn parse_number(text: String) -> Int raise ImageError {
   try @string.parse_int(digits, base=radix) catch { _ => raise InvalidImage("Invalid number in map: \{text}") }
 }
 
-// `$ADDR`, or `BANK:$ADDR` / `FIRST-LAST:$ADDR` for the switchable window:
-// the address and its banks (empty when not qualified).
+// `$ADDR`, or `BANK:$ADDR` / `FIRST-LAST:$ADDR` for a switchable window:
+// the address and its banks (empty when not qualified). That the address is
+// in a window is checked against the cartridge (`rom_image`).
 fn parse_location(text: String) -> (Int, Array[Int]) raise ImageError {
   guard text.find(":") is Some(i) else { return (parse_number(text), []) }
   let banks_text = text.view(end_offset=i).to_owned()
@@ -130,7 +153,6 @@ fn parse_location(text: String) -> (Int, Array[Int]) raise ImageError {
     }
   }
   if first < 0 || last < first || last > 255 { raise InvalidImage("Invalid banks in map: \{text}") }
-  if address < 0x8000 || address >= 0xc000 { raise InvalidImage("Only addresses in the switchable window ($8000-$BFFF) have banks: \{text}") }
   (address, Array::makei(last - first + 1, fn(k) { first + k }))
 }
 
@@ -140,6 +162,8 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
   let pending: Array[(MapKind, Int, String, Int, String, Int, Int, Array[Int])] = []
   let types: Array[MapType] = []
   let banks: Array[MapBank] = []
+  let mut prg_mode = 0
+  let shadows: Array[(Int, Int)] = []
   let names: Set[String] = Set([])
   fn claim(name: String) raise ImageError {
     if names.contains(name) { raise InvalidImage("Duplicate map name: \{name}") }
@@ -179,12 +203,44 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       types.push({ name, flags: fields[0] == "flags", members, description })
       continue
     }
-    // bank N NAME ; description
+    // prg_mode N: the MMC3 PRG mode the game sets
+    if fields[0] == "prg_mode" {
+      if fields.length() != 2 || (fields[1] != "0" && fields[1] != "1") { raise InvalidImage("Map prg_mode line needs 0 or 1: \{line}") }
+      prg_mode = parse_number(fields[1])
+      continue
+    }
+    // shadow $WINDOW $RAM: the RAM byte with the bank of a window
+    if fields[0] == "shadow" {
+      if fields.length() != 3 { raise InvalidImage("Map shadow line needs a window and a RAM address: \{line}") }
+      let ram = parse_number(fields[2])
+      if ram >= 0x800 || (ram >= 0x100 && ram < 0x200) { raise InvalidImage("A shadow is internal RAM outside the stack page: \{line}") }
+      shadows.push((parse_number(fields[1]), ram))
+      continue
+    }
+    // bank N NAME [$WINDOW] ; description
     if fields[0] == "bank" {
-      if fields.length() != 3 { raise InvalidImage("Map bank line needs a bank number and a name: \{line}") }
+      // bank N name [$window [with M]]
+      let paired = fields.length() == 6 && fields[4] == "with"
+      if fields.length() != 3 && fields.length() != 4 && !paired { raise InvalidImage("Map bank line needs a bank number and a name: \{line}") }
       let index = parse_number(fields[1])
       if banks.iter().any(fn(b) { b.index == index || b.name == fields[2] }) { raise InvalidImage("Duplicate map bank: \{line}") }
-      banks.push({ index, name: fields[2], description })
+      let window = if fields.length() >= 4 { parse_number(fields[3]) } else { -1 }
+      let companion = if paired { parse_number(fields[5]) } else { -1 }
+      banks.push({ index, name: fields[2], window, companion, description })
+      continue
+    }
+    // trap [BANK:]$ADDR ; description
+    if fields[0] == "trap" {
+      if fields.length() != 2 { raise InvalidImage("Map trap line needs an address: \{line}") }
+      let (address, in_banks) = parse_location(fields[1])
+      let name = "__trap__" + fields[1]
+      if in_banks.is_empty() {
+        entries.push({ kind: Trap, address, name, length: 1, type_name: "", description, bank: -1, stride: 0, adjust: 0 })
+      } else {
+        for bank in in_banks {
+          entries.push({ kind: Trap, address, name: name + "_" + bank.to_string(), length: 1, type_name: "", description, bank, stride: 0, adjust: 0 })
+        }
+      }
       continue
     }
     if fields.length() < 3 { raise InvalidImage("Map line needs a kind, an address and a name: \{line}") }
@@ -244,7 +300,7 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
   for item in pending {
     let (kind, address, name, length, description, stride, adjust, in_banks) = item
     for bank in in_banks {
-      let prefix = { entries: [], roms: [], types: [], banks }.bank_name(bank)
+      let prefix = { ..RomMap::empty(), banks }.bank_name(bank)
       let prefix = if kind == Routine { prefix } else { prefix.to_upper() }
       entries.push({ kind, address, name: prefix + "_" + name, length, type_name: "", description, bank, stride, adjust })
     }
@@ -259,13 +315,13 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       raise InvalidImage("Unknown map type: \{entry.type_name}")
     }
   }
-  { entries, roms, types, banks }
+  { entries, roms, types, banks, prg_mode, shadows }
 }
 
 pub(all) struct Cartridge {
   prg: Array[Int]
   chr: Array[Int] // empty: 8 KiB of CHR RAM
-  mapper: Int // 0: NROM, 1: MMC1
+  mapper: Int // 0: NROM, 1: MMC1, 4: MMC3
 } derive(Debug)
 
 // MMC1 boards switch 16 KiB of PRG ROM at $8000 with the last bank fixed at
@@ -278,6 +334,16 @@ fn check_mmc1(prg_size: Int, chr_size: Int) -> Unit raise ImageError {
   if chr_size != 0 && chr_size != 8192 { raise InvalidImage("Only MMC1 boards with CHR RAM or 8 KiB of CHR ROM are supported") }
 }
 
+// MMC3 boards switch 8 KiB banks of PRG ROM and 1 or 2 KiB banks of CHR ROM
+// (or have CHR RAM).
+fn check_mmc3(prg_size: Int, chr_size: Int) -> Unit raise ImageError {
+  let banks = prg_size / 8192
+  if prg_size % 8192 != 0 || banks < 4 || banks > 64 || (banks & (banks - 1)) != 0 {
+    raise InvalidImage("MMC3 needs 32 to 512 KiB of PRG ROM in 8 KiB banks")
+  }
+  if chr_size > 262144 || chr_size % 1024 != 0 { raise InvalidImage("MMC3 has up to 256 KiB of CHR ROM in 1 KiB banks") }
+}
+
 pub(all) struct Dump {
   cartridge: Cartridge
   sha256: String // of PRG and CHR, without a header
@@ -287,7 +353,8 @@ pub(all) struct Dump {
 // A cartridge from an iNES file, or from a raw dump of the cartridge's ROMs
 // (PRG then CHR, no header). A raw dump is split by the sizes of a dump the
 // map knows of the same length, or as 16 or 32 KiB of PRG and 8 KiB of CHR;
-// more than 32 KiB of PRG ROM is an MMC1 board.
+// more than 32 KiB of PRG ROM is an MMC1 board, or MMC3 with more than 8 KiB
+// of CHR ROM.
 pub fn load_dump(bytes: Bytes, map: RomMap) -> Dump raise ImageError {
   let headered = bytes.length() >= 4 && bytes[0] == b'N' && bytes[1] == b'E' && bytes[2] == b'S' && bytes[3] == b'\x1a'
   let cartridge = if headered {
@@ -303,9 +370,11 @@ pub fn load_dump(bytes: Bytes, map: RomMap) -> Dump raise ImageError {
           raise InvalidImage("Not an iNES file, nor a raw NROM dump (24 or 40 KiB): \{size} bytes")
         }
     }
-    let mapper = if prg_size > 32768 { 1 } else { 0 }
+    let mapper = if prg_size <= 32768 { 0 } else if size - prg_size > 8192 { 4 } else { 1 }
     if mapper == 1 {
       check_mmc1(prg_size, size - prg_size)
+    } else if mapper == 4 {
+      check_mmc3(prg_size, size - prg_size)
     } else if prg_size != 16384 && prg_size != 32768 {
       raise InvalidImage("NROM needs 16 or 32 KiB of PRG ROM")
     }
@@ -332,8 +401,8 @@ pub fn RomMap::warning(self: RomMap, dump: Dump) -> String? {
   Some("Unrecognised ROM (SHA-256 of PRG and CHR \{dump.sha256}). The map was written for \{expected}: names may not match and the game may not work.")
 }
 
-// iNES file with mapper 0 (NROM: 16 or 32 KiB of PRG ROM, 8 KiB of CHR ROM)
-// or 1 (MMC1, see check_mmc1).
+// iNES file with mapper 0 (NROM: 16 or 32 KiB of PRG ROM, 8 KiB of CHR ROM),
+// 1 (MMC1, see check_mmc1) or 4 (MMC3, see check_mmc3).
 pub fn load_ines(bytes: Bytes) -> Cartridge raise ImageError {
   if bytes.length() < 16 || bytes[0] != b'N' || bytes[1] != b'E' || bytes[2] != b'S' || bytes[3] != b'\x1a' {
     raise InvalidImage("Not an iNES file")
@@ -347,7 +416,8 @@ pub fn load_ines(bytes: Bytes) -> Cartridge raise ImageError {
   match mapper {
     0 => if prg_size != 16384 && prg_size != 32768 { raise InvalidImage("NROM needs 16 or 32 KiB of PRG ROM") }
     1 => check_mmc1(prg_size, chr_size)
-    _ => raise InvalidImage("Only mappers 0 (NROM) and 1 (MMC1) are supported, not \{mapper}")
+    4 => check_mmc3(prg_size, chr_size)
+    _ => raise InvalidImage("Only mappers 0 (NROM), 1 (MMC1) and 4 (MMC3) are supported, not \{mapper}")
   }
   let start = 16 + (if (bytes[6].to_int() & 4) != 0 { 512 } else { 0 })
   if bytes.length() < start + prg_size + chr_size { raise InvalidImage("Truncated iNES file") }
@@ -364,31 +434,85 @@ fn byte_const(value: Int) -> @parse.SourceExpr {
 // directives (they bound inline jump tables), and variable definitions.
 pub fn rom_image(cartridge: Cartridge, map: RomMap) -> Image raise ImageError {
   let banked = cartridge.mapper != 0
-  let count = cartridge.prg.length() / 16384
-  let origin = if banked || cartridge.prg.length() == 16384 { 0xc000 } else { 0x8000 }
-  // with banks, the last is fixed at $C000 and any can be switched in
-  let bytes = if banked { Array::makei(16384, fn(i) { cartridge.prg[(count - 1) * 16384 + i] }) } else { cartridge.prg.copy() }
+  let layout = match cartridge.mapper {
+    1 => Layout::mmc1(cartridge.prg.length() / 0x4000)
+    4 => Layout::mmc3(cartridge.prg.length() / 0x2000, map.prg_mode)
+    _ => Layout::none()
+  }
+  set_layout(layout)
+  let size = layout.bank_size
+  let count = if banked { cartridge.prg.length() / size } else { 0 }
+  // with banks, the fixed ones from the lowest to $FFFF (the windows between
+  // them hold no bytes of their own) and any can be switched in
+  let origin = if !banked {
+    if cartridge.prg.length() == 16384 { 0xc000 } else { 0x8000 }
+  } else {
+    layout.fixed.fold(init=0x10000, fn(lowest, region) { if region.0 < lowest { region.0 } else { lowest } })
+  }
+  let bytes = if banked {
+    let bytes = Array::make(0x10000 - origin, 0)
+    for region in layout.fixed {
+      for i in 0..<size { bytes[region.0 - origin + i] = cartridge.prg[region.1 * size + i] }
+    }
+    bytes
+  } else { cartridge.prg.copy() }
   let banks : Banks = if banked {
     {
-      contents: Array::makei(count, fn(k) { Array::makei(16384, fn(i) { cartridge.prg[k * 16384 + i] }) }),
+      contents: Array::makei(count, fn(k) { Array::makei(size, fn(i) { cartridge.prg[k * size + i] }) }),
+      homes: Array::make(count, -1),
+      companions: Array::make(count, -1),
       names: Array::makei(count, fn(k) { map.bank_name(k) }),
       windows: Map([]),
       window_names: Map([]),
       code: [],
+      shadows: [],
     }
   } else { Banks::none() }
+  for shadow in map.shadows {
+    let window = window_of(shadow.0)
+    if window < 0 || layout.windows[window] != shadow.0 { raise InvalidImage("Shadow of \{show_pc(shadow.0)}, which is not a window") }
+    banks.shadows.push((window, shadow.1))
+  }
+  // each bank's window: as the map says, and from the addresses it gives
+  let homes: Map[Int, Int] = Map([])
+  for b in map.banks {
+    if b.window < 0 { continue }
+    if !banked || b.index >= count { raise InvalidImage("Map bank \{b.index}, which the cartridge does not have") }
+    let window = window_of(b.window)
+    if window < 0 || layout.windows[window] != b.window { raise InvalidImage("Bank \{b.index} is for \{show_pc(b.window)}, which is not a window") }
+    homes[b.index] = window
+    if b.companion >= 0 {
+      if b.companion >= count || layout.windows.length() != 2 { raise InvalidImage("Bank \{b.index} runs with bank \{b.companion}, which needs two windows and a bank the cartridge has") }
+      banks.companions[b.index] = b.companion
+    }
+  }
+  for entry in map.entries {
+    if entry.bank < 0 { continue }
+    if !banked || entry.bank >= count {
+      raise InvalidImage("\{entry.name} is in bank \{entry.bank}, which the cartridge does not have")
+    }
+    let window = window_of(entry.address)
+    if window < 0 {
+      raise InvalidImage("\{entry.name}: only addresses in switchable windows have banks (\{layout.windows.map(show_pc).join(", ")}, \{size / 1024} KiB each)")
+    }
+    match homes.get(entry.bank) {
+      Some(other) if other != window =>
+        raise InvalidImage("\{entry.name}: bank \{entry.bank} is named at \{show_pc(layout.windows[other])} and at \{show_pc(layout.windows[window])}")
+      _ => homes[entry.bank] = window
+    }
+  }
+  for bank, window in homes { banks.homes[bank] = window }
   let symbols: Map[String, Int] = Map([])
   let items: Array[(Int, @parse.SourceItem)] = []
   let named_data = []
   for entry in map.entries {
-    if entry.bank >= 0 && (!banked || entry.bank >= count) {
-      raise InvalidImage("\{entry.name} is in bank \{entry.bank}, which the cartridge does not have")
-    }
     let location = if entry.bank >= 0 { bank_location(entry.bank, entry.address) } else { entry.address }
     // the window as fixed-bank code sees it holds no bytes of its own
     let window = banked && entry.bank < 0 && in_window(entry.address)
     match entry.kind {
       Var | Io => items.push((-1, Define(name=entry.name, rhs=byte_const(entry.address))))
+      // traps like data: execution never decodes it
+      Trap => named_data.push((location, 1))
       Routine => {
         if entry.bank >= 0 {
           if !banks.windows.contains(entry.address) { banks.windows[entry.address] = [] }
@@ -404,8 +528,9 @@ pub fn rom_image(cartridge: Cartridge, map: RomMap) -> Image raise ImageError {
       }
       Table | Code if window => items.push((-1, Define(name=entry.name, rhs=byte_const(entry.address))))
       Table | Code => {
-        let (start, size) = if entry.bank >= 0 { (0x8000, 16384) } else { (origin, bytes.length()) }
-        if entry.address < start || entry.address + entry.length > start + size {
+        let (start, extent) = if entry.bank >= 0 { (layout.windows[window_of(entry.address)], size) } else { (origin, bytes.length()) }
+        if entry.address < start || entry.address + entry.length > start + extent ||
+          (banked && entry.bank < 0 && (fixed_bank(entry.address) < 0 || fixed_bank(entry.address + entry.length - 1) < 0)) {
           raise InvalidImage("Table \{entry.name} is outside the PRG image")
         }
         let data = if entry.bank >= 0 { banks.contents[entry.bank] } else { bytes }
@@ -415,7 +540,16 @@ pub fn rom_image(cartridge: Cartridge, map: RomMap) -> Image raise ImageError {
         items.push((location, Directive(name="db", args~)))
         named_data.push((location, entry.length))
         for address in entry.code_addresses() {
-          banks.code.push((if entry.bank >= 0 { bank_location(entry.bank, address) } else { address }, entry.adjust))
+          banks.code.push((if entry.bank >= 0 { bank_location(entry.bank, address) } else { address }, entry.adjust, entry.address))
+          // a code address of a bank in its window: the bank has a routine
+          // there, which code outside the window reaches as mapped
+          if entry.bank >= 0 {
+            let target = (data[address - start] | (data[address - start + 1] << 8)) + entry.adjust
+            if window_of(target) == window_of(entry.address) {
+              if !banks.windows.contains(target) { banks.windows[target] = [] }
+              if !banks.windows[target].contains(entry.bank) { banks.windows[target].push(entry.bank) }
+            }
+          }
         }
       }
     }
@@ -425,7 +559,7 @@ pub fn rom_image(cartridge: Cartridge, map: RomMap) -> Image raise ImageError {
   order.sort_by(fn(i, j) { if items[i].0 != items[j].0 { items[i].0 - items[j].0 } else { i - j } })
   let source = order.map(fn(i) { items[i].1 })
   let addresses = order.map(fn(i) { if items[i].0 < 0 { 0 } else { items[i].0 } })
-  { origin, bytes, symbols, addresses, source, banks, data: named_data }
+  Image::new(origin, bytes, symbols, addresses, source, banks, named_data)
 }
 
 priv struct Namer {
@@ -453,9 +587,10 @@ fn offset_expr(name: String, offset: Int) -> @parse.SourceExpr {
 // starts there, plain accesses a scalar; otherwise the nearest array that
 // contains the address, then the variable it falls after. An indexed read
 // just before a table is that table with the index starting at 1 or more.
-// Code in a bank reads the window's tables of its bank (`bank`; -1 for the
-// fixed bank, which reads the window as mapped).
-fn Namer::name(self: Namer, address: Int, size: @parse.ConstantSize, indexed~: Bool, bank~: Int = -1) -> @parse.SourceExpr {
+// Code in a bank reads the tables of its bank in its window (`at` is the
+// reading instruction); other code reads a window as mapped.
+fn Namer::name(self: Namer, address: Int, size: @parse.ConstantSize, indexed~: Bool, at~: Int = 0) -> @parse.SourceExpr {
+  let bank = bank_of(rebase(at, address)).unwrap_or(-1)
   let tables = self.tables.filter(fn(t) {
     t.bank == (if self.banked && in_window(address) { bank } else { -1 })
   })
@@ -494,29 +629,22 @@ fn Namer::name(self: Namer, address: Int, size: @parse.ConstantSize, indexed~: B
   }
 }
 
-fn rom_mode(image: Image, namer: Namer, inst: Instruction) -> @parse.SourceAddressingMode raise ImageError {
+fn rom_mode(image: Image, namer: Namer, inst: Instruction) -> @parse.SourceAddressingMode {
   let size: @parse.ConstantSize = if width(inst.mode) == 2 { Byte } else { Word }
-  let bank = bank_of(inst.pc).unwrap_or(-1)
-  // Lowering picks zero-page forms by value, so an absolute encoding of a
-  // zero-page address would change indexed wrap-around.
-  let absolute = inst.mode == "abs" || inst.mode == "absx" || inst.mode == "absy"
-  if absolute && inst.arg < 256 && inst.op != JMP && inst.op != JSR {
-    let zp = match inst.mode { "abs" => "zp"; "absx" => "zpx"; _ => "zpy" }
-    if encoding(inst.op, zp) != None {
-      raise InvalidImage("Absolute encoding of zero-page address at \{show_pc(inst.pc)} is not supported")
-    }
-  }
+  let at = inst.pc
+  // (an absolute encoding of a zero-page address stays absolute: lowering
+  // reads the decoded instruction's mode)
   match inst.mode {
     "imp" | "acc" | "imm" | "rel" => source_mode(image, inst)
     "zp" | "abs" =>
       if inst.op == JMP || inst.op == JSR { source_mode(image, inst) }
-      else { AbsoluteOrZeroPage(addr=namer.name(inst.arg, size, indexed=false, bank~)) }
-    "zpx" | "absx" => AbsoluteOrZeroPageX(addr=namer.name(inst.arg, size, indexed=true, bank~))
-    "zpy" | "absy" => AbsoluteOrZeroPageY(addr=namer.name(inst.arg, size, indexed=true, bank~))
+      else { AbsoluteOrZeroPage(addr=namer.name(inst.arg, size, indexed=false, at~)) }
+    "zpx" | "absx" => AbsoluteOrZeroPageX(addr=namer.name(inst.arg, size, indexed=true, at~))
+    "zpy" | "absy" => AbsoluteOrZeroPageY(addr=namer.name(inst.arg, size, indexed=true, at~))
     // pointers: the variable holding the address
     "indx" => IndexedIndirect(addr=namer.name(inst.arg, size, indexed=true))
     "indy" => IndirectIndexed(addr=namer.name(inst.arg, size, indexed=false))
-    "ind" => Indirect(addr=namer.name(inst.arg, size, indexed=false, bank~))
+    "ind" => Indirect(addr=namer.name(inst.arg, size, indexed=false, at~))
     _ => abort("Invalid decoded addressing mode")
   }
 }

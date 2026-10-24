@@ -37,9 +37,12 @@ struct Hit {
     int layer;
 };
 
+uniform bool u_level_known; // SMB's materials; else the background is solid, behind the sprites
+
 // The depths of a background material's voxels.
 bool background_slab(int material, out vec2 range) {
-    if (material == M_SOLID || material == M_QUESTION || material == M_LAVA) range = vec2(-8.0, 8.0);
+    if (material == M_SOLID && !u_level_known) range = vec2(3.5, 11.0);
+    else if (material == M_SOLID || material == M_QUESTION || material == M_LAVA) range = vec2(-8.0, 8.0);
     else if (material == M_COIN) range = vec2(-2.0, 2.0);
     else if (material == M_CLIMB) range = vec2(-1.0, 1.0);
     else if (material == M_SCENERY) range = vec2(8.0, 11.0);
@@ -84,7 +87,7 @@ Hit trace(vec3 origin, vec3 direction, float t_max) {
         float z = origin.z + direction.z * t;
         if ((direction.z >= 0.0 && z > BACK) || (direction.z <= 0.0 && z < FRONT)) break;
         float t_exit = min(min(next.x, next.y), t_max);
-        ivec2 at = cell + ivec2(u_origin, 0);
+        ivec2 at = cell + u_origin;
         bool inside = at.x >= 0 && at.x < SCENE_WIDTH && cell.y >= 0 && cell.y < 240;
         if (inside) {
             int background = material_of(texelFetch(u_background, at, 0));
@@ -173,7 +176,7 @@ vec4 side_color(ivec2 at, ivec2 inward, int layer) {
 
 void main() {
     vec2 screen = vec2(gl_FragCoord.x, 240.0 * u_scale - gl_FragCoord.y) / u_scale; // y down
-    ivec2 pixel = ivec2(screen) + ivec2(u_origin, 0);
+    ivec2 pixel = ivec2(screen) + u_origin;
     vec4 status_bar = texelFetch(u_background, pixel, 0);
     if (material_of(status_bar) == M_HUD) {
         vec4 sprite = texelFetch(u_sprite, pixel, 0);
@@ -184,11 +187,12 @@ void main() {
     vec3 origin = vec3(screen + VIEW.xy * NEAR, NEAR);
     Hit hit = trace(origin, VIEW, BACK - NEAR);
     if (hit.layer == NONE) {
-        o_color = vec4((u_mask & 0x08) != 0 ? color(u_palette[0]) : vec3(0.0), 1.0);
+        select_line(clamp(int(screen.y), 0, 239));
+        o_color = vec4((line_mask & 0x08) != 0 ? color(u_palette[0]) : vec3(0.0), 1.0);
         return;
     }
 
-    ivec2 at = hit.cell + ivec2(u_origin, 0);
+    ivec2 at = hit.cell + u_origin;
     vec4 layer = layer_at(at, hit.layer);
     int material = material_of(layer);
     if (hit.normal.z == 0.0) layer = side_color(at, -ivec2(hit.normal.xy), hit.layer);

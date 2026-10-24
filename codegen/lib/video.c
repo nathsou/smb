@@ -3,7 +3,8 @@
 #include <stddef.h>
 
 Video video;
-uint8_t chr_rom[CHR_ROM_SIZE];
+uint8_t chr_rom[CHR_MAX_SIZE];
+uint32_t chr_size = CHR_ROM_SIZE;
 bool chr_ram;
 
 // Byte offsets of the Video fields, for hosts that read it from memory (web).
@@ -11,12 +12,24 @@ const uint32_t video_layout[] = {
     offsetof(Video, nametable), offsetof(Video, palette), offsetof(Video, oam),
     offsetof(Video, ctrl), offsetof(Video, mask), offsetof(Video, scroll_x),
     offsetof(Video, status_bar), offsetof(Video, scroll_y), offsetof(Video, mirroring),
-    offsetof(Video, chr_version),
+    offsetof(Video, chr_version), offsetof(Video, chr_banks), offsetof(Video, split_count),
+    offsetof(Video, splits), sizeof(VideoSplit),
 };
 
-void video_init(const uint8_t *chr) {
-    memcpy(chr_rom, chr, CHR_ROM_SIZE);
+void video_init_chr(uint32_t size) {
+    chr_size = size < CHR_ROM_SIZE ? CHR_ROM_SIZE : size;
+    for (int i = 0; i < 8; i++) video.chr_banks[i] = (uint8_t)i;
+    video.split_count = 0;
     video.chr_version++;
+}
+
+void video_init(const uint8_t *chr) {
+    if (chr != chr_rom) memcpy(chr_rom, chr, CHR_ROM_SIZE);
+    video_init_chr(CHR_ROM_SIZE);
+}
+
+unsigned video_chr_banks(void) {
+    return chr_size / 0x400;
 }
 
 uint16_t video_nametable_offset(uint16_t addr) {
@@ -41,7 +54,7 @@ static uint8_t *palette_entry(uint16_t addr) {
 }
 
 uint8_t video_read(uint16_t addr) {
-    if (addr < 0x2000) return chr_rom[addr];
+    if (addr < 0x2000) return video_pattern(video.chr_banks, addr);
     if (addr < 0x3f00) return video.nametable[video_nametable_offset(addr)];
     if (addr < 0x4000) return *palette_entry(addr);
     return 0;
@@ -49,8 +62,9 @@ uint8_t video_read(uint16_t addr) {
 
 void video_write(uint16_t addr, uint8_t value) {
     if (addr < 0x2000) {
-        if (chr_ram && chr_rom[addr] != value) {
-            chr_rom[addr] = value;
+        uint32_t at = ((uint32_t)video.chr_banks[addr >> 10] << 10) | (addr & 0x3ff);
+        if (chr_ram && chr_rom[at] != value) {
+            chr_rom[at] = value;
             video.chr_version++;
         }
     } else if (addr < 0x3f00) {

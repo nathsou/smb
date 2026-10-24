@@ -79,8 +79,9 @@ def waits(rom, rom_map):
     """The wait loops the recompiler finds, as the interpreter takes them."""
     printed = subprocess.run(["moon", "run", "src/inspect", "--", "--rom", rom, "--map", rom_map],
                              cwd=ROOT, check=True, capture_output=True, text=True).stdout
-    found = re.findall(r"Wait loop at \$([0-9a-f]+), back from \$([0-9a-f]+)", printed)
-    return ",".join(f"{back}:{start}" for start, back in found)
+    # BANK:FROM:TO for a wait in a bank
+    found = re.findall(r"Wait loop at (?:\d+:)?\$([0-9a-f]+), back from (?:(\d+):)?\$([0-9a-f]+)", printed)
+    return ",".join((f"{bank}:" if bank else "") + f"{back}:{start}" for start, bank, back in found)
 
 
 def check_banked(frames=200):
@@ -120,7 +121,7 @@ def check_banked(frames=200):
             run("moon", "run", "src/main", "--", "--rom", rom, "--map", rom_map,
                 "--output", str(output / "unused"), "--wasm", str(game), *variant)
             run("node", "tests/web/fixture.mjs", str(runtime), str(game), rom)
-            run("node", "tests/web/replay_cartridge.mjs", "web/runtime-mmc1.wasm", str(game), rom,
+            run("node", "tests/web/replay_cartridge.mjs", "web/runtime-cartridge.wasm", str(game), rom,
                 "/dev/null", trace)
 
 
@@ -129,5 +130,5 @@ if __name__ == "__main__":
     check("tests/nrom128.asm", "tests/nrom128.c", rom_map="tests/nrom128.map")
     print("Independent NROM-128 program passed from its iNES image")
     check("tests/semantics.asm", "tests/semantics.c")
-    run("make", "runtime-mmc1-wasm")
+    run("make", "runtime-cartridge-wasm")
     check_banked()

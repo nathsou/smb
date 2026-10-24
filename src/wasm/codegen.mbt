@@ -8,12 +8,14 @@
 // - the addresses of the runtime's machine state as i32 globals: `ram`
 //   (2 KiB), `data` (the PRG ROM: 32 KiB, or every bank with a mapper), and
 //   one byte per register and flag under the C names (`a`, `carry_flag`,
-//   ...); with a mapper, `wram` (8 KiB) and `prg_window` (a pointer to the
-//   bank mapped at $8000); the runtime state the code reads (`Runtime`);
+//   ...); with a mapper, `wram` (8 KiB) and `prg_slots` (the offsets in
+//   `data` of the 8 KiB mapped at $8000, $A000, $C000 and $E000); the
+//   runtime state the code reads (`Runtime`);
 // - the runtime functions it calls: bus access, APU and joypad writes, the
 //   idle yield and trap, and the native routines.
 //
-// It exports every routine, and `cpu_reset_entry` / `cpu_nmi_entry`.
+// It exports every routine, and `cpu_reset_entry` / `cpu_nmi_entry` (and
+// `cpu_irq_entry` when code enables interrupts).
 //
 // Control flow is structured with the algorithm of Ramsey, "Beyond
 // Relooper" (ICFP 2022): on a reducible CFG, each block is emitted once under
@@ -49,7 +51,8 @@ fn runtime_type(name : String) -> Int {
   match name {
     "read_byte" => 3
     "dynamic_ram_write" | "apu_write" | "ppu_bus_write" | "mapper_write" | "cpu_returned" => 2
-    "write_joypad1" | "write_joypad2" | "cpu_yield" | "cpu_unresolved_jump" | "ppu_bus_oam_dma" | "cpu_suspend" => 1
+    "write_joypad1" | "write_joypad2" | "cpu_yield" | "cpu_unresolved_jump" | "ppu_bus_oam_dma" | "cpu_suspend" |
+    "mapper_prg_mode" => 1
     _ => 0
   }
 }
@@ -71,7 +74,7 @@ priv struct Gen {
   read : Int
   // with a mapper: where the fixed bank starts in `data`
   banked : Bool
-  fixed_base : Int
+  prg_layout : @image.Layout
 }
 
 fn var_slot(v : @ir.Var) -> Int {
@@ -200,44 +203,66 @@ fn Gen::wram_address(self : Gen, addr : @ir.Expr) -> Int raise WasmError {
   }
 }
 
-// Pushes `addr - base` plus the value of the runtime pointer `name` (as an
-// address); returns the memory offset.
-fn Gen::relative(self : Gen, name : String, addr : @ir.Expr, base : Int) -> Int raise WasmError {
+// The data offset of the fixed bank at `address`, as that address's offset
+// in it subtracted (so that adding the address gives the byte), if fixed.
+fn Gen::fixed_offset(self : Gen, address : Int) -> Int? {
+  let size = self.prg_layout.bank_size
+  match self.prg_layout.fixed.iter().find_first(fn(r) { address >= r.0 && address < r.0 + size }) {
+    Some(r) => Some(r.1 * size - r.0)
+    None => None
+  }
+}
+
+// Pushes the address of the PRG byte that `addr` ($8000-$FFFF) maps to at
+// run time, through the runtime's `prg_slots`; returns the memory offset.
+fn Gen::mapped_address(self : Gen, addr : @ir.Expr) -> Int raise WasmError {
+  let r = addr.range(self.f.temps)
   let (rest, offset) = split_offset(addr)
-  let offset = if offset >= base {
-    offset - base
-  } else {
-    // the constant part does not reach the base: subtract it at run time
-    let at = self.base(name, None)
+  let slot = if r.lo >= 0x8000 && r.hi <= 0xffff && (r.lo >> 13) == (r.hi >> 13) { (r.lo >> 13) & 3 } else { -1 }
+  // prg_slots[slot], then the offset in the 8 KiB, then `data`
+  if slot >= 0 {
+    let at = self.base("prg_slots", None)
     self.code.byte(I32_LOAD)
     self.code.u32(2)
-    self.code.u32(at)
-    self.expr(addr)
-    self.const_(base)
-    self.op(I32_SUB)
+    self.code.u32(at + slot * 4)
+    let start = 0x8000 + slot * 0x2000
+    let within = if offset >= start && offset < start + 0x2000 {
+      match rest {
+        Some(e) => {
+          self.expr(e)
+          self.op(I32_ADD)
+        }
+        None => ()
+      }
+      offset - start
+    } else {
+      self.expr(Binary(And, addr, Const(0x1fff)))
+      self.op(I32_ADD)
+      0
+    }
+    let data = self.base("data", None)
     self.op(I32_ADD)
-    return 0
+    return data + within
   }
-  let at = self.base(name, None)
+  let at = self.base("prg_slots", Some(Binary(Shl, Binary(And, Binary(Shr, addr, Const(13)), Const(3)), Const(2))))
   self.code.byte(I32_LOAD)
   self.code.u32(2)
   self.code.u32(at)
-  if rest is Some(e) {
-    self.expr(e)
-    self.op(I32_ADD)
-  }
-  offset
+  self.expr(Binary(And, addr, Const(0x1fff)))
+  self.op(I32_ADD)
+  let data = self.base("data", None)
+  self.op(I32_ADD)
+  data
 }
 
 fn Gen::rom_address(self : Gen, addr : @ir.Expr) -> Int raise WasmError {
   let r = addr.range(self.f.temps)
   let (rest, offset) = split_offset(addr)
   if self.banked {
-    // the fixed bank, at $C000
-    return if r.lo >= 0xc000 && r.hi <= 0xffff && offset >= 0xc000 {
-      self.base("data", rest) + offset - 0xc000 + self.fixed_base
-    } else {
-      self.base("data", Some(Binary(And, addr, Const(0x3fff)))) + self.fixed_base
+    // a fixed bank: a constant offset when the address stays in one
+    return match (self.fixed_offset(r.lo), self.fixed_offset(r.hi), self.fixed_offset(offset)) {
+      (Some(lo), Some(hi), Some(base)) if lo == hi && lo == base => self.base("data", rest) + offset + base
+      _ => self.mapped_address(addr)
     }
   }
   if r.lo >= 0x8000 && r.hi <= 0xffff && offset >= 0x8000 {
@@ -296,17 +321,20 @@ fn Gen::expr(self : Gen, e : @ir.Expr) -> Unit raise WasmError {
       self.load8(offset)
     }
     Load(Bank(bank), a) => {
-      // proven inside the window: bank `bank`'s bytes
+      // proven inside a window: bank `bank`'s bytes
       let (rest, offset) = split_offset(a)
-      let at = if offset >= 0x8000 {
-        self.base("data", rest) + bank * 0x4000 + offset - 0x8000
+      let size = self.prg_layout.bank_size
+      let window = @image.window_of(a.range(self.f.temps).lo)
+      let start = if window >= 0 { self.prg_layout.windows[window] } else { 0x8000 }
+      let at = if offset >= start {
+        self.base("data", rest) + bank * size + offset - start
       } else {
-        self.base("data", Some(Binary(Sub, a, Const(0x8000)))) + bank * 0x4000
+        self.base("data", Some(Binary(Sub, a, Const(start)))) + bank * size
       }
       self.load8(at)
     }
     Load(Window, a) => {
-      let offset = self.relative("prg_window", a, 0x8000)
+      let offset = self.mapped_address(a)
       self.load8(offset)
     }
     Load(Wram, a) => {
@@ -314,25 +342,17 @@ fn Gen::expr(self : Gen, e : @ir.Expr) -> Unit raise WasmError {
       self.load8(offset)
     }
     Load(Bus, a) if self.banked => {
-      // the fixed bank, the bank mapped, and RAM directly; the runtime's
-      // read_byte for everything else
+      // the banks mapped, and RAM directly; the runtime's read_byte for
+      // everything else
       self.masked(a, 0xffff)
       self.code.byte(LOCAL_TEE)
       self.code.u32(self.scratch)
-      self.const_(0xc000)
-      self.op(I32_GE_S)
-      self.op(IF)
-      self.code.byte(I32)
-      let rom = self.base("data", Some(Binary(And, Temp(-1), Const(0x3fff))))
-      self.load8(rom + self.fixed_base)
-      self.op(ELSE)
-      self.local_get(self.scratch)
       self.const_(0x8000)
       self.op(I32_GE_S)
       self.op(IF)
       self.code.byte(I32)
-      let window = self.relative("prg_window", Binary(And, Temp(-1), Const(0x3fff)), 0)
-      self.load8(window)
+      let mapped = self.mapped_address(Temp(-1))
+      self.load8(mapped)
       self.op(ELSE)
       self.local_get(self.scratch)
       self.const_(0x2000)
@@ -344,7 +364,6 @@ fn Gen::expr(self : Gen, e : @ir.Expr) -> Unit raise WasmError {
       self.op(ELSE)
       self.local_get(self.scratch)
       self.call("read_byte")
-      self.op(END)
       self.op(END)
       self.op(END)
     }
@@ -844,7 +863,7 @@ pub fn emit(
   for v in @ir.all_vars { objects.push(v.c_name()) }
   // with a mapper: the cartridge's RAM, the bank mapped, the runtime state
   let banked = !program.banks.is_empty()
-  if banked { objects.push("wram"); objects.push("prg_window") }
+  if banked { objects.push("wram"); objects.push("prg_slots") }
   fn note_runtime(e : @ir.Expr) -> Unit {
     match e {
       Runtime(name) => if !objects.contains(name) { objects.push(name) }
@@ -884,7 +903,7 @@ pub fn emit(
   for f in program.functions {
     if f.native { natives.add(f.name) }
   }
-  let reached = [program.reset, program.nmi]
+  let reached = program.roots()
   for f in generated {
     for block in f.blocks {
       for s in block.stmts {
@@ -962,6 +981,7 @@ pub fn emit(
   }
   exports.push(("cpu_reset_entry", index_of(program.reset)))
   exports.push(("cpu_nmi_entry", index_of(program.nmi)))
+  if program.irq is Some(irq) { exports.push(("cpu_irq_entry", index_of(irq))) }
   let section = Buf::new()
   section.u32(exports.length())
   for e in exports {
@@ -1000,7 +1020,7 @@ pub fn emit(
       assigned,
       read,
       banked,
-      fixed_base: if banked { (program.banks.length() - 1) * 0x4000 } else { 0 },
+      prg_layout: program.layout,
     }
     // the variables live on entry start in their locals
     gen.reload(gen.block_in[f.entry])

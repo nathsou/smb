@@ -110,9 +110,9 @@ fn pointer(p : Expr) -> Expr {
 }
 
 // An absolute address, classified by the range of values it can take.
-// With a mapper, ROM is the fixed bank from $C000; the window is the
-// bank of the code reading it (`at`), or the bank mapped when fixed-bank
-// code reads it; $6000-$7FFF is the cartridge's RAM.
+// With a mapper, ROM is the fixed banks (see `@image.Layout`); a window is
+// the bank of the code reading it (`at`) when that code is in the window,
+// else the bank mapped there; $6000-$7FFF is the cartridge's RAM.
 fn absolute(addr : Expr, base : Int, indexed : Bool, banked~ : Bool = false, at~ : Int = 0) -> Operand {
   let lo = base
   let hi = if indexed { base + 0xff } else { base }
@@ -122,12 +122,14 @@ fn absolute(addr : Expr, base : Int, indexed : Bool, banked~ : Bool = false, at~
     At(Ram, Binary(And, addr, Const(0x7ff)))
   } else if banked && lo >= 0x6000 && hi < 0x8000 {
     At(Wram, addr)
-  } else if banked && lo >= 0x8000 && hi < 0xc000 {
-    match @image.bank_of(at) {
+  } else if banked && lo >= 0x8000 && hi < 0x10000 && @image.window_of(lo) >= 0 && @image.window_of(lo) == @image.window_of(hi) {
+    match @image.bank_of(@image.rebase(at, lo)) {
       Some(bank) => At(Bank(bank), addr)
       None => At(Window, addr)
     }
-  } else if lo >= (if banked { 0xc000 } else { 0x8000 }) && hi < 0x10000 {
+  } else if banked && lo >= 0x8000 && hi < 0x10000 && @image.fixed_bank(lo) >= 0 && @image.fixed_bank(hi) >= 0 {
+    At(Rom, addr)
+  } else if !banked && lo >= 0x8000 && hi < 0x10000 {
     At(Rom, addr)
   } else {
     At(Bus, addr)
@@ -397,7 +399,12 @@ fn Builder::instruction(self : Builder, op : @parse.OpCode, mode : @lower.AsmAdd
     SEC => self.emit(Assign(C, Const(1)))
     CLD => self.emit(Assign(D, Const(0)))
     SED => self.emit(Assign(D, Const(1)))
-    CLI => self.emit(Assign(I, Const(0)))
+    CLI => {
+      self.emit(Assign(I, Const(0)))
+      // an interrupt handler that enables interrupts can be interrupted by
+      // the IRQ (see the runtime's next_frame)
+      self.emit(Effect("cpu_interrupts_enabled", []))
+    }
     SEI => self.emit(Assign(I, Const(1)))
     CLV => self.emit(Assign(V, Const(0)))
     NOP => ()
@@ -724,7 +731,7 @@ fn build_helper(
       builder = { low, program, f, stmts: [], at: dispatch.helper }
       continue
     }
-    let mode = low.lower_mode(@image.source_mode(program.image, inst), op=Some(inst.op)) catch {
+    let mode = low.lower_mode(@image.source_mode(program.image, inst), op=Some(inst.op), absolute=inst.mode.has_prefix("abs")) catch {
       _ => raise BuildError("Invalid dispatcher instruction")
     }
     builder.instruction(inst.op, mode)
@@ -774,7 +781,8 @@ pub fn build(low : @lower.AsmLowering, native~ : Set[String]) -> Program raise B
   for sub in low.subroutines {
     functions.push(build_routine(low, program, sub, native.contains(rename(sub.name))))
   }
-  // Fixed-bank code reaching the window runs the routine of the bank mapped.
+  // Code reaching a window from outside it runs the routine of the bank
+  // mapped there.
   let windows = program.windows.keys().to_array()
   windows.sort()
   for address in windows {
@@ -788,7 +796,8 @@ pub fn build(low : @lower.AsmLowering, native~ : Set[String]) -> Program raise B
       f.blocks.push({ label: "", stmts: [], term: TailCall(@image.address_name(program.image, location)) })
       cases.push((bank, f.blocks.length() - 1))
     }
-    f.blocks.push({ label: "", stmts: [], term: Switch(Runtime("prg_bank"), cases, 0) })
+    let mapped = Runtime(@image.window_bank_variable(@image.window_of(address)))
+    f.blocks.push({ label: "", stmts: [], term: Switch(mapped, cases, 0) })
     f.entry = f.blocks.length() - 1
     functions.push(f)
   }
@@ -799,9 +808,16 @@ pub fn build(low : @lower.AsmLowering, native~ : Set[String]) -> Program raise B
     _ => raise BuildError("Missing NMI vector")
   }
   let nmi = rename(nmi)
-  // With exact returns the interrupt pushes the return address and the
+  // the IRQ handler, a root of its own (after reset and NMI) when code
+  // enables interrupts
+  let irq = match (try Some(@image.address_name(program.image, program.image.word(base + 4))) catch { _ => None }) {
+    Some(name) if program.roots.length() > 2 && program.roots[2] == name => Some(rename(name))
+    _ => None
+  }
+  // With exact returns an interrupt pushes the return address and the
   // status, which RTI pulls.
-  if program.exact.val && by_name.get(nmi) is Some(i) {
+  for handler in [Some(nmi), irq] {
+    guard handler is Some(name) && program.exact.val && by_name.get(name) is Some(i) else { continue }
     let f = functions[i]
     let builder : Builder = { low, program, f, stmts: [], at: 0 }
     push(builder, Const(0))
@@ -810,13 +826,25 @@ pub fn build(low : @lower.AsmLowering, native~ : Set[String]) -> Program raise B
     f.blocks.push({ label: "", stmts: builder.stmts, term: Goto(f.entry) })
     f.entry = f.blocks.length() - 1
   }
+  let reset = rename(program.roots[0])
+  // MMC3: the runtime checks the game selects the PRG mode it was
+  // recompiled for
+  let layout = @image.layout()
+  if layout.windows.length() == 2 && by_name.get(reset) is Some(i) {
+    let f = functions[i]
+    let mode = if layout.windows[0] == 0xa000 { 1 } else { 0 }
+    f.blocks.push({ label: "", stmts: [Effect("mapper_prg_mode", [Const(mode)])], term: Goto(f.entry) })
+    f.entry = f.blocks.length() - 1
+  }
   {
     functions,
     by_name,
-    reset: rename(program.roots[0]),
+    reset,
     nmi,
+    irq,
     prg: program.image.bytes,
     banks: program.image.banks.contents,
+    layout: @image.layout(),
     info: None,
   }
 }

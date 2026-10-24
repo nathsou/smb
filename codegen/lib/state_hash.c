@@ -26,6 +26,23 @@ uint32_t hash_state(void) {
 #ifdef MAPPER
     hash = hash_bytes(hash, wram, WRAM_SIZE);
     hash = hash_byte(hash, prg_bank);
+    if (mapper_number == 4) {
+        // MMC3: the second window, the CHR banks, the frame's splits
+        hash = hash_byte(hash, prg_bank1);
+        hash = hash_bytes(hash, video.chr_banks, 8);
+        hash = hash_byte(hash, video.split_count);
+        for (int i = 0; i < video.split_count; i++) {
+            const VideoSplit *split = &video.splits[i];
+            hash = hash_byte(hash, split->line);
+            hash = hash_byte(hash, split->ctrl);
+            hash = hash_byte(hash, split->mask);
+            hash = hash_bytes(hash, split->chr_banks, 8);
+            hash = hash_byte(hash, (uint8_t)split->x);
+            hash = hash_byte(hash, (uint8_t)(split->x >> 8));
+            hash = hash_byte(hash, (uint8_t)split->y);
+            hash = hash_byte(hash, (uint8_t)(split->y >> 8));
+        }
+    }
 #endif
     hash = hash_bytes(hash, chr_rom, CHR_ROM_SIZE);
     hash = hash_bytes(hash, video.nametable, NAMETABLE_SIZE);

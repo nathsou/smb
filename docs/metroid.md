@@ -181,11 +181,12 @@ trace.
 
 ## Limits
 
-- **Boards.** Only MMC1 in PRG mode 3, with CHR RAM or 8 KiB of CHR ROM.
-  There is no CHR banking, and no other mapper.
+- **Boards.** MMC1 only in PRG mode 3, with CHR RAM or 8 KiB of CHR ROM
+  (no MMC1 CHR banking). [SMB3](smb3.md) added MMC3.
 - **Timing.** The frame model is SMB's: the interrupt runs once per frame,
   at a wait or the idle loop, and the frame is drawn from the state at the
-  end. Nothing changes the picture mid-frame.
+  end. Metroid changes nothing mid-frame (SMB3's IRQ does, see
+  [frames in parts](smb3.md#frames-in-parts)).
 - **Names.** The map names the frame, bank switching, the title bank's
   entry points, the sound engine and the areas' shared routines. Most other
   routines keep generated names (`loc_brinstar_8024`).

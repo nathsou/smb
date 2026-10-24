@@ -12,7 +12,7 @@ uniform vec3 u_floor; // light everywhere
 out vec4 o_color;
 
 void main() {
-    ivec2 p = ivec2(int(gl_FragCoord.x) + u_origin, 239 - int(gl_FragCoord.y));
+    ivec2 p = ivec2(int(gl_FragCoord.x), 239 - int(gl_FragCoord.y)) + u_origin;
     vec4 background = texelFetch(u_background, p, 0);
     vec4 sprite = texelFetch(u_sprite, p, 0);
     int material = material_of(background);

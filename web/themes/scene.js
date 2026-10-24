@@ -3,7 +3,7 @@
 // game's level data (the map names the variables it reads).
 
 export const SCENE_WIDTH = 320;
-export const SCENE_HEIGHT = 256;
+export const SCENE_HEIGHT = 288;
 
 export function createTexture(gl, width, height, internalFormat, format, type) {
     const texture = gl.createTexture();
@@ -16,7 +16,7 @@ export function createTexture(gl, width, height, internalFormat, format, type) {
     return texture;
 }
 
-// A 320x256 half-float target (light, distances); needs EXT_color_buffer_float.
+// A 320x288 half-float target (light, distances); needs EXT_color_buffer_float.
 export function createFloatTexture(gl, width = SCENE_WIDTH, height = SCENE_HEIGHT) {
     return createTexture(gl, width, height, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT);
 }
@@ -40,13 +40,13 @@ export function createFramebuffer(gl, textures) {
     return framebuffer;
 }
 
-// Binds textures to units from 2 (0 and 1 are video.frag's) and points the
+// Binds textures to units from 3 (0 to 2 are video.frag's) and points the
 // program's samplers at them: { u_name: texture }.
 export function bindTextures(gl, program, textures) {
     Object.entries(textures).forEach(([name, texture], i) => {
-        gl.activeTexture(gl.TEXTURE2 + i);
+        gl.activeTexture(gl.TEXTURE3 + i);
         gl.bindTexture(gl.TEXTURE_2D, texture);
-        gl.uniform1i(gl.getUniformLocation(program, name), 2 + i);
+        gl.uniform1i(gl.getUniformLocation(program, name), 3 + i);
     });
 }
 
@@ -65,13 +65,33 @@ export function pass(context, program, framebuffer, width, height) {
     context.drawFullscreen();
 }
 
-// The linear backdrop colour, and whether it is dark (underground, castles,
-// night): dark areas have no sky light.
+// Whether the map names SMB's level data (the block buffer): its materials,
+// fire and lava, and its dark areas lit by them.
+export function levelKnown(context) {
+    return ['block_buffer1', 'block_buffer2'].every(name => context.symbols.has(name));
+}
+
+// The linear backdrop colour, and whether it is dark (SMB's underground,
+// castles, night): dark areas have no sky light. Other games, whose lights
+// the themes do not know, are lit as by day (Metroid's black backdrop is
+// space and caverns: the sky light shades what is under something).
 export function backdrop(context) {
     const entry = context.frame.palette[0] & 63;
     const rgb = Array.from(context.colors.subarray(entry * 3, entry * 3 + 3), c => c ** 2.2);
     const luma = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
-    return { rgb, dark: luma < 0.02 };
+    return { rgb, dark: levelKnown(context) && luma < 0.02 };
+}
+
+// The playfield's point in the 512x480 plane of the nametables at the
+// screen's top-left corner, from the first scanline that is not a status
+// bar (render.h's video_lines).
+function planePosition(lines) {
+    for (let y = 0; y < 240; y++) {
+        const at = y * 16;
+        if (lines[at + 6] !== 0) continue;
+        return [lines[at + 2] | (lines[at + 3] << 8), (lines[at + 4] | (lines[at + 5] << 8)) - y];
+    }
+    return [0, 0];
 }
 
 export async function createScene(context) {
@@ -93,25 +113,30 @@ export async function createScene(context) {
 
     gl.useProgram(program);
     gl.uniform1iv(gl.getUniformLocation(program, 'u_climb_limits'), climbLimits);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_level_known'), levelKnown(context) ? 1 : 0);
     const areaKindLocation = gl.getUniformLocation(program, 'u_area_kind');
 
+    const mod = (a, n) => ((a % n) + n) % n;
     let scrollPosition = null;
     const scene = {
         background,
         sprite,
         metatile,
-        origin: 16, // scene x of the screen's left edge (common.glsl)
-        shift: 0,   // where last frame had this frame's scene x, minus x
+        origin: [16, 0], // scene point of the screen's top-left corner (common.glsl)
+        shift: [0, 0],   // where last frame had this frame's scene point, minus the point
         // Sets u_origin on a program that uses the scene.
         bindOrigin(target) {
             gl.useProgram(target);
-            gl.uniform1i(gl.getUniformLocation(target, 'u_origin'), scene.origin);
+            gl.uniform2i(gl.getUniformLocation(target, 'u_origin'), scene.origin[0], scene.origin[1]);
         },
         draw() {
-            const position = (frame.ctrl & 1) * 256 + frame.scrollX;
-            const origin = 16 + (((position - 16) % 32) + 32) % 32;
-            const scrolled = scrollPosition === null ? 0 : ((position - scrollPosition + 768) % 512) - 256;
-            scene.shift = scrolled - (origin - scene.origin);
+            const position = planePosition(frame.lines);
+            const origin = [16 + mod(position[0] - 16, 32), mod(position[1], 32)];
+            const sizes = [512, 480];
+            scene.shift = position.map((p, i) => {
+                const scrolled = scrollPosition === null ? 0 : mod(p - scrollPosition[i] + sizes[i] / 2, sizes[i]) - sizes[i] / 2;
+                return scrolled - (origin[i] - scene.origin[i]);
+            });
             scene.origin = origin;
             scrollPosition = position;
 
@@ -123,10 +148,10 @@ export async function createScene(context) {
             context.bindVideo(program);
             scene.bindOrigin(program);
             gl.uniform1i(areaKindLocation, areaKind === undefined ? -1 : ram[areaKind]);
-            gl.activeTexture(gl.TEXTURE2);
+            gl.activeTexture(gl.TEXTURE3);
             gl.bindTexture(gl.TEXTURE_2D, blocks);
             gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 16, 26, gl.RED, gl.UNSIGNED_BYTE, blockBytes);
-            gl.uniform1i(gl.getUniformLocation(program, 'u_blocks'), 2);
+            gl.uniform1i(gl.getUniformLocation(program, 'u_blocks'), 3);
             pass(context, program, framebuffer, SCENE_WIDTH, SCENE_HEIGHT);
         },
         dispose() {

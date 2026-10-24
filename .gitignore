@@ -22,8 +22,9 @@ codegen/prg.bin
 __pycache__/
 web/game.wasm
 web/runtime.wasm
-web/runtime-mmc1.wasm
+web/runtime-cartridge.wasm
 web/metroid.map
+web/smb3.map
 web/layout.txt
 web/recompiler.js
 web/smb.map
@@ -36,3 +37,5 @@ codegen/metroid/
 replay
 interpreter
 metroid
+codegen/smb3/
+smb3

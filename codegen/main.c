@@ -186,7 +186,7 @@ int main(int argc, char **argv) {
 #ifdef MAPPER
     // the game writes its own tiles (CHR RAM): no debug tiles to fall back on
     if (load_cartridge(ROM_PATH)) return 1;
-    mapper_init();
+    mapper_init(cartridge_mapper);
 #else
     if (read_chr_rom(ROM_PATH)) {
         fprintf(stderr, "Using generated debug tiles instead\n");

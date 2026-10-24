@@ -21,6 +21,8 @@ pub fn bank_of(Int32) -> Int32?
 
 pub fn branch_target(Instruction) -> Int32
 
+pub fn collect_problems() -> Unit
+
 pub fn condition(@parse.OpCode, Facts) -> Bool?
 
 pub fn decode(Image, Int32) -> Instruction raise ImageError
@@ -33,9 +35,13 @@ pub fn discover_rom(Image, RomMap) -> Program raise ImageError
 
 pub fn encoding(@parse.OpCode, String) -> Int32?
 
+pub fn fixed_bank(Int32) -> Int32
+
 pub fn in_window(Int32) -> Bool
 
 pub fn jump_target(Instruction) -> Int32
+
+pub fn layout() -> Layout
 
 pub fn load_dump(Bytes, RomMap) -> Dump raise ImageError
 
@@ -45,9 +51,13 @@ pub fn operand(@parse.SourceAddressingMode) -> @parse.SourceExpr?
 
 pub fn parse_map(String) -> RomMap raise ImageError
 
+pub fn problems() -> Array[String]
+
 pub fn rebase(Int32, Int32) -> Int32
 
 pub fn rom_image(Cartridge, RomMap) -> Image raise ImageError
+
+pub fn set_layout(Layout) -> Unit
 
 pub fn sha256(Array[Int32]) -> String
 
@@ -55,13 +65,19 @@ pub fn show_pc(Int32) -> String
 
 pub fn source_mode(Image, Instruction) -> @parse.SourceAddressingMode
 
-pub fn transfer(Instruction, Facts) -> Facts
+pub fn transfer(Instruction, Facts, table? : (Int32) -> Array[Int32]) -> Facts
 
 pub fn trap_address(String) -> Int32?
 
 pub fn trap_name(Int32) -> String
 
+pub fn values_of(Array[Int32]) -> Array[Int32]
+
 pub fn width(String) -> Int32
+
+pub fn window_bank_variable(Int32) -> String
+
+pub fn window_of(Int32) -> Int32
 
 // Errors
 pub suberror ImageError {
@@ -69,12 +85,31 @@ pub suberror ImageError {
 } derive(@debug.Debug)
 
 // Types and methods
+pub(all) struct Banking {
+  a : Array[Int32]
+  x : Array[Int32]
+  y : Array[Int32]
+  ram : Array[(Int32, Array[Int32])]
+  select : Int32?
+  banks : Array[Array[Int32]]
+} derive(Eq, @debug.Debug)
+pub fn Banking::bank(Self, Int32) -> Array[Int32]
+pub fn Banking::join(Self, Self) -> Self
+pub fn Banking::kept(Self, Array[(Int32, Int32)], switched~ : Int32, keep_banks? : Bool) -> Self
+pub fn Banking::mapped(Self, Int32, Array[(Int32, Int32)]) -> Array[Int32]
+pub fn Banking::running(Self, Int32, Int32) -> Self
+pub fn Banking::transfer(Self, Instruction, table? : (Int32) -> Array[Int32]) -> Self
+pub fn Banking::unknown() -> Self
+
 pub(all) struct Banks {
   contents : Array[Array[Int32]]
+  homes : Array[Int32]
+  companions : Array[Int32]
   names : Array[String]
   windows : Map[Int32, Array[Int32]]
   window_names : Map[Int32, String]
-  code : Array[(Int32, Int32)]
+  code : Array[(Int32, Int32, Int32)]
+  shadows : Array[(Int32, Int32)]
 } derive(@debug.Debug)
 pub fn Banks::none() -> Self
 
@@ -118,6 +153,7 @@ pub(all) struct Facts {
   n : Bool?
   v : Bool?
   depth : Int32?
+  banking : Banking?
 } derive(Eq, @debug.Debug)
 pub fn Facts::entry(Self) -> Self
 pub fn Facts::join(Self, Self) -> Self
@@ -131,10 +167,13 @@ pub(all) struct Image {
   source : Array[@parse.SourceItem]
   banks : Banks
   data : Array[(Int32, Int32)]
+  data_cells : @set.Set[Int32]
+  defines : Map[String, @parse.SourceExpr]
 } derive(@debug.Debug)
 pub fn Image::banked(Self) -> Bool
 pub fn Image::eval(Self, @parse.SourceExpr) -> Int32 raise ImageError
 pub fn Image::is_data(Self, Int32) -> Bool
+pub fn Image::new(Int32, Array[Int32], Map[String, Int32], Array[Int32], Array[@parse.SourceItem], Banks, Array[(Int32, Int32)]) -> Self
 pub fn Image::read(Self, Int32) -> Int32 raise ImageError
 pub fn Image::word(Self, Int32) -> Int32 raise ImageError
 
@@ -153,9 +192,20 @@ pub(all) struct KnownRom {
   label : String
 } derive(@debug.Debug)
 
+pub(all) struct Layout {
+  bank_size : Int32
+  windows : Array[Int32]
+  fixed : Array[(Int32, Int32)]
+} derive(Eq, @debug.Debug)
+pub fn Layout::mmc1(Int32) -> Self
+pub fn Layout::mmc3(Int32, Int32) -> Self
+pub fn Layout::none() -> Self
+
 pub(all) struct MapBank {
   index : Int32
   name : String
+  window : Int32
+  companion : Int32
   description : String
 } derive(@debug.Debug)
 
@@ -178,6 +228,7 @@ pub(all) enum MapKind {
   Var
   Io
   Code
+  Trap
 } derive(Eq, @debug.Debug)
 
 pub(all) struct MapType {
@@ -202,6 +253,7 @@ pub(all) struct Program {
   addresses : Array[Int32]
   map : RomMap
 } derive(@debug.Debug)
+pub fn Program::switching_chain(Self, Int32) -> Array[String]
 pub fn Program::validate_stacks(Self) -> Unit raise ImageError
 
 pub(all) struct RomMap {
@@ -209,6 +261,8 @@ pub(all) struct RomMap {
   roms : Array[KnownRom]
   types : Array[MapType]
   banks : Array[MapBank]
+  prg_mode : Int32
+  shadows : Array[(Int32, Int32)]
 } derive(@debug.Debug)
 pub fn RomMap::bank_name(Self, Int32) -> String
 pub fn RomMap::empty() -> Self
@@ -216,5 +270,6 @@ pub fn RomMap::identify(Self, Dump) -> KnownRom?
 pub fn RomMap::warning(Self, Dump) -> String?
 
 // Type aliases
+pub type Values = Array[Int32]
 
 // Traits

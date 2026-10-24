@@ -8,7 +8,7 @@
 
 import {
     SCENE_WIDTH, SCENE_HEIGHT, createScene, createTexture, createFloatTexture, createFramebuffer, bindTextures,
-    pass, sizeCanvas,
+    pass, sizeCanvas, levelKnown,
 } from './scene.js';
 import { createGlobalIllumination, JUMP_FLOOD_STEPS } from './light.js';
 import { bindLighting, canvasScale } from './voxel.js';
@@ -37,6 +37,9 @@ export async function create(context) {
         console.warn('3D: the full shader failed, using the lighter one:', error);
         program = await context.compile('model.frag', '#define MODEL_LITE\n');
     }
+
+    gl.useProgram(shapes);
+    gl.uniform1i(gl.getUniformLocation(shapes, 'u_level_known'), levelKnown(context) ? 1 : 0);
 
     const seeds = [createFloatTexture(gl), createFloatTexture(gl)];
     const seedTargets = seeds.map(texture => createFramebuffer(gl, [texture]));
@@ -84,7 +87,7 @@ export async function create(context) {
                 source = 1 - source;
             }
 
-            gl.useProgram(shapes);
+            scene.bindOrigin(shapes);
             bindTextures(gl, shapes, {
                 u_background: scene.background,
                 u_sprite: scene.sprite,

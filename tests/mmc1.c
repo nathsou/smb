@@ -10,7 +10,7 @@ int main(void) {
     chr_ram = true;
     uint8_t chr[CHR_ROM_SIZE] = {0};
     video_init(chr);
-    mapper_init();
+    mapper_init(1);
 
     // Reset runs bank 0's setup, then waits in a subroutine of the main loop.
     cpu_reset_entry();

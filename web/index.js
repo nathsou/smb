@@ -9,10 +9,10 @@ const SCREEN_WIDTH = 256;
 const SCREEN_HEIGHT = 240;
 
 // The games the page recompiles, told apart by their board: Super Mario
-// Bros. (NROM), with its hand-written display routines, and Metroid (MMC1),
-// which drives the PPU through its registers and switches banks, with the
-// runtime module for such cartridges. The themes read SMB's variables, and
-// Metroid writes its own tiles (CHR RAM): both are SMB's only.
+// Bros. (NROM), with its hand-written display routines, Metroid (MMC1) and
+// Super Mario Bros. 3 (MMC3), which drive the PPU through their registers
+// and switch banks, with the runtime module for such cartridges. The debug
+// tiles replace SMB's (Metroid writes its own, SMB3 switches banks of them).
 const GAMES = {
     smb: {
         title: 'SUPER MARIO BROS.',
@@ -21,7 +21,7 @@ const GAMES = {
         runtime: 'runtime.wasm',
         native: 'routines.txt',
         display: 'display.c',
-        extras: true, // themes and debug tiles
+        debugTiles: true,
         mapKey: 'map',
         saveKey: 'save_state',
     },
@@ -29,17 +29,30 @@ const GAMES = {
         title: 'METROID',
         pageTitle: 'Metroid Recompiled',
         map: 'metroid.map',
-        runtime: 'runtime-mmc1.wasm',
+        runtime: 'runtime-cartridge.wasm',
         native: null,
         display: null,
-        extras: false,
+        debugTiles: false,
         mapKey: 'map:metroid',
         saveKey: 'save_state:metroid',
     },
+    smb3: {
+        title: 'SUPER MARIO BROS. 3',
+        pageTitle: 'SMB3 Recompiled',
+        map: 'smb3.map',
+        runtime: 'runtime-cartridge.wasm',
+        native: null,
+        display: null,
+        debugTiles: false,
+        mapKey: 'map:smb3',
+        saveKey: 'save_state:smb3',
+    },
 };
 
+const BOARDS = { 0: GAMES.smb, 1: GAMES.metroid, 4: GAMES.smb3 };
+
 function gameOf(rom) {
-    return splitDump(rom).mapper === 1 ? GAMES.metroid : GAMES.smb;
+    return BOARDS[splitDump(rom).mapper] ?? GAMES.smb;
 }
 
 // A game's files, fetched once.
@@ -444,7 +457,7 @@ async function main() {
     const themeWarning = document.getElementById('theme-warning');
     const applyTheme = async () => {
         if (!renderer?.setTheme) return;
-        const wanted = currentGame.extras ? themeMenu.value : 'original';
+        const wanted = themeMenu.value;
         themeWarning.hidden = true;
         try {
             await renderer.setTheme(wanted);
@@ -455,7 +468,7 @@ async function main() {
             themeWarning.textContent = message;
             themeWarning.hidden = false;
         }
-        if (currentGame.extras) themeMenu.value = renderer.theme;
+        themeMenu.value = renderer.theme;
     };
     themeMenu.addEventListener('change', () => {
         localStorage.setItem(THEME_KEY, themeMenu.value);
@@ -517,31 +530,46 @@ async function main() {
         load() { shouldLoadState = true; },
     });
 
+    // The runs started so far: a run that a later one replaced (another ROM
+    // loaded while it was recompiling, say) stops at its next step, before
+    // it starts its game or touches the page.
+    let runs = 0;
+
     // One run of the game: recompiled module, linked runtime, frame loop.
-    async function start() {
+    async function start(run) {
+        const stale = () => run !== runs;
+        // what the run shows of its progress, until a later run replaces it
+        const steps = new Proxy(progress, { get: (target, name) => (...args) => stale() || target[name](...args) });
+        const status = { setStatus: (...args) => stale() || viewer.setStatus(...args) };
         session?.stop();
         session = null;
-        while (!rom) rom = await askForRom();
+        while (!rom) {
+            rom = await askForRom();
+            if (stale()) return;
+        }
         currentGame = gameOf(rom);
         document.title = currentGame.pageTitle;
         document.getElementById('game-title').textContent = currentGame.title;
-        debugTiles.parentElement.hidden = !currentGame.extras;
-        themeMenu.parentElement.hidden = !currentGame.extras;
+        debugTiles.parentElement.hidden = !currentGame.debugTiles;
         canvas.hidden = true;
         progress.show(currentGame.title);
         progress.begin('files');
         const { map: defaultMap, native, display, runtime: runtimeBytes } = await filesOf(currentGame);
+        if (stale()) return;
         const map = localStorage.getItem(currentGame.mapKey) ?? defaultMap;
         let files = null;
-        progress.begin('runtime');
+        let warning = '';
+        steps.begin('runtime');
         const { memory, runtime, game } = await link(runtimeBytes, async layout => {
             const layoutText = Object.entries(layout).map(([name, address]) => `${name} ${address}`).join('\n');
-            const result = await build({ rom, map, native, layout: layoutText, version }, viewer, progress);
+            const result = await build({ rom, map, native, layout: layoutText, version }, status, steps);
             files = result.files;
-            showWarning(result.warning);
-            progress.begin('link');
+            warning = result.warning;
+            steps.begin('link');
             return result.wasm;
         }, rom);
+        if (stale()) return;
+        showWarning(warning);
         progress.begin('start');
 
         const ordered = FILE_ORDER.map(name => files.find(f => f.name === name)).filter(Boolean);
@@ -558,8 +586,8 @@ async function main() {
         let saveStateReady = false;
 
         const chrRomPtr = runtime.chr_rom.value;
-        const { chr } = splitDump(rom);
-        if (debugTiles.checked && currentGame.extras) {
+        const { chr, mapper } = splitDump(rom);
+        if (debugTiles.checked && currentGame.debugTiles) {
             runtime.debug_chr_generate(chrRomPtr);
         } else {
             // CHR RAM (no CHR in the dump) starts blank: the game writes its tiles
@@ -570,16 +598,22 @@ async function main() {
 
         runtime.cpu_init();
         runtime.video_init(chrRomPtr);
+        // a cartridge's CHR ROM can be larger than the pattern tables (MMC3)
+        runtime.video_init_chr?.(Math.max(chr.length, 0x2000));
         runtime.render_init();
-        runtime.mapper_init?.();
+        runtime.mapper_init?.(mapper);
 
         // Draw with WebGL2 unless unavailable or ?software is in the URL.
         await renderer?.setTheme?.('original'); // frees the last run's theme
+        if (stale()) return;
         renderer = null;
         if (!new URLSearchParams(window.location.search).has('software')) {
             try {
-                renderer = await createGpuRenderer(canvas, runtime, memory, 'video.frag', { map });
+                const gpu = await createGpuRenderer(canvas, runtime, memory, 'video.frag', { map });
+                if (stale()) return;
+                renderer = gpu;
             } catch (error) {
+                if (stale()) return;
                 console.error('WebGL renderer unavailable:', error);
                 // a canvas keeps its first context type: start over with a 2D one
                 canvas.remove();
@@ -593,6 +627,7 @@ async function main() {
         // the themes are WebGL2 only
         themeMenu.disabled = renderer.setTheme === undefined;
         await applyTheme();
+        if (stale()) return;
         progress.hide();
         canvas.hidden = false;
         updateSize();
@@ -664,9 +699,11 @@ async function main() {
     }
 
     async function boot() {
+        const run = ++runs;
         try {
-            await start();
+            await start(run);
         } catch (error) {
+            if (run !== runs) return; // a later run replaced it
             console.error(error);
             viewer.setStatus(`ERROR: ${error.message}`.toUpperCase(), 'error');
             progress.fail(`ERROR: ${error.message}`);

@@ -89,7 +89,7 @@ pub(all) struct AsmLowering {
 pub fn AsmLowering::flag_live_after(Self, Int32) -> FlagLiveness
 pub fn AsmLowering::is_subroutine_label(Self, String) -> Bool
 pub fn AsmLowering::lower(Self) -> Unit raise LoweringError
-pub fn AsmLowering::lower_mode(Self, @parse.SourceAddressingMode, op? : @parse.OpCode?) -> AsmAddressingMode raise LoweringError
+pub fn AsmLowering::lower_mode(Self, @parse.SourceAddressingMode, op? : @parse.OpCode?, absolute? : Bool) -> AsmAddressingMode raise LoweringError
 pub fn AsmLowering::new(Array[@parse.SourceItem], program? : @image.Program?) -> Self
 pub fn AsmLowering::register_live_after(Self, Int32) -> Registers
 pub fn AsmLowering::return_flag_demand(Self, String) -> FlagLiveness

@@ -5,6 +5,11 @@
 //                                         program: no vectors to start from)
 //     --symbols                           print the labels' addresses
 //   --rom FILE.nes --map FILE.map         discover a ROM's code with a map
+//     --collect                           report every problem discovery can
+//                                         step over, not only the first
+//       --facts [BANK:]ADDR               and what discovery knows there
+//       --calls ADDR                      and the calls to a routine
+//       --switching [BANK:]ADDR           and why a routine switches banks
 fn option(name: String, fallback: String) -> String {
   let args = @env.args()
   for i in 0..<(args.length() - 1) {
@@ -50,7 +55,45 @@ fn main {
     if rom != "" {
       let map = @image.parse_map(@fs.read_file_to_string(option("--map", "")))
       let dump = @image.load_dump(@fs.read_file_to_bytes(rom), map)
+      if @env.args().contains("--collect") { @image.collect_problems() }
       let program = @image.discover_rom(@image.rom_image(dump.cartridge, map), map)
+      let problems = @image.problems()
+      if !problems.is_empty() || @env.args().contains("--collect") {
+        problems.sort()
+        for p in problems { println(p) }
+        println("\{problems.length()} problems")
+        let waits = program.waits.keys().to_array()
+        waits.sort()
+        for w in waits { println("Wait loop at \{location(program.waits[w])}, back from \{location(w)}") }
+        let at = option("--facts", "")
+        if at != "" {
+          let location = match at.find(":") {
+            Some(i) => @image.bank_location(@string.parse_int(at.view(end_offset=i).to_owned()), @string.parse_int(at.view(start_offset=i + 1).to_owned(), base=16))
+            None => @string.parse_int(at, base=16)
+          }
+          println(@debug.to_string(program.facts.get(location)))
+        }
+        let callee = option("--calls", "")
+        if callee != "" {
+          let target = @string.parse_int(callee, base=16)
+          let sites = []
+          for pc, inst in program.instructions {
+            if inst.op == JSR && (@image.jump_target(inst) & 0xffff) == target { sites.push(pc) }
+          }
+          sites.sort()
+          for site in sites { println("call \{location(site)}") }
+        }
+        let why = option("--switching", "")
+        if why != "" {
+          // BANK:ADDR or ADDR (hex)
+          let location = match why.find(":") {
+            Some(i) => @image.bank_location(@string.parse_int(why.view(end_offset=i).to_owned()), @string.parse_int(why.view(start_offset=i + 1).to_owned(), base=16))
+            None => @string.parse_int(why, base=16)
+          }
+          for line in program.switching_chain(location) { println(line) }
+        }
+        return
+      }
       if map.warning(dump) is Some(text) { println("Warning: \{text}") }
       report(program)
       return

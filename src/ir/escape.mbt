@@ -75,9 +75,10 @@ fn Function::block(self : Function, stmts : Array[Stmt], term : Term) -> Int {
 // (see above). Run once, after `build` and before any analysis.
 pub fn Program::make_resumable(self : Program) -> Unit raise BuildError {
   let suspending = self.suspending()
-  if suspending.contains(self.nmi) {
+  for handler in [Some(self.nmi), self.irq] {
+    guard handler is Some(name) && suspending.contains(name) else { continue }
     // the chain of calls to a wait, for the message
-    let chain = [self.nmi]
+    let chain = [name]
     while self.function(chain[chain.length() - 1]) is Some(f) && chain.length() < 32 {
       let mut next : String? = None
       for block in f.blocks {

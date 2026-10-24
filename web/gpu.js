@@ -1,7 +1,8 @@
 // WebGL2 renderer: draws the Video state (codegen/lib/video.h) from wasm
 // memory with the fragment shader in video.frag, which the desktop build
-// shares. Pattern tables and nametables are textures; palette, sprites and
-// the master palette are uniforms.
+// shares. The CHR, nametables and each scanline's settings (render.h's
+// video_lines) are textures; palette, sprites and the master palette are
+// uniforms.
 //
 // A theme (web/themes) draws the same state its own way; 'original' is
 // video.frag alone.
@@ -61,19 +62,20 @@ function createByteTexture(gl, width, height) {
     return texture;
 }
 
-// 2-bit planar tiles to one colour index (0-3) per pixel: 16 tiles per row,
-// bank 0 in rows 0-15, bank 1 in rows 16-31.
+// 2-bit planar tiles to one colour index (0-3) per pixel: 64 tiles (a 1 KiB
+// bank) per 8 rows of 512.
+const ATLAS_WIDTH = 512;
 function decodePatterns(chr) {
-    const atlas = new Uint8Array(128 * 256);
-    for (let index = 0; index < 512; index++) {
-        const left = (index % 16) * 8;
-        const top = Math.floor(index / 16) * 8;
+    const atlas = new Uint8Array(ATLAS_WIDTH * (chr.length / 1024) * 8);
+    for (let index = 0; index < chr.length / 16; index++) {
+        const left = (index % 64) * 8;
+        const top = Math.floor(index / 64) * 8;
         for (let row = 0; row < 8; row++) {
             const low = chr[index * 16 + row];
             const high = chr[index * 16 + row + 8];
             for (let col = 0; col < 8; col++) {
                 const bit = 7 - col;
-                atlas[(top + row) * 128 + left + col] = ((low >> bit) & 1) | (((high >> bit) & 1) << 1);
+                atlas[(top + row) * ATLAS_WIDTH + left + col] = ((low >> bit) & 1) | (((high >> bit) & 1) << 1);
             }
         }
     }
@@ -108,8 +110,10 @@ export async function createGpuRenderer(canvas, exports, memory, shaderUrl = 'vi
         Array.from(words, offset => videoPtr + offset);
 
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    const patterns = createByteTexture(gl, 128, 256);
-    // The pattern tables, again whenever the game rewrites them (CHR RAM).
+    // The CHR (8 KiB, or a cartridge's CHR ROM in 1 KiB banks), again
+    // whenever the game rewrites it (CHR RAM).
+    const chrSize = () => new DataView(memory.buffer).getUint32(exports.chr_size.value, true);
+    const patterns = createByteTexture(gl, ATLAS_WIDTH, (chrSize() / 1024) * 8);
     let patternsVersion = -1;
     const uploadPatterns = () => {
         const version = new DataView(memory.buffer).getUint32(chrVersion, true);
@@ -117,16 +121,21 @@ export async function createGpuRenderer(canvas, exports, memory, shaderUrl = 'vi
         patternsVersion = version;
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, patterns);
-        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 128, 256, gl.RED, gl.UNSIGNED_BYTE,
-            decodePatterns(bytes().subarray(exports.chr_rom.value, exports.chr_rom.value + 8192)));
+        const size = chrSize();
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, ATLAS_WIDTH, (size / 1024) * 8, gl.RED, gl.UNSIGNED_BYTE,
+            decodePatterns(bytes().subarray(exports.chr_rom.value, exports.chr_rom.value + size)));
     };
     uploadPatterns();
     const nametableTexture = createByteTexture(gl, 32, 64);
+    // each scanline's settings (render.h)
+    const LINE_SIZE = 16;
+    const linesTexture = createByteTexture(gl, LINE_SIZE, GPU_SCREEN_HEIGHT);
 
     const colorBytes = bytes().subarray(exports.COLOR_PALETTE.value, exports.COLOR_PALETTE.value + 64 * 3);
     const colors = Float32Array.from(colorBytes, value => value / 255);
 
-    // This frame's display state, read once and given to every program.
+    // This frame's display state, read once and given to every program:
+    // `lines` holds each scanline's settings (render.h's video_lines).
     const frame = {
         palette: new Int32Array(32),
         oam: new Int32Array(256),
@@ -136,6 +145,7 @@ export async function createGpuRenderer(canvas, exports, memory, shaderUrl = 'vi
         scrollY: 0,
         mirroring: 0,
         statusBar: 0,
+        lines: new Uint8Array(LINE_SIZE * GPU_SCREEN_HEIGHT),
     };
 
     const readFrame = () => {
@@ -155,6 +165,11 @@ export async function createGpuRenderer(canvas, exports, memory, shaderUrl = 'vi
         frame.scrollY = view[scrollY];
         frame.mirroring = view[mirroring];
         frame.statusBar = view[statusBar];
+        exports.video_prepare_lines();
+        frame.lines.set(bytes().subarray(exports.video_lines.value, exports.video_lines.value + frame.lines.length));
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D, linesTexture);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, LINE_SIZE, GPU_SCREEN_HEIGHT, gl.RED, gl.UNSIGNED_BYTE, frame.lines);
     };
 
     // Sets video.frag's uniforms on a program that includes it.
@@ -166,15 +181,11 @@ export async function createGpuRenderer(canvas, exports, memory, shaderUrl = 'vi
             uniforms = {
                 patterns: location('u_patterns'),
                 nametable: location('u_nametable'),
+                lines: location('u_lines'),
                 palette: location('u_palette'),
                 oam: location('u_oam'),
                 colors: location('u_colors'),
-                ctrl: location('u_ctrl'),
-                mask: location('u_mask'),
-                scrollX: location('u_scroll_x'),
-                scrollY: location('u_scroll_y'),
                 mirroring: location('u_mirroring'),
-                statusBar: location('u_status_bar'),
                 flipY: location('u_flip_y'),
             };
             videoUniforms.set(target, uniforms);
@@ -182,16 +193,12 @@ export async function createGpuRenderer(canvas, exports, memory, shaderUrl = 'vi
             gl.uniform3fv(uniforms.colors, colors);
             gl.uniform1i(uniforms.patterns, 0);
             gl.uniform1i(uniforms.nametable, 1);
+            gl.uniform1i(uniforms.lines, 2);
         }
         gl.useProgram(target);
         gl.uniform1iv(uniforms.palette, frame.palette);
         gl.uniform1iv(uniforms.oam, frame.oam);
-        gl.uniform1i(uniforms.ctrl, frame.ctrl);
-        gl.uniform1i(uniforms.mask, frame.mask);
-        gl.uniform1i(uniforms.scrollX, frame.scrollX);
-        gl.uniform1i(uniforms.scrollY, frame.scrollY);
         gl.uniform1i(uniforms.mirroring, frame.mirroring);
-        gl.uniform1i(uniforms.statusBar, frame.statusBar);
         gl.uniform1i(uniforms.flipY, flipY);
     };
 

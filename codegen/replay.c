@@ -28,6 +28,9 @@
 //   --dump-every N      write every Nth frame
 //   --check-states N    every N frames, save the state, run 60 frames, load
 //                       it and run them again: the states must be the same
+//   --poke F:ADDR=V,... write RAM before frame F (hex address and value)
+//   --save-state F:FILE write the save state after frame F (state.h's bytes,
+//                       as the page saves them)
 
 static void dump_frame(uint32_t index) {
     char path[32];
@@ -48,6 +51,14 @@ static bool listed(const char *list, uint32_t index) {
         list = *end == ',' ? end + 1 : end;
     }
     return false;
+}
+
+// RAM, or the cartridge's
+static void poke(uint16_t addr, uint8_t value) {
+#ifdef MAPPER
+    if (addr >= 0x6000 && addr < 0x8000) { wram[addr - 0x6000] = value; return; }
+#endif
+    ram[addr & 0x7ff] = value;
 }
 
 static const char *option(int argc, char **argv, const char *name) {
@@ -71,12 +82,20 @@ int main(int argc, char **argv) {
     uint32_t every = every_option ? (uint32_t)strtoul(every_option, NULL, 10) : 0;
     const char *states_option = option(argc, argv, "--check-states");
     uint32_t states_every = states_option ? (uint32_t)strtoul(states_option, NULL, 10) : 0;
+    const char *pokes = option(argc, argv, "--poke");
+    const char *save_option = option(argc, argv, "--save-state");
+    unsigned save_frame = 0;
+    char save_path[256] = "";
+    if (save_option && sscanf(save_option, "%u:%255s", &save_frame, save_path) != 2) {
+        fprintf(stderr, "Error: --save-state FRAME:FILE\n");
+        return 1;
+    }
 
     cpu_init();
     apu_init(48000);
     if (load_cartridge(argv[1])) return 1;
 #ifdef MAPPER
-    mapper_init();
+    mapper_init(cartridge_mapper);
 #endif
 
     NESInputRecording recording = {0};
@@ -125,9 +144,20 @@ int main(int argc, char **argv) {
             load_state(saved);
         }
         update_controller1(rec_path ? rec_state_at_frame(&recording, i) : 0);
+        rec_pokes(pokes, i, poke);
         next_frame();
         sound_end_frame();
         uint32_t state = hash_state();
+        if (save_path[0] && i == save_frame) {
+            static uint8_t saved[SAVE_STATE_SIZE];
+            save_state(saved);
+            FILE *file = fopen(save_path, "wb");
+            if (!file || fwrite(saved, 1, sizeof saved, file) != sizeof saved) {
+                fprintf(stderr, "Error: Could not write %s\n", save_path);
+                return 1;
+            }
+            fclose(file);
+        }
         if (write_trace) fprintf(write_trace, "%08x\n", state);
         if (trace && first_divergence < 0) {
             unsigned expected;

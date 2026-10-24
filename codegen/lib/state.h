@@ -13,11 +13,11 @@
 #define SAVE_STATE_OAM_OFFSET (RAM_SIZE + NAMETABLE_SIZE + PALETTE_SIZE)
 
 #ifdef MAPPER
-// Cartridges with a mapper (Metroid) also keep their tiles (CHR RAM), their
-// RAM and the mapper, the PPU's registers and latches, and the CPU: the
+// Cartridges with a mapper (Metroid, SMB3) also keep their tiles (CHR RAM),
+// their RAM and the mapper, the PPU's registers and latches, and the CPU: the
 // state is saved between frames, while the foreground is suspended in a
 // wait, with its registers and its resume points.
-#define SAVE_STATE_CARTRIDGE_SIZE (CHR_ROM_SIZE + 0x2000 + 6 + 6 + 6 + 12 + 1 + CPU_RESUME_STACK)
+#define SAVE_STATE_CARTRIDGE_SIZE (CHR_ROM_SIZE + 0x2000 + 6 + 16 + 6 + 9 + 12 + 1 + CPU_RESUME_STACK)
 #define SAVE_STATE_SIZE (SAVE_STATE_DISPLAY_SIZE + SAVE_STATE_CARTRIDGE_SIZE)
 #else
 #define SAVE_STATE_SIZE SAVE_STATE_DISPLAY_SIZE
