@@ -96,6 +96,7 @@ export async function create(context) {
                 u_background: scene.background,
                 u_sprite: scene.sprite,
                 u_shape: shapeTextures[1],
+                u_metatile: scene.metatile,
                 u_light: illumination.light,
             });
             bindLighting(context, program, illumination, FIRE_DEPTH);

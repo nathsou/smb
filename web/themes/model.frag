@@ -13,6 +13,7 @@
 uniform sampler2D u_background;
 uniform sampler2D u_sprite;
 uniform sampler2D u_shape;
+uniform sampler2D u_metatile;    // scene.frag's: metatile / 255
 uniform sampler2D u_light;
 uniform vec3 u_floor;           // light to add to u_light everywhere
 uniform float u_scale;          // canvas pixels per NES pixel
@@ -243,6 +244,48 @@ vec4 block_face_color(Hit hit, float z) {
     return layer_color(cell, BACKGROUND);
 }
 
+int metatile_at(ivec2 cell) {
+    return int(texelFetch(u_metatile, scene_at(cell), 0).r * 255.0 + 0.5);
+}
+
+bool upright_pipe(int metatile) {
+    return metatile >= 0x10 && metatile <= 0x15;
+}
+
+bool sideways_pipe(int metatile) {
+    return metatile >= 0x1c && metatile <= 0x21;
+}
+
+const float PIPE_RADIUS = 16.0; // as shape.frag's
+const float PIPE_HOLE = 11.0;
+
+// The open end of a pipe, for a ray that came in by the end of a pipe's
+// column (the top of an upright pipe, the side of a sideways one): a dark
+// hole inside a rim of the pipe's colour, which a dark edge outlines as the
+// front's outline does. False for any other face.
+bool pipe_end(Hit hit, vec3 p, int metatile, out vec3 albedo) {
+    ivec2 at = scene_at(hit.cell);
+    ivec2 corner = hit.cell - ivec2(at.x % 16, at.y % 16);
+    float r;
+    vec4 rim;
+    if (upright_pipe(metatile) && hit.side.y != 0.0) {
+        float axis = float(corner.x) + (metatile % 2 == 0 ? 16.0 : 0.0); // left halves are even
+        r = length(vec2(p.x - axis, p.z));
+        rim = layer_color(ivec2(hit.cell.x, corner.y + 4), BACKGROUND); // below the outline
+    } else if (sideways_pipe(metatile) && hit.side.x != 0.0) {
+        float axis = float(corner.y) + (metatile <= 0x1e ? 16.0 : 0.0); // the top row is $1c-$1e
+        r = length(vec2(p.y - axis, p.z));
+        rim = layer_color(ivec2(corner.x + 4, hit.cell.y), BACKGROUND);
+    } else {
+        return false;
+    }
+    vec3 colour = to_linear(rim.rgb);
+    if (r > PIPE_RADIUS - 1.25) albedo = vec3(0.004);
+    else if (r > PIPE_HOLE) albedo = colour;
+    else albedo = colour * mix(0.02, 0.12, smoothstep(PIPE_HOLE - 4.0, PIPE_HOLE, r)); // darker deeper in
+    return true;
+}
+
 // The share of five short rays around the normal that get out.
 float ambient_occlusion(vec3 origin, vec3 normal, ivec2 skip) {
     vec3 u = normalize(abs(normal.z) > 0.7 ? cross(normal, vec3(0.0, 1.0, 0.0)) : cross(normal, vec3(0.0, 0.0, 1.0)));
@@ -297,11 +340,18 @@ void main() {
     vec3 n = surface_normal(hit, p);
     vec4 layer = layer_color(hit.cell, hit.layer);
     int material = material_of(layer);
-    if (hit.side != vec3(0.0)) {
+    int metatile = hit.layer == BACKGROUND ? metatile_at(hit.cell) : 0;
+    bool pipe = upright_pipe(metatile) || sideways_pipe(metatile);
+    vec3 albedo = to_linear(layer.rgb);
+    if (pipe && hit.side != vec3(0.0) && pipe_end(hit, p, metatile, albedo)) {
+        n = hit.side;
+    } else if (hit.side != vec3(0.0) && !pipe) {
+        // a pipe's curved side keeps its column's colour: the picture is its
+        // front view
         bool block = hit.layer == BACKGROUND && (material == M_SOLID || material == M_QUESTION);
         layer = block ? block_face_color(hit, p.z) : side_color(hit.cell, -ivec2(hit.side.xy), hit.layer);
+        albedo = to_linear(layer.rgb);
     }
-    vec3 albedo = to_linear(layer.rgb);
     vec3 surface = p + n * 0.05;
 
     ivec2 at = scene_at(hit.cell);
