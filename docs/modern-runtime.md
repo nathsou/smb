@@ -407,8 +407,9 @@ The old PPU module is split in three:
 
 - `video.c`: the display state and VRAM address decoding;
 - `render.c`: the software renderer, a function of `Video` only;
-- `tests/support/ppu_bus.c`: the register interface over `Video`, compiled
-  only with `-DPPU_BUS` for generic programs (the test fixtures).
+- `codegen/lib/ppu_bus.c`: the register interface over `Video`, compiled
+  only with `-DPPU_BUS` for programs that drive the registers (the test
+  fixtures and Metroid, see [recompiling Metroid](metroid.md)).
 
 SMB's build does not include it: a register access left in its generated code
 is a link error, and a computed access to $2000-$3FFF or $4014 traps.
@@ -426,7 +427,9 @@ frames: natively with Mesa under Xvfb (`make gpu-check`, then
 `xvfb-run ./gpu_check --debug-chr`) and in headless Chromium with SwiftShader
 (`NODE_PATH=$(npm root -g) node tests/web/gpu_check.cjs`). The only intended
 difference, a masked left column showing the backdrop rather than the
-previous frame's pixels, never occurs in SMB.
+previous frame's pixels, never occurs in SMB. Metroid's frames, with
+vertical scrolling and its own mirroring, are compared the same way
+(`make gpu-check GAME=metroid`, see [oracles](metroid.md#oracles)).
 
 ## Themes
 
