@@ -138,6 +138,10 @@
             line-height: 14px;
         }
         .warning[hidden] { display: none; }
+        #screen-status { margin: 0; font-size: 8px; line-height: 14px; text-align: center; max-width: 560px; }
+        #screen-status[hidden] { display: none; }
+        #screen-status.busy { color: var(--coin); }
+        #screen-status.error { color: var(--salmon); }
 
         #code {
             flex: 1 1 50%;
@@ -346,6 +350,7 @@
     <main>
         <section id="screen">
             <p class="warning" id="rom-warning" hidden></p>
+            <p class="status" id="screen-status" hidden></p>
             <p class="hint" id="controls">WASD MOVE · K B · L A · ENTER START · SPACE SELECT · Z SAVE · X LOAD</p>
         </section>
         <section id="code"></section>

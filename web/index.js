@@ -356,14 +356,14 @@ function pickFile() {
 }
 
 // Recompiles in a worker, or reuses an earlier result for the same inputs.
-async function build(inputs, viewer) {
+async function build(inputs, setStatus) {
     const key = await store.digest(inputs.rom, inputs.map, inputs.native, inputs.layout, inputs.version);
     const cached = await store.get('builds', key);
     if (cached) {
-        viewer.setStatus('RECOMPILED EARLIER: LOADED FROM THIS BROWSER\'S CACHE');
+        setStatus('RECOMPILED EARLIER: LOADED FROM THIS BROWSER\'S CACHE');
         return cached;
     }
-    viewer.setStatus('RECOMPILING THE ROM...', 'busy');
+    setStatus(`RECOMPILING ${inputs.title}...`, 'busy');
     const result = await new Promise((resolve, reject) => {
         const worker = new Worker('recompiler-worker.js', { type: 'module' });
         worker.onmessage = ({ data }) => {
@@ -377,7 +377,7 @@ async function build(inputs, viewer) {
         };
         worker.postMessage({ rom: inputs.rom, map: inputs.map, native: inputs.native, layout: inputs.layout });
     });
-    viewer.setStatus(`RECOMPILED IN ${(result.ms / 1000).toFixed(1)} S: ${(result.wasm.length / 1024).toFixed(0)} KB OF WEBASSEMBLY`);
+    setStatus(`RECOMPILED IN ${(result.ms / 1000).toFixed(1)} S: ${(result.wasm.length / 1024).toFixed(0)} KB OF WEBASSEMBLY`);
     const entry = { wasm: result.wasm, files: result.files, warning: result.warning };
     await store.put('builds', key, entry);
     return entry;
@@ -408,6 +408,15 @@ async function main() {
             boot();
         },
     });
+    // The code panel's status line; what the player must see (recompiling,
+    // errors) also shows under the screen, as the panel starts hidden.
+    const screenStatus = document.getElementById('screen-status');
+    const setStatus = (text, kind = '') => {
+        viewer.setStatus(text, kind);
+        screenStatus.textContent = kind ? text : '';
+        screenStatus.className = `status ${kind}`;
+        screenStatus.hidden = !kind;
+    };
     const toggleCode = document.getElementById('toggle-code');
     toggleCode.addEventListener('click', () => {
         const hidden = document.body.classList.toggle('code-hidden');
@@ -435,7 +444,7 @@ async function main() {
             await renderer.setTheme(currentGame.extras ? themeMenu.value : 'original');
         } catch (error) {
             console.error(error);
-            viewer.setStatus(`THEME UNAVAILABLE: ${error.message}`.toUpperCase(), 'error');
+            setStatus(`THEME UNAVAILABLE: ${error.message}`.toUpperCase(), 'error');
         }
         if (currentGame.extras) themeMenu.value = renderer.theme;
     };
@@ -458,7 +467,7 @@ async function main() {
         try {
             checkRom(bytes);
         } catch (e) {
-            viewer.setStatus(e.message.toUpperCase(), 'error');
+            setStatus(e.message.toUpperCase(), 'error');
             return;
         }
         await store.put('rom', 'rom', bytes);
@@ -499,26 +508,41 @@ async function main() {
         load() { shouldLoadState = true; },
     });
 
+    // The runs started so far: a run that a later one replaced (another ROM
+    // loaded while it was recompiling, say) stops at its next step, before
+    // it starts its game or touches the page.
+    let runs = 0;
+
     // One run of the game: recompiled module, linked runtime, frame loop.
-    async function start() {
+    async function start(run) {
+        const stale = () => run !== runs;
         session?.stop();
         session = null;
-        while (!rom) rom = await askForRom();
+        while (!rom) {
+            rom = await askForRom();
+            if (stale()) return;
+        }
         currentGame = gameOf(rom);
         document.title = currentGame.pageTitle;
         document.getElementById('game-title').textContent = currentGame.title;
         debugTiles.parentElement.hidden = !currentGame.extras;
         themeMenu.parentElement.hidden = !currentGame.extras;
         const { map: defaultMap, native, display, runtime: runtimeBytes } = await filesOf(currentGame);
+        if (stale()) return;
         const map = localStorage.getItem(currentGame.mapKey) ?? defaultMap;
         let files = null;
+        let warning = '';
+        const title = currentGame.title;
         const { memory, runtime, game } = await link(runtimeBytes, async layout => {
             const layoutText = Object.entries(layout).map(([name, address]) => `${name} ${address}`).join('\n');
-            const result = await build({ rom, map, native, layout: layoutText, version }, viewer);
+            const result = await build({ rom, map, native, layout: layoutText, version, title },
+                (text, kind) => stale() || setStatus(text, kind));
             files = result.files;
-            showWarning(result.warning);
+            warning = result.warning;
             return result.wasm;
         }, rom);
+        if (stale()) return;
+        showWarning(warning);
 
         const ordered = FILE_ORDER.map(name => files.find(f => f.name === name)).filter(Boolean);
         viewer.setFiles([
@@ -551,11 +575,15 @@ async function main() {
 
         // Draw with WebGL2 unless unavailable or ?software is in the URL.
         await renderer?.setTheme?.('original'); // frees the last run's theme
+        if (stale()) return;
         renderer = null;
         if (!new URLSearchParams(window.location.search).has('software')) {
             try {
-                renderer = await createGpuRenderer(canvas, runtime, memory, 'video.frag', { map });
+                const gpu = await createGpuRenderer(canvas, runtime, memory, 'video.frag', { map });
+                if (stale()) return;
+                renderer = gpu;
             } catch (error) {
+                if (stale()) return;
                 console.error('WebGL renderer unavailable:', error);
                 // a canvas keeps its first context type: start over with a 2D one
                 canvas.remove();
@@ -569,6 +597,7 @@ async function main() {
         // the themes are WebGL2 only
         themeMenu.disabled = renderer.setTheme === undefined;
         await applyTheme();
+        if (stale()) return;
         updateSize();
 
         let running = true;
@@ -632,11 +661,13 @@ async function main() {
     }
 
     async function boot() {
+        const run = ++runs;
         try {
-            await start();
+            await start(run);
         } catch (error) {
+            if (run !== runs) return; // a later run replaced it
             console.error(error);
-            viewer.setStatus(`ERROR: ${error.message}`.toUpperCase(), 'error');
+            setStatus(`ERROR: ${error.message}`.toUpperCase(), 'error');
             if (/iNES|mapper|ROM/.test(error.message)) {
                 rom = await askForRom(error.message);
                 boot();
