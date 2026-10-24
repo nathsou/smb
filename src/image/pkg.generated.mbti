@@ -3,6 +3,7 @@ package "nathsou/smb/image"
 
 import {
   "moonbitlang/core/debug",
+  "moonbitlang/core/ref",
   "moonbitlang/core/set",
   "nathsou/smb/parse",
 }
@@ -13,6 +14,10 @@ pub fn address_name(Image, Int32) -> String
 pub fn assemble(Array[@parse.SourceItem]) -> Image raise ImageError
 
 pub fn assume_condition(@parse.OpCode, Bool, Facts) -> Facts
+
+pub fn bank_location(Int32, Int32) -> Int32
+
+pub fn bank_of(Int32) -> Int32?
 
 pub fn branch_target(Instruction) -> Int32
 
@@ -28,6 +33,10 @@ pub fn discover_rom(Image, RomMap) -> Program raise ImageError
 
 pub fn encoding(@parse.OpCode, String) -> Int32?
 
+pub fn in_window(Int32) -> Bool
+
+pub fn jump_target(Instruction) -> Int32
+
 pub fn load_dump(Bytes, RomMap) -> Dump raise ImageError
 
 pub fn load_ines(Bytes) -> Cartridge raise ImageError
@@ -35,6 +44,8 @@ pub fn load_ines(Bytes) -> Cartridge raise ImageError
 pub fn operand(@parse.SourceAddressingMode) -> @parse.SourceExpr?
 
 pub fn parse_map(String) -> RomMap raise ImageError
+
+pub fn rebase(Int32, Int32) -> Int32
 
 pub fn rom_image(Cartridge, RomMap) -> Image raise ImageError
 
@@ -46,6 +57,10 @@ pub fn source_mode(Image, Instruction) -> @parse.SourceAddressingMode
 
 pub fn transfer(Instruction, Facts) -> Facts
 
+pub fn trap_address(String) -> Int32?
+
+pub fn trap_name(Int32) -> String
+
 pub fn width(String) -> Int32
 
 // Errors
@@ -54,9 +69,19 @@ pub suberror ImageError {
 } derive(@debug.Debug)
 
 // Types and methods
+pub(all) struct Banks {
+  contents : Array[Array[Int32]]
+  names : Array[String]
+  windows : Map[Int32, Array[Int32]]
+  window_names : Map[Int32, String]
+  code : Array[(Int32, Int32)]
+} derive(@debug.Debug)
+pub fn Banks::none() -> Self
+
 pub(all) struct Cartridge {
   prg : Array[Int32]
   chr : Array[Int32]
+  mapper : Int32
 } derive(@debug.Debug)
 
 pub(all) struct Dispatch {
@@ -92,7 +117,9 @@ pub(all) struct Facts {
   z : Bool?
   n : Bool?
   v : Bool?
+  depth : Int32?
 } derive(Eq, @debug.Debug)
+pub fn Facts::entry(Self) -> Self
 pub fn Facts::join(Self, Self) -> Self
 pub fn Facts::unknown() -> Self
 
@@ -102,8 +129,12 @@ pub(all) struct Image {
   symbols : Map[String, Int32]
   addresses : Array[Int32]
   source : Array[@parse.SourceItem]
+  banks : Banks
+  data : Array[(Int32, Int32)]
 } derive(@debug.Debug)
+pub fn Image::banked(Self) -> Bool
 pub fn Image::eval(Self, @parse.SourceExpr) -> Int32 raise ImageError
+pub fn Image::is_data(Self, Int32) -> Bool
 pub fn Image::read(Self, Int32) -> Int32 raise ImageError
 pub fn Image::word(Self, Int32) -> Int32 raise ImageError
 
@@ -122,6 +153,12 @@ pub(all) struct KnownRom {
   label : String
 } derive(@debug.Debug)
 
+pub(all) struct MapBank {
+  index : Int32
+  name : String
+  description : String
+} derive(@debug.Debug)
+
 pub(all) struct MapEntry {
   kind : MapKind
   address : Int32
@@ -129,13 +166,18 @@ pub(all) struct MapEntry {
   length : Int32
   type_name : String
   description : String
+  bank : Int32
+  stride : Int32
+  adjust : Int32
 } derive(@debug.Debug)
+pub fn MapEntry::code_addresses(Self) -> Array[Int32]
 
 pub(all) enum MapKind {
   Routine
   Table
   Var
   Io
+  Code
 } derive(Eq, @debug.Debug)
 
 pub(all) struct MapType {
@@ -152,6 +194,10 @@ pub(all) struct Program {
   roots : Array[String]
   facts : Map[Int32, Facts]
   idle : @set.Set[Int32]
+  windows : Map[Int32, Array[Int32]]
+  jumps : Map[Int32, Array[Int32]]
+  waits : Map[Int32, Int32]
+  exact : @ref.Ref[Bool]
   source : Array[@parse.SourceItem]
   addresses : Array[Int32]
   map : RomMap
@@ -162,7 +208,9 @@ pub(all) struct RomMap {
   entries : Array[MapEntry]
   roms : Array[KnownRom]
   types : Array[MapType]
+  banks : Array[MapBank]
 } derive(@debug.Debug)
+pub fn RomMap::bank_name(Self, Int32) -> String
 pub fn RomMap::empty() -> Self
 pub fn RomMap::identify(Self, Dump) -> KnownRom?
 pub fn RomMap::warning(Self, Dump) -> String?

@@ -1,12 +1,64 @@
 // Source addresses are semantic identity. Labels and comments are views over
 // the bytes, not boundaries that force a code/data partition or a C function.
+//
+// With a mapper, `bytes` is the fixed bank at $C000-$FFFF and the banks that
+// switch in at $8000-$BFFF are in `banks`. Code and data in the window are
+// then located by bank as well as address: a location is
+// `(bank + 1) << 16 | address` (see `bank_location`), and a window address
+// without a bank is the window as mapped at run time. Locations outside the
+// window, and every location of a cartridge without banks, are plain
+// addresses.
 pub(all) struct Image {
   origin: Int
   bytes: Array[Int]
   symbols: Map[String, Int]
   addresses: Array[Int]
   source: Array[@parse.SourceItem]
+  banks: Banks
+  // Data a ROM map names (location and length): execution never decodes
+  // it; a transfer into it traps.
+  data: Array[(Int, Int)]
 } derive(Debug)
+
+pub fn Image::is_data(self: Image, location: Int) -> Bool {
+  self.data.iter().any(fn(d) { location >= d.0 && location < d.0 + d.1 })
+}
+
+pub(all) struct Banks {
+  contents: Array[Array[Int]] // 16 KiB each
+  names: Array[String] // prefixes of the banks' names
+  windows: Map[Int, Array[Int]] // window address -> the banks the map names routines at it in
+  window_names: Map[Int, String] // window address -> the routine as fixed-bank code calls it
+  code: Array[(Int, Int)] // locations of the code addresses in the map's code tables, and what to add to them
+} derive(Debug)
+
+pub fn Banks::none() -> Banks {
+  { contents: [], names: [], windows: Map([]), window_names: Map([]), code: [] }
+}
+
+pub fn Image::banked(self: Image) -> Bool {
+  !self.banks.contents.is_empty()
+}
+
+pub fn bank_location(bank: Int, address: Int) -> Int {
+  ((bank + 1) << 16) | address
+}
+
+// The switchable bank of a location, if it has one.
+pub fn bank_of(location: Int) -> Int? {
+  if location >= 0x10000 { Some((location >> 16) - 1) } else { None }
+}
+
+pub fn in_window(address: Int) -> Bool {
+  let a = address & 0xffff
+  a >= 0x8000 && a < 0xc000
+}
+
+// `address` as seen from code at `from`: window addresses are in its bank.
+pub fn rebase(from: Int, address: Int) -> Int {
+  let address = address & 0xffff
+  if from >= 0x10000 && in_window(address) { (from & 0x7fff0000) | address } else { address }
+}
 
 pub suberror ImageError { InvalidImage(String) } derive(Debug)
 
@@ -175,13 +227,23 @@ pub fn assemble(source: Array[@parse.SourceItem]) -> Image raise ImageError {
       _ => ()
     }
   }
-  { origin, bytes, symbols, addresses, source }
+  { origin, bytes, symbols, addresses, source, banks: Banks::none(), data: [] }
 }
 
 fn math_min(a: Int, b: Int) -> Int { if a < b { a } else { b } }
 fn math_max(a: Int, b: Int) -> Int { if a > b { a } else { b } }
 
 pub fn Image::read(self: Image, address: Int) -> Int raise ImageError {
+  if self.banked() {
+    let a = address & 0xffff
+    if in_window(a) {
+      guard bank_of(address) is Some(bank) && bank < self.banks.contents.length() else {
+        raise InvalidImage("Address in the switchable window without a bank: \{a}")
+      }
+      return self.banks.contents[bank][a - 0x8000]
+    }
+    return self.bytes.get(a - self.origin).unwrap_or_error(InvalidImage("Address outside image: \{a}"))
+  }
   let index = if self.bytes.length() == 16384 && self.origin >= 0x8000 && address >= 0x8000 {
     (address - 0x8000) & 0x3fff
   } else { address - self.origin }
@@ -189,5 +251,5 @@ pub fn Image::read(self: Image, address: Int) -> Int raise ImageError {
 }
 
 pub fn Image::word(self: Image, address: Int) -> Int raise ImageError {
-  self.read(address) | (self.read(address + 1) << 8)
+  self.read(address) | (self.read(rebase(address, (address & 0xffff) + 1)) << 8)
 }

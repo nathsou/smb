@@ -1,9 +1,20 @@
-// The frame-based runtime delivers NMI only at a `jmp *` idle yield. A loop
-// that can come back to the same instruction without changing memory, reading
-// I/O, touching the stack or consuming a register it later changes would
-// repeat that iteration forever: only an interrupt could end it. Such
-// wait-for-interrupt loops need a resumable foreground, so they are rejected
-// instead of compiling into a hang.
+// The frame-based runtime delivers NMI only where the foreground yields: at a
+// `jmp *` idle loop, or in a wait loop. A loop that can come back to the
+// same instruction without changing memory, reading I/O, touching the stack
+// or consuming a register it later changes would repeat that iteration
+// forever: only an interrupt could end it.
+//
+// A path back whose decisions depend on what it read from memory is not
+// proven to repeat forever: what it reads decides (a table that restarts an
+// animation, say). Among those, a wait loop is a loop entered only at its
+// start, whose every decision
+// depends on values it read from memory since the start: memory does not
+// change during the loop, so once an iteration from the start comes back to
+// it, every later one would too. The transfer back to the start yields
+// instead: the runtime delivers the interrupt, and the loop resumes from its
+// start, reading memory again (the foreground keeps its state; see the IR's
+// resumable functions). Other loops that only an interrupt could end are
+// rejected instead of compiling into a hang.
 
 // Register and flag bits: A, X, Y, C, Z, N, V.
 const REG_A = 1
@@ -69,40 +80,164 @@ fn pure_effects(inst: Instruction) -> (Int, Int)? {
 // bits still hold p's incoming values and which of those were consumed. If a
 // path returns to p having changed nothing it consumed, every later iteration
 // consumes the same values and repeats the same path.
-fn check_wait_loops(image: Image, instructions: Map[Int, Instruction], facts: Map[Int, Facts], idle: Set[Int]) -> Unit raise ImageError {
-  fn successors(inst: Instruction) -> Array[Int] {
-    if inst.op == JMP { return [inst.arg] }
-    if inst.mode != "rel" { return [inst.next] }
-    match condition(inst.op, facts[inst.pc]) {
-      Some(true) => [branch_target(inst)]
-      Some(false) => [inst.next]
-      None => [branch_target(inst), inst.next]
-    }
+fn check_wait_loops(image: Image, instructions: Map[Int, Instruction], facts: Map[Int, Facts], idle: Set[Int], waits: Map[Int, Int]) -> Unit raise ImageError {
+  let waiting: Set[Int] = Set([])
+  for _, start in waits {
+    for pc in wait_body(instructions, facts, idle, start) { waiting.add(pc) }
   }
   fn pure(pc: Int) -> (Int, Int)? {
     if idle.contains(pc) { return None }
     match instructions.get(pc) { Some(inst) => pure_effects(inst); None => None }
   }
   for start, _ in instructions {
-    if pure(start) is None { continue }
-    let seen: Set[Int] = Set([])
-    let work = [(start, ALL_STATE, 0)]
-    while work.pop() is Some((pc, untouched, consumed)) {
-      let key = pc * 16384 + untouched * 128 + consumed
-      if seen.contains(key) { continue }
-      seen.add(key)
+    if pure(start) is None || waiting.contains(start) { continue }
+    // `tainted`: state holding values read from memory on this path;
+    // `decided`: whether a branch on this path depended on one
+    let seen: Set[(Int, Int, Int, Int, Bool)] = Set([])
+    let work = [(start, ALL_STATE, 0, 0, false)]
+    while work.pop() is Some((pc, untouched, consumed, tainted, decided)) {
+      if seen.contains((pc, untouched, consumed, tainted, decided)) { continue }
+      seen.add((pc, untouched, consumed, tainted, decided))
+      let inst = instructions[pc]
       let (reads, writes) = pure(pc).unwrap()
       let consumed = consumed | (reads & untouched)
       let untouched = untouched & (ALL_STATE ^ writes)
-      for next in successors(instructions[pc]) {
+      let decided = decided || (inst.mode == "rel" && (reads & tainted) != 0)
+      let tainted = if reads_memory(inst) || (reads & tainted) != 0 { tainted | writes } else { tainted & (ALL_STATE ^ writes) }
+      for next in successors(inst, facts) {
         if next == start {
-          if (consumed & (ALL_STATE ^ untouched)) == 0 {
+          if (consumed & (ALL_STATE ^ untouched)) == 0 && !decided {
             raise InvalidImage("Loop at \{show_pc(start)} (\{address_name(image, start)}) can only exit through an interrupt; the frame-based backend requires a `jmp *` idle loop")
           }
         } else if pure(next) is Some(_) {
-          work.push((next, untouched, consumed))
+          work.push((next, untouched, consumed, tainted, decided))
         }
       }
     }
   }
+}
+
+fn reads_memory(inst: Instruction) -> Bool {
+  match inst.mode {
+    "zp" | "zpx" | "zpy" | "abs" | "absx" | "absy" | "indx" | "indy" => inst.op != JMP
+    _ => false
+  }
+}
+
+fn successors(inst: Instruction, facts: Map[Int, Facts]) -> Array[Int] {
+  if inst.op == JMP { return [jump_target(inst)] }
+  if inst.mode != "rel" { return [inst.next] }
+  match condition(inst.op, facts[inst.pc]) {
+    Some(true) => [branch_target(inst)]
+    Some(false) => [inst.next]
+    None => [branch_target(inst), inst.next]
+  }
+}
+
+fn pure_at(instructions: Map[Int, Instruction], idle: Set[Int], pc: Int) -> (Int, Int)? {
+  if idle.contains(pc) { return None }
+  match instructions.get(pc) {
+    Some(inst) if inst.op != JMP || inst.mode == "abs" => pure_effects(inst)
+    _ => None
+  }
+}
+
+// The pure instructions on paths from `start` back to it.
+fn wait_body(instructions: Map[Int, Instruction], facts: Map[Int, Facts], idle: Set[Int], start: Int) -> Array[Int] {
+  let forward: Set[Int] = Set([])
+  let work = [start]
+  while work.pop() is Some(pc) {
+    if forward.contains(pc) || pure_at(instructions, idle, pc) is None { continue }
+    forward.add(pc)
+    for next in successors(instructions[pc], facts) { work.push(next) }
+  }
+  // keep those from which the start is reachable again
+  let body: Set[Int] = Set([])
+  let mut changed = true
+  while changed {
+    changed = false
+    for pc in forward {
+      if body.contains(pc) { continue }
+      if successors(instructions[pc], facts).iter().any(fn(n) { n == start || body.contains(n) }) {
+        body.add(pc)
+        changed = true
+      }
+    }
+  }
+  let out = body.to_array()
+  out.sort()
+  out
+}
+
+// Wait loops: each transfer back to a wait loop's start, with that start.
+fn find_waits(instructions: Map[Int, Instruction], facts: Map[Int, Facts], idle: Set[Int]) -> Map[Int, Int] {
+  // Where control can come from: other instructions, and entries (calls,
+  // vectors, dispatch and jump targets) that make an instruction a start.
+  let predecessors: Map[Int, Array[Int]] = Map([])
+  let entered: Set[Int] = Set([])
+  for pc, inst in instructions {
+    let next = match (inst.op, inst.mode) {
+      (JSR, _) => {
+        entered.add(jump_target(inst))
+        [inst.next]
+      }
+      (JMP, "ind") | (RTS, _) | (RTI, _) | (BRK, _) => []
+      _ => successors(inst, facts)
+    }
+    for n in next {
+      if !predecessors.contains(n) { predecessors[n] = [] }
+      predecessors[n].push(pc)
+    }
+  }
+  let waits: Map[Int, Int] = Map([])
+  let claimed: Set[Int] = Set([])
+  let starts = instructions.keys().to_array()
+  starts.sort()
+  for start in starts {
+    if claimed.contains(start) || pure_at(instructions, idle, start) is None { continue }
+    let body = wait_body(instructions, facts, idle, start)
+    if !body.contains(start) { continue }
+    let inside: Set[Int] = Set(body)
+    // entered only at the start
+    let closed = body.iter().all(fn(pc) {
+      pc == start || (!entered.contains(pc) && predecessors.get(pc).unwrap_or([]).iter().all(fn(p) { inside.contains(p) }))
+    })
+    if !closed { continue }
+    // Registers and flags holding values read from memory (or constants)
+    // since the start, on every path within the body.
+    let determined: Map[Int, Int] = Map([])
+    determined[start] = 0
+    let mut changed = true
+    while changed {
+      changed = false
+      for pc in body {
+        guard determined.get(pc) is Some(known) else { continue }
+        let (reads, writes) = pure_at(instructions, idle, pc).unwrap()
+        let out = if (reads & known) == reads { known | writes } else { known & (ALL_STATE ^ writes) }
+        for next in successors(instructions[pc], facts) {
+          if next == start || !inside.contains(next) { continue }
+          let merged = match determined.get(next) { Some(d) => d & out; None => out }
+          if determined.get(next) != Some(merged) {
+            determined[next] = merged
+            changed = true
+          }
+        }
+      }
+    }
+    let decided = body.iter().all(fn(pc) {
+      let inst = instructions[pc]
+      if inst.mode != "rel" || condition(inst.op, facts[pc]) is Some(_) { return true }
+      let (reads, _) = pure_at(instructions, idle, pc).unwrap()
+      (reads & determined.get(pc).unwrap_or(0)) == reads
+    })
+    // the start is reached back by a jump or a branch
+    let back = body.filter(fn(pc) {
+      let inst = instructions[pc]
+      (inst.op == JMP || inst.mode == "rel") && successors(inst, facts).contains(start)
+    })
+    if !decided || back.is_empty() { continue }
+    for pc in back { waits[pc] = start }
+    for pc in body { claimed.add(pc) }
+  }
+  waits
 }

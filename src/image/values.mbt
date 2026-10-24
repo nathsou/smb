@@ -1,5 +1,8 @@
 // A finite-height constant domain. Joins only lose facts, so cycles converge.
 // Unknown is not zero; MMIO and unresolved memory reads always produce unknown.
+//
+// `depth` counts the bytes pushed since the routine's entry, when known: a
+// return with two pushed is a computed jump.
 pub(all) struct Facts {
   a: Int?
   x: Int?
@@ -8,10 +11,16 @@ pub(all) struct Facts {
   z: Bool?
   n: Bool?
   v: Bool?
+  depth: Int?
 } derive(Debug, Eq)
 
 pub fn Facts::unknown() -> Facts {
-  { a: None, x: None, y: None, c: None, z: None, n: None, v: None }
+  { a: None, x: None, y: None, c: None, z: None, n: None, v: None, depth: None }
+}
+
+// At the entry of a routine.
+pub fn Facts::entry(self: Facts) -> Facts {
+  { ..self, depth: Some(0) }
 }
 
 pub fn Facts::join(self: Facts, other: Facts) -> Facts {
@@ -21,7 +30,8 @@ pub fn Facts::join(self: Facts, other: Facts) -> Facts {
     c: if self.c == other.c { self.c } else { None },
     z: if self.z == other.z { self.z } else { None },
     n: if self.n == other.n { self.n } else { None },
-    v: if self.v == other.v { self.v } else { None } }
+    v: if self.v == other.v { self.v } else { None },
+    depth: if self.depth == other.depth { self.depth } else { None } }
 }
 
 fn Facts::nz(self: Facts, value: Int?) -> Facts {
@@ -105,11 +115,15 @@ pub fn transfer(inst: Instruction, f: Facts) -> Facts {
     }
     ADC | SBC => { ..f.nz(None), a: None, c: None, v: None }
     BIT => { ..f.nz(None), v: None }
-    PLA => { ..f.nz(None), a: None }
+    PLA => { ..f.nz(None), a: None, depth: f.depth.map(fn(d) { d - 1 }) }
+    PHA | PHP => { ..f, depth: f.depth.map(fn(d) { d + 1 }) }
     TSX => { ..f.nz(None), x: None }
+    TXS => { ..f, depth: None }
     INC | DEC => f.nz(None)
-    PLP | RTI => { ..f, c: None, z: None, n: None, v: None }
-    JSR => Facts::unknown()
+    PLP => { ..f, c: None, z: None, n: None, v: None, depth: f.depth.map(fn(d) { d - 1 }) }
+    RTI => { ..f, c: None, z: None, n: None, v: None }
+    // a call returns with the stack as it found it
+    JSR => { ..Facts::unknown(), depth: f.depth }
     _ => f
   }
 }

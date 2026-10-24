@@ -121,7 +121,7 @@ fn transpile_rom(source: String, map_text: String) -> Map[String, String] raise 
   let items = @parse.Parser::new(@parse.Lexer::new(source).tokenize()).parse()
   let image = @image.assemble(items)
   let map = @image.parse_map(map_text)
-  let program = @image.discover_rom(@image.rom_image({ prg: image.bytes, chr: [] }, map), map)
+  let program = @image.discover_rom(@image.rom_image({ prg: image.bytes, chr: [], mapper: 0 }, map), map)
   program.validate_stacks()
   let low = @lower.AsmLowering::new(program.source, program=Some(program))
   low.lower()
