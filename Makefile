@@ -111,10 +111,11 @@ game-wasm: runtime-wasm
 
 # The page: the C runtime, the recompiler compiled to JavaScript, and the
 # inputs it recompiles the player's ROM with. Serve web/ over HTTP.
-web: runtime-wasm apu-wasm
+web: runtime-wasm runtime-mmc1-wasm apu-wasm
 	moon build --target js --release
 	cp _build/js/release/build/web/web.js web/recompiler.js
 	cp maps/smb.map web/smb.map
+	cp maps/metroid.map web/metroid.map
 	cp codegen/native/routines.txt web/routines.txt
 	cp codegen/native/display.c web/display.c
 

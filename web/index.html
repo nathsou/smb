@@ -81,7 +81,7 @@
 
         button:hover:not(:disabled), .button:hover { background: var(--ink); color: var(--panel); }
         button:disabled { opacity: 0.4; cursor: default; }
-        button[hidden] { display: none; }
+        button[hidden], label.toggle[hidden] { display: none; }
 
         select {
             font-family: var(--pixel);
@@ -337,7 +337,7 @@
 </head>
 <body class="code-hidden">
     <header>
-        <h1>SUPER MARIO BROS. <small>RECOMPILED</small></h1>
+        <h1><span id="game-title">SUPER MARIO BROS.</span> <small>RECOMPILED</small></h1>
         <label class="toggle">THEME <select id="theme"></select></label>
         <label class="toggle"><input type="checkbox" id="debug-tiles"> DEBUG TILES</label>
         <button id="load-rom">LOAD ROM</button>
@@ -353,8 +353,8 @@
     <div id="dialog" hidden>
         <div class="box">
             <h2>INSERT CARTRIDGE</h2>
-            <p>This page recompiles Super Mario Bros. from your own copy of the
-               game into WebAssembly and C, in your browser.</p>
+            <p>This page recompiles Super Mario Bros. or Metroid from your own copy
+               of the game into WebAssembly and C, in your browser.</p>
             <p>Load a legally obtained dump, an iNES file (<code>.nes</code>) or a raw dump of
                the cartridge, or drop it here.
                It stays on this device.</p>
