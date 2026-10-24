@@ -2,8 +2,7 @@
 // background and sprite layers with materials, from the display state and the
 // game's level data (the map names the variables it reads).
 
-export const SCENE_MARGIN = 16;
-export const SCENE_WIDTH = 288;
+export const SCENE_WIDTH = 320;
 export const SCENE_HEIGHT = 256;
 
 export function createTexture(gl, width, height, internalFormat, format, type) {
@@ -17,7 +16,7 @@ export function createTexture(gl, width, height, internalFormat, format, type) {
     return texture;
 }
 
-// A 288x256 half-float target (light, distances); needs EXT_color_buffer_float.
+// A 320x256 half-float target (light, distances); needs EXT_color_buffer_float.
 export function createFloatTexture(gl, width = SCENE_WIDTH, height = SCENE_HEIGHT) {
     return createTexture(gl, width, height, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT);
 }
@@ -99,24 +98,34 @@ export async function createScene(context) {
     const scene = {
         background,
         sprite,
-        scrollDelta: 0, // pixels scrolled since the last frame
+        origin: 16, // scene x of the screen's left edge (common.glsl)
+        shift: 0,   // where last frame had this frame's scene x, minus x
+        // Sets u_origin on a program that uses the scene.
+        bindOrigin(target) {
+            gl.useProgram(target);
+            gl.uniform1i(gl.getUniformLocation(target, 'u_origin'), scene.origin);
+        },
         draw() {
+            const position = (frame.ctrl & 1) * 256 + frame.scrollX;
+            const origin = 16 + (((position - 16) % 32) + 32) % 32;
+            const scrolled = scrollPosition === null ? 0 : ((position - scrollPosition + 768) % 512) - 256;
+            scene.shift = scrolled - (origin - scene.origin);
+            scene.origin = origin;
+            scrollPosition = position;
+
             const ram = context.ram();
             if (blockBuffers.every(address => address !== undefined)) {
                 blockBytes.set(ram.subarray(blockBuffers[0], blockBuffers[0] + 208), 0);
                 blockBytes.set(ram.subarray(blockBuffers[1], blockBuffers[1] + 208), 208);
             }
             context.bindVideo(program);
+            scene.bindOrigin(program);
             gl.uniform1i(areaKindLocation, areaKind === undefined ? -1 : ram[areaKind]);
             gl.activeTexture(gl.TEXTURE2);
             gl.bindTexture(gl.TEXTURE_2D, blocks);
             gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 16, 26, gl.RED, gl.UNSIGNED_BYTE, blockBytes);
             gl.uniform1i(gl.getUniformLocation(program, 'u_blocks'), 2);
             pass(context, program, framebuffer, SCENE_WIDTH, SCENE_HEIGHT);
-
-            const position = (frame.ctrl & 1) * 256 + frame.scrollX;
-            scene.scrollDelta = scrollPosition === null ? 0 : ((position - scrollPosition + 768) % 512) - 256;
-            scrollPosition = position;
         },
         dispose() {
             [background, sprite, blocks].forEach(texture => gl.deleteTexture(texture));

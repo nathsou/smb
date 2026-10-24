@@ -437,8 +437,8 @@ they decode tiles, attributes and sprites exactly as the original picture
 does.
 
 Both themes start from the scene (`scene.frag`): the frame as a background
-and a sprite layer, 16 pixels wider on each side, each pixel with a
-material. The materials come from the game, not from the picture: the block
+and a sprite layer, at least 16 pixels wider on each side, each pixel with
+a material. The materials come from the game, not from the picture: the block
 buffer (`block_buffer1`, `block_buffer2`) holds the metatiles of the two
 screens around the player that the player can touch, because the level parser
 leaves scenery out (`block_buffer_limits`). A metatile there is solid unless
@@ -446,22 +446,28 @@ leaves scenery out (`block_buffer_limits`). A metatile there is solid unless
 block; the rest of the opaque background is scenery. Lava is the castle's
 water tiles, and fire is the fireball and flame sprite tiles. The scene reads
 these by the map's names, so a map without them leaves everything scenery.
+The scene is anchored to the level, not to the screen: its left edge moves
+in steps of 32 pixels, so that the light's probes (2 to 32 pixels apart) stay
+on the same spots of the level as it scrolls. Anchored to the screen, the
+level slid across them and the light shimmered while scrolling.
 
 - 2D global illumination (`light.js`): a jump flood (`jfa.frag`) gives every
   pixel its nearest occluder and nearest free pixel; radiance cascades
   (`cascade.frag`) march rays through that distance field, from the top
-  cascade down, each merging the one above; rays that leave the scene see the
-  sky, which dark areas (a black backdrop) do not have. Occluders return
-  their own light and last frame's light on them, reflected once (shifted by
-  the scroll). An occluder pixel takes the light of its nearest free pixel.
-  The backdrop is the sky and is not lit.
+  cascade down, each merging the one above. Fire, lava, coins and question
+  blocks emit light; occluders also return last frame's light on them,
+  reflected once (shifted by the scroll). An occluder pixel takes the light of
+  its nearest free pixel. Light that reaches everywhere is added after, and
+  is not reflected: daylight is even, as in the game, and dark areas (a black
+  backdrop) are dim. The backdrop is not lit.
 - 2.5D ray tracing (`voxel.js`): each opaque pixel is a column of voxels
   over the depths its material gives, seen through a cabinet projection, so
   the play plane is where the game draws it. Rays walk the pixel grid
   checking the depths they cross each cell at. The sun and fire sprites
   (point lights, merged per flame) cast shadow rays, five short rays give
   ambient occlusion, and the 2D global illumination is the light from
-  everywhere else.
+  everywhere else; here rays that leave the scene see the sky (in daylight),
+  so what is under something is shaded.
 
 The status bar is drawn as it is. `tests/web/themes.cjs` draws replay frames
 with every theme and fails on WebGL errors. The themes are a presentation

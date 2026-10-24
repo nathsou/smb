@@ -83,8 +83,9 @@ DEBUG TILES draws with generated placeholder tiles instead of the ROM's, and
 THEME draws the same frames differently (WebGL2; ORIGINAL is the game's own
 picture):
 
-- 2D GLOBAL ILLUMINATION: the sky, fire, lava and coins light the scene,
-  with soft shadows and a bounce, by radiance cascades;
+- 2D GLOBAL ILLUMINATION: fire, lava, coins and question blocks light the
+  scene, with soft shadows and a bounce, by radiance cascades; daylight
+  stays as in the game;
 - 2.5D RAY TRACING: every pixel becomes voxels, seen from slightly above,
   with sun and fire shadows traced through them.
 

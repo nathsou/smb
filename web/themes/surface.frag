@@ -1,12 +1,10 @@
 // The light on each scene pixel: the irradiance of cascade 0 (its four rays,
 // between the four nearest probes). An occluder takes the light of its
 // nearest free pixel, dimming with depth, so that surfaces are lit from the
-// side light comes from. u_floor is light that reaches everywhere, enclosed
-// or not.
+// side light comes from.
 
 uniform sampler2D u_cascade0;
 uniform sampler2D u_seeds;
-uniform vec3 u_floor;
 
 out vec4 o_light;
 
@@ -32,9 +30,9 @@ void main() {
     vec2 here = vec2(p);
     vec4 seeds = texelFetch(u_seeds, p, 0);
     if (distance(here, seeds.xy) >= 0.5) {
-        o_light = vec4(irradiance(here + 0.5) + u_floor, 1.0);
+        o_light = vec4(irradiance(here + 0.5), 1.0);
         return;
     }
     float depth = distance(here, seeds.zw);
-    o_light = vec4(irradiance(seeds.zw + 0.5) * (0.6 + 0.4 * exp(-max(depth - 1.0, 0.0) / 12.0)) + u_floor, 1.0);
+    o_light = vec4(irradiance(seeds.zw + 0.5) * (0.6 + 0.4 * exp(-max(depth - 1.0, 0.0) / 12.0)), 1.0);
 }

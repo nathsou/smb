@@ -1,5 +1,5 @@
 // The scene for the themes: the frame as background and sprite layers with a
-// material each (common.glsl), including SCENE_MARGIN columns on each side.
+// material each (common.glsl), with at least 16 columns on each side.
 //
 // Materials come from the game's block buffer, the metatiles of the two
 // screens around the player, which holds only what the player can touch:
@@ -34,7 +34,7 @@ bool is_fire(int tile) {
 }
 
 void main() {
-    int x = int(gl_FragCoord.x) - SCENE_MARGIN;
+    int x = int(gl_FragCoord.x) - u_origin;
     int y = int(gl_FragCoord.y);
     o_background = vec4(color(u_palette[0]), float(M_BACKDROP) / 255.0);
     o_sprite = vec4(0.0);
