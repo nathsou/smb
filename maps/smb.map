@@ -840,7 +840,7 @@ table $b2c2 hidden_1up_coin_counts 8
 routine $b2ca walk_to_castle
 routine $b315 next_area
 routine $b329 move_player
-table $b351 player_movement_states 9
+table $b351 player_movement_states 8
 routine $b35a move_on_ground
 routine $b36d move_falling
 routine $b376 move_jumping_or_swimming
