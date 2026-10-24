@@ -12,7 +12,7 @@ const FRAMES = 7987;
 const STACK_SCRATCH_START = 0x140; // see codegen/hash.c
 const STACK_SCRATCH_END = 0x200;
 
-const memory = new WebAssembly.Memory({ initial: 10 });
+const memory = new WebAssembly.Memory({ initial: 32 }); // room for the runtime to grow
 const view = () => new Uint8Array(memory.buffer);
 const { instance } = await WebAssembly.instantiate(fs.readFileSync(path.join(root, 'web/smb.wasm')), {
     env: {

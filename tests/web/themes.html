@@ -10,6 +10,7 @@
 // ?frames=100,2000  frames to draw
 // &rom=1            the ROM's tiles (smb.nes in the root) instead of debug tiles
 // &poke=500:075f:3  write RAM at a frame (frame:address:value, hex; ';' between)
+// &scale=4          canvas pixels per NES pixel for the themes drawn finer (2)
 import { createGpuRenderer, THEMES } from '../../web/gpu.js';
 
 const params = new URLSearchParams(location.search);
@@ -20,7 +21,7 @@ const pokes = (params.get('poke') ?? '').split(';').filter(Boolean).map(poke => 
 });
 
 async function run() {
-    const memory = new WebAssembly.Memory({ initial: 10 });
+    const memory = new WebAssembly.Memory({ initial: 32 }); // room for the runtime to grow
     const view = () => new Uint8Array(memory.buffer);
     const { instance } = await WebAssembly.instantiateStreaming(fetch('../../web/smb.wasm'), {
         env: {
@@ -54,7 +55,7 @@ async function run() {
         const renderer = await createGpuRenderer(canvas, wasm, memory, '../../web/video.frag', { map });
         if (renderer === null) return { error: 'WebGL2 unavailable' };
         await renderer.setTheme(theme);
-        renderer.setDisplayScale(2);
+        renderer.setDisplayScale(Number(params.get('scale') ?? 2));
         renderers[theme] = { renderer, canvas };
     }
 

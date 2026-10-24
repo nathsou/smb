@@ -10,13 +10,13 @@ import {
 // Values
 pub fn from_assembly(String) -> @image.Program raise PipelineError
 
-pub fn from_rom(Bytes, String) -> (@image.Program, String?) raise PipelineError
+pub fn from_rom(Bytes, String, progress? : (String) -> Unit) -> (@image.Program, String?) raise PipelineError
 
 pub fn map_header(String, source~ : String) -> String raise PipelineError
 
 pub fn parse_names(String) -> Array[String]
 
-pub fn recompile(@image.Program, Options) -> Output raise PipelineError
+pub fn recompile(@image.Program, Options, progress? : (String) -> Unit) -> Output raise PipelineError
 
 // Errors
 pub suberror PipelineError {

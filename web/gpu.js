@@ -13,6 +13,7 @@ export const THEMES = {
     original: 'ORIGINAL',
     light: '2D GLOBAL ILLUMINATION',
     voxel: '2.5D RAY TRACING',
+    model: '3D',
 };
 
 export const VERTEX_SHADER = `#version 300 es

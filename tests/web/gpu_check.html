@@ -12,7 +12,7 @@ const WIDTH = 256, HEIGHT = 240, FRAMES = 7987;
 const every = Number(new URLSearchParams(location.search).get('every') ?? 1);
 
 async function run() {
-    const memory = new WebAssembly.Memory({ initial: 10 });
+    const memory = new WebAssembly.Memory({ initial: 32 }); // room for the runtime to grow
     const view = () => new Uint8Array(memory.buffer);
     const { instance } = await WebAssembly.instantiateStreaming(fetch('../../web/smb.wasm'), {
         env: {

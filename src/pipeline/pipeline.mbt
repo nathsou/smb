@@ -7,13 +7,28 @@ fn fail(stage : String, err : Error) -> PipelineError {
   PipelineError("\{stage}: \{@debug.to_string(err)}")
 }
 
+// `progress` is told each stage as it starts, by its key: "map", "rom" and
+// "discover" here, then "stacks", "lower", "ir", "resumable", "optimize",
+// "c", and for WebAssembly "inline" and "wasm" (the page shows them).
+fn no_progress(_stage : String) -> Unit {
+  ()
+}
+
 // A program discovered from a ROM (an iNES file or a raw dump) and a map,
 // with a warning when the map was written for other dumps.
-pub fn from_rom(rom : Bytes, map_text : String) -> (@image.Program, String?) raise PipelineError {
+pub fn from_rom(
+  rom : Bytes,
+  map_text : String,
+  progress~ : (String) -> Unit = no_progress,
+) -> (@image.Program, String?) raise PipelineError {
   try {
+    progress("map")
     let map = @image.parse_map(map_text)
+    progress("rom")
     let dump = @image.load_dump(rom, map)
-    (@image.discover_rom(@image.rom_image(dump.cartridge, map), map), map.warning(dump))
+    let image = @image.rom_image(dump.cartridge, map)
+    progress("discover")
+    (@image.discover_rom(image, map), map.warning(dump))
   } catch {
     err => raise fail("ROM", err)
   }
@@ -54,15 +69,25 @@ pub(all) struct Output {
   irreducible : Array[String] // functions structured as dispatch loops
 }
 
-pub fn recompile(program : @image.Program, options : Options) -> Output raise PipelineError {
+pub fn recompile(
+  program : @image.Program,
+  options : Options,
+  progress~ : (String) -> Unit = no_progress,
+) -> Output raise PipelineError {
+  progress("stacks")
   program.validate_stacks() catch { err => raise fail("Stack", err) }
+  progress("lower")
   let low = @lower.AsmLowering::new(program.source, program=Some(program))
   low.lower() catch { err => raise fail("Lowering", err) }
+  progress("ir")
   let ir = @ir.build(low, native=Set::from_array(options.native)) catch {
     err => raise fail("IR", err)
   }
+  progress("resumable")
   ir.make_resumable() catch { err => raise fail("IR", err) }
+  progress("optimize")
   if options.reference { ir.analyze() |> ignore } else { ir.optimize() }
+  progress("c")
   let c = @transpile.Transpiler::transpile(low, ir, native=options.native) catch {
     err => raise fail("C", err)
   }
@@ -70,9 +95,11 @@ pub fn recompile(program : @image.Program, options : Options) -> Output raise Pi
   // The WebAssembly build also inlines small leaf routines; the C keeps one
   // function per routine.
   if !options.reference && options.inline {
+    progress("inline")
     ir.inline_leaves() |> ignore
     ir.optimize()
   }
+  progress("wasm")
   let output = @wasm.emit(
     ir,
     layout=options.layout,
