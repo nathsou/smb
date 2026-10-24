@@ -439,13 +439,21 @@ async function main() {
     for (const [name, label] of Object.entries(THEMES)) themeMenu.add(new Option(label, name));
     themeMenu.value = localStorage.getItem(THEME_KEY) ?? 'original';
     if (themeMenu.value === '') themeMenu.value = 'original';
+    // A theme this browser cannot draw says why under the screen (the
+    // shader compiler's message is in the console).
+    const themeWarning = document.getElementById('theme-warning');
     const applyTheme = async () => {
         if (!renderer?.setTheme) return;
+        const wanted = currentGame.extras ? themeMenu.value : 'original';
+        themeWarning.hidden = true;
         try {
-            await renderer.setTheme(currentGame.extras ? themeMenu.value : 'original');
+            await renderer.setTheme(wanted);
         } catch (error) {
             console.error(error);
-            viewer.setStatus(`THEME UNAVAILABLE: ${error.message}`.toUpperCase(), 'error');
+            const message = `${THEMES[wanted]} IS UNAVAILABLE HERE: ${error.message.split('\n')[0]}`.toUpperCase();
+            viewer.setStatus(message, 'error');
+            themeWarning.textContent = message;
+            themeWarning.hidden = false;
         }
         if (currentGame.extras) themeMenu.value = renderer.theme;
     };

@@ -31,6 +31,16 @@ uniform vec3 u_light_colors[8];
 
 out vec4 o_color;
 
+// MODEL_LITE (model.js, for GPUs that cannot compile the full shader): no
+// ambient occlusion, and inflated shapes keep their stepped columns.
+#ifdef MODEL_LITE
+const int OCCLUSION_RAYS = 0;
+const int REFINE_STEPS = 0;
+#else
+const int OCCLUSION_RAYS = 5;
+const int REFINE_STEPS = 4;
+#endif
+
 const float NEAR = -20.0; // in front of every shape
 const float HAZE_START = 18.0; // depth from which far shapes fade towards the backdrop
 const float HAZE_MAX = 0.12;
@@ -186,7 +196,7 @@ float centre_of(Hit hit) {
 float refine(Hit hit, vec3 origin, vec3 direction) {
     float centre = centre_of(hit);
     float t = hit.t;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < REFINE_STEPS; i++) {
         vec3 p = origin + direction * t;
         float z = centre - smooth_half(p.xy, hit.layer, centre);
         t = clamp((z - origin.z) / direction.z, hit.t_enter, hit.t_exit);
@@ -202,12 +212,15 @@ float refine(Hit hit, vec3 origin, vec3 direction) {
 vec3 surface_normal(Hit hit, vec3 p) {
     float centre = centre_of(hit);
     float facing = p.z < centre ? -1.0 : 1.0;
-    if (inflated(hit)) {
-        float dx = smooth_half(p.xy + vec2(0.5, 0.0), hit.layer, centre) -
-            smooth_half(p.xy - vec2(0.5, 0.0), hit.layer, centre);
-        float dy = smooth_half(p.xy + vec2(0.0, 0.5), hit.layer, centre) -
-            smooth_half(p.xy - vec2(0.0, 0.5), hit.layer, centre);
-        return normalize(vec3(-dx, -dy, facing));
+    if (inflated(hit) && REFINE_STEPS > 0) {
+        // the thickness half a pixel right, left, below and above, in one
+        // loop: one copy of the lookup
+        vec2 slope = vec2(0.0);
+        for (int i = 0; i < 4; i++) {
+            vec2 offset = vec2(i == 0 ? 0.5 : i == 1 ? -0.5 : 0.0, i == 2 ? 0.5 : i == 3 ? -0.5 : 0.0);
+            slope -= 2.0 * offset * smooth_half(p.xy + offset, hit.layer, centre);
+        }
+        return normalize(vec3(slope, facing));
     }
     float dx = half_thickness(hit.cell + ivec2(1, 0), hit.layer) - half_thickness(hit.cell - ivec2(1, 0), hit.layer);
     float dy = half_thickness(hit.cell + ivec2(0, 1), hit.layer) - half_thickness(hit.cell - ivec2(0, 1), hit.layer);
@@ -286,17 +299,13 @@ bool pipe_end(Hit hit, vec3 p, int metatile, out vec3 albedo) {
     return true;
 }
 
-// The share of five short rays around the normal that get out.
-float ambient_occlusion(vec3 origin, vec3 normal, ivec2 skip) {
+// Ambient occlusion's ray k (0-4): along the normal, then leaning each way.
+vec3 occlusion_direction(int k, vec3 normal) {
+    if (k == 0) return normal;
     vec3 u = normalize(abs(normal.z) > 0.7 ? cross(normal, vec3(0.0, 1.0, 0.0)) : cross(normal, vec3(0.0, 0.0, 1.0)));
     vec3 v = cross(normal, u);
-    float open = 0.0;
-    open += blocked(origin, normal, 6.0, skip) ? 0.0 : 1.0;
-    open += blocked(origin, normalize(normal + u), 6.0, skip) ? 0.0 : 1.0;
-    open += blocked(origin, normalize(normal - u), 6.0, skip) ? 0.0 : 1.0;
-    open += blocked(origin, normalize(normal + v), 6.0, skip) ? 0.0 : 1.0;
-    open += blocked(origin, normalize(normal - v), 6.0, skip) ? 0.0 : 1.0;
-    return 0.3 + 0.7 * open / 5.0;
+    vec3 lean = k == 1 ? u : k == 2 ? -u : k == 3 ? v : -v;
+    return normalize(normal + lean);
 }
 
 // The sun's direction for this pixel: with u_jitter, each pixel of a 2x2
@@ -355,27 +364,53 @@ void main() {
     vec3 surface = p + n * 0.05;
 
     ivec2 at = scene_at(hit.cell);
-    float from_above = 0.8 - 0.3 * n.y; // y is down
-    vec3 light = (texelFetch(u_light, at, 0).rgb + u_floor) * u_ambient * from_above *
-        ambient_occlusion(surface, n, skip);
     vec3 to_sun = sun_direction();
     float sun = dot(n, to_sun);
+    // Every ray from the surface goes through this one loop: ambient
+    // occlusion's, the sun's, then each fire's. Compilers write out every
+    // call to the tracer in full, and some GPUs' cannot take a shader with
+    // one per ray.
+    float open = 0.0;
+    bool sunlit = false;
+    vec3 fire = vec3(0.0);
+    for (int k = 0; k < OCCLUSION_RAYS + 1 + 8; k++) {
+        int light_index = k - OCCLUSION_RAYS - 1;
+        if (light_index >= u_light_count) break;
+        vec3 ray;
+        float reach;
+        if (k < OCCLUSION_RAYS) {
+            ray = occlusion_direction(k, n);
+            reach = 6.0;
+        } else if (light_index < 0) {
+            if (sun <= 0.0) continue;
+            ray = to_sun;
+            reach = 64.0;
+        } else {
+            vec3 to = u_lights[light_index].xyz - p;
+            reach = length(to);
+            ray = to / reach;
+            if (dot(n, ray) <= 0.0) continue;
+        }
+        if (blocked(surface, ray, reach, skip)) continue;
+        if (k < OCCLUSION_RAYS) {
+            open += 1.0;
+        } else if (light_index < 0) {
+            sunlit = true;
+        } else {
+            float r = u_lights[light_index].w;
+            fire += u_light_colors[light_index] * dot(n, ray) / (1.0 + reach * reach / (r * r));
+        }
+    }
+    float occlusion = OCCLUSION_RAYS > 0 ? 0.3 + 0.7 * open / float(OCCLUSION_RAYS) : 1.0;
+
+    float from_above = 0.8 - 0.3 * n.y; // y is down
+    vec3 light = (texelFetch(u_light, at, 0).rgb + u_floor) * u_ambient * from_above * occlusion + fire;
     vec3 glint = vec3(0.0);
-    if (sun > 0.0 && !blocked(surface, to_sun, 64.0, skip)) {
+    if (sunlit) {
         light += u_sun_color * sun;
         // blocks, pipes and characters are glossier than scenery
         float gloss = hit.layer == SPRITE ? 0.25 : inflated(hit) ? 0.06 : 0.2;
         glint = u_sun_color * gloss * pow(max(dot(n, normalize(to_sun - direction)), 0.0), 40.0);
-    }
-    for (int i = 0; i < 8; i++) {
-        if (i >= u_light_count) break;
-        vec3 to = u_lights[i].xyz - p;
-        float d = length(to);
-        vec3 l = to / d;
-        float facing = dot(n, l);
-        if (facing <= 0.0 || blocked(surface, l, d, skip)) continue;
-        float r = u_lights[i].w;
-        light += u_light_colors[i] * facing / (1.0 + d * d / (r * r));
     }
 
     vec3 c = albedo * light + glint;

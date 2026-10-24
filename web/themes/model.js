@@ -26,8 +26,17 @@ export async function create(context) {
     const { gl, canvas } = context;
     const scene = await createScene(context);
     const illumination = await createGlobalIllumination(context, scene, { sky: true });
-    const [edges, jumpFlood, shapes, smoothing, program] = await Promise.all(
-        ['edges.frag', 'jfa.frag', 'shape.frag', 'smooth.frag', 'model.frag'].map(path => context.compile(path)));
+    const [edges, jumpFlood, shapes, smoothing] = await Promise.all(
+        ['edges.frag', 'jfa.frag', 'shape.frag', 'smooth.frag'].map(path => context.compile(path)));
+    // Some GPUs' compilers give up on the full shader: then without ambient
+    // occlusion and smooth shapes.
+    let program;
+    try {
+        program = await context.compile('model.frag');
+    } catch (error) {
+        console.warn('3D: the full shader failed, using the lighter one:', error);
+        program = await context.compile('model.frag', '#define MODEL_LITE\n');
+    }
 
     const seeds = [createFloatTexture(gl), createFloatTexture(gl)];
     const seedTargets = seeds.map(texture => createFramebuffer(gl, [texture]));

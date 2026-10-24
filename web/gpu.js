@@ -211,9 +211,10 @@ export async function createGpuRenderer(canvas, exports, memory, shaderUrl = 'vi
         ram: () => bytes().subarray(exports.ram.value, exports.ram.value + 0x800),
         // the PRG ROM, $8000-$FFFF
         prg: () => bytes().subarray(exports.data.value, exports.data.value + 0x8000),
-        async compile(path) {
+        // `defines`: lines to put first, such as `#define MODEL_LITE`
+        async compile(path, defines = '') {
             commonSource ??= await fetchText('common.glsl');
-            return createProgram(gl, '#define NES_LIBRARY\n' + videoSource + '\n' + commonSource + '\n' +
+            return createProgram(gl, '#define NES_LIBRARY\n' + defines + videoSource + '\n' + commonSource + '\n' +
                 await fetchText(path));
         },
         drawFullscreen() {
