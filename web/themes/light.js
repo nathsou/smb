@@ -1,7 +1,8 @@
-// 2D global illumination: the scene lit by the sky and by what glows (fire,
-// lava, coins), with soft shadows and one bounce, by radiance cascades over
-// the distance field of a jump flood. The 2.5D theme (voxel.js) uses the
-// same light.
+// 2D global illumination: the scene lit by what glows (fire, lava, coins,
+// question blocks), with soft shadows and one bounce, by radiance cascades
+// over the distance field of a jump flood. Daylight is even, as in the game.
+// The 2.5D theme (voxel.js) uses the same light with the sky as a light
+// source too, for shade under overhangs.
 
 import {
     SCENE_WIDTH, SCENE_HEIGHT, createScene, createFloatTexture, createFramebuffer, requireFloatTargets,
@@ -16,14 +17,19 @@ const JUMP_FLOOD_STEPS = [256, 128, 64, 32, 16, 8, 4, 2, 1];
 // sky and the ground's bounce, is lit about 0.95, keeping its colours, and
 // open air about 1.1.
 const SKY = [2.12, 2.1, 2.0];
-// In dark areas, light from beyond the scene and light everywhere.
+// In dark areas, light from beyond the scene.
 const DARK_AMBIENT = [0.12, 0.12, 0.15];
-const DAY_FLOOR = [0.04, 0.04, 0.05];
-const DARK_FLOOR = [0.2, 0.2, 0.24];
+// Light everywhere, enclosed or not (not in the light texture: it is not
+// reflected), with and without the sky.
+const FLOOR = { day: [0.04, 0.04, 0.05], dark: [0.2, 0.2, 0.24] };
+const FLOOR_WITHOUT_SKY = { day: [1, 1, 1], dark: [0.3, 0.3, 0.36] };
 const BOUNCE = 0.5;
 
-// The light texture of every pixel of the scene, refreshed by draw().
-export async function createGlobalIllumination(context, scene) {
+// The light texture of every pixel of the scene, refreshed by draw(), and
+// the light to add to it everywhere (floor). With `sky`, light also comes
+// from beyond the scene (the sky in daylight), which shades what is under
+// something.
+export async function createGlobalIllumination(context, scene, { sky: withSky }) {
     const { gl } = context;
     requireFloatTargets(gl);
     const [seed, jumpFlood, cascade, surface] = await Promise.all(
@@ -49,14 +55,15 @@ export async function createGlobalIllumination(context, scene) {
     let current = 0; // the light being drawn; the other is last frame's
     const illumination = {
         get light() { return lights[current]; },
-        // The light in open space, without emitters.
+        // The light in open space, without emitters and the floor.
         open: [0, 0, 0],
+        floor: [0, 0, 0],
         draw() {
             const { dark } = backdrop(context);
-            const sky = dark ? [0, 0, 0] : SKY;
-            const ambient = dark ? DARK_AMBIENT : [0, 0, 0];
-            const floor = dark ? DARK_FLOOR : DAY_FLOOR;
-            illumination.open = sky.map((s, i) => s * 0.536 + ambient[i] + floor[i]);
+            const sky = dark || !withSky ? [0, 0, 0] : SKY;
+            const ambient = dark && withSky ? DARK_AMBIENT : [0, 0, 0];
+            illumination.floor = (withSky ? FLOOR : FLOOR_WITHOUT_SKY)[dark ? 'dark' : 'day'];
+            illumination.open = sky.map((s, i) => s * 0.536 + ambient[i]);
 
             gl.useProgram(seed);
             bindTextures(gl, seed, { u_background: scene.background, u_sprite: scene.sprite });
@@ -74,7 +81,7 @@ export async function createGlobalIllumination(context, scene) {
             gl.useProgram(cascade);
             gl.uniform3fv(uniform(cascade, 'u_sky'), sky);
             gl.uniform3fv(uniform(cascade, 'u_ambient'), ambient);
-            gl.uniform1i(uniform(cascade, 'u_scroll_delta'), scene.scrollDelta);
+            gl.uniform1i(uniform(cascade, 'u_shift'), scene.shift);
             for (let n = CASCADES - 1; n >= 0; n--) {
                 bindTextures(gl, cascade, {
                     u_seeds: seeds[source],
@@ -90,7 +97,6 @@ export async function createGlobalIllumination(context, scene) {
 
             gl.useProgram(surface);
             bindTextures(gl, surface, { u_cascade0: cascades[0], u_seeds: seeds[source] });
-            gl.uniform3fv(uniform(surface, 'u_floor'), floor);
             pass(context, surface, lightTargets[current], SCENE_WIDTH, SCENE_HEIGHT);
         },
         dispose() {
@@ -105,7 +111,7 @@ export async function createGlobalIllumination(context, scene) {
 export async function create(context) {
     const { gl, canvas } = context;
     const scene = await createScene(context);
-    const illumination = await createGlobalIllumination(context, scene);
+    const illumination = await createGlobalIllumination(context, scene, { sky: false });
     const program = await context.compile('light.frag');
 
     return {
@@ -113,13 +119,14 @@ export async function create(context) {
             sizeCanvas(canvas, 256, 240);
             scene.draw();
             illumination.draw();
-            gl.useProgram(program);
+            scene.bindOrigin(program);
             bindTextures(gl, program, {
                 u_background: scene.background,
                 u_sprite: scene.sprite,
                 u_light: illumination.light,
             });
             gl.uniform3fv(gl.getUniformLocation(program, 'u_open'), illumination.open);
+            gl.uniform3fv(gl.getUniformLocation(program, 'u_floor'), illumination.floor);
             pass(context, program, null, 256, 240);
         },
         dispose() {

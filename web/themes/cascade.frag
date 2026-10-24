@@ -14,7 +14,7 @@ uniform sampler2D u_previous_light; // surface.frag, last frame
 uniform sampler2D u_upper;          // cascade n + 1
 uniform int u_cascade;
 uniform int u_cascades;
-uniform int u_scroll_delta;         // pixels the screen scrolled since last frame
+uniform int u_shift;                // where last frame had this frame's scene x, minus x
 uniform vec3 u_sky;                 // sky light (none in dark areas)
 uniform vec3 u_ambient;             // light from everywhere
 uniform float u_bounce;
@@ -43,7 +43,7 @@ vec3 emission(ivec2 p) {
     if (material == M_LAVA) light = LAVA * 1.6;
     else if (material == M_COIN) light = albedo * 1.5;
     else if (material == M_QUESTION) light = albedo * 0.5;
-    ivec2 before = clamp(p + ivec2(u_scroll_delta, 0), ivec2(0), ivec2(SCENE_WIDTH - 1, SCENE_HEIGHT - 1));
+    ivec2 before = clamp(p + ivec2(u_shift, 0), ivec2(0), ivec2(SCENE_WIDTH - 1, SCENE_HEIGHT - 1));
     return light + albedo * texelFetch(u_previous_light, before, 0).rgb * u_bounce;
 }
 

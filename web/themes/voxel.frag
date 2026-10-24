@@ -10,6 +10,7 @@
 uniform sampler2D u_background;
 uniform sampler2D u_sprite;
 uniform sampler2D u_light;
+uniform vec3 u_floor;           // light to add to u_light everywhere
 uniform float u_scale;          // canvas pixels per NES pixel
 uniform vec3 u_sun;             // towards the sun
 uniform vec3 u_sun_color;       // faint in dark areas
@@ -83,9 +84,9 @@ Hit trace(vec3 origin, vec3 direction, float t_max) {
         float z = origin.z + direction.z * t;
         if ((direction.z >= 0.0 && z > BACK) || (direction.z <= 0.0 && z < FRONT)) break;
         float t_exit = min(min(next.x, next.y), t_max);
-        bool inside = cell.x >= -SCENE_MARGIN && cell.x < 256 + SCENE_MARGIN && cell.y >= 0 && cell.y < 240;
+        ivec2 at = cell + ivec2(u_origin, 0);
+        bool inside = at.x >= 0 && at.x < SCENE_WIDTH && cell.y >= 0 && cell.y < 240;
         if (inside) {
-            ivec2 at = cell + ivec2(SCENE_MARGIN, 0);
             int background = material_of(texelFetch(u_background, at, 0));
             if (background != M_HUD) {
                 vec2 range;
@@ -114,7 +115,7 @@ Hit trace(vec3 origin, vec3 direction, float t_max) {
                 }
             }
         } else if ((cell.y < 0 && step.y < 0.0) || (cell.y >= 240 && step.y > 0.0) ||
-                   (cell.x < -SCENE_MARGIN && step.x < 0.0) || (cell.x >= 256 + SCENE_MARGIN && step.x > 0.0)) {
+                   (at.x < 0 && step.x < 0.0) || (at.x >= SCENE_WIDTH && step.x > 0.0)) {
             break;
         }
         if (t_exit >= t_max) break;
@@ -172,7 +173,7 @@ vec4 side_color(ivec2 at, ivec2 inward, int layer) {
 
 void main() {
     vec2 screen = vec2(gl_FragCoord.x, 240.0 * u_scale - gl_FragCoord.y) / u_scale; // y down
-    ivec2 pixel = ivec2(screen) + ivec2(SCENE_MARGIN, 0);
+    ivec2 pixel = ivec2(screen) + ivec2(u_origin, 0);
     vec4 status_bar = texelFetch(u_background, pixel, 0);
     if (material_of(status_bar) == M_HUD) {
         vec4 sprite = texelFetch(u_sprite, pixel, 0);
@@ -187,7 +188,7 @@ void main() {
         return;
     }
 
-    ivec2 at = hit.cell + ivec2(SCENE_MARGIN, 0);
+    ivec2 at = hit.cell + ivec2(u_origin, 0);
     vec4 layer = layer_at(at, hit.layer);
     int material = material_of(layer);
     if (hit.normal.z == 0.0) layer = side_color(at, -ivec2(hit.normal.xy), hit.layer);
@@ -196,7 +197,7 @@ void main() {
     vec3 n = hit.normal;
     vec3 surface = p + n * 0.02;
 
-    vec3 light = texelFetch(u_light, at, 0).rgb * u_ambient * ambient_occlusion(surface, n);
+    vec3 light = (texelFetch(u_light, at, 0).rgb + u_floor) * u_ambient * ambient_occlusion(surface, n);
     float sun = dot(n, u_sun);
     if (sun > 0.0 && u_sun_color != vec3(0.0) && !blocked(surface, u_sun, 48.0)) light += u_sun_color * sun;
     for (int i = 0; i < 8; i++) {
