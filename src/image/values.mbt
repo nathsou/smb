@@ -62,9 +62,18 @@ pub fn values_of(list: Array[Int]) -> Values {
 
 fn join_values(a: Values, b: Values) -> Values {
   if a.is_empty() || b.is_empty() { return [] }
-  let all = a.copy()
-  all.append(b)
-  values_of(all)
+  if a == b { return a }
+  // a merge of the two ascending lists
+  let out = []
+  let mut i = 0
+  let mut j = 0
+  while i < a.length() || j < b.length() {
+    let next = if j >= b.length() || (i < a.length() && a[i] <= b[j]) { a[i] } else { b[j] }
+    if i < a.length() && a[i] == next { i += 1 }
+    if j < b.length() && b[j] == next { j += 1 }
+    out.push(next)
+  }
+  if out.length() > most_values { [] } else { out }
 }
 
 fn map_values(a: Values, f: (Int) -> Int) -> Values {
@@ -76,14 +85,14 @@ pub fn Banking::unknown() -> Banking {
 }
 
 pub fn Banking::join(self: Banking, other: Banking) -> Banking {
+  // (both ascending by address)
   let ram = []
+  let mut j = 0
   for entry in self.ram {
-    match other.ram.iter().find_first(fn(o) { o.0 == entry.0 }) {
-      Some(o) => {
-        let v = join_values(entry.1, o.1)
-        if !v.is_empty() { ram.push((entry.0, v)) }
-      }
-      None => ()
+    while j < other.ram.length() && other.ram[j].0 < entry.0 { j += 1 }
+    if j < other.ram.length() && other.ram[j].0 == entry.0 {
+      let v = join_values(entry.1, other.ram[j].1)
+      if !v.is_empty() { ram.push((entry.0, v)) }
     }
   }
   let count = if self.banks.length() > other.banks.length() { self.banks.length() } else { other.banks.length() }
@@ -254,7 +263,7 @@ pub fn Facts::join(self: Facts, other: Facts) -> Facts {
     v: if self.v == other.v { self.v } else { None },
     depth: if self.depth == other.depth { self.depth } else { None },
     banking: match (self.banking, other.banking) {
-      (Some(a), Some(b)) => Some(a.join(b))
+      (Some(a), Some(b)) => Some(if a == b { a } else { a.join(b) })
       _ => None
     } }
 }

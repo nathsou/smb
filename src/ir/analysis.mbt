@@ -96,186 +96,349 @@ fn add(map : Map[String, Int], name : String, bits : Int) -> Bool {
   }
 }
 
-fn Program::liveness(self : Program, info : Analysis) -> Unit {
-  // Least fixpoint: known routines start with nothing live.
-  for f in self.functions {
-    info.live_in[f.name] = 0
-    info.demand[f.name] = 0
-  }
-  let mut changed = true
-  while changed {
-    changed = false
-    for f in self.functions {
-      let block_in = info.blocks_live(f)
-      if add(info.live_in, f.name, block_in[f.entry]) { changed = true }
-      for block in f.blocks {
-        let mut live = info.term_live(f, block.term, block_in)
-        let d = info.demand.get(f.name).unwrap_or(0)
-        match block.term {
-          TailCall(g) => if add(info.demand, g, d) { changed = true }
-          Jump(_, cases) =>
-            for c in cases {
-              if add(info.demand, c.1, d) { changed = true }
-            }
-          Dispatch(h, _, cases) => {
-            let mut after = 0
-            for c in cases {
-              after = after | info.get_in(c.1)
-              if add(info.demand, c.1, d) { changed = true }
-            }
-            if add(info.demand, h, after) { changed = true }
-          }
-          _ => ()
+// A block's statements for the fixpoints below, computed once: runs of
+// statements without calls as one step (what the run writes, and what it
+// reads before writing), and the calls.
+priv enum Step {
+  Run(Int, Int) // kill, gen: live before = (live after & ~kill) | gen
+  Calls(String)
+}
+
+priv struct Shape {
+  steps : Array[Array[Step]] // by block, in order
+  term_vars : Array[Int] // what each block's terminator reads itself
+  preds : Array[Array[Int]]
+  callees : Array[String] // routines it calls, tail calls or jumps to
+  uses_root : Bool // suspends or yields: reads the roots' demand
+}
+
+fn shape_of(f : Function) -> Shape {
+  let callees = []
+  let note = fn(g : String) { if !callees.contains(g) { callees.push(g) } }
+  let preds : Array[Array[Int]] = f.blocks.map(fn(_) { [] })
+  let mut uses_root = false
+  let steps = f.blocks.mapi(fn(b, block) {
+    for t in block.term.successors() { preds[t].push(b) }
+    let out : Array[Step] = []
+    let mut kill = 0
+    let mut gen = 0
+    let mut open = false
+    for s in block.stmts {
+      match s {
+        Call(g) | CallValue(_, g, _) => {
+          if open { out.push(Run(kill, gen)) }
+          kill = 0
+          gen = 0
+          open = false
+          out.push(Calls(g))
+          note(g)
         }
-        let mut k = block.stmts.length() - 1
-        while k >= 0 {
-          if block.stmts[k] is (Call(g) | CallValue(_, g, _)) && add(info.demand, g, live) { changed = true }
-          live = info.stmt_live(block.stmts[k], live)
-          k -= 1
+        _ => {
+          // the run so far, then s
+          gen = gen | (s.uses() & kill.lnot())
+          kill = kill | s.defs()
+          open = true
         }
       }
     }
-    let mut roots = 0
-    for r in self.roots() { roots = roots | info.get_in(r) }
-    if roots != info.root_demand {
-      info.root_demand = roots
-      changed = true
+    if open { out.push(Run(kill, gen)) }
+    match block.term {
+      TailCall(g) => note(g)
+      Jump(_, cases) => for c in cases { note(c.1) }
+      Dispatch(h, _, cases) => {
+        note(h)
+        for c in cases { note(c.1) }
+      }
+      Suspend(_) | Yield(_) => uses_root = true
+      _ => ()
     }
-    for r in self.roots() {
-      if add(info.demand, r, info.root_demand) { changed = true }
+    out
+  })
+  let term_vars = f.blocks.map(fn(block) {
+    match block.term {
+      Branch(c, _, _) => c.vars()
+      ReturnValue(e) | Jump(e, _) | Switch(e, _, _) => e.vars()
+      _ => 0
     }
+  })
+  { steps, term_vars, preds, callees, uses_root }
+}
+
+// The functions and their shapes, and who calls each routine.
+priv struct Graph {
+  functions : Map[String, Function]
+  shapes : Map[String, Shape]
+  callers : Map[String, Array[String]]
+}
+
+fn Program::graph(self : Program) -> Graph {
+  let functions = Map([])
+  let shapes = Map([])
+  let callers : Map[String, Array[String]] = Map([])
+  for f in self.functions {
+    functions[f.name] = f
+    let shape = shape_of(f)
+    shapes[f.name] = shape
+    for g in shape.callees {
+      match callers.get(g) {
+        Some(list) => list.push(f.name)
+        None => callers[g] = [f.name]
+      }
+    }
+  }
+  { functions, shapes, callers }
+}
+
+// A queue of routines to (re)analyse, each in it once.
+priv struct Work {
+  queue : Array[String]
+  queued : Set[String]
+  mut next : Int
+}
+
+fn Work::new(names : Array[String]) -> Work {
+  { queue: names.copy(), queued: Set(names), next: 0 }
+}
+
+fn Work::push(self : Work, name : String) -> Unit {
+  if !self.queued.contains(name) {
+    self.queued.add(name)
+    self.queue.push(name)
   }
 }
 
-fn Program::summaries(self : Program, info : Analysis) -> Unit {
-  // May-write: everything assigned, with callees and tail targets.
-  for f in self.functions { info.may_write[f.name] = 0 }
-  let mut changed = true
-  while changed {
-    changed = false
-    for f in self.functions {
-      let mut w = 0
-      for block in f.blocks {
-        for s in block.stmts {
-          w = w | s.defs()
-          if s is (Call(g) | CallValue(_, g, _)) { w = w | info.may_write.get(g).unwrap_or(everything) }
-        }
-        match block.term {
-          TailCall(g) => w = w | info.may_write.get(g).unwrap_or(everything)
-          Jump(_, cases) =>
-            for c in cases { w = w | info.may_write.get(c.1).unwrap_or(everything) }
-          Dispatch(h, _, cases) => {
-            w = w | info.may_write.get(h).unwrap_or(everything)
-            for c in cases { w = w | info.may_write.get(c.1).unwrap_or(everything) }
+fn Work::pop(self : Work) -> String? {
+  if self.next >= self.queue.length() {
+    self.queue.clear()
+    self.next = 0
+    return None
+  }
+  let name = self.queue[self.next]
+  self.next += 1
+  self.queued.remove(name)
+  Some(name)
+}
+
+fn Work::push_all(self : Work, names : Array[String]?) -> Unit {
+  match names {
+    Some(list) => for n in list { self.push(n) }
+    None => ()
+  }
+}
+
+fn Program::liveness(self : Program, info : Analysis) -> Unit {
+  // Least fixpoint: known routines start with nothing live.
+  let graph = self.graph()
+  let names = self.functions.map(fn(f) { f.name })
+  for name in names {
+    info.live_in[name] = 0
+    info.demand[name] = 0
+  }
+  let roots = self.roots()
+  let root_users = self.functions.filter(fn(f) { graph.shapes[f.name].uses_root }).map(fn(f) { f.name })
+  let work = Work::new(names)
+  let demand = fn(g : String, bits : Int) { if add(info.demand, g, bits) { work.push(g) } }
+  while work.pop() is Some(name) {
+    let f = graph.functions[name]
+    let shape = graph.shapes[name]
+    let d = info.demand.get(name).unwrap_or(0)
+    // the block's live-in from the variables live before its terminator
+    let through = fn(b : Int, live : Int, record : Bool) {
+      let steps = shape.steps[b]
+      let mut l = live
+      let mut k = steps.length() - 1
+      while k >= 0 {
+        match steps[k] {
+          Run(kill, gen) => l = (l & kill.lnot()) | gen
+          Calls(g) => {
+            if record { demand(g, l) }
+            l = info.get_in(g)
           }
-          _ => ()
         }
+        k -= 1
       }
-      if add(info.may_write, f.name, w) { changed = true }
+      l
+    }
+    let before_term = fn(b : Int, block_in : Array[Int]) {
+      let tv = shape.term_vars[b]
+      match f.blocks[b].term {
+        Goto(t) => block_in[t]
+        Branch(_, t, e) => tv | block_in[t] | block_in[e]
+        Return => d | SP_BIT
+        ReturnValue(_) => d | SP_BIT | tv
+        TailCall(g) => info.get_in(g)
+        Dispatch(h, _, _) => info.get_in(h)
+        Jump(_, cases) => cases.fold(init=tv, fn(acc, c) { acc | info.get_in(c.1) })
+        Switch(_, _, _) as term => term.successors().fold(init=tv, fn(acc, t) { acc | block_in[t] })
+        Suspend(t) => info.root_demand | SP_BIT | block_in[t]
+        Yield(_) => info.root_demand | SP_BIT
+        Trap(_) => 0
+      }
+    }
+    let block_in = f.blocks.map(fn(_) { 0 })
+    let mut changed = true
+    while changed {
+      changed = false
+      let mut b = f.blocks.length() - 1
+      while b >= 0 {
+        let l = through(b, before_term(b, block_in), false)
+        if l != block_in[b] {
+          block_in[b] = l
+          changed = true
+        }
+        b -= 1
+      }
+    }
+    // what the routine demands of the routines it calls
+    for b, block in f.blocks {
+      match block.term {
+        TailCall(g) => demand(g, d)
+        Jump(_, cases) => for c in cases { demand(c.1, d) }
+        Dispatch(h, _, cases) => {
+          let mut after = 0
+          for c in cases {
+            after = after | info.get_in(c.1)
+            demand(c.1, d)
+          }
+          demand(h, after)
+        }
+        _ => ()
+      }
+      through(b, before_term(b, block_in), true) |> ignore
+    }
+    if add(info.live_in, name, block_in[f.entry]) {
+      work.push_all(graph.callers.get(name))
+      if roots.contains(name) {
+        let mut r = 0
+        for root in roots { r = r | info.get_in(root) }
+        if r != info.root_demand {
+          info.root_demand = r
+          for user in root_users { work.push(user) }
+        }
+        for root in roots { demand(root, info.root_demand) }
+      }
     }
   }
+  // the roots read what they demand of each other
+  for root in roots { add(info.demand, root, info.root_demand) |> ignore }
+}
+
+fn Program::summaries(self : Program, info : Analysis) -> Unit {
+  let graph = self.graph()
+  let names = self.functions.map(fn(f) { f.name })
+  // Each a fixpoint over the routines: a routine is analysed again when
+  // what it reads of a callee changes.
+  // May-write: everything assigned, with callees and tail targets.
+  for name in names { info.may_write[name] = 0 }
+  let work = Work::new(names)
+  while work.pop() is Some(name) {
+    let shape = graph.shapes[name]
+    let mut w = 0
+    for steps in shape.steps {
+      for step in steps {
+        if step is Run(kill, _) { w = w | kill }
+      }
+    }
+    for g in shape.callees { w = w | info.may_write.get(g).unwrap_or(everything) }
+    if add(info.may_write, name, w) { work.push_all(graph.callers.get(name)) }
+  }
   // Must-write: written on every path to every return (greatest fixpoint).
-  for f in self.functions { info.must_write[f.name] = everything }
-  changed = true
-  while changed {
-    changed = false
-    for f in self.functions {
-      let preds : Array[Array[Int]] = f.blocks.map(fn(_) { [] })
-      for b, block in f.blocks {
-        for s in block.term.successors() { preds[s].push(b) }
-      }
-      let out = f.blocks.map(fn(_) { everything })
-      let mut inner = true
-      while inner {
-        inner = false
-        for b, block in f.blocks {
-          let mut w = if b == f.entry {
-            0
-          } else {
-            preds[b].fold(init=everything, fn(acc, p) { acc & out[p] })
-          }
-          for s in block.stmts {
-            w = w | s.defs()
-            if s is (Call(g) | CallValue(_, g, _)) { w = w | info.must_write.get(g).unwrap_or(0) }
-          }
-          if w != out[b] {
-            out[b] = w
-            inner = true
+  for name in names { info.must_write[name] = everything }
+  let work = Work::new(names)
+  while work.pop() is Some(name) {
+    let f = graph.functions[name]
+    let shape = graph.shapes[name]
+    let out = f.blocks.map(fn(_) { everything })
+    let mut inner = true
+    while inner {
+      inner = false
+      for b in 0..<f.blocks.length() {
+        let mut w = if b == f.entry {
+          0
+        } else {
+          shape.preds[b].fold(init=everything, fn(acc, p) { acc & out[p] })
+        }
+        for step in shape.steps[b] {
+          match step {
+            Run(kill, _) => w = w | kill
+            Calls(g) => w = w | info.must_write.get(g).unwrap_or(0)
           }
         }
-      }
-      let mut must = everything
-      for b, block in f.blocks {
-        match block.term {
-          Return | ReturnValue(_) => must = must & out[b]
-          TailCall(g) => must = must & (out[b] | info.must_write.get(g).unwrap_or(0))
-          Jump(_, cases) => {
-            let mut cases_must = everything
-            for c in cases { cases_must = cases_must & info.must_write.get(c.1).unwrap_or(0) }
-            must = must & (out[b] | cases_must)
-          }
-          Dispatch(h, _, cases) => {
-            let mut cases_must = everything
-            for c in cases { cases_must = cases_must & info.must_write.get(c.1).unwrap_or(0) }
-            must = must & (out[b] | info.must_write.get(h).unwrap_or(0) | cases_must)
-          }
-          _ => ()
+        if w != out[b] {
+          out[b] = w
+          inner = true
         }
       }
-      if must != info.must_write[f.name] {
-        info.must_write[f.name] = must
-        changed = true
+    }
+    let mut must = everything
+    for b, block in f.blocks {
+      match block.term {
+        Return | ReturnValue(_) => must = must & out[b]
+        TailCall(g) => must = must & (out[b] | info.must_write.get(g).unwrap_or(0))
+        Jump(_, cases) => {
+          let mut cases_must = everything
+          for c in cases { cases_must = cases_must & info.must_write.get(c.1).unwrap_or(0) }
+          must = must & (out[b] | cases_must)
+        }
+        Dispatch(h, _, cases) => {
+          let mut cases_must = everything
+          for c in cases { cases_must = cases_must & info.must_write.get(c.1).unwrap_or(0) }
+          must = must & (out[b] | info.must_write.get(h).unwrap_or(0) | cases_must)
+        }
+        _ => ()
       }
+    }
+    if must != info.must_write[name] {
+      info.must_write[name] = must
+      work.push_all(graph.callers.get(name))
     }
   }
   // Reads: live on entry when nothing is demanded after the routine.
-  for f in self.functions { info.reads[f.name] = 0 }
-  changed = true
-  while changed {
-    changed = false
-    for f in self.functions {
-      let block_in = f.blocks.map(fn(_) { 0 })
-      let mut inner = true
-      while inner {
-        inner = false
-        let mut b = f.blocks.length() - 1
-        while b >= 0 {
-          let block = f.blocks[b]
-          let mut l = match block.term {
-            Goto(t) => block_in[t]
-            Branch(c, t, e) => c.vars() | block_in[t] | block_in[e]
-            ReturnValue(e) => e.vars()
-            TailCall(g) => info.reads.get(g).unwrap_or(everything)
-            Jump(e, cases) => cases.fold(init=e.vars(), fn(acc, c) { acc | info.reads.get(c.1).unwrap_or(everything) })
-            Switch(e, _, _) as term => term.successors().fold(init=e.vars(), fn(acc, t) { acc | block_in[t] })
-            Suspend(t) => block_in[t]
-            Dispatch(h, _, cases) => {
-              let mut after = 0
-              for c in cases { after = after | info.reads.get(c.1).unwrap_or(everything) }
-              info.reads.get(h).unwrap_or(everything) |
-              (after & info.must_write.get(h).unwrap_or(0).lnot())
-            }
-            _ => 0
+  for name in names { info.reads[name] = 0 }
+  let work = Work::new(names)
+  while work.pop() is Some(name) {
+    let f = graph.functions[name]
+    let shape = graph.shapes[name]
+    let reads = fn(g : String) { info.reads.get(g).unwrap_or(everything) }
+    let block_in = f.blocks.map(fn(_) { 0 })
+    let mut inner = true
+    while inner {
+      inner = false
+      let mut b = f.blocks.length() - 1
+      while b >= 0 {
+        let tv = shape.term_vars[b]
+        let mut l = match f.blocks[b].term {
+          Goto(t) => block_in[t]
+          Branch(_, t, e) => tv | block_in[t] | block_in[e]
+          ReturnValue(_) => tv
+          TailCall(g) => reads(g)
+          Jump(_, cases) => cases.fold(init=tv, fn(acc, c) { acc | reads(c.1) })
+          Switch(_, _, _) as term => term.successors().fold(init=tv, fn(acc, t) { acc | block_in[t] })
+          Suspend(t) => block_in[t]
+          Dispatch(h, _, cases) => {
+            let mut after = 0
+            for c in cases { after = after | reads(c.1) }
+            reads(h) | (after & info.must_write.get(h).unwrap_or(0).lnot())
           }
-          let mut k = block.stmts.length() - 1
-          while k >= 0 {
-            l = match block.stmts[k] {
-              Call(g) | CallValue(_, g, _) =>
-                info.reads.get(g).unwrap_or(everything) |
-                (l & info.must_write.get(g).unwrap_or(0).lnot())
-              s => (l & s.defs().lnot()) | s.uses()
-            }
-            k -= 1
-          }
-          if l != block_in[b] {
-            block_in[b] = l
-            inner = true
-          }
-          b -= 1
+          _ => 0
         }
+        let steps = shape.steps[b]
+        let mut k = steps.length() - 1
+        while k >= 0 {
+          l = match steps[k] {
+            Calls(g) => reads(g) | (l & info.must_write.get(g).unwrap_or(0).lnot())
+            Run(kill, gen) => (l & kill.lnot()) | gen
+          }
+          k -= 1
+        }
+        if l != block_in[b] {
+          block_in[b] = l
+          inner = true
+        }
+        b -= 1
       }
-      if add(info.reads, f.name, block_in[f.entry]) { changed = true }
     }
+    if add(info.reads, name, block_in[f.entry]) { work.push_all(graph.callers.get(name)) }
   }
 }
 

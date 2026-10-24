@@ -559,7 +559,7 @@ pub fn rom_image(cartridge: Cartridge, map: RomMap) -> Image raise ImageError {
   order.sort_by(fn(i, j) { if items[i].0 != items[j].0 { items[i].0 - items[j].0 } else { i - j } })
   let source = order.map(fn(i) { items[i].1 })
   let addresses = order.map(fn(i) { if items[i].0 < 0 { 0 } else { items[i].0 } })
-  { origin, bytes, symbols, addresses, source, banks, data: named_data }
+  Image::new(origin, bytes, symbols, addresses, source, banks, named_data)
 }
 
 priv struct Namer {

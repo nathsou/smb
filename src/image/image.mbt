@@ -18,10 +18,26 @@ pub(all) struct Image {
   // Data a ROM map names (location and length): execution never decodes
   // it; a transfer into it traps.
   data: Array[(Int, Int)]
+  // derived: the locations of `data`, and the source's constants
+  data_cells: Set[Int]
+  defines: Map[String, @parse.SourceExpr]
 } derive(Debug)
 
+pub fn Image::new(origin: Int, bytes: Array[Int], symbols: Map[String, Int], addresses: Array[Int],
+                  source: Array[@parse.SourceItem], banks: Banks, data: Array[(Int, Int)]) -> Image {
+  let data_cells: Set[Int] = Set([])
+  for d in data {
+    for i in 0..<d.1 { data_cells.add(d.0 + i) }
+  }
+  let defines: Map[String, @parse.SourceExpr] = Map([])
+  for item in source {
+    if item is Define(name~, rhs~) { defines[name] = rhs }
+  }
+  { origin, bytes, symbols, addresses, source, banks, data, data_cells, defines }
+}
+
 pub fn Image::is_data(self: Image, location: Int) -> Bool {
-  self.data.iter().any(fn(d) { location >= d.0 && location < d.0 + d.1 })
+  self.data_cells.contains(location)
 }
 
 pub(all) struct Banks {
@@ -164,11 +180,7 @@ fn value(expr: @parse.SourceExpr, symbols: Map[String, Int], defines: Map[String
 }
 
 pub fn Image::eval(self: Image, expr: @parse.SourceExpr) -> Int raise ImageError {
-  let defines: Map[String, @parse.SourceExpr] = Map([])
-  for item in self.source {
-    if item is Define(name~, rhs~) { defines[name] = rhs }
-  }
-  value(expr, self.symbols, defines, Set([]))
+  value(expr, self.symbols, self.defines, Set([]))
 }
 
 pub fn operand(mode: @parse.SourceAddressingMode) -> @parse.SourceExpr? {
@@ -302,7 +314,7 @@ pub fn assemble(source: Array[@parse.SourceItem]) -> Image raise ImageError {
     }
   }
   set_layout(Layout::none())
-  { origin, bytes, symbols, addresses, source, banks: Banks::none(), data: [] }
+  Image::new(origin, bytes, symbols, addresses, source, Banks::none(), [])
 }
 
 fn math_min(a: Int, b: Int) -> Int { if a < b { a } else { b } }

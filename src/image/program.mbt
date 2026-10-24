@@ -604,6 +604,8 @@ fn explore_with(image: Image, waiting: Map[Int, Int], switching: Map[Int, Int]?)
   let jumps: Map[Int, Array[Int]] = Map([])
   let traps: Set[Int] = Set([])
   let facts: Map[Int, Facts] = Map([])
+  // the dispatchers proven at each call (and its target), once
+  let proofs: Map[(Int, Int), Dispatch?] = Map([])
   // the first transfer to each location, to explain how bad code was reached
   let parents: Map[Int, Int] = Map([])
   fn path(pc: Int) -> String {
@@ -731,7 +733,19 @@ fn explore_with(image: Image, waiting: Map[Int, Int], switching: Map[Int, Int]?)
     match (inst.op, inst.mode) {
       (JSR, _) => {
         let table = data_at.get(inst.next).map(fn(i) { inline_data_end(image, i) })
-        match table.map(fn(end) { dispatch_at(image, inst, end) }) {
+        let proven = match table {
+          Some(end) =>
+            match proofs.get((pc, inst.arg)) {
+              Some(known) => Some(known)
+              None => {
+                let found = dispatch_at(image, inst, end)
+                proofs[(pc, inst.arg)] = found
+                Some(found)
+              }
+            }
+          None => None
+        }
+        match proven {
           Some(Some(dispatch)) => {
             dispatches[pc] = dispatch
             // the targets run with what the call knows of the banks

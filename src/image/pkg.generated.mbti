@@ -167,10 +167,13 @@ pub(all) struct Image {
   source : Array[@parse.SourceItem]
   banks : Banks
   data : Array[(Int32, Int32)]
+  data_cells : @set.Set[Int32]
+  defines : Map[String, @parse.SourceExpr]
 } derive(@debug.Debug)
 pub fn Image::banked(Self) -> Bool
 pub fn Image::eval(Self, @parse.SourceExpr) -> Int32 raise ImageError
 pub fn Image::is_data(Self, Int32) -> Bool
+pub fn Image::new(Int32, Array[Int32], Map[String, Int32], Array[Int32], Array[@parse.SourceItem], Banks, Array[(Int32, Int32)]) -> Self
 pub fn Image::read(Self, Int32) -> Int32 raise ImageError
 pub fn Image::word(Self, Int32) -> Int32 raise ImageError
 
