@@ -99,9 +99,13 @@ picture), in every game:
   scene, with soft shadows and a bounce, by radiance cascades; daylight
   stays as in the game;
 - 2.5D RAY TRACING: every pixel becomes voxels, seen from slightly above,
-  with sun and fire shadows traced through them.
+  with sun and fire shadows traced through them;
+- 3D: the level and its characters as shapes made from the ROM's own tiles
+  and level data (textured cubes, pipes as cylinders, hills, clouds and
+  sprites inflated from their silhouettes), through a perspective camera.
+  No model is drawn by hand: nothing of the game is in the repository.
 
-![The original picture and the two themes, in 1-1 and 1-4](res/themes.png)
+![The original picture and the three themes, in 1-1 and 1-4](res/themes.png)
 
 In SMB the themes know what is solid from the game's own level data (its
 block buffer, by the map's names), not from the picture. In Metroid and

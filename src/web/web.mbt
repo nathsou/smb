@@ -1,12 +1,19 @@
 // The recompiler for the page (built with `moon build --target js`; see
 // web/recompiler-worker.js). `recompile` returns an error message, or ""
-// once the outputs are ready to read with the other functions.
+// once the outputs are ready to read with the other functions. It calls
+// `progress` with each stage's key as the stage starts (src/pipeline).
 
 let last : Ref[@pipeline.Output?] = Ref(None)
 let last_warning : Ref[String] = Ref("")
 
 // `layout`: "name address" lines, the runtime module's addresses.
-pub fn recompile(rom : Bytes, map : String, native : String, layout : String) -> String {
+pub fn recompile(
+  rom : Bytes,
+  map : String,
+  native : String,
+  layout : String,
+  progress : (String) -> Unit,
+) -> String {
   last.val = None
   last_warning.val = ""
   let addresses : Map[String, Int] = Map([])
@@ -17,10 +24,10 @@ pub fn recompile(rom : Bytes, map : String, native : String, layout : String) ->
     }
   }
   try {
-    let (program, warning) = @pipeline.from_rom(rom, map)
+    let (program, warning) = @pipeline.from_rom(rom, map, progress~)
     last_warning.val = warning.unwrap_or("")
     let options = { ..@pipeline.Options::default(), native: @pipeline.parse_names(native), wasm: true, layout: addresses }
-    last.val = Some(@pipeline.recompile(program, options))
+    last.val = Some(@pipeline.recompile(program, options, progress~))
     ""
   } catch {
     @pipeline.PipelineError(message) => message

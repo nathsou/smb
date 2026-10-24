@@ -16,19 +16,21 @@ const FIRE_COLOR = [2.5, 1.25, 0.4];
 const FIRE_RADIUS = 40;
 const FIRE_DEPTH = -10; // in front of the blocks, so that fire lights their faces
 const MAX_LIGHTS = 8;
+const positions = new Float32Array(MAX_LIGHTS * 4);
+const colors = new Float32Array(MAX_LIGHTS * 3);
 
 function normalize(v) {
     const length = Math.hypot(...v);
     return v.map(c => c / length);
 }
 
-function isFire(tile) {
+export function isFire(tile) {
     return (tile >= 0x64 && tile <= 0x68) || (tile >= 0x51 && tile <= 0x53);
 }
 
 // Fire sprites as point lights; the sprites of one flame (Bowser's is three)
 // make one light.
-function fireLights(oam) {
+export function fireLights(oam) {
     const lights = [];
     for (let i = 0; i < 64; i++) {
         const y = oam[i * 4];
@@ -47,31 +49,51 @@ function fireLights(oam) {
     return lights;
 }
 
+// Sets the light uniforms of voxel.frag and model.frag: the sun (a faint key
+// light in dark areas), the 2D light as ambient, and fire as point lights at
+// `fireDepth`, in front of what they should light (SMB's fire: other games
+// have none the themes know), and whether the game's level data is known.
+export function bindLighting(context, program, illumination, fireDepth = FIRE_DEPTH) {
+    const { gl, frame } = context;
+    const uniform = name => gl.getUniformLocation(program, name);
+    const { dark } = backdrop(context);
+    const known = levelKnown(context);
+    const lights = known ? fireLights(frame.oam) : [];
+    lights.forEach((light, i) => {
+        positions.set([light.x, light.y, fireDepth, FIRE_RADIUS * Math.sqrt(light.count)], i * 4);
+        colors.set(FIRE_COLOR, i * 3);
+    });
+    gl.useProgram(program);
+    gl.uniform3fv(uniform('u_floor'), illumination.floor);
+    gl.uniform1i(uniform('u_level_known'), known ? 1 : 0);
+    gl.uniform3fv(uniform('u_sun'), SUN);
+    gl.uniform3fv(uniform('u_sun_color'), dark ? DARK_KEY_COLOR : SUN_COLOR);
+    gl.uniform1f(uniform('u_ambient'), dark ? DARK_AMBIENT : DAY_AMBIENT);
+    gl.uniform1i(uniform('u_light_count'), lights.length);
+    gl.uniform4fv(uniform('u_lights'), positions);
+    gl.uniform3fv(uniform('u_light_colors'), colors);
+}
+
+// Canvas pixels per NES pixel for the page's scale, at most 4.
+export function canvasScale(displayScale) {
+    return Math.min(4, Math.max(1, Math.round(displayScale)));
+}
+
 export async function create(context) {
-    const { gl, canvas, frame } = context;
+    const { gl, canvas } = context;
     const scene = await createScene(context);
     const illumination = await createGlobalIllumination(context, scene, { sky: true });
     const program = await context.compile('voxel.frag');
-    const uniform = name => gl.getUniformLocation(program, name);
-    const positions = new Float32Array(MAX_LIGHTS * 4);
-    const colors = new Float32Array(MAX_LIGHTS * 3);
     let scale = 2;
 
     return {
         resize(displayScale) {
-            scale = Math.min(4, Math.max(1, Math.round(displayScale)));
+            scale = canvasScale(displayScale);
         },
         draw() {
             sizeCanvas(canvas, 256 * scale, 240 * scale);
             scene.draw();
             illumination.draw();
-
-            const { dark } = backdrop(context);
-            const lights = levelKnown(context) ? fireLights(frame.oam) : []; // (SMB's fire)
-            lights.forEach((light, i) => {
-                positions.set([light.x, light.y, FIRE_DEPTH, FIRE_RADIUS * Math.sqrt(light.count)], i * 4);
-                colors.set(FIRE_COLOR, i * 3);
-            });
 
             context.bindVideo(program);
             scene.bindOrigin(program);
@@ -80,15 +102,8 @@ export async function create(context) {
                 u_sprite: scene.sprite,
                 u_light: illumination.light,
             });
-            gl.uniform3fv(uniform('u_floor'), illumination.floor);
-            gl.uniform1f(uniform('u_scale'), scale);
-            gl.uniform1i(uniform('u_level_known'), levelKnown(context) ? 1 : 0);
-            gl.uniform3fv(uniform('u_sun'), SUN);
-            gl.uniform3fv(uniform('u_sun_color'), dark ? DARK_KEY_COLOR : SUN_COLOR);
-            gl.uniform1f(uniform('u_ambient'), dark ? DARK_AMBIENT : DAY_AMBIENT);
-            gl.uniform1i(uniform('u_light_count'), lights.length);
-            gl.uniform4fv(uniform('u_lights'), positions);
-            gl.uniform3fv(uniform('u_light_colors'), colors);
+            bindLighting(context, program, illumination);
+            gl.uniform1f(gl.getUniformLocation(program, 'u_scale'), scale);
             pass(context, program, null, 256 * scale, 240 * scale);
         },
         dispose() {

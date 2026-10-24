@@ -3,6 +3,7 @@ import { link } from './link.js';
 import { createViewer } from './viewer.js';
 import * as store from './store.js';
 import { splitDump } from './cartridge.js';
+import { createProgress, RECOMPILER_STEPS } from './progress.js';
 
 const SCREEN_WIDTH = 256;
 const SCREEN_HEIGHT = 240;
@@ -369,17 +370,23 @@ function pickFile() {
 }
 
 // Recompiles in a worker, or reuses an earlier result for the same inputs.
-async function build(inputs, setStatus) {
+async function build(inputs, viewer, progress) {
+    progress.begin('cache');
     const key = await store.digest(inputs.rom, inputs.map, inputs.native, inputs.layout, inputs.version);
     const cached = await store.get('builds', key);
     if (cached) {
-        setStatus('RECOMPILED EARLIER: LOADED FROM THIS BROWSER\'S CACHE');
+        viewer.setStatus('RECOMPILED EARLIER: LOADED FROM THIS BROWSER\'S CACHE');
+        progress.skip([...RECOMPILER_STEPS.map(([stage]) => stage), 'store'], 'CACHED');
         return cached;
     }
-    setStatus(`RECOMPILING ${inputs.title}...`, 'busy');
+    viewer.setStatus('RECOMPILING THE ROM...', 'busy');
     const result = await new Promise((resolve, reject) => {
         const worker = new Worker('recompiler-worker.js', { type: 'module' });
         worker.onmessage = ({ data }) => {
+            if (data.progress) {
+                progress.begin(data.progress, data.progress === 'map' ? undefined : data.took);
+                return;
+            }
             worker.terminate();
             if (data.error) reject(new Error(data.error));
             else resolve(data);
@@ -390,8 +397,9 @@ async function build(inputs, setStatus) {
         };
         worker.postMessage({ rom: inputs.rom, map: inputs.map, native: inputs.native, layout: inputs.layout });
     });
-    setStatus(`RECOMPILED IN ${(result.ms / 1000).toFixed(1)} S: ${(result.wasm.length / 1024).toFixed(0)} KB OF WEBASSEMBLY`);
+    viewer.setStatus(`RECOMPILED IN ${(result.ms / 1000).toFixed(1)} S: ${(result.wasm.length / 1024).toFixed(0)} KB OF WEBASSEMBLY`);
     const entry = { wasm: result.wasm, files: result.files, warning: result.warning };
+    progress.begin('store', result.took);
     await store.put('builds', key, entry);
     return entry;
 }
@@ -411,6 +419,8 @@ const THEME_KEY = 'theme';
 async function main() {
     // the game of the current run (its map, its save state)
     let currentGame = GAMES.smb;
+    // the steps to a running game, in place of the screen until it runs
+    const progress = createProgress(document.getElementById('screen'));
     const viewer = createViewer(document.getElementById('code'), {
         onRecompile: text => {
             localStorage.setItem(currentGame.mapKey, text);
@@ -421,15 +431,6 @@ async function main() {
             boot();
         },
     });
-    // The code panel's status line; what the player must see (recompiling,
-    // errors) also shows under the screen, as the panel starts hidden.
-    const screenStatus = document.getElementById('screen-status');
-    const setStatus = (text, kind = '') => {
-        viewer.setStatus(text, kind);
-        screenStatus.textContent = kind ? text : '';
-        screenStatus.className = `status ${kind}`;
-        screenStatus.hidden = !kind;
-    };
     const toggleCode = document.getElementById('toggle-code');
     toggleCode.addEventListener('click', () => {
         const hidden = document.body.classList.toggle('code-hidden');
@@ -451,13 +452,21 @@ async function main() {
     for (const [name, label] of Object.entries(THEMES)) themeMenu.add(new Option(label, name));
     themeMenu.value = localStorage.getItem(THEME_KEY) ?? 'original';
     if (themeMenu.value === '') themeMenu.value = 'original';
+    // A theme this browser cannot draw says why under the screen (the
+    // shader compiler's message is in the console).
+    const themeWarning = document.getElementById('theme-warning');
     const applyTheme = async () => {
         if (!renderer?.setTheme) return;
+        const wanted = themeMenu.value;
+        themeWarning.hidden = true;
         try {
-            await renderer.setTheme(themeMenu.value);
+            await renderer.setTheme(wanted);
         } catch (error) {
             console.error(error);
-            setStatus(`THEME UNAVAILABLE: ${error.message}`.toUpperCase(), 'error');
+            const message = `${THEMES[wanted]} IS UNAVAILABLE HERE: ${error.message.split('\n')[0]}`.toUpperCase();
+            viewer.setStatus(message, 'error');
+            themeWarning.textContent = message;
+            themeWarning.hidden = false;
         }
         themeMenu.value = renderer.theme;
     };
@@ -480,7 +489,7 @@ async function main() {
         try {
             checkRom(bytes);
         } catch (e) {
-            setStatus(e.message.toUpperCase(), 'error');
+            viewer.setStatus(e.message.toUpperCase(), 'error');
             return;
         }
         await store.put('rom', 'rom', bytes);
@@ -529,6 +538,9 @@ async function main() {
     // One run of the game: recompiled module, linked runtime, frame loop.
     async function start(run) {
         const stale = () => run !== runs;
+        // what the run shows of its progress, until a later run replaces it
+        const steps = new Proxy(progress, { get: (target, name) => (...args) => stale() || target[name](...args) });
+        const status = { setStatus: (...args) => stale() || viewer.setStatus(...args) };
         session?.stop();
         session = null;
         while (!rom) {
@@ -539,22 +551,26 @@ async function main() {
         document.title = currentGame.pageTitle;
         document.getElementById('game-title').textContent = currentGame.title;
         debugTiles.parentElement.hidden = !currentGame.debugTiles;
+        canvas.hidden = true;
+        progress.show(currentGame.title);
+        progress.begin('files');
         const { map: defaultMap, native, display, runtime: runtimeBytes } = await filesOf(currentGame);
         if (stale()) return;
         const map = localStorage.getItem(currentGame.mapKey) ?? defaultMap;
         let files = null;
         let warning = '';
-        const title = currentGame.title;
+        steps.begin('runtime');
         const { memory, runtime, game } = await link(runtimeBytes, async layout => {
             const layoutText = Object.entries(layout).map(([name, address]) => `${name} ${address}`).join('\n');
-            const result = await build({ rom, map, native, layout: layoutText, version, title },
-                (text, kind) => stale() || setStatus(text, kind));
+            const result = await build({ rom, map, native, layout: layoutText, version }, status, steps);
             files = result.files;
             warning = result.warning;
+            steps.begin('link');
             return result.wasm;
         }, rom);
         if (stale()) return;
         showWarning(warning);
+        progress.begin('start');
 
         const ordered = FILE_ORDER.map(name => files.find(f => f.name === name)).filter(Boolean);
         viewer.setFiles([
@@ -612,6 +628,8 @@ async function main() {
         themeMenu.disabled = renderer.setTheme === undefined;
         await applyTheme();
         if (stale()) return;
+        progress.hide();
+        canvas.hidden = false;
         updateSize();
 
         let running = true;
@@ -631,15 +649,21 @@ async function main() {
 
         game.cpu_reset_entry();
 
+        // The game runs at 60 frames per second whatever the display's rate:
+        // a frame when 1/60 s has built up. Past a few frames' worth (the tab
+        // was hidden, the page stalled), the backlog is dropped rather than
+        // caught up, which a faster display would do at its own rate.
         let lastUpdateTime = performance.now();
-        let currentFrameTime = lastUpdateTime;
+        let currentFrameTime = 0;
         const targetFrameTime = 1000 / 60;
+        const maxBacklog = 3 * targetFrameTime;
 
         const update = () => {
             if (!running) return;
             const currentTime = performance.now();
             currentFrameTime += currentTime - lastUpdateTime;
             lastUpdateTime = currentTime;
+            if (currentFrameTime > maxBacklog) currentFrameTime = targetFrameTime;
 
             if (currentFrameTime >= targetFrameTime) {
                 runtime.update_controller1(joypad1.getState());
@@ -681,7 +705,8 @@ async function main() {
         } catch (error) {
             if (run !== runs) return; // a later run replaced it
             console.error(error);
-            setStatus(`ERROR: ${error.message}`.toUpperCase(), 'error');
+            viewer.setStatus(`ERROR: ${error.message}`.toUpperCase(), 'error');
+            progress.fail(`ERROR: ${error.message}`);
             if (/iNES|mapper|ROM/.test(error.message)) {
                 rom = await askForRom(error.message);
                 boot();

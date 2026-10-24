@@ -489,6 +489,29 @@ settings of the first scanline that is not a status bar.
   so what is under something is shaded. Without SMB's level data the solid
   background is set behind the sprites, so that characters stay in front of
   the walls they overlap.
+- 3D (`model.js`): shapes made at runtime from the tiles and the level data,
+  never designed by hand, so that the repository holds nothing of the game.
+  `shape.frag` gives each scene pixel, for its background and its sprite, the
+  depths it covers (a centre and a half thickness). Solid metatiles are
+  16-deep cubes with bevelled edges, the floor's (the bottom two rows)
+  reaching back under the scenery as a stage. Pipes are cylinders around the
+  axis between their halves (metatiles $10-$15 upright, $1c-$21 sideways).
+  Coins and climbables are thin. Scenery and sprites are inflated: a jump
+  flood (`edges.frag`) gives each pixel its distance to the edge of its
+  silhouette, and the thickness rises from it as a quarter circle.
+  `smooth.frag` then blurs their thickness (outside the shape counting as 0),
+  which rounds off the creases a distance field leaves along the middle.
+  `model.frag` traces those columns as `voxel.frag` does, but from a
+  perspective camera tilted down. Where a ray reaches an inflated shape it
+  meets the thickness interpolated between pixels, for the depth and the
+  normal, so the shape shades smoothly while its outline stays pixel art;
+  its own column does not shadow it. A block's top and sides show its own
+  tile, as a cube's faces. The lighting is the 2.5D theme's, with more
+  ambient light from above than below, a highlight where the sun glints and
+  a little haze far back. The picture is drawn at up to 4 times the NES
+  resolution and scaled to the canvas (2x2 samples per pixel at the usual
+  2x), each sample seeing the sun from its own point, which softens shadow
+  edges.
 
 Status bars (any band the scanline settings mark) are drawn as they are.
 `tests/web/themes.cjs` (SMB) and `tests/web/cartridge_gpu.cjs` (Metroid,

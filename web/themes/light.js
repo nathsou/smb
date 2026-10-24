@@ -14,7 +14,7 @@ import {
 } from './scene.js';
 
 const CASCADES = 5; // enough for rays to cross the scene: 2 * (4^5 - 1) / 3 pixels
-const JUMP_FLOOD_STEPS = [256, 128, 64, 32, 16, 8, 4, 2, 1];
+export const JUMP_FLOOD_STEPS = [256, 128, 64, 32, 16, 8, 4, 2, 1];
 
 // Sky light (cascade.frag) averages 0.819 of u_sky over the upper half of
 // the directions and 0.536 over all of them: open ground, which sees half the

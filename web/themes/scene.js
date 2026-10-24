@@ -99,7 +99,8 @@ export async function createScene(context) {
     const program = await context.compile('scene.frag');
     const background = createTexture(gl, SCENE_WIDTH, SCENE_HEIGHT, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
     const sprite = createTexture(gl, SCENE_WIDTH, SCENE_HEIGHT, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
-    const framebuffer = createFramebuffer(gl, [background, sprite]);
+    const metatile = createTexture(gl, SCENE_WIDTH, SCENE_HEIGHT, gl.R8, gl.RED, gl.UNSIGNED_BYTE);
+    const framebuffer = createFramebuffer(gl, [background, sprite, metatile]);
     const blocks = createTexture(gl, 16, 26, gl.R8, gl.RED, gl.UNSIGNED_BYTE);
     const blockBytes = new Uint8Array(16 * 26);
 
@@ -120,6 +121,7 @@ export async function createScene(context) {
     const scene = {
         background,
         sprite,
+        metatile,
         origin: [16, 0], // scene point of the screen's top-left corner (common.glsl)
         shift: [0, 0],   // where last frame had this frame's scene point, minus the point
         // Sets u_origin on a program that uses the scene.
@@ -153,7 +155,7 @@ export async function createScene(context) {
             pass(context, program, framebuffer, SCENE_WIDTH, SCENE_HEIGHT);
         },
         dispose() {
-            [background, sprite, blocks].forEach(texture => gl.deleteTexture(texture));
+            [background, sprite, metatile, blocks].forEach(texture => gl.deleteTexture(texture));
             gl.deleteFramebuffer(framebuffer);
             gl.deleteProgram(program);
         },
