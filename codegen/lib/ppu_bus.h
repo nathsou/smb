@@ -11,6 +11,11 @@
 // its generated code is a link error.
 
 extern uint8_t oam_addr;
+// The latches between register accesses (saved with the state).
+extern uint8_t ppu_write_toggle; // shared $2005/$2006 first/second write latch
+extern uint16_t ppu_vram_addr;
+extern uint8_t ppu_read_buffer;
+extern bool ppu_status_clear;
 
 uint8_t ppu_bus_read(uint16_t addr);
 void ppu_bus_write(uint16_t addr, uint8_t value);

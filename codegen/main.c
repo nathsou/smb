@@ -5,8 +5,18 @@
 #include "lib/state.h"
 #include "lib/debug_chr.h"
 #include "gpu.h"
+#ifdef MAPPER
+#include "lib/mapper.h"
+#include "lib/cartridge.h"
+#endif
 
+// The game (see the Makefile's GAME): Super Mario Bros. by default.
+#ifndef GAME_TITLE
+#define GAME_TITLE "SMB"
+#endif
+#ifndef ROM_PATH
 #define ROM_PATH "smb.nes"
+#endif
 
 #define CONTROLLER_RIGHT 0b10000000
 #define CONTROLLER_LEFT 0b01000000
@@ -27,7 +37,9 @@
 #define CONTROLLER1_SELECT_KEY KEY_SPACE
 
 #define AUDIO_SAMPLE_RATE 48000
+#ifndef SAVE_FILE
 #define SAVE_FILE "smb.sav"
+#endif
 #define SHADER_PATH "web/video.frag"
 
 bool last_save_state_loaded = false;
@@ -171,6 +183,11 @@ int main(int argc, char **argv) {
     cpu_init();
     apu_init(AUDIO_SAMPLE_RATE);
 
+#ifdef MAPPER
+    // the game writes its own tiles (CHR RAM): no debug tiles to fall back on
+    if (load_cartridge(ROM_PATH)) return 1;
+    mapper_init();
+#else
     if (read_chr_rom(ROM_PATH)) {
         fprintf(stderr, "Using generated debug tiles instead\n");
         uint8_t chr[DEBUG_CHR_SIZE];
@@ -178,11 +195,12 @@ int main(int argc, char **argv) {
         video_init(chr);
         render_init();
     }
+#endif
 
     cpu_reset_entry();
 
     SetTargetFPS(60);
-    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "SMB");
+    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, GAME_TITLE);
 
     SetAudioStreamBufferSizeDefault(128);
 

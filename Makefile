@@ -5,9 +5,28 @@ CFLAGS += -I./raylib-quickstart/build/external/raylib-master/src
 CFLAGS += -O3 -std=c99
 CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -ferror-limit=0
+# The game: smb (Super Mario Bros.) or metroid, recompiled from your ROM.
+GAME ?= smb
+ifeq ($(GAME),metroid)
+ROM ?= metroid.nes
+MAP = maps/metroid.map
+GAME_DIR = codegen/metroid
+NATIVE_ROUTINES =
+# it drives the PPU through its registers and switches banks (MMC1)
+GAME_FLAGS = -DPPU_BUS -DMAPPER -DGAME_TITLE='"Metroid"' -DROM_PATH='"$(ROM)"' -DSAVE_FILE='"metroid.sav"'
+GAME_SOURCES = codegen/lib/ppu_bus.c codegen/lib/mapper.c codegen/lib/cartridge.c
+else
+ROM ?= smb.nes
+MAP = maps/smb.map
+GAME_DIR = codegen/game
+NATIVE_ROUTINES = --native codegen/native/routines.txt
+GAME_FLAGS =
+GAME_SOURCES = codegen/native/display.c
+endif
+
 # the generated program (make codegen) and the runtime it includes
-CFLAGS += -Icodegen/game -Icodegen/lib
-CFLAGS += $(EXTRA_CFLAGS)
+CFLAGS += -I$(GAME_DIR) -Icodegen/lib
+CFLAGS += $(GAME_FLAGS) $(EXTRA_CFLAGS)
 
 # Platform-specific flags
 UNAME_S := $(shell uname -s)
@@ -21,34 +40,36 @@ endif
 
 OBJECTS = raylib-quickstart/bin/Debug/libraylib.a
 
-# The game is recompiled from your own copy of the ROM.
-ROM ?= smb.nes
-
-SOURCES += codegen/game/code.c
-SOURCES += codegen/game/data.c
+SOURCES += $(GAME_DIR)/code.c
+SOURCES += $(GAME_DIR)/data.c
 SOURCES += codegen/lib/cpu.c
 SOURCES += codegen/lib/video.c
 SOURCES += codegen/lib/render.c
-SOURCES += codegen/native/display.c
+SOURCES += $(GAME_SOURCES)
 SOURCES += codegen/lib/apu.c
 SOURCES += codegen/lib/sound.c
 SOURCES += codegen/lib/state.c
 SOURCES += codegen/lib/debug_chr.c
 MAIN = codegen/main.c
 
-.PHONY: codegen header clean gpu-check runtime-wasm runtime-mmc1-wasm apu-wasm game-wasm web
+.PHONY: codegen header clean gpu-check runtime-wasm runtime-mmc1-wasm apu-wasm game-wasm web replay
 
-# The game is recompiled from your ROM into codegen/game (not in the
-# repository).
+# The game is recompiled from your ROM into codegen/game, or codegen/metroid
+# with GAME=metroid (not in the repository).
 codegen:
-	moon run src/main -- --rom $(ROM) --map maps/smb.map --native codegen/native/routines.txt --output codegen/game
+	moon run src/main -- --rom $(ROM) --map $(MAP) $(NATIVE_ROUTINES) --output $(GAME_DIR)
 
 # The map's names for the hand-written code (committed; no ROM needed).
 header:
 	moon run src/main -- --map maps/smb.map --header codegen/native/smb.h
 
 build: clean
-	$(CC) $(CFLAGS) -o smb ${MAIN} codegen/gpu.c $(SOURCES) codegen/lib/common.c $(GC_FLAGS) $(RAYLIB_FLAGS) $(OBJECTS)
+	$(CC) $(CFLAGS) -o $(GAME) ${MAIN} codegen/gpu.c $(SOURCES) codegen/lib/common.c $(GC_FLAGS) $(RAYLIB_FLAGS) $(OBJECTS)
+
+# Replays a recording headlessly (games that drive the PPU registers, see
+# codegen/replay.c): ./replay metroid.nes --rec rec/metroid.rec
+replay:
+	$(CC) $(CFLAGS) -o replay codegen/replay.c $(SOURCES) codegen/lib/rec.c codegen/lib/state_hash.c $(GC_FLAGS) -lm
 
 # Compares the GPU renderer with the software renderer over the replay
 # (needs OpenGL 3.3; under Xvfb: xvfb-run ./gpu_check --debug-chr).
@@ -95,4 +116,4 @@ hash: clean
 	$(CC) $(CFLAGS) -o hash codegen/hash.c $(SOURCES) codegen/lib/rec.c codegen/lib/common.c $(GC_FLAGS)
 
 clean:
-	rm -f smb hash gpu_check smb.wasm audio_queue
+	rm -f smb metroid hash gpu_check replay smb.wasm audio_queue

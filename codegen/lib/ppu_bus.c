@@ -3,10 +3,14 @@
 #include "external.h"
 
 uint8_t oam_addr;
-static uint8_t write_toggle; // shared $2005/$2006 first/second write latch
-static uint16_t vram_addr;
-static uint8_t read_buffer;
-static bool status_clear;
+uint8_t ppu_write_toggle;
+uint16_t ppu_vram_addr;
+uint8_t ppu_read_buffer;
+bool ppu_status_clear;
+#define write_toggle ppu_write_toggle
+#define vram_addr ppu_vram_addr
+#define read_buffer ppu_read_buffer
+#define status_clear ppu_status_clear
 
 static uint16_t vram_increment(void) {
     return video.ctrl & VIDEO_CTRL_INCREMENT_32 ? 32 : 1;

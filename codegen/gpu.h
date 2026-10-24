@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include "raylib.h"
+#include <stdint.h>
 
 // Draws the Video state with a fragment shader (web/video.frag): pattern
 // tables and nametables are textures, palette and sprites are uniforms, and

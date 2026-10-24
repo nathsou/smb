@@ -6,6 +6,7 @@
 #include "lib/rec.h"
 #include "lib/ppu_bus.h"
 #include "lib/state_hash.h"
+#include "lib/state.h"
 #ifdef MAPPER
 #include "lib/mapper.h"
 #endif
@@ -25,6 +26,8 @@
 //   --write-trace FILE  record per-frame state hashes
 //   --dump N[,N...]     write those frames as frame_N.ppm
 //   --dump-every N      write every Nth frame
+//   --check-states N    every N frames, save the state, run 60 frames, load
+//                       it and run them again: the states must be the same
 
 static void dump_frame(uint32_t index) {
     char path[32];
@@ -76,6 +79,8 @@ int main(int argc, char **argv) {
     const char *dump = option(argc, argv, "--dump");
     const char *every_option = option(argc, argv, "--dump-every");
     uint32_t every = every_option ? (uint32_t)strtoul(every_option, NULL, 10) : 0;
+    const char *states_option = option(argc, argv, "--check-states");
+    uint32_t states_every = states_option ? (uint32_t)strtoul(states_option, NULL, 10) : 0;
 
     cpu_init();
     apu_init(48000);
@@ -102,6 +107,33 @@ int main(int argc, char **argv) {
     cpu_reset_entry();
     long first_divergence = -1;
     for (uint32_t i = 0; i < frames; i++) {
+        if (states_every && i % states_every == 0 && i > 0 && rec_path) {
+            static uint8_t saved[SAVE_STATE_SIZE];
+            uint32_t hashes[60];
+            save_state(saved);
+            NESInputRecording again = {0};
+            rec_open(rec_path, "r", &again);
+            for (uint32_t k = 0; k < 60; k++) {
+                update_controller1(rec_state_at_frame(&again, i + k));
+                next_frame();
+                sound_end_frame();
+                hashes[k] = hash_state();
+            }
+            rec_close(&again);
+            load_state(saved);
+            rec_open(rec_path, "r", &again);
+            for (uint32_t k = 0; k < 60; k++) {
+                update_controller1(rec_state_at_frame(&again, i + k));
+                next_frame();
+                sound_end_frame();
+                if (hash_state() != hashes[k]) {
+                    printf("A state loaded at frame %u diverges %u frames later\n", i, k);
+                    return 1;
+                }
+            }
+            rec_close(&again);
+            load_state(saved);
+        }
         update_controller1(rec_path ? rec_state_at_frame(&recording, i) : 0);
         next_frame();
         sound_end_frame();
@@ -126,6 +158,7 @@ int main(int argc, char **argv) {
         }
         printf("Per-frame state matches %s\n", trace_path);
     }
+    if (states_every) printf("States saved every %u frames load back to the same frames\n", states_every);
     printf("Ran %u frames\n", frames);
     return 0;
 }
