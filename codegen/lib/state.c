@@ -28,6 +28,9 @@ static void cartridge_state(uint8_t *state, bool save) {
     uint8_t vram_low = (uint8_t)ppu_vram_addr, vram_high = (uint8_t)(ppu_vram_addr >> 8);
     BYTE(oam_addr, uint8_t); BYTE(ppu_write_toggle, uint8_t); BYTE(vram_low, uint8_t);
     BYTE(vram_high, uint8_t); BYTE(ppu_read_buffer, uint8_t); BYTE(ppu_status_clear, bool);
+    // the scroll the IRQ handler's splits start from
+    uint8_t temp_low = (uint8_t)ppu_temp_addr, temp_high = (uint8_t)(ppu_temp_addr >> 8);
+    BYTE(temp_low, uint8_t); BYTE(temp_high, uint8_t); BYTE(ppu_fine_x, uint8_t);
     BYTE(a, uint8_t); BYTE(x, uint8_t); BYTE(y, uint8_t); BYTE(sp, uint8_t);
     BYTE(carry_flag, bool); BYTE(zero_flag, bool); BYTE(neg_flag, bool);
     BYTE(overflow_flag, bool); BYTE(interrupt_disabled, bool); BYTE(decimal_flag, bool);
@@ -37,6 +40,7 @@ static void cartridge_state(uint8_t *state, bool save) {
     BYTES(cpu_resume_stack, CPU_RESUME_STACK);
     if (!save) {
         ppu_vram_addr = (uint16_t)(vram_low | (vram_high << 8));
+        ppu_temp_addr = (uint16_t)(temp_low | (temp_high << 8));
         cpu_return = (uint16_t)(return_low | (return_high << 8));
         mapper_apply();
         video.chr_version++; // the renderers decode the tiles again

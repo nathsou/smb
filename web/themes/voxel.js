@@ -2,7 +2,7 @@
 // resolution, lit by the sun and by fire with shadow rays and by the 2D
 // global illumination (light.js) as ambient light.
 
-import { createScene, bindTextures, pass, backdrop, sizeCanvas } from './scene.js';
+import { createScene, bindTextures, pass, backdrop, sizeCanvas, levelKnown } from './scene.js';
 import { createGlobalIllumination } from './light.js';
 
 const SUN = normalize([-0.45, -0.8, -0.55]); // up and to the left, towards the viewer
@@ -67,7 +67,7 @@ export async function create(context) {
             illumination.draw();
 
             const { dark } = backdrop(context);
-            const lights = fireLights(frame.oam);
+            const lights = levelKnown(context) ? fireLights(frame.oam) : []; // (SMB's fire)
             lights.forEach((light, i) => {
                 positions.set([light.x, light.y, FIRE_DEPTH, FIRE_RADIUS * Math.sqrt(light.count)], i * 4);
                 colors.set(FIRE_COLOR, i * 3);
@@ -82,6 +82,7 @@ export async function create(context) {
             });
             gl.uniform3fv(uniform('u_floor'), illumination.floor);
             gl.uniform1f(uniform('u_scale'), scale);
+            gl.uniform1i(uniform('u_level_known'), levelKnown(context) ? 1 : 0);
             gl.uniform3fv(uniform('u_sun'), SUN);
             gl.uniform3fv(uniform('u_sun_color'), dark ? DARK_KEY_COLOR : SUN_COLOR);
             gl.uniform1f(uniform('u_ambient'), dark ? DARK_AMBIENT : DAY_AMBIENT);

@@ -84,9 +84,10 @@ int screen_of(int table) {
     return table % 2; // vertical
 }
 
-// The point of the 512x480 plane pixel x of the scanline shows.
+// The point of the 512x480 plane pixel x of the scanline shows (x can be
+// off the screen: the plane goes on).
 ivec2 plane_point(int x) {
-    return ivec2((line_x + x) % 512, line_y % 480);
+    return ivec2(((line_x + x) % 512 + 512) % 512, line_y % 480);
 }
 
 // The background pixel of the plane at `point`, as background().

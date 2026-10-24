@@ -1,10 +1,14 @@
 // The light on each scene pixel: the irradiance of cascade 0 (its four rays,
 // between the four nearest probes). An occluder takes the light of its
 // nearest free pixel, dimming with depth, so that surfaces are lit from the
-// side light comes from.
+// side light comes from (less without SMB's level data, where all the
+// background is taken as solid: deep is often only a wall seen from the
+// front).
 
 uniform sampler2D u_cascade0;
 uniform sampler2D u_seeds;
+uniform bool u_level_known;
+uniform vec3 u_open; // the light in open space, for a scene without any
 
 out vec4 o_light;
 
@@ -33,6 +37,11 @@ void main() {
         o_light = vec4(irradiance(here + 0.5), 1.0);
         return;
     }
+    if (seeds.z < -1000.0) {
+        o_light = vec4(u_open, 1.0); // nothing free in the scene (a map filling the screen)
+        return;
+    }
     float depth = distance(here, seeds.zw);
-    o_light = vec4(irradiance(seeds.zw + 0.5) * (0.6 + 0.4 * exp(-max(depth - 1.0, 0.0) / 12.0)), 1.0);
+    float deepest = u_level_known ? 0.6 : 0.85;
+    o_light = vec4(irradiance(seeds.zw + 0.5) * (deepest + (1.0 - deepest) * exp(-max(depth - 1.0, 0.0) / 12.0)), 1.0);
 }
