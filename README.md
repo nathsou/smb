@@ -78,12 +78,28 @@ shows next to the game (SHOW CODE; the map tab is editable and recompiles).
 DEBUG TILES draws with generated placeholder tiles instead of the ROM's, and
 `?software` in the URL selects the software renderer instead of WebGL2.
 
+### Themes
+
+THEME draws the same frames differently (WebGL2; ORIGINAL is the game's own
+picture):
+
+- 2D GLOBAL ILLUMINATION: the sky, fire, lava and coins light the scene,
+  with soft shadows and a bounce, by radiance cascades;
+- 2.5D RAY TRACING: every pixel becomes voxels, seen from slightly above,
+  with sun and fire shadows traced through them.
+
+![The original picture and the two themes, in 1-1 and 1-4](res/themes.png)
+
+The themes know what is solid from the game's own level data (its block
+buffer, by the map's names), not from the picture. See
+[themes](docs/modern-runtime.md#themes).
+
 ## Codegen
 
 1. Install [Moonbit](https://www.moonbitlang.com/):
 
 ```bash
-$ curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s '0.10.9+6e6c44045'
+$ curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s '0.10.17+d971670cd'
 ```
 
 2. Place your `smb.nes` in the root folder and run `make codegen`; the C goes
@@ -113,7 +129,9 @@ tiles), run the differential test of every generated routine
 The GPU renderers can be compared with the software renderer pixel for pixel:
 `make gpu-check && xvfb-run ./gpu_check --debug-chr` (desktop) and
 `NODE_PATH=$(npm root -g) node tests/web/gpu_check.cjs` (WebGL2 in headless
-Chromium, needs Playwright).
+Chromium, needs Playwright). `tests/web/themes.cjs` draws frames of the
+replay with every theme and fails on WebGL errors; with a query and a
+directory it saves them, e.g. `'frames=7800&rom=1' /tmp/themes`.
 
 Calls are plain C calls. Return addresses are not kept on the emulated stack,
 except by the inline-table dispatchers, which read their table through it.

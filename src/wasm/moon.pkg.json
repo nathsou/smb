@@ -1,8 +1,0 @@
-{
-  "is-main": false,
-  "import": [
-    "nathsou/smb/ir",
-    "moonbitlang/core/encoding/utf8",
-    "moonbitlang/core/list"
-  ]
-}

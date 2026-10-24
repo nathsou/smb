@@ -1,0 +1,199 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "nathsou/smb/ir"
+
+import {
+  "moonbitlang/core/debug",
+  "moonbitlang/core/set",
+  "nathsou/smb/lower",
+}
+
+// Values
+pub const FLAGS : Int32 = 1008
+
+pub const REGISTERS : Int32 = 7
+
+pub const SP_BIT : Int32 = 8
+
+pub const STATUS_FLAGS : Int32 = 240
+
+pub let all_vars : Array[Var]
+
+pub fn build(@lower.AsmLowering, native~ : @set.Set[String]) -> Program raise BuildError
+
+pub fn simplify(Expr) -> Expr
+
+pub fn vars_of(Int32) -> Array[Var]
+
+// Errors
+pub suberror BuildError {
+  BuildError(String)
+} derive(@debug.Debug)
+
+// Types and methods
+pub(all) struct Analysis {
+  live_in : Map[String, Int32]
+  demand : Map[String, Int32]
+  mut root_demand : Int32
+  reads : Map[String, Int32]
+  may_write : Map[String, Int32]
+  must_write : Map[String, Int32]
+} derive(@debug.Debug)
+pub fn Analysis::blocks_live(Self, Function) -> Array[Int32]
+pub fn Analysis::blocks_live_out(Self, Function, Array[Int32]) -> Array[Int32]
+pub fn Analysis::inputs(Self, String) -> Int32
+pub fn Analysis::stmt_live(Self, Stmt, Int32) -> Int32
+pub fn Analysis::term_live(Self, Function, Term, Array[Int32]) -> Int32
+
+pub(all) enum BinOp {
+  Add
+  Sub
+  And
+  Or
+  Xor
+  Shl
+  Shr
+  Eq
+  Ne
+  Lt
+  Ge
+} derive(Eq, @debug.Debug)
+
+pub(all) struct Block {
+  label : String
+  mut stmts : Array[Stmt]
+  mut term : Term
+} derive(@debug.Debug)
+
+pub(all) enum Expr {
+  Const(Int32)
+  Sym(String, Int32)
+  Var(Var)
+  Temp(Int32)
+  Param
+  Load(Mem, Expr)
+  Unary(UnOp, Expr)
+  Binary(BinOp, Expr, Expr)
+} derive(Eq, @debug.Debug)
+pub fn Expr::fits_byte(Self, Array[Temp]) -> Bool
+pub fn Expr::is_atom(Self) -> Bool
+pub fn Expr::is_boolean(Self) -> Bool
+pub fn Expr::is_pure(Self) -> Bool
+pub fn Expr::range(Self, Array[Temp]) -> Range
+pub fn Expr::reads_memory(Self) -> Bool
+pub fn Expr::replace_temp(Self, Int32, Self) -> Self
+pub fn Expr::replace_var(Self, Var, Self) -> Self
+pub fn Expr::size(Self) -> Int32
+pub fn Expr::temps(Self, Array[Int32]) -> Unit
+pub fn Expr::uses_temp(Self, Int32) -> Int32
+pub fn Expr::uses_var(Self, Var) -> Int32
+pub fn Expr::value(Self) -> Int32?
+pub fn Expr::vars(Self) -> Int32
+
+pub(all) struct Function {
+  name : String
+  mut blocks : Array[Block]
+  mut entry : Int32
+  temps : Array[Temp]
+  doc : Array[String]
+  native : Bool
+  helper : Bool
+} derive(@debug.Debug)
+pub fn Function::new_temp(Self, String, Width) -> Int32
+
+pub(all) enum Mem {
+  Ram
+  Rom
+  Bus
+} derive(Eq, @debug.Debug)
+
+pub(all) struct Program {
+  functions : Array[Function]
+  by_name : Map[String, Int32]
+  reset : String
+  nmi : String
+  prg : Array[Int32]
+  mut info : Analysis?
+} derive(@debug.Debug)
+pub fn Program::analyze(Self) -> Analysis
+pub fn Program::function(Self, String) -> Function?
+pub fn Program::inline_leaves(Self, limit? : Int32) -> Int32
+pub fn Program::is_root(Self, String) -> Bool
+pub fn Program::optimize(Self) -> Unit
+pub fn Program::outputs(Self, Analysis, String) -> Int32
+pub fn Program::roots(Self) -> Array[String]
+
+pub(all) struct Range {
+  lo : Int32
+  hi : Int32
+} derive(Eq, @debug.Debug)
+
+pub(all) enum Stmt {
+  Assign(Var, Expr)
+  Let(Int32, Expr)
+  Store(Mem, Expr, Expr)
+  Effect(String, Array[Expr])
+  Eval(Expr)
+  Call(String)
+} derive(Eq, @debug.Debug)
+pub fn Stmt::defs(Self) -> Int32
+pub fn Stmt::exprs(Self) -> Array[Expr]
+pub fn Stmt::has_effects(Self) -> Bool
+pub fn Stmt::map_exprs(Self, (Expr) -> Expr) -> Self
+pub fn Stmt::uses(Self) -> Int32
+
+pub(all) struct Temp {
+  hint : String
+  width : Width
+} derive(@debug.Debug)
+
+pub(all) enum Term {
+  Goto(Int32)
+  Branch(Expr, Int32, Int32)
+  Return
+  ReturnValue(Expr)
+  TailCall(String)
+  Dispatch(String, Int32, Array[(Int32, String)])
+  Yield(Int32)
+  Trap(Int32)
+} derive(Eq, @debug.Debug)
+pub fn Term::exprs(Self) -> Array[Expr]
+pub fn Term::map_exprs(Self, (Expr) -> Expr) -> Self
+pub fn Term::map_targets(Self, (Int32) -> Int32) -> Self
+pub fn Term::successors(Self) -> Array[Int32]
+
+pub(all) enum UnOp {
+  Not
+  Lo
+  Hi
+  Byte
+} derive(Eq, @debug.Debug)
+
+pub(all) enum Var {
+  A
+  X
+  Y
+  SP
+  C
+  Z
+  N
+  V
+  I
+  D
+} derive(Eq, Hash, @debug.Debug)
+pub fn Var::bit(Self) -> Int32
+pub fn Var::c_name(Self) -> String
+pub fn Var::interface_name(Self) -> String
+pub fn Var::is_flag(Self) -> Bool
+pub fn Var::width(Self) -> Width
+
+pub(all) enum Width {
+  U8
+  U16
+  Wide
+  Flag
+} derive(Eq, @debug.Debug)
+pub fn Width::wrap(Self, Expr, Array[Temp]) -> Expr
+
+// Type aliases
+
+// Traits

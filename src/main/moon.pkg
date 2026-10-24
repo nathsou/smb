@@ -1,0 +1,11 @@
+import {
+  "nathsou/smb/pipeline",
+  "moonbitlang/x/fs",
+  "moonbitlang/core/debug",
+  "moonbitlang/core/env",
+  "moonbitlang/core/string",
+}
+
+options(
+  "is-main": true,
+)

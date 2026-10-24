@@ -1,0 +1,8 @@
+import {
+  "nathsou/smb/parse",
+  "nathsou/smb/image",
+}
+
+options(
+  "is-main": false,
+)

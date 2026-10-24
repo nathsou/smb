@@ -1,0 +1,191 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "nathsou/smb/lower"
+
+import {
+  "moonbitlang/core/debug",
+  "moonbitlang/core/ref",
+  "moonbitlang/core/set",
+  "nathsou/smb/image",
+  "nathsou/smb/parse",
+}
+
+// Values
+pub fn decoded_index_register(String) -> IndexRegister
+
+pub fn flag_reads(@parse.OpCode) -> FlagLiveness
+
+pub fn flag_writes(@parse.OpCode) -> FlagLiveness
+
+pub fn register_reads(@parse.OpCode, accumulator~ : Bool, index~ : IndexRegister) -> Registers
+
+pub fn register_writes(@parse.OpCode, accumulator~ : Bool) -> Registers
+
+// Errors
+pub suberror LoweringError {
+  LoweringError(String)
+} derive(@debug.Debug)
+
+// Types and methods
+pub(all) enum AsmAddressingMode {
+  Accumulator
+  Implied
+  Immediate(TypedExpr)
+  Relative(TypedExpr)
+  ZeroPage(TypedExpr)
+  ZeroPageX(TypedExpr)
+  ZeroPageY(TypedExpr)
+  Absolute(TypedExpr)
+  AbsoluteX(TypedExpr)
+  AbsoluteY(TypedExpr)
+  Indirect(TypedExpr)
+  IndexedIndirect(TypedExpr)
+  IndirectIndexed(TypedExpr)
+} derive(@debug.Debug)
+pub fn AsmAddressingMode::index_register(Self) -> IndexRegister
+pub fn AsmAddressingMode::suffix(Self) -> String
+
+pub(all) struct AsmFlatSubroutine {
+  name : String
+  items : Array[AsmItem]
+} derive(@debug.Debug)
+
+pub(all) enum AsmItem {
+  Label(String)
+  Inst(id~ : Int32, op~ : @parse.OpCode, mode~ : AsmAddressingMode, comment~ : String?)
+  JumpEngine(jump_table~ : Array[String], site~ : Int32)
+  DoWhile(cond~ : @parse.OpCode, body~ : Array[AsmItem], comment~ : String?)
+  If(comparison~ : (String, TypedExpr)?, cond~ : @parse.OpCode, then~ : Array[AsmItem], otherwise~ : Array[AsmItem]?, comment~ : String?)
+  Comment(String)
+} derive(@debug.Debug)
+
+pub(all) struct AsmLowering {
+  items : Array[@parse.SourceItem]
+  program : @image.Program?
+  lowered : Array[AsmItem]
+  mut next_instruction_id : Int32
+  defines : Map[String, TypedExpr]
+  jump_target_labels : @set.Set[String]
+  tables : Array[AsmTable]
+  tables_by_label : Map[String, AsmTable]
+  mut table_offset : Int32
+  targets : JumpTargets
+  basic_blocks : Array[BasicBlock]
+  bb_by_label : Map[String, BasicBlock]
+  subroutines : Array[AsmSubroutine]
+  flat_subroutines : Array[AsmFlatSubroutine]
+  flag_liveness : Map[Int32, FlagLiveness]
+  mut block_flag_demands : Array[FlagLiveness]
+  return_flag_demands : Map[String, FlagLiveness]
+  register_liveness : Map[Int32, Registers]
+  return_register_demands : Map[String, Registers]
+  entry_register_reads : Map[String, Registers]
+  routine_register_writes : Map[String, Registers]
+  routine_flag_writes : Map[String, FlagLiveness]
+  caller_register_demands : Map[String, Registers]
+  caller_flag_demands : Map[String, FlagLiveness]
+  preamble : Array[String]
+} derive(@debug.Debug)
+pub fn AsmLowering::flag_live_after(Self, Int32) -> FlagLiveness
+pub fn AsmLowering::is_subroutine_label(Self, String) -> Bool
+pub fn AsmLowering::lower(Self) -> Unit raise LoweringError
+pub fn AsmLowering::lower_mode(Self, @parse.SourceAddressingMode, op? : @parse.OpCode?) -> AsmAddressingMode raise LoweringError
+pub fn AsmLowering::new(Array[@parse.SourceItem], program? : @image.Program?) -> Self
+pub fn AsmLowering::register_live_after(Self, Int32) -> Registers
+pub fn AsmLowering::return_flag_demand(Self, String) -> FlagLiveness
+pub fn AsmLowering::routine_flag_outputs(Self, String) -> FlagLiveness
+pub fn AsmLowering::routine_inputs(Self, String) -> Registers
+pub fn AsmLowering::routine_register_outputs(Self, String) -> Registers
+
+pub(all) struct AsmSubroutine {
+  name : String
+  blocks : Array[BasicBlock]
+  entry : BasicBlock
+  mut exit : BasicBlock
+  internal_labels : @set.Set[String]
+} derive(@debug.Debug)
+
+pub(all) struct AsmTable {
+  name : String
+  offset : Int32
+  lines : Array[AsmTableLine]
+  size : Int32
+  elem_size : @parse.ConstantSize
+  items_count : Int32
+} derive(@debug.Debug)
+
+pub(all) enum AsmTableLine {
+  Data(data~ : Array[TypedExpr], comment~ : @ref.Ref[String])
+  Comment(String)
+} derive(@debug.Debug)
+
+pub(all) struct BasicBlock {
+  id : Int32
+  mut name : String?
+  items : Array[AsmItem]
+  predecessors : Array[BasicBlockLink]
+  successors : Array[BasicBlockLink]
+  mut is_subroutine_entry : Bool
+  mut subroutine : AsmSubroutine?
+} derive(@debug.Debug)
+
+pub(all) struct BasicBlockLink {
+  bb : BasicBlock
+  is_fallthrough : Bool
+} derive(@debug.Debug)
+
+pub(all) struct FlagLiveness {
+  carry : Bool
+  zero : Bool
+  negative : Bool
+  overflow : Bool
+} derive(Eq, @debug.Debug)
+pub fn FlagLiveness::all() -> Self
+pub fn FlagLiveness::intersect(Self, Self) -> Self
+pub fn FlagLiveness::is_none(Self) -> Bool
+pub fn FlagLiveness::names(Self) -> Array[String]
+pub fn FlagLiveness::none() -> Self
+pub fn FlagLiveness::subtract(Self, Self) -> Self
+pub fn FlagLiveness::union(Self, Self) -> Self
+
+pub(all) enum IndexRegister {
+  NoIndex
+  IndexX
+  IndexY
+} derive(Eq, @debug.Debug)
+
+pub(all) struct JumpTargets {
+  jump_targets : @set.Set[String]
+  subroutines : @set.Set[String]
+  externals : @set.Set[String]
+} derive(@debug.Debug)
+
+pub(all) struct Registers {
+  a : Bool
+  x : Bool
+  y : Bool
+} derive(Eq, @debug.Debug)
+pub fn Registers::all() -> Self
+pub fn Registers::intersect(Self, Self) -> Self
+pub fn Registers::is_none(Self) -> Bool
+pub fn Registers::names(Self) -> Array[String]
+pub fn Registers::none() -> Self
+pub fn Registers::subtract(Self, Self) -> Self
+pub fn Registers::union(Self, Self) -> Self
+
+pub(all) enum Type {
+  ConstTy(@parse.ConstantSize)
+  ArrayTy(@parse.ConstantSize)
+  LabelTy
+} derive(Eq, @debug.Debug)
+
+pub(all) enum TypedExpr {
+  Const(base~ : @parse.ConstantBase, value~ : Int32, size~ : @parse.ConstantSize, ty~ : Type)
+  Ident(name~ : String, ty~ : Type)
+  Unary(op~ : @parse.UnaryOp, expr~ : TypedExpr, ty~ : Type)
+  Binary(op~ : @parse.BinaryOp, lhs~ : TypedExpr, rhs~ : TypedExpr, ty~ : Type)
+} derive(@debug.Debug)
+pub fn TypedExpr::ty(Self) -> Type
+
+// Type aliases
+
+// Traits

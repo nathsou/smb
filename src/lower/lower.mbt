@@ -758,7 +758,7 @@ fn AsmLowering::collect_subroutines(self: AsmLowering) -> Unit raise LoweringErr
 }
 
 fn  AsmLowering::_cfg_dotfile(self: AsmLowering) -> String {
-  let builder = StringBuilder::new()
+  let builder = StringBuilder()
 
   builder.write_string("digraph G {\n")
 

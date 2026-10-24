@@ -72,7 +72,7 @@ pub fn sha256(data : Array[Int]) -> String {
     h[7] = h[7] + hh
     chunk += 64
   }
-  let out = StringBuilder::new()
+  let out = StringBuilder()
   for word in h {
     out.write_string(word.to_string(radix=16).pad_start(8, '0'))
   }
