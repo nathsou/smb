@@ -1,13 +1,16 @@
 // Shared by the theme shaders, after video.frag (as a library).
 //
 // The scene (scene.frag) is the frame split into a background and a sprite
-// layer, 288x256: x from -SCENE_MARGIN to 271, y down from the top, rows past
-// 239 empty. Each layer's alpha is a material: what the game's level data
-// says the pixel is.
+// layer, 320x256, y down from the top, rows past 239 empty. Each layer's
+// alpha is a material: what the game's level data says the pixel is. The
+// screen's left edge is at scene x u_origin, 16 to 47: the scene moves with
+// the world in steps of 32 pixels, so that the light's probes (2 to 32 pixels
+// apart) stay in place on the level as it scrolls.
 
-const int SCENE_MARGIN = 16;
-const int SCENE_WIDTH = 288;
+const int SCENE_WIDTH = 320;
 const int SCENE_HEIGHT = 256;
+
+uniform int u_origin;
 
 // background materials
 const int M_BACKDROP = 0; // transparent: the backdrop colour shows

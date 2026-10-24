@@ -50,7 +50,7 @@ function fireLights(oam) {
 export async function create(context) {
     const { gl, canvas, frame } = context;
     const scene = await createScene(context);
-    const illumination = await createGlobalIllumination(context, scene);
+    const illumination = await createGlobalIllumination(context, scene, { sky: true });
     const program = await context.compile('voxel.frag');
     const uniform = name => gl.getUniformLocation(program, name);
     const positions = new Float32Array(MAX_LIGHTS * 4);
@@ -74,11 +74,13 @@ export async function create(context) {
             });
 
             context.bindVideo(program);
+            scene.bindOrigin(program);
             bindTextures(gl, program, {
                 u_background: scene.background,
                 u_sprite: scene.sprite,
                 u_light: illumination.light,
             });
+            gl.uniform3fv(uniform('u_floor'), illumination.floor);
             gl.uniform1f(uniform('u_scale'), scale);
             gl.uniform3fv(uniform('u_sun'), SUN);
             gl.uniform3fv(uniform('u_sun_color'), dark ? DARK_KEY_COLOR : SUN_COLOR);
