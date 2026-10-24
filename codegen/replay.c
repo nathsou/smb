@@ -57,16 +57,6 @@ static const char *option(int argc, char **argv, const char *name) {
     return NULL;
 }
 
-// The last frame a recording names.
-static uint32_t recording_length(const char *path) {
-    FILE *file = fopen(path, "r");
-    uint32_t frame = 0, last = 0;
-    uint8_t state;
-    while (file && fscanf(file, "%u:%hhu\n", &frame, &state) == 2) last = frame;
-    if (file) fclose(file);
-    return last + 1;
-}
-
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "usage: %s ROM.nes [--rec FILE] [--frames N] [--trace FILE] [--write-trace FILE] [--dump N,...]\n", argv[0]);
@@ -95,7 +85,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     uint32_t frames = frames_option ? (uint32_t)strtoul(frames_option, NULL, 10)
-                    : rec_path ? recording_length(rec_path) : 600;
+                    : rec_path ? rec_length(rec_path) : 600;
 
     FILE *trace = trace_path ? fopen(trace_path, "r") : NULL;
     FILE *write_trace = write_trace_path ? fopen(write_trace_path, "w") : NULL;

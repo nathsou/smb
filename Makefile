@@ -52,7 +52,7 @@ SOURCES += codegen/lib/state.c
 SOURCES += codegen/lib/debug_chr.c
 MAIN = codegen/main.c
 
-.PHONY: codegen header clean gpu-check runtime-wasm runtime-mmc1-wasm apu-wasm game-wasm web replay
+.PHONY: codegen header clean gpu-check runtime-wasm runtime-mmc1-wasm apu-wasm game-wasm web replay interpreter
 
 # The game is recompiled from your ROM into codegen/game, or codegen/metroid
 # with GAME=metroid (not in the repository).
@@ -71,8 +71,14 @@ build: clean
 replay:
 	$(CC) $(CFLAGS) -o replay codegen/replay.c $(SOURCES) codegen/lib/rec.c codegen/lib/state_hash.c $(GC_FLAGS) -lm
 
+# The reference interpreter replay is checked against (tests/interpreter.c):
+# ./interpreter metroid.nes --waits ... --rec rec/metroid.rec
+interpreter:
+	$(CC) $(CFLAGS) -o interpreter tests/interpreter.c codegen/lib/cpu.c codegen/lib/video.c codegen/lib/render.c $(GAME_SOURCES) codegen/lib/apu.c codegen/lib/sound.c codegen/lib/prg.c codegen/lib/rec.c codegen/lib/state_hash.c $(GC_FLAGS) -lm
+
 # Compares the GPU renderer with the software renderer over the replay
-# (needs OpenGL 3.3; under Xvfb: xvfb-run ./gpu_check --debug-chr).
+# (needs OpenGL 3.3; under Xvfb: xvfb-run ./gpu_check --debug-chr, or
+# xvfb-run ./gpu_check --every 25 --variations with GAME=metroid).
 gpu-check: clean
 	$(CC) $(CFLAGS) -o gpu_check codegen/gpu_check.c codegen/gpu.c $(SOURCES) codegen/lib/rec.c codegen/lib/common.c $(GC_FLAGS) $(RAYLIB_FLAGS) $(OBJECTS)
 
@@ -116,4 +122,4 @@ hash: clean
 	$(CC) $(CFLAGS) -o hash codegen/hash.c $(SOURCES) codegen/lib/rec.c codegen/lib/common.c $(GC_FLAGS)
 
 clean:
-	rm -f smb metroid hash gpu_check replay smb.wasm audio_queue
+	rm -f smb metroid hash gpu_check replay interpreter smb.wasm audio_queue

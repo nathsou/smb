@@ -59,3 +59,12 @@ uint8_t rec_state_at_frame(NESInputRecording* rec, uint32_t frame) {
 
     return rec->current.state;
 }
+
+uint32_t rec_length(const char* filename) {
+    FILE* file = fopen(filename, "r");
+    uint32_t frame = 0, last = 0;
+    uint8_t state;
+    while (file && fscanf(file, "%u:%hhu\n", &frame, &state) == 2) last = frame;
+    if (file) fclose(file);
+    return last + 1;
+}

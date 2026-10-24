@@ -3,9 +3,10 @@
 // mapper, APU), with the same frame model as the recompiled program. It
 // runs the foreground from reset to a wait loop's transfer back to its start
 // (the frame ends there), then each frame the interrupt handler and the
-// foreground again to the next such transfer. tests/check_cartridge.py
-// compares its per-frame state hashes with the recompiled program's
-// (codegen/replay.c); the wait loops come from the recompiler.
+// foreground again to the next such transfer. tests/check_fixtures.py and
+// `tests/check_codegen.py --metroid` compare its per-frame state hashes with
+// the recompiled program's (codegen/replay.c); the wait loops come from the
+// recompiler.
 //
 // usage: ./interpreter ROM.nes --waits FROM:TO,... [--rec FILE] [--frames N]
 //                     [--write-trace FILE]
@@ -287,7 +288,8 @@ int main(int argc, char **argv) {
 
     NESInputRecording recording = {0};
     if (rec_path && rec_open(rec_path, "r", &recording) != 0) { fprintf(stderr, "Cannot open %s\n", rec_path); return 1; }
-    uint32_t frames = frames_option ? (uint32_t)strtoul(frames_option, NULL, 10) : 600;
+    uint32_t frames = frames_option ? (uint32_t)strtoul(frames_option, NULL, 10)
+                    : rec_path ? rec_length(rec_path) : 600;
     FILE *trace = write_trace_path ? fopen(write_trace_path, "w") : NULL;
 
     pc = word_at(0xfffc);

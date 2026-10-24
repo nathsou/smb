@@ -25,4 +25,7 @@ int rec_write(NESInputRecording* rec, uint32_t frame, uint8_t state);
 
 uint8_t rec_state_at_frame(NESInputRecording* rec, uint32_t frame);
 
+// The frames up to the last one a recording names.
+uint32_t rec_length(const char* filename);
+
 #endif

@@ -7,10 +7,17 @@ module. With --rom (smb.nes in the root): recompile the game, replay the
 recording natively against tests/golden/warpless.trace (debug and ROM
 tiles) and tests/golden/warpless.audio (APU writes and samples, also
 through the page's AudioWorklet), the routine-level differential test, and the replay of the split
-WebAssembly build."""
+WebAssembly build. With --metroid (metroid.nes in the root): recompile
+Metroid, check the reference interpreter (tests/interpreter.c) against
+tests/golden/metroid.trace over rec/metroid.rec, then the recompiled game
+natively (save states loaded back along the way) and in WebAssembly, with
+registers in locals and, structured as dispatch loops, in memory."""
 import argparse
 import pathlib
 import subprocess
+import tempfile
+
+from check_fixtures import WASM_VARIANTS, waits
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -22,6 +29,7 @@ def run(*args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--rom", action="store_true")
+    parser.add_argument("--metroid", action="store_true")
     args = parser.parse_args()
     run("moon", "check")
     run("moon", "test")
@@ -45,3 +53,18 @@ if __name__ == "__main__":
         run("node", "tests/web/replay_split.mjs")
         # The page's audio path: the AudioWorklet processor and apu.wasm.
         run("node", "tests/web/worklet.mjs")
+    if args.metroid:
+        trace = "tests/golden/metroid.trace"
+        run("make", "codegen", "replay", "interpreter", "GAME=metroid")
+        with tempfile.TemporaryDirectory(prefix="smb-metroid-") as directory:
+            interpreted = str(pathlib.Path(directory) / "interpreter.trace")
+            run("./interpreter", "metroid.nes", "--waits", waits("metroid.nes", "maps/metroid.map"),
+                "--rec", "rec/metroid.rec", "--write-trace", interpreted)
+            run("cmp", trace, interpreted)
+            run("./replay", "metroid.nes", "--rec", "rec/metroid.rec", "--trace", trace, "--check-states", "500")
+            game = str(pathlib.Path(directory) / "game.wasm")
+            for variant in WASM_VARIANTS:
+                run("moon", "run", "src/main", "--", "--rom", "metroid.nes", "--map", "maps/metroid.map",
+                    "--output", str(pathlib.Path(directory) / "unused"), "--wasm", game, *variant)
+                run("node", "tests/web/replay_cartridge.mjs", "web/runtime-mmc1.wasm", game, "metroid.nes",
+                    "rec/metroid.rec", trace)

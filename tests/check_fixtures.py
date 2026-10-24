@@ -104,7 +104,7 @@ def check_banked(frames=200):
         replay = str(output / "replay")
         interpreter = str(output / "interpreter")
         trace = str(output / "interpreter.trace")
-        run("cc", *flags, "-o", replay, "codegen/replay.c", *lib_sources(["code", "data"] + CARTRIDGE))
+        run("cc", *flags, "-o", replay, "codegen/replay.c", *lib_sources(["code", "data", "state"] + CARTRIDGE))
         run("cc", *flags, "-o", interpreter, "tests/interpreter.c", *lib_sources(CARTRIDGE + ["prg"]))
         run(interpreter, rom, "--waits", waits(rom, rom_map), "--frames", str(frames), "--write-trace", trace)
         run(replay, rom, "--frames", str(frames), "--trace", trace)
