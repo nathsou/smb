@@ -20,7 +20,7 @@ const pokes = (params.get('poke') ?? '').split(';').filter(Boolean).map(poke => 
 });
 
 async function run() {
-    const memory = new WebAssembly.Memory({ initial: 10 });
+    const memory = new WebAssembly.Memory({ initial: 32 }); // room for the runtime to grow
     const view = () => new Uint8Array(memory.buffer);
     const { instance } = await WebAssembly.instantiateStreaming(fetch('../../web/smb.wasm'), {
         env: {

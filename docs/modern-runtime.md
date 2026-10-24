@@ -471,6 +471,20 @@ level slid across them and the light shimmered while scrolling.
   ambient occlusion, and the 2D global illumination is the light from
   everywhere else; here rays that leave the scene see the sky (in daylight),
   so what is under something is shaded.
+- 3D (`model.js`): shapes made at runtime from the tiles and the level data,
+  never designed by hand, so that the repository holds nothing of the game.
+  `shape.frag` gives each scene pixel, for its background and its sprite, the
+  depths it covers (a centre and a half thickness). Solid metatiles are
+  16-deep cubes with bevelled edges, the floor's (the bottom two rows)
+  reaching back under the scenery as a stage. Pipes are cylinders around the
+  axis between their halves (metatiles $10-$15 upright, $1c-$21 sideways).
+  Coins and climbables are thin. Scenery and sprites are inflated: a jump
+  flood (`edges.frag`) gives each pixel its distance to the edge of its
+  silhouette, and the thickness rises from it as a quarter circle.
+  `model.frag` traces those columns as `voxel.frag` does, but from a
+  perspective camera tilted down, with normals from how the thickness changes
+  between columns, so rounded shapes shade smoothly; a block's top and sides
+  show its own tile, as a cube's faces. The lighting is the 2.5D theme's.
 
 The status bar is drawn as it is. `tests/web/themes.cjs` draws replay frames
 with every theme and fails on WebGL errors. The themes are a presentation

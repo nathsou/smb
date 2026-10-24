@@ -5,7 +5,9 @@
 // screens around the player, which holds only what the player can touch:
 // the level parser leaves scenery out (block_buffer_limits). A metatile is
 // solid unless it is climbable (climb_metatile_limits), a coin, or one of the
-// invisible ones (vine stem, hidden blocks).
+// invisible ones (vine stem, hidden blocks). The metatile itself goes to a
+// third target, for themes that shape each kind (scene x and y are the
+// world's modulo 32, so a pixel is at x % 16, y % 16 in its metatile).
 
 uniform sampler2D u_blocks; // 16x26 R8: block_buffer1 rows 0-12, block_buffer2 rows 13-25
 uniform int u_climb_limits[4];
@@ -13,10 +15,9 @@ uniform int u_area_kind;    // area_kind: 3 is a castle
 
 layout(location = 0) out vec4 o_background;
 layout(location = 1) out vec4 o_sprite;
+layout(location = 2) out vec4 o_metatile; // metatile / 255, 0 when none
 
-int background_material(int screen, int nx, int y, int tile) {
-    int metatile = 0;
-    if (y >= 32) metatile = fetch(u_blocks, nx / 16, screen * 13 + (y - 32) / 16);
+int background_material(int metatile, int tile) {
     if (metatile == 0) {
         // lava is water drawn with the castle palette: tiles of metatiles $86-$87
         if (u_area_kind == 3 && (tile == 0x41 || tile == 0x26)) return M_LAVA;
@@ -38,6 +39,7 @@ void main() {
     int y = int(gl_FragCoord.y);
     o_background = vec4(color(u_palette[0]), float(M_BACKDROP) / 255.0);
     o_sprite = vec4(0.0);
+    o_metatile = vec4(0.0);
     if (y >= 240) return;
 
     bool background_opaque = false;
@@ -57,8 +59,10 @@ void main() {
         int nx = wx % 256;
         ivec3 bg = background(screen, nx, y);
         background_opaque = bg.y != 0;
+        int metatile = y >= 32 ? fetch(u_blocks, nx / 16, screen * 13 + (y - 32) / 16) : 0;
+        o_metatile = vec4(float(metatile) / 255.0, 0.0, 0.0, 1.0);
         if (background_opaque) {
-            o_background = vec4(color(bg.x), float(background_material(screen, nx, y, bg.z)) / 255.0);
+            o_background = vec4(color(bg.x), float(background_material(metatile, bg.z)) / 255.0);
         }
     }
 
