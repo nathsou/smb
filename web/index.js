@@ -8,10 +8,10 @@ const SCREEN_WIDTH = 256;
 const SCREEN_HEIGHT = 240;
 
 // The games the page recompiles, told apart by their board: Super Mario
-// Bros. (NROM), with its hand-written display routines, and Metroid (MMC1),
-// which drives the PPU through its registers and switches banks, with the
-// runtime module for such cartridges. The themes read SMB's variables, and
-// Metroid writes its own tiles (CHR RAM): both are SMB's only.
+// Bros. (NROM), with its hand-written display routines, Metroid (MMC1) and
+// Super Mario Bros. 3 (MMC3), which drive the PPU through their registers
+// and switch banks, with the runtime module for such cartridges. The debug
+// tiles replace SMB's (Metroid writes its own, SMB3 switches banks of them).
 const GAMES = {
     smb: {
         title: 'SUPER MARIO BROS.',
@@ -20,7 +20,7 @@ const GAMES = {
         runtime: 'runtime.wasm',
         native: 'routines.txt',
         display: 'display.c',
-        extras: true, // themes and debug tiles
+        debugTiles: true,
         mapKey: 'map',
         saveKey: 'save_state',
     },
@@ -31,14 +31,27 @@ const GAMES = {
         runtime: 'runtime-cartridge.wasm',
         native: null,
         display: null,
-        extras: false,
+        debugTiles: false,
         mapKey: 'map:metroid',
         saveKey: 'save_state:metroid',
     },
+    smb3: {
+        title: 'SUPER MARIO BROS. 3',
+        pageTitle: 'SMB3 Recompiled',
+        map: 'smb3.map',
+        runtime: 'runtime-cartridge.wasm',
+        native: null,
+        display: null,
+        debugTiles: false,
+        mapKey: 'map:smb3',
+        saveKey: 'save_state:smb3',
+    },
 };
 
+const BOARDS = { 0: GAMES.smb, 1: GAMES.metroid, 4: GAMES.smb3 };
+
 function gameOf(rom) {
-    return splitDump(rom).mapper === 1 ? GAMES.metroid : GAMES.smb;
+    return BOARDS[splitDump(rom).mapper] ?? GAMES.smb;
 }
 
 // A game's files, fetched once.
@@ -441,12 +454,12 @@ async function main() {
     const applyTheme = async () => {
         if (!renderer?.setTheme) return;
         try {
-            await renderer.setTheme(currentGame.extras ? themeMenu.value : 'original');
+            await renderer.setTheme(themeMenu.value);
         } catch (error) {
             console.error(error);
             setStatus(`THEME UNAVAILABLE: ${error.message}`.toUpperCase(), 'error');
         }
-        if (currentGame.extras) themeMenu.value = renderer.theme;
+        themeMenu.value = renderer.theme;
     };
     themeMenu.addEventListener('change', () => {
         localStorage.setItem(THEME_KEY, themeMenu.value);
@@ -525,8 +538,7 @@ async function main() {
         currentGame = gameOf(rom);
         document.title = currentGame.pageTitle;
         document.getElementById('game-title').textContent = currentGame.title;
-        debugTiles.parentElement.hidden = !currentGame.extras;
-        themeMenu.parentElement.hidden = !currentGame.extras;
+        debugTiles.parentElement.hidden = !currentGame.debugTiles;
         const { map: defaultMap, native, display, runtime: runtimeBytes } = await filesOf(currentGame);
         if (stale()) return;
         const map = localStorage.getItem(currentGame.mapKey) ?? defaultMap;
@@ -559,7 +571,7 @@ async function main() {
 
         const chrRomPtr = runtime.chr_rom.value;
         const { chr, mapper } = splitDump(rom);
-        if (debugTiles.checked && currentGame.extras) {
+        if (debugTiles.checked && currentGame.debugTiles) {
             runtime.debug_chr_generate(chrRomPtr);
         } else {
             // CHR RAM (no CHR in the dump) starts blank: the game writes its tiles

@@ -24,6 +24,7 @@ web/game.wasm
 web/runtime.wasm
 web/runtime-cartridge.wasm
 web/metroid.map
+web/smb3.map
 web/layout.txt
 web/recompiler.js
 web/smb.map

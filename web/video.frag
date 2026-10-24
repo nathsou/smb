@@ -5,19 +5,15 @@
 // where render.c, scrolling horizontally only, leaves the previous frame
 // (SMB never masks it).
 // The themes (web/themes) prepend `#define NES_LIBRARY` to use its functions
-// without its main.
+// without its main: select_line(y) first, for the scanline's settings.
 
-uniform sampler2D u_patterns;  // 128x256 R8: 2 banks x 256 tiles, colour index 0-3
+uniform sampler2D u_patterns;  // R8, the CHR's colour indices (0-3): a 1 KiB bank (64 tiles) per 8 rows of 512
 uniform sampler2D u_nametable; // 32x64 R8: screen 0 rows 0-31, screen 1 rows 32-63
+uniform sampler2D u_lines;     // 16x240 R8: each scanline's settings (render.h's video_lines)
 uniform int u_palette[32];     // palette RAM
 uniform int u_oam[256];        // 64 sprites x (y, tile, attributes, x)
 uniform vec3 u_colors[64];     // NES master palette
-uniform int u_ctrl;
-uniform int u_mask;
-uniform int u_scroll_x;
-uniform int u_scroll_y;
 uniform int u_mirroring;       // MIRROR_* of video.h
-uniform int u_status_bar;
 uniform int u_flip_y;          // 1 when the target's first row is the bottom
 
 #ifndef NES_LIBRARY
@@ -29,10 +25,34 @@ int fetch(sampler2D tex, int x, int y) {
     return int(texelFetch(tex, ivec2(x, y), 0).r * 255.0 + 0.5);
 }
 
-// Colour index (0-3) of pixel (col, row) of a tile; col 0 is the leftmost.
-int pattern(int bank, int tile, int col, int row) {
-    int index = bank * 256 + tile;
-    return fetch(u_patterns, (index % 16) * 8 + col, (index / 16) * 8 + row);
+// The scanline select_line chose: its control and mask registers, its
+// position in the 512x480 plane of the four nametables (x of its first
+// pixel, and row), whether it is part of a status bar, the sprites'
+// priority and left masking (as render.c's path for the frame) and the CHR
+// banks.
+int line_ctrl;
+int line_mask;
+int line_x;
+int line_y;
+bool line_status;
+bool line_hardware_priority;
+int line_banks[8];
+
+void select_line(int y) {
+    line_ctrl = fetch(u_lines, 0, y);
+    line_mask = fetch(u_lines, 1, y);
+    line_x = fetch(u_lines, 2, y) + fetch(u_lines, 3, y) * 256;
+    line_y = fetch(u_lines, 4, y) + fetch(u_lines, 5, y) * 256;
+    line_status = fetch(u_lines, 6, y) != 0;
+    line_hardware_priority = fetch(u_lines, 7, y) != 0;
+    for (int i = 0; i < 8; i++) line_banks[i] = fetch(u_lines, 8 + i, y);
+}
+
+// Colour index (0-3) of pixel (col, row) of a tile of pattern table `table`
+// (0 at $0000, 1 at $1000); col 0 is the leftmost.
+int pattern(int table, int tile, int col, int row) {
+    int bank = line_banks[table * 4 + tile / 64];
+    return fetch(u_patterns, (tile % 64) * 8 + col, bank * 8 + row);
 }
 
 // Background pixel at nametable coordinates of one screen.
@@ -42,8 +62,8 @@ ivec3 background(int screen, int nx, int ny) {
     int tile_x = nx / 8;
     int tile_y = ny / 8;
     int tile = fetch(u_nametable, tile_x, screen * 32 + tile_y);
-    int bank = (u_ctrl & 0x10) != 0 ? 1 : 0;
-    int index = pattern(bank, tile, nx % 8, ny % 8);
+    int table = (line_ctrl & 0x10) != 0 ? 1 : 0;
+    int index = pattern(table, tile, nx % 8, ny % 8);
 
     // attribute byte: one per 4x4 tiles, two bits per 2x2 tiles
     int attribute_offset = 960 + (tile_y / 4) * 8 + (tile_x / 4);
@@ -64,32 +84,60 @@ int screen_of(int table) {
     return table % 2; // vertical
 }
 
+// The point of the 512x480 plane pixel x of the scanline shows.
+ivec2 plane_point(int x) {
+    return ivec2((line_x + x) % 512, line_y % 480);
+}
+
+// The background pixel of the plane at `point`, as background().
+ivec3 plane_background(ivec2 point) {
+    int table = (point.y >= 240 ? 2 : 0) + (point.x >= 256 ? 1 : 0);
+    return background(screen_of(table), point.x % 256, point.y % 240);
+}
+
 vec3 color(int entry) {
     return u_colors[entry & 63];
 }
 
-// The sprite pixel at (x, y): its palette RAM entry in .x and its OAM index
-// in .y, or -1 in .y when no sprite is drawn there.
+// The sprite pixel at (x, y) of the selected scanline y: its palette RAM
+// entry in .x and its OAM index in .y, or -1 in .y when no sprite is drawn
+// there.
 ivec2 sprite(int x, int y, bool background_opaque) {
-    int bank = (u_ctrl & 0x08) != 0 ? 1 : 0;
-    bool left = (u_mask & 0x04) != 0;
+    bool tall = (line_ctrl & 0x20) != 0;
+    int height = tall ? 16 : 8;
+    int table = (line_ctrl & 0x08) != 0 ? 1 : 0;
+    bool left = (line_mask & 0x04) != 0;
+    // masked in the left column: the hardware's pixels, or (render.c's
+    // simple path) the sprites at x 0
+    if (!left && x < 8 && line_hardware_priority) return ivec2(0, -1);
     // The lowest-numbered sprite with a visible pixel here wins; a pixel
-    // behind an opaque background lets later sprites show through.
+    // behind an opaque background shows the background, or (render.c's
+    // simple path) lets later sprites show through.
     for (int i = 0; i < 64; i++) {
         int sx = u_oam[i * 4 + 3];
-        int sy = (u_oam[i * 4] + 1) & 255;
+        // (render.c's simple path wraps a sprite at y 255 to the top)
+        int sy = line_hardware_priority ? u_oam[i * 4] + 1 : (u_oam[i * 4] + 1) & 255;
         if (!left && sx == 0) continue;
         int dx = x - sx;
         int dy = y - sy;
-        if (dx < 0 || dx > 7 || dy < 0 || dy > 7) continue;
+        if (dx < 0 || dx > 7 || dy < 0 || dy >= height) continue;
 
         int tile = u_oam[i * 4 + 1];
         int attributes = u_oam[i * 4 + 2];
         int col = (attributes & 0x40) != 0 ? 7 - dx : dx;
-        int row = (attributes & 0x80) != 0 ? 7 - dy : dy;
-        int index = pattern(bank, tile, col, row);
+        int row = (attributes & 0x80) != 0 ? height - 1 - dy : dy;
+        int index;
+        if (tall) {
+            // tiles in pairs, the pair's table in the index's low bit
+            index = pattern(tile & 1, (tile & 0xfe) + row / 8, col, row % 8);
+        } else {
+            index = pattern(table, tile, col, row);
+        }
         if (index == 0) continue;
-        if ((attributes & 0x20) != 0 && background_opaque) continue;
+        if ((attributes & 0x20) != 0 && background_opaque) {
+            if (line_hardware_priority) return ivec2(0, -1);
+            continue;
+        }
 
         return ivec2(u_palette[0x10 + (attributes & 3) * 4 + index], i);
     }
@@ -101,28 +149,23 @@ void main() {
     int x = int(gl_FragCoord.x);
     int y = int(gl_FragCoord.y);
     if (u_flip_y == 1) y = 239 - y;
+    select_line(y);
 
     vec3 rgb = vec3(0.0);
     bool background_opaque = false;
 
-    if ((u_mask & 0x08) != 0) {
+    if ((line_mask & 0x08) != 0) {
         ivec2 bg;
-        if (u_status_bar != 0 && y < 32) {
-            bg = background(0, x, y).xy; // fixed status bar from the first screen
-        } else if ((u_mask & 0x02) == 0 && x < 8) {
+        if ((line_mask & 0x02) == 0 && x < 8) {
             bg = ivec2(u_palette[0], 0);
         } else {
-            // the 512x480 plane of the four nametables
-            int wx = (x + u_scroll_x + ((u_ctrl & 0x01) != 0 ? 256 : 0)) % 512;
-            int wy = (y + u_scroll_y + ((u_ctrl & 0x02) != 0 ? 240 : 0)) % 480;
-            int table = (wy >= 240 ? 2 : 0) + (wx >= 256 ? 1 : 0);
-            bg = background(screen_of(table), wx % 256, wy % 240).xy;
+            bg = plane_background(plane_point(x)).xy;
         }
         rgb = color(bg.x);
         background_opaque = bg.y != 0;
     }
 
-    if ((u_mask & 0x10) != 0) {
+    if ((line_mask & 0x10) != 0) {
         ivec2 s = sprite(x, y, background_opaque);
         if (s.y >= 0) rgb = color(s.x);
     }

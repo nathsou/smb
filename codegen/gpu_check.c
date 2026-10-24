@@ -10,11 +10,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Replays rec/warpless.rec (rec/metroid.rec with GAME=metroid) and compares
-// the GPU renderer with the software renderer pixel for pixel. Needs an
-// OpenGL 3.3 context (Xvfb works).
+// Replays rec/warpless.rec (rec/metroid.rec with GAME=metroid, rec/smb3.rec
+// with GAME=smb3) and compares the GPU renderer with the software renderer
+// pixel for pixel. Needs an OpenGL 3.3 context (Xvfb works).
 //
-// usage: ./gpu_check [--debug-chr] [--every N] [--variations]
+// usage: ./gpu_check [--debug-chr] [--every N] [--variations] [--rec FILE]
 //   --variations  also draw each compared frame with every mirroring, base
 //                 nametable and a few vertical scrolls, which the recording
 //                 may not reach
@@ -22,10 +22,12 @@
 #ifndef ROM_PATH
 #define ROM_PATH "smb.nes"
 #endif
+#ifndef REC_FILE
 #ifdef MAPPER
 #define REC_FILE "rec/metroid.rec"
 #else
 #define REC_FILE "rec/warpless.rec"
+#endif
 #endif
 #define SHADER_PATH "web/video.frag"
 
@@ -70,7 +72,9 @@ static int compare(GpuRenderer *gpu, uint32_t frame_number, const char *variatio
 int main(int argc, char **argv) {
     bool debug_chr = false, variations = false;
     int every = 1;
+    const char *rec_file = REC_FILE;
     for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--rec") == 0 && i + 1 < argc) rec_file = argv[++i];
         if (strcmp(argv[i], "--debug-chr") == 0) debug_chr = true;
         if (strcmp(argv[i], "--variations") == 0) variations = true;
         if (strcmp(argv[i], "--every") == 0 && i + 1 < argc) every = atoi(argv[++i]);
@@ -94,8 +98,8 @@ int main(int argc, char **argv) {
 #endif
 
     NESInputRecording recording;
-    if (rec_open(REC_FILE, "r", &recording) != 0) {
-        fprintf(stderr, "Could not open %s\n", REC_FILE);
+    if (rec_open(rec_file, "r", &recording) != 0) {
+        fprintf(stderr, "Could not open %s\n", rec_file);
         return 1;
     }
 
@@ -110,7 +114,7 @@ int main(int argc, char **argv) {
 
     cpu_reset_entry();
     int compared = 0, mismatched_frames = 0;
-    uint32_t frames = rec_length(REC_FILE);
+    uint32_t frames = rec_length(rec_file);
 
     for (uint32_t i = 0; i < frames; i++) {
         update_controller1(rec_state_at_frame(&recording, i));

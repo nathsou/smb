@@ -28,6 +28,7 @@
 //   --dump-every N      write every Nth frame
 //   --check-states N    every N frames, save the state, run 60 frames, load
 //                       it and run them again: the states must be the same
+//   --poke F:ADDR=V,... write RAM before frame F (hex address and value)
 
 static void dump_frame(uint32_t index) {
     char path[32];
@@ -48,6 +49,14 @@ static bool listed(const char *list, uint32_t index) {
         list = *end == ',' ? end + 1 : end;
     }
     return false;
+}
+
+// RAM, or the cartridge's
+static void poke(uint16_t addr, uint8_t value) {
+#ifdef MAPPER
+    if (addr >= 0x6000 && addr < 0x8000) { wram[addr - 0x6000] = value; return; }
+#endif
+    ram[addr & 0x7ff] = value;
 }
 
 static const char *option(int argc, char **argv, const char *name) {
@@ -71,6 +80,7 @@ int main(int argc, char **argv) {
     uint32_t every = every_option ? (uint32_t)strtoul(every_option, NULL, 10) : 0;
     const char *states_option = option(argc, argv, "--check-states");
     uint32_t states_every = states_option ? (uint32_t)strtoul(states_option, NULL, 10) : 0;
+    const char *pokes = option(argc, argv, "--poke");
 
     cpu_init();
     apu_init(48000);
@@ -125,6 +135,7 @@ int main(int argc, char **argv) {
             load_state(saved);
         }
         update_controller1(rec_path ? rec_state_at_frame(&recording, i) : 0);
+        rec_pokes(pokes, i, poke);
         next_frame();
         sound_end_frame();
         uint32_t state = hash_state();

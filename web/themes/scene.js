@@ -40,13 +40,13 @@ export function createFramebuffer(gl, textures) {
     return framebuffer;
 }
 
-// Binds textures to units from 2 (0 and 1 are video.frag's) and points the
+// Binds textures to units from 3 (0 to 2 are video.frag's) and points the
 // program's samplers at them: { u_name: texture }.
 export function bindTextures(gl, program, textures) {
     Object.entries(textures).forEach(([name, texture], i) => {
-        gl.activeTexture(gl.TEXTURE2 + i);
+        gl.activeTexture(gl.TEXTURE3 + i);
         gl.bindTexture(gl.TEXTURE_2D, texture);
-        gl.uniform1i(gl.getUniformLocation(program, name), 2 + i);
+        gl.uniform1i(gl.getUniformLocation(program, name), 3 + i);
     });
 }
 
@@ -121,10 +121,10 @@ export async function createScene(context) {
             context.bindVideo(program);
             scene.bindOrigin(program);
             gl.uniform1i(areaKindLocation, areaKind === undefined ? -1 : ram[areaKind]);
-            gl.activeTexture(gl.TEXTURE2);
+            gl.activeTexture(gl.TEXTURE3);
             gl.bindTexture(gl.TEXTURE_2D, blocks);
             gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 16, 26, gl.RED, gl.UNSIGNED_BYTE, blockBytes);
-            gl.uniform1i(gl.getUniformLocation(program, 'u_blocks'), 2);
+            gl.uniform1i(gl.getUniformLocation(program, 'u_blocks'), 3);
             pass(context, program, framebuffer, SCENE_WIDTH, SCENE_HEIGHT);
         },
         dispose() {

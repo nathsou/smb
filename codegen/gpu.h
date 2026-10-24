@@ -5,17 +5,19 @@
 #include "raylib.h"
 #include <stdint.h>
 
-// Draws the Video state with a fragment shader (web/video.frag): pattern
-// tables and nametables are textures, palette and sprites are uniforms, and
+// Draws the Video state with a fragment shader (web/video.frag): the CHR,
+// nametables and each scanline's settings are textures, palette and sprites
+// are uniforms, and
 // every pixel is computed on the GPU. The software renderer (render.c) is
 // the reference.
 typedef struct {
     Shader shader;
     Texture2D patterns;
     Texture2D nametable;
+    Texture2D lines; // video_lines
     RenderTexture2D target; // 256x240, drawn scaled to the window
-    int ctrl_loc, mask_loc, scroll_x_loc, scroll_y_loc, mirroring_loc, status_bar_loc, flip_y_loc;
-    int patterns_loc, nametable_loc, palette_loc, oam_loc, colors_loc;
+    int mirroring_loc, flip_y_loc;
+    int patterns_loc, nametable_loc, lines_loc, palette_loc, oam_loc, colors_loc;
     uint32_t chr_version; // of the pattern tables uploaded
     float colors[64 * 3];
 } GpuRenderer;

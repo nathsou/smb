@@ -79,8 +79,9 @@ def waits(rom, rom_map):
     """The wait loops the recompiler finds, as the interpreter takes them."""
     printed = subprocess.run(["moon", "run", "src/inspect", "--", "--rom", rom, "--map", rom_map],
                              cwd=ROOT, check=True, capture_output=True, text=True).stdout
-    found = re.findall(r"Wait loop at \$([0-9a-f]+), back from \$([0-9a-f]+)", printed)
-    return ",".join(f"{back}:{start}" for start, back in found)
+    # BANK:FROM:TO for a wait in a bank
+    found = re.findall(r"Wait loop at (?:\d+:)?\$([0-9a-f]+), back from (?:(\d+):)?\$([0-9a-f]+)", printed)
+    return ",".join((f"{bank}:" if bank else "") + f"{back}:{start}" for start, bank, back in found)
 
 
 def check_banked(frames=200):

@@ -11,7 +11,10 @@ WebAssembly build. With --metroid (metroid.nes in the root): recompile
 Metroid, check the reference interpreter (tests/interpreter.c) against
 tests/golden/metroid.trace over rec/metroid.rec, then the recompiled game
 natively (save states loaded back along the way) and in WebAssembly, with
-registers in locals and, structured as dispatch loops, in memory."""
+registers in locals and, structured as dispatch loops, in memory. With
+--smb3 (smb3.nes in the root): the same for Super Mario Bros. 3, over
+rec/smb3.rec against tests/golden/smb3.trace, and the GPU renderer
+against the software renderer (under Xvfb)."""
 import argparse
 import pathlib
 import subprocess
@@ -30,6 +33,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--rom", action="store_true")
     parser.add_argument("--metroid", action="store_true")
+    parser.add_argument("--smb3", action="store_true")
     args = parser.parse_args()
     run("moon", "check")
     run("moon", "test")
@@ -68,3 +72,21 @@ if __name__ == "__main__":
                     "--output", str(pathlib.Path(directory) / "unused"), "--wasm", game, *variant)
                 run("node", "tests/web/replay_cartridge.mjs", "web/runtime-cartridge.wasm", game, "metroid.nes",
                     "rec/metroid.rec", trace)
+    if args.smb3:
+        trace = "tests/golden/smb3.trace"
+        run("make", "codegen", "replay", "interpreter", "GAME=smb3")
+        with tempfile.TemporaryDirectory(prefix="smb-smb3-") as directory:
+            interpreted = str(pathlib.Path(directory) / "interpreter.trace")
+            run("./interpreter", "smb3.nes", "--waits", waits("smb3.nes", "maps/smb3.map"),
+                "--rec", "rec/smb3.rec", "--write-trace", interpreted)
+            run("cmp", trace, interpreted)
+            run("./replay", "smb3.nes", "--rec", "rec/smb3.rec", "--trace", trace, "--check-states", "500")
+            game = str(pathlib.Path(directory) / "game.wasm")
+            for variant in WASM_VARIANTS:
+                run("moon", "run", "src/main", "--", "--rom", "smb3.nes", "--map", "maps/smb3.map",
+                    "--output", str(pathlib.Path(directory) / "unused"), "--wasm", game, *variant)
+                run("node", "tests/web/replay_cartridge.mjs", "web/runtime-cartridge.wasm", game, "smb3.nes",
+                    "rec/smb3.rec", trace)
+        # the GPU renderer (web/video.frag) against the software renderer
+        run("make", "gpu-check", "GAME=smb3")
+        run("xvfb-run", "-a", "./gpu_check", "--every", "4")

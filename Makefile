@@ -22,7 +22,7 @@ MAP = maps/smb3.map
 GAME_DIR = codegen/smb3
 NATIVE_ROUTINES =
 # the PPU registers too, and MMC3's banks and scanline IRQ
-GAME_FLAGS = -DPPU_BUS -DMAPPER -DGAME_TITLE='"Super Mario Bros. 3"' -DROM_PATH='"$(ROM)"' -DSAVE_FILE='"smb3.sav"'
+GAME_FLAGS = -DPPU_BUS -DMAPPER -DGAME_TITLE='"Super Mario Bros. 3"' -DROM_PATH='"$(ROM)"' -DSAVE_FILE='"smb3.sav"' -DREC_FILE='"rec/smb3.rec"'
 GAME_SOURCES = codegen/lib/ppu_bus.c codegen/lib/mapper.c codegen/lib/cartridge.c
 else
 ROM ?= smb.nes
@@ -126,6 +126,7 @@ web: runtime-wasm runtime-cartridge-wasm apu-wasm
 	cp _build/js/release/build/web/web.js web/recompiler.js
 	cp maps/smb.map web/smb.map
 	cp maps/metroid.map web/metroid.map
+	cp maps/smb3.map web/smb3.map
 	cp codegen/native/routines.txt web/routines.txt
 	cp codegen/native/display.c web/display.c
 

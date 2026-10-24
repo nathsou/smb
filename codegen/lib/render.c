@@ -394,6 +394,42 @@ static LineSettings line_settings(int line) {
     return (LineSettings){ split->ctrl, split->mask, split->chr_banks, split->x, split->y + (line - split->line) };
 }
 
+uint8_t video_lines[SCREEN_HEIGHT * VIDEO_LINE_SIZE];
+
+static bool needs_scanlines(void);
+
+void video_prepare_lines(void) {
+    bool scanlines = needs_scanlines();
+    // a part of the frame that starts low on the screen and runs to its
+    // bottom, with settings of its own, is a status bar (SMB3's)
+    int status_from = SCREEN_HEIGHT;
+    if (video.split_count > 1 && video.splits[video.split_count - 1].line >= 160) {
+        status_from = video.splits[video.split_count - 1].line;
+    }
+    for (int line = 0; line < SCREEN_HEIGHT; line++) {
+        LineSettings s = line_settings(line);
+        bool status = line >= status_from;
+        if (video.status_bar && line < 32) {
+            // SMB's: the first screen's top, unscrolled
+            s.ctrl &= (uint8_t)~3;
+            s.x = 0;
+            s.y = line;
+            status = true;
+        }
+        uint8_t *out = &video_lines[line * VIDEO_LINE_SIZE];
+        int x = ((s.x % 512) + 512) % 512, y = ((s.y % 480) + 480) % 480;
+        out[0] = s.ctrl;
+        out[1] = s.mask;
+        out[2] = (uint8_t)x;
+        out[3] = (uint8_t)(x >> 8);
+        out[4] = (uint8_t)y;
+        out[5] = (uint8_t)(y >> 8);
+        out[6] = status;
+        out[7] = scanlines; // the general path's sprite priority
+        memcpy(&out[8], s.banks, 8);
+    }
+}
+
 // The colour index (0-3) of pixel (col, row) of the tile at `address`.
 static uint8_t tile_pixel(const uint8_t *banks, uint16_t address, int col, int row) {
     uint8_t low = video_pattern(banks, (uint16_t)(address + row));

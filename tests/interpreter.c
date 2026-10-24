@@ -10,8 +10,9 @@
 //
 // usage: ./interpreter ROM.nes --waits [BANK:]FROM:TO,... [--rec FILE]
 //                     [--frames N] [--write-trace FILE] [--dump N,...]
-//                     [--profile FILE]
+//                     [--profile FILE] [--poke F:ADDR=V,...]
 //   a wait in a bank names it (the bank must be mapped there);
+//   --poke writes RAM before frame F (hex address and value), as replay's;
 //   --dump writes those frames as frame_N.ppm;
 //   --profile writes what ran, for writing a map: the instructions run
 //   (by bank), calls and jumps into a window from outside it with the bank
@@ -320,6 +321,14 @@ static void write_ppm(const char *path) {
     fclose(file);
 }
 
+// RAM, or the cartridge's (--poke)
+static void poke(uint16_t addr, uint8_t value) {
+#ifdef MAPPER
+    if (addr >= 0x6000 && addr < 0x8000) { wram[addr - 0x6000] = value; return; }
+#endif
+    ram[addr & 0x7ff] = value;
+}
+
 static const char *option(int argc, char **argv, const char *name) {
     for (int i = 1; i + 1 < argc; i++) {
         if (strcmp(argv[i], name) == 0) return argv[i + 1];
@@ -335,8 +344,9 @@ int main(int argc, char **argv) {
     const char *dump = option(argc, argv, "--dump");
     const char *profile_path = option(argc, argv, "--profile");
     const char *dispatcher_option = option(argc, argv, "--dispatcher");
+    const char *pokes = option(argc, argv, "--poke");
     if (argc < 2 || !waits) {
-        fprintf(stderr, "usage: %s ROM.nes --waits [BANK:]FROM:TO,... [--rec FILE] [--frames N] [--write-trace FILE] [--dump N,...] [--profile FILE]\n", argv[0]);
+        fprintf(stderr, "usage: %s ROM.nes --waits [BANK:]FROM:TO,... [--rec FILE] [--frames N] [--write-trace FILE] [--dump N,...] [--profile FILE] [--poke F:ADDR=V,...]\n", argv[0]);
         return 1;
     }
     for (const char *p = waits; *p && wait_count < MAX_WAITS;) {
@@ -384,6 +394,7 @@ int main(int argc, char **argv) {
     run_foreground();
     for (uint32_t i = 0; i < frames; i++) {
         update_controller1(rec_path ? rec_state_at_frame(&recording, i) : 0);
+        rec_pokes(pokes, i, poke);
         interrupt();
         mapper_frame(irq, left_enabled || !interrupt_disabled);
         run_foreground();
