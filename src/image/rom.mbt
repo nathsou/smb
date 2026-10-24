@@ -597,7 +597,7 @@ pub fn discover_rom(image: Image, map: RomMap) -> Program raise ImageError {
     }
     let falls = inst.op != JMP && inst.op != RTS && inst.op != RTI &&
       inst.op != BRK && !dispatches.contains(pc) && branch != Some(true)
-    if inst.op == JSR && dispatches.get(pc) is None && always_unwinds(image, jump_target(inst)) {
+    if inst.op == JSR && always_unwinds(image, jump_target(inst)) {
       // the callee returns past this routine: nothing follows the call
       append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(trap_name(inst.next)))), pc)
     } else if falls && (following.get(pc) != Some(inst.next) || traps.contains(inst.next)) {

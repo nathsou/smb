@@ -1,0 +1,15 @@
+# Names for the MMC1 regression program (tests/mmc1/*.asm), recompiled from
+# its assembled iNES image by tests/check_fixtures.py.
+bank 0 first
+bank 1 second
+bank 2 data
+routine $c00f reset
+routine $c0ab interrupt
+routine $c091 choose                 ; jump through the table after the call
+routine 0:$8000 setup
+routine 0-1:$8003 step
+routine 0-1:$b000 tick
+table 0:$8037 step_cases 4           ; after the call to choose
+code 1:$8047 handlers 2              ; reached through a pointer in RAM
+code 1:$804b moves 2 2 rts           ; returned through
+var $6000 pattern_copy 4

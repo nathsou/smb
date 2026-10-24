@@ -28,7 +28,7 @@ if __name__ == "__main__":
     run("python3", "tests/check_fixtures.py")
     run("make", "header")
     run("git", "diff", "--exit-code", "--", "codegen/native/smb.h")
-    run("make", "runtime-wasm", "apu-wasm")
+    run("make", "runtime-wasm", "runtime-mmc1-wasm", "apu-wasm")
     # The synthesizer's frame queue at its edges.
     run("cc", "-std=c99", "-O2", "-Wall", "-Icodegen/lib", "-o", "audio_queue",
         "tests/audio_queue.c", "codegen/lib/apu.c")

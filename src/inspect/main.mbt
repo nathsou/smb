@@ -1,6 +1,9 @@
 // Inspects code discovery without generating code:
 //
 //   --input FILE.asm [--output prg.bin]   assemble, write the PRG image
+//     --bank                              only assemble (a bank of a banked
+//                                         program: no vectors to start from)
+//     --symbols                           print the labels' addresses
 //   --rom FILE.nes --map FILE.map         discover a ROM's code with a map
 fn option(name: String, fallback: String) -> String {
   let args = @env.args()
@@ -57,6 +60,11 @@ fn main {
     let image = @image.assemble(source)
     println("PRG: origin=\{image.origin}, bytes=\{image.bytes.length()}")
     @fs.write_bytes_to_file(option("--output", "codegen/prg.bin"), Bytes::makei(image.bytes.length(), fn(i) { image.bytes[i].to_byte() }))
-    report(@image.discover(image))
+    if @env.args().contains("--symbols") {
+      let names = image.symbols.keys().to_array()
+      names.sort_by(fn(a, b) { image.symbols[a] - image.symbols[b] })
+      for name in names { println("\{name} \{hex(image.symbols[name])}") }
+    }
+    if !@env.args().contains("--bank") { report(@image.discover(image)) }
   } catch { error => { println(@debug.to_string(error)); abort("Inspection failed") } }
 }

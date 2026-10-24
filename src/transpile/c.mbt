@@ -299,8 +299,11 @@ fn CFunc::exit_code(self : CFunc, term : @ir.Term) -> String? {
   match term {
     Return => Some("return;")
     TailCall(g) => Some("\{g}(); return;")
-    Yield(pc) => Some("cpu_yield(0x\{hex(pc)}); return;")
-    Trap(pc) => Some(if self.f.helper { "cpu_unresolved_jump(0x\{hex(pc)});" } else { "cpu_unresolved_jump(0x\{hex(pc)}); return;" })
+    Yield(pc) => Some("cpu_yield(0x\{hex(pc & 0xffff)}); return;")
+    Trap(pc) => {
+      let address = "0x\{hex(pc & 0xffff)}"
+      Some(if self.f.helper { "cpu_unresolved_jump(\{address});" } else { "cpu_unresolved_jump(\{address}); return;" })
+    }
     ReturnValue(e) => Some("return cpu_dispatch_target = \{self.word(e)};")
     _ => None
   }

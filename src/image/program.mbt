@@ -118,17 +118,23 @@ fn rom_vector(image: Image, inst: Instruction) -> Int? raise ImageError {
   } else { None }
 }
 
-// A routine that runs straight into `pla; pla` without touching the stack
-// otherwise never returns to its caller: it drops the return address, and
-// returns to the caller's caller.
+// A routine that runs straight into `pla; pla; rts` without touching the
+// stack otherwise never returns to its caller: it drops the return address,
+// and returns to the caller's caller.
 fn always_unwinds(image: Image, entry: Int) -> Bool {
   let mut pc = entry
+  let mut pulls = 0
   for _ in 0..<32 {
     let inst = decode(image, pc) catch { _ => return false }
     match inst.op {
-      PLA => return (try decode(image, inst.next).op == PLA catch { _ => false })
-      PHA | PHP | PLP | TXS | TSX | JSR | JMP | RTS | RTI | BRK => return false
-      _ => if inst.mode == "rel" { return false }
+      PLA if pulls < 2 => pulls += 1
+      RTS => return pulls == 2
+      JMP if inst.mode == "abs" => {
+        pc = jump_target(inst)
+        continue
+      }
+      PLA | PHA | PHP | PLP | TXS | TSX | JSR | JMP | RTI | BRK => return false
+      _ => if inst.mode == "rel" || pulls == 1 { return false }
     }
     pc = inst.next
   }
@@ -257,11 +263,13 @@ fn explore(image: Image) -> Exploration raise ImageError {
             dispatches[pc] = dispatch
             for target in dispatch.targets { work.push((target, Facts::unknown().entry(), pc)) }
           }
+          // a callee that returns past this routine: whatever follows the
+          // call is not reached from it
+          _ if always_unwinds(image, jump_target(inst)) => work.push((jump_target(inst), f.entry(), pc))
           // Returning into data is never decoded as a guess.
           Some(None) => raise InvalidImage("Call at \{show_pc(pc)} returns into inline data at \{show_pc(inst.next)}, but \{address_name(image, jump_target(inst))} was not proven to be an inline dispatcher")
           None => {
-            work.push((jump_target(inst), f.entry(), pc))
-            if !always_unwinds(image, jump_target(inst)) { work.push((inst.next, after, pc)) }
+            work.push((jump_target(inst), f.entry(), pc)); work.push((inst.next, after, pc))
           }
         }
       }

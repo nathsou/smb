@@ -521,12 +521,12 @@ fn Gen::exit(self : Gen, term : @ir.Term) -> Unit raise WasmError {
       self.op(RETURN)
     }
     Yield(pc) => {
-      self.const_(pc)
+      self.const_(pc & 0xffff)
       self.call("cpu_yield")
       self.op(RETURN)
     }
     Trap(pc) => {
-      self.const_(pc)
+      self.const_(pc & 0xffff)
       self.call("cpu_unresolved_jump")
       self.op(UNREACHABLE)
     }
