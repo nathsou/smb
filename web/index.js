@@ -3,6 +3,7 @@ import { link } from './link.js';
 import { createViewer } from './viewer.js';
 import * as store from './store.js';
 import { splitDump } from './cartridge.js';
+import { createProgress, RECOMPILER_STEPS } from './progress.js';
 
 const SCREEN_WIDTH = 256;
 const SCREEN_HEIGHT = 240;
@@ -356,17 +357,23 @@ function pickFile() {
 }
 
 // Recompiles in a worker, or reuses an earlier result for the same inputs.
-async function build(inputs, viewer) {
+async function build(inputs, viewer, progress) {
+    progress.begin('cache');
     const key = await store.digest(inputs.rom, inputs.map, inputs.native, inputs.layout, inputs.version);
     const cached = await store.get('builds', key);
     if (cached) {
         viewer.setStatus('RECOMPILED EARLIER: LOADED FROM THIS BROWSER\'S CACHE');
+        progress.skip([...RECOMPILER_STEPS.map(([stage]) => stage), 'store'], 'CACHED');
         return cached;
     }
     viewer.setStatus('RECOMPILING THE ROM...', 'busy');
     const result = await new Promise((resolve, reject) => {
         const worker = new Worker('recompiler-worker.js', { type: 'module' });
         worker.onmessage = ({ data }) => {
+            if (data.progress) {
+                progress.begin(data.progress, data.progress === 'map' ? undefined : data.took);
+                return;
+            }
             worker.terminate();
             if (data.error) reject(new Error(data.error));
             else resolve(data);
@@ -379,6 +386,7 @@ async function build(inputs, viewer) {
     });
     viewer.setStatus(`RECOMPILED IN ${(result.ms / 1000).toFixed(1)} S: ${(result.wasm.length / 1024).toFixed(0)} KB OF WEBASSEMBLY`);
     const entry = { wasm: result.wasm, files: result.files, warning: result.warning };
+    progress.begin('store', result.took);
     await store.put('builds', key, entry);
     return entry;
 }
@@ -398,6 +406,8 @@ const THEME_KEY = 'theme';
 async function main() {
     // the game of the current run (its map, its save state)
     let currentGame = GAMES.smb;
+    // the steps to a running game, in place of the screen until it runs
+    const progress = createProgress(document.getElementById('screen'));
     const viewer = createViewer(document.getElementById('code'), {
         onRecompile: text => {
             localStorage.setItem(currentGame.mapKey, text);
@@ -509,16 +519,22 @@ async function main() {
         document.getElementById('game-title').textContent = currentGame.title;
         debugTiles.parentElement.hidden = !currentGame.extras;
         themeMenu.parentElement.hidden = !currentGame.extras;
+        canvas.hidden = true;
+        progress.show(currentGame.title);
+        progress.begin('files');
         const { map: defaultMap, native, display, runtime: runtimeBytes } = await filesOf(currentGame);
         const map = localStorage.getItem(currentGame.mapKey) ?? defaultMap;
         let files = null;
+        progress.begin('runtime');
         const { memory, runtime, game } = await link(runtimeBytes, async layout => {
             const layoutText = Object.entries(layout).map(([name, address]) => `${name} ${address}`).join('\n');
-            const result = await build({ rom, map, native, layout: layoutText, version }, viewer);
+            const result = await build({ rom, map, native, layout: layoutText, version }, viewer, progress);
             files = result.files;
             showWarning(result.warning);
+            progress.begin('link');
             return result.wasm;
         }, rom);
+        progress.begin('start');
 
         const ordered = FILE_ORDER.map(name => files.find(f => f.name === name)).filter(Boolean);
         viewer.setFiles([
@@ -569,6 +585,8 @@ async function main() {
         // the themes are WebGL2 only
         themeMenu.disabled = renderer.setTheme === undefined;
         await applyTheme();
+        progress.hide();
+        canvas.hidden = false;
         updateSize();
 
         let running = true;
@@ -643,6 +661,7 @@ async function main() {
         } catch (error) {
             console.error(error);
             viewer.setStatus(`ERROR: ${error.message}`.toUpperCase(), 'error');
+            progress.fail(`ERROR: ${error.message}`);
             if (/iNES|mapper|ROM/.test(error.message)) {
                 rom = await askForRom(error.message);
                 boot();

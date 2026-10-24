@@ -8,7 +8,7 @@ pub fn file_count() -> Int32
 
 pub fn file_name(Int32) -> String
 
-pub fn recompile(Bytes, String, String, String) -> String
+pub fn recompile(Bytes, String, String, String, (String) -> Unit) -> String
 
 pub fn warning() -> String
 
