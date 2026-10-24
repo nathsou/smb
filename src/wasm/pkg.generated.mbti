@@ -37,6 +37,10 @@ pub const I32_EQZ : Int32 = 0x45
 
 pub const I32_GE_S : Int32 = 0x4e
 
+pub const I32_LOAD : Int32 = 0x28
+
+pub const I32_LOAD16_U : Int32 = 0x2f
+
 pub const I32_LOAD8_U : Int32 = 0x2d
 
 pub const I32_LT_S : Int32 = 0x48

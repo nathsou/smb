@@ -21,8 +21,6 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 GENERATED = {"code.c", "code.h", "vars.h", "data.c", "data.h", "constants.h"}
-# Generic programs reach the PPU through its register interface.
-SUPPORT = ROOT / "tests/support"
 WASM_VARIANTS = [[], ["--wasm-dispatch", "--wasm-memory-vars"]]
 
 
@@ -44,7 +42,7 @@ def check(source, harness, rom_map=None):
         program = ["--rom", str(rom), "--map", rom_map] if rom_map else ["--input", source]
         run("moon", "run", "src/main", "--", *program, "--output", str(lib))
         # Compile with precisely the same runtime as SMB, plus the PPU adapter.
-        for path in list((ROOT / "codegen/lib").iterdir()) + list(SUPPORT.iterdir()):
+        for path in (ROOT / "codegen/lib").iterdir():
             if path.name not in GENERATED and path.suffix in {".h", ".c"}:
                 shutil.copyfile(path, lib / path.name)
         shutil.copyfile(ROOT / harness, output / "main.c")

@@ -82,7 +82,7 @@ fn count_in(name : Name, exprs : Array[Expr]) -> Int {
 
 fn writes_memory(s : Stmt) -> Bool {
   match s {
-    Store(_, _, _) | Effect(_, _) | Call(_) => true
+    Store(_, _, _) | Effect(_, _) | Call(_) | CallValue(_, _, _) => true
     _ => false
   }
 }
@@ -123,11 +123,11 @@ fn forward(info : Analysis, f : Function) -> Bool {
         }
         if !pure { blocked = true; break }
         match (s, name) {
-          (Call(_), NVar(_)) => { blocked = true; break }
+          (Call(_) | CallValue(_, _, _), NVar(_)) => { blocked = true; break }
           _ => ()
         }
         if (s.defs() & e.vars()) != 0 { blocked = true; break }
-        if (s is Call(_)) && (e.vars() != 0 || e.reads_memory()) { blocked = true; break }
+        if s.callee() is Some(_) && (e.vars() != 0 || e.reads_memory()) { blocked = true; break }
         if e.reads_memory() && writes_memory(s) { blocked = true; break }
         if name is NVar(v) && (s.defs() & v.bit()) != 0 { blocked = true; break }
         j += 1
@@ -161,7 +161,7 @@ fn forward(info : Analysis, f : Function) -> Bool {
               if count_in(name, s.exprs()) > 0 { dead = false; break }
               // a call reads what is live into the callee, and nothing
               // else of the caller's survives it unread
-              if s is Call(g) {
+              if s.callee() is Some(g) {
                 if (info.get_in(g) & v.bit()) != 0 { dead = false } else { redefined = true }
                 break
               }
@@ -275,7 +275,7 @@ pub fn Program::inline_leaves(self : Program, limit~ : Int = 12) -> Int {
     if f.native || f.helper || f.blocks.length() != 1 { continue }
     let block = f.blocks[0]
     if block.term != Return || block.stmts.length() > limit { continue }
-    if block.stmts.iter().any(fn(s) { s is Call(_) }) { continue }
+    if block.stmts.iter().any(fn(s) { s.callee() is Some(_) }) { continue }
     leaves[f.name] = f
   }
   let mut count = 0

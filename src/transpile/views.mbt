@@ -29,8 +29,24 @@ priv enum ViewKind {
   ZeroPageArray // bytes of page zero from the address, wrapping within it
   RamArray // bytes of RAM from the address
   MirroredArray // bytes of RAM from the address, wrapping to its start
-  Table // bytes of PRG ROM from the address
+  Table // bytes of PRG ROM from the address (the fixed bank's, with a mapper)
+  BankTable(Int) // bytes of a switchable bank from its address in the window
+  WindowTable // bytes of the window from the address, in the bank mapped
+  WramScalar // one byte of the cartridge's RAM
+  WramArray // bytes of the cartridge's RAM from the address
 } derive(Eq)
+
+// Whether accesses to `space` read or write the bytes a view names.
+fn ViewKind::names(self : ViewKind, space : @ir.Mem) -> Bool {
+  match (self, space) {
+    (Scalar | ZeroPageArray | RamArray | MirroredArray, Ram) => true
+    (Table, Rom) | (WindowTable, Window) => true
+    (BankTable(a), Bank(b)) => a == b
+    (WramScalar | WramArray, Wram) => true
+    _ => false
+  }
+}
+
 
 priv struct View {
   name : String // lower case
@@ -71,6 +87,7 @@ fn Views::from_map(low : @lower.AsmLowering, reserved : Set[String]) -> Views {
   guard low.program is Some(p) else { return Views::empty() }
   let taken = fn(name : String) { reserved.contains(name) || c_reserved.contains(name) }
   let views = { ..Views::empty(), origin: p.image.origin, types: Map::from_array(p.map.types.map(fn(t) { (t.name, t) })) }
+  let banked = p.image.banked()
   let seen : Set[String] = Set([])
   for entry in p.map.entries {
     let name = entry.name.to_lower()
@@ -81,7 +98,10 @@ fn Views::from_map(low : @lower.AsmLowering, reserved : Set[String]) -> Views {
       Var if end <= 0x100 => ZeroPageArray
       Var if entry.address + 0xff < 0x800 => RamArray
       Var if end <= 0x800 => MirroredArray
-      Table if entry.address >= p.image.origin => Table
+      Var if banked && entry.address >= 0x6000 && end <= 0x8000 => if entry.length == 0 { WramScalar } else { WramArray }
+      Table | Code if entry.bank >= 0 => BankTable(entry.bank)
+      Table | Code if banked && @image.in_window(entry.address) => WindowTable
+      Table | Code if entry.address >= p.image.origin => Table
       _ => continue
     }
     seen.add(name)
@@ -137,7 +157,7 @@ priv struct Place {
 fn Views::containing(self : Views, address : Int) -> View? {
   let mut found : View? = None
   for v in self.list {
-    if v.kind != Scalar && v.kind != Table && v.address <= address && address < v.address + v.length {
+    if (v.kind is (ZeroPageArray | RamArray | MirroredArray | WramArray)) && v.address <= address && address < v.address + v.length {
       if found is Some(f) && f.address >= v.address { continue }
       found = Some(v)
     }
@@ -184,7 +204,7 @@ fn Views::place(self : Views, address : @ir.Expr) -> Place? {
   // a second symbol folded into the offset would hide its name
   guard ok && symbols == 1 && view is Some(named) else { return None }
   let mut v = named
-  if v.kind == Scalar && (offset != 0 || !index.is_empty()) {
+  if (v.kind == Scalar || v.kind == WramScalar) && (offset != 0 || !index.is_empty()) {
     match self.containing(v.address + offset) {
       Some(array) => {
         offset = v.address + offset - array.address
@@ -195,11 +215,12 @@ fn Views::place(self : Views, address : @ir.Expr) -> Place? {
   }
   if wraps is Some(kind) && v.kind != kind { return None }
   let fits = match v.kind {
-    Scalar => true
-    ZeroPageArray | RamArray | MirroredArray => offset >= 0 && offset < v.length
+    Scalar | WramScalar => true
+    ZeroPageArray | RamArray | MirroredArray | WramArray => offset >= 0 && offset < v.length
     // before the table only with an index (`table - 1 + y`), never before
-    // the image
+    // the image (or the window)
     Table => (offset >= 0 && offset < v.length) || (offset < 0 && !index.is_empty() && v.address + offset >= self.origin)
+    BankTable(_) | WindowTable => (offset >= 0 && offset < v.length) || (offset < 0 && !index.is_empty() && v.address + offset >= 0x8000)
   }
   if fits { Some({ view: v, offset, index }) } else { None }
 }
@@ -224,6 +245,10 @@ fn Views::header(self : Views) -> String {
       RamArray => "\{v.name} (&ram[\{v.symbol}])"
       MirroredArray => "\{v.name}(i) ram[(\{v.symbol} + (i)) & 0x7ff]"
       Table => "\{v.name} (&ROM(\{v.symbol}))"
+      BankTable(bank) => "\{v.name} (&BANK_ROM(\{bank}, \{v.symbol}))"
+      WindowTable => "\{v.name} (&WINDOW_ROM(\{v.symbol}))"
+      WramScalar => "\{v.name} WRAM(\{v.symbol})"
+      WramArray => "\{v.name} (&WRAM(\{v.symbol}))"
     }
     out.write_string("#define \{text}\{comment}\n")
   }

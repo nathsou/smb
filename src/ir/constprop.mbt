@@ -16,6 +16,12 @@ fn Program::rom_byte(self : Program, address : Int) -> Int? {
   Some(self.prg[(address - 0x8000) % size])
 }
 
+// A byte of bank `bank` in the switchable window.
+fn Program::bank_byte(self : Program, bank : Int, address : Int) -> Int? {
+  if bank >= self.banks.length() || address < 0x8000 || address >= 0xc000 { return None }
+  Some(self.banks[bank][address - 0x8000])
+}
+
 fn Program::fold(self : Program, e : Expr, known : Array[Int]) -> Expr {
   let e = match e {
     Var(v) => {
@@ -27,6 +33,11 @@ fn Program::fold(self : Program, e : Expr, known : Array[Int]) -> Expr {
       match (m, a.value()) {
         (Rom, Some(address)) =>
           match self.rom_byte(address) {
+            Some(b) => Const(b)
+            None => Load(m, a)
+          }
+        (Bank(bank), Some(address)) =>
+          match self.bank_byte(bank, address) {
             Some(b) => Const(b)
             None => Load(m, a)
           }
@@ -68,7 +79,7 @@ fn Program::transfer(self : Program, info : Analysis, s : Stmt, known : Array[In
         None => varying
       }
     }
-    Call(g) => {
+    Call(g) | CallValue(_, g, _) => {
       let writes = info.may_write.get(g).unwrap_or(everything)
       for i, v in all_vars {
         if (writes & v.bit()) != 0 { known[i] = varying }
@@ -117,7 +128,7 @@ fn Program::const_prop(self : Program, info : Analysis, f : Function) -> Bool {
     let known = entry_state[b].copy()
     let stmts = block.stmts.map(fn(s) {
       let folded = match s {
-        Call(_) => s
+        Call(_) | CallValue(_, _, _) => s
         _ => s.map_exprs(fn(e) { self.fold(e, known) })
       }
       self.transfer(info, s, known, f.temps)
@@ -180,7 +191,7 @@ fn dead_stores(f : Function) -> Bool {
         let t = stmts[j]
         // anything that may read RAM ends the search
         let reads = t.exprs().iter().any(fn(e) { e.reads_memory() })
-        if reads || t is Call(_) || t is Effect(_, _) { break }
+        if reads || t.callee() is Some(_) || t is Effect(_, _) { break }
         match t {
           Store(Ram, other, _) if other.value() == Some(a) => {
             keep[i] = false

@@ -126,7 +126,7 @@ fn Emitter::emit_data_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("#include \"stdint.h\"")
   self.emit("#include \"constants.h\"")
   self.emit("")
-  let size = match low.program { Some(p) => p.image.bytes.length(); None => low.table_offset }
+  let size = match low.program { Some(p) => prg_size(p); None => low.table_offset }
   self.emit("extern const uint8_t data[\{size}];")
   self.emit("#define PRG_IMAGE_SIZE \{size}")
   self.emit("")
@@ -134,11 +134,11 @@ fn Emitter::emit_data_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   if low.program is Some(p) {
     let symbols = p.image.symbols.keys().to_array()
     symbols.sort()
-    for name in symbols { self.emit("#define ROM_ADDR_\{name} 0x\{hex(p.image.symbols[name])}") }
+    for name in symbols { self.emit("#define ROM_ADDR_\{name} 0x\{hex(p.image.symbols[name] & 0xffff)}") }
   }
   for label, table in low.tables_by_label {
     let address = match low.program {
-      Some(p) => p.image.symbols[label]
+      Some(p) => p.image.symbols[label] & 0xffff
       None => 0x8000 + table.offset
     }
     self.emit("#define \{label} 0x\{hex(address)}")
@@ -146,6 +146,23 @@ fn Emitter::emit_data_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
 
   self.emit("")
   self.emit("#endif")
+}
+
+// The PRG ROM's bytes: the image, or every bank with a mapper.
+fn prg_size(p: @image.Program) -> Int {
+  if p.image.banked() { p.image.banks.contents.length() * 0x4000 } else { p.image.bytes.length() }
+}
+
+// The location of each byte of the PRG ROM in data.c order, for its labels:
+// with a mapper, the banks in the window, the last one at $C000.
+fn prg_location(p: @image.Program, offset: Int) -> Int {
+  if !p.image.banked() { return p.image.origin + offset }
+  let bank = offset / 0x4000
+  if bank == p.image.banks.contents.length() - 1 { 0xc000 + offset % 0x4000 } else { @image.bank_location(bank, 0x8000 + offset % 0x4000) }
+}
+
+fn prg_byte(p: @image.Program, offset: Int) -> Int {
+  if p.image.banked() { p.image.banks.contents[offset / 0x4000][offset % 0x4000] } else { p.image.bytes[offset] }
 }
 
 fn Emitter::emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
@@ -179,17 +196,21 @@ fn Emitter::emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
       }
     }
     let mut offset = 0
-    while offset < p.image.bytes.length() {
-      let pc = p.image.origin + offset
+    let size = prg_size(p)
+    while offset < size {
+      let pc = prg_location(p, offset)
+      if p.image.banked() && offset % 0x4000 == 0 { self.emit("// bank \{offset / 0x4000}: \{p.image.banks.names[offset / 0x4000]}") }
       if labels.get(pc) is Some(names) { self.emit("// \{names.join(", ")}") }
       if notes.get(pc) is Some(comments) {
         for comment in comments { self.emit("// " + comment) }
       }
       let bytes = []
       for _ in 0..<16 {
-        bytes.push("0x" + hex(p.image.bytes[offset]).pad_start(2, '0'))
+        bytes.push("0x" + hex(prg_byte(p, offset)).pad_start(2, '0'))
         offset += 1
-        if offset == p.image.bytes.length() || labels.contains(p.image.origin + offset) || notes.contains(p.image.origin + offset) { break }
+        if offset == size || offset % 0x4000 == 0 { break }
+        let next = prg_location(p, offset)
+        if labels.contains(next) || notes.contains(next) { break }
       }
       self.emit(bytes.join(", ") + ",")
     }
@@ -207,24 +228,36 @@ fn Emitter::emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
 
   self.indentation -= 1
   self.emit("};\n")
-  let size = match low.program { Some(p) => p.image.bytes.length(); None => low.table_offset }
+  let size = match low.program { Some(p) => prg_size(p); None => low.table_offset }
   self.emit("const unsigned prg_image_size = \{size};")
 }
 
 // `uses_ppu_bus`: the program writes PPU registers, which a host supplies
 // through ppu_bus.h (SMB's display code writes its state directly instead).
 fn Emitter::emit_code_h(self: Emitter, program: @ir.Program, uses_ppu_bus~: Bool) -> Unit {
+  let banked = !program.banks.is_empty()
   self.emit("#ifndef SMB_CODE_H")
   self.emit("#define SMB_CODE_H")
   self.emit("")
   self.emit("#include \"data.h\"")
   self.emit("#include \"cpu.h\"")
   if uses_ppu_bus { self.emit("#include \"ppu_bus.h\"") }
+  if banked { self.emit("#include \"mapper.h\"") }
   self.emit("#include \"sound.h\"")
   self.emit("")
 
-  self.emit("// PRG ROM read; images smaller than 32 KiB are mirrored.")
-  self.emit("#define ROM(addr) data[((addr) - 0x8000) % PRG_IMAGE_SIZE]")
+  if banked {
+    self.emit("// PRG ROM: 16 KiB banks, the last fixed at $C000 (ROM), one of them")
+    self.emit("// switched in at $8000; the cartridge's RAM at $6000.")
+    self.emit("#define PRG_BANKS \{program.banks.length()}")
+    self.emit("#define ROM(addr) data[(PRG_BANKS - 1) * 0x4000 + (addr) - 0xc000]")
+    self.emit("#define BANK_ROM(bank, addr) data[(bank) * 0x4000 + (addr) - 0x8000]")
+    self.emit("#define WINDOW_ROM(addr) prg_window[(addr) - 0x8000]")
+    self.emit("#define WRAM(addr) wram[(addr) - 0x6000]")
+  } else {
+    self.emit("// PRG ROM read; images smaller than 32 KiB are mirrored.")
+    self.emit("#define ROM(addr) data[((addr) - 0x8000) % PRG_IMAGE_SIZE]")
+  }
   self.emit("")
   self.emit("void cpu_reset_entry(void);")
   self.emit("void cpu_nmi_entry(void);")

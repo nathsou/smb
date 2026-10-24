@@ -5,9 +5,10 @@
 #include "video.h"
 
 // NES PPU register interface ($2000-$2007, OAM DMA at $4014) on top of the
-// Video state, for generic programs that talk to the hardware registers.
-// SMB's build does not link it: its display code writes Video directly, so
-// any register access left in its generated code is a link error.
+// Video state, for programs that talk to the hardware registers (Metroid,
+// the test fixtures; builds define PPU_BUS). SMB's build does not link it:
+// its display code writes Video directly, so any register access left in
+// its generated code is a link error.
 
 extern uint8_t oam_addr;
 

@@ -265,7 +265,16 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
         }
       }
       Inst(op~, mode~) => {
-        if op == JSR && (match self.program { Some(p) => p.dispatches.contains(p.addresses[item_idx]); None => false }) {
+        let computed = match self.program {
+          Some(p) => (op == JMP || op == RTS) && p.jumps.contains(p.addresses[item_idx])
+          None => false
+        }
+        if computed {
+          let p = self.program.unwrap()
+          let site = p.addresses[item_idx]
+          let targets = p.jumps[site].map(fn(t) { @image.address_name(p.image, t) })
+          self.lowered.push(ComputedJump(targets~, site~))
+        } else if op == JSR && (match self.program { Some(p) => p.dispatches.contains(p.addresses[item_idx]); None => false }) {
           // Targets come from the dispatch proof, not from the table's
           // source spelling. The table's data items are skipped below.
           let p = self.program.unwrap()
@@ -317,15 +326,17 @@ fn AsmLowering::collect_jump_targets(self: AsmLowering) -> Unit {
         mode=Relative(Ident(name=label, ..)) | Absolute(Ident(name=label, ..)),
         ..
       ) => {
-        if op == JSR {
+        if self.targets.externals.contains(label) || @image.trap_address(label) is Some(_) {
+          () // routines of the window, and traps, have no body here
+        } else if op == JSR {
           self.targets.subroutines.add(label)
         } else {
           self.targets.jump_targets.add(label)
         }
       }
-      JumpEngine(jump_table~, ..) => {
+      JumpEngine(jump_table~, ..) | ComputedJump(targets=jump_table, ..) => {
         for label in jump_table {
-          self.targets.subroutines.add(label)
+          if !self.targets.externals.contains(label) { self.targets.subroutines.add(label) }
         }
       }
       Label(name) => {
@@ -343,6 +354,11 @@ fn JumpTargets::contains(self: JumpTargets, label: String) -> Bool {
   self.jump_targets.contains(label) || self.subroutines.contains(label)
 }
 
+// Labels of the source, and names that are not (window dispatchers, traps).
+fn AsmLowering::bodiless(self: AsmLowering, label: String) -> Bool {
+  label == "__ret__" || self.targets.externals.contains(label) || @image.trap_address(label) is Some(_)
+}
+
 fn AsmLowering::next_non_comment_item_index(self: AsmLowering, start: Int) -> Int? {
   for i in start..<self.lowered.length() {
     match self.lowered[i] {
@@ -357,6 +373,12 @@ fn AsmLowering::next_non_comment_item_index(self: AsmLowering, start: Int) -> In
 fn AsmLowering::collect_basic_block_leaders(self: AsmLowering) -> Array[Int] {
   if self.program is Some(p) {
     for root in p.roots { self.targets.subroutines.add(root) }
+    // Calls into the window from the fixed bank go to a dispatcher on the
+    // bank mapped; the routines it chooses are entries.
+    for address, targets in p.windows {
+      self.targets.externals.add(@image.address_name(p.image, address))
+      for target in targets { self.targets.subroutines.add(@image.address_name(p.image, target)) }
+    }
   }
   self.collect_jump_targets()
   let leader_indices = []
@@ -395,7 +417,7 @@ fn AsmLowering::collect_basic_block_leaders(self: AsmLowering) -> Array[Int] {
           insert_leader_index(self.next_non_comment_item_index(i + 1))
         }
       }
-      JumpEngine(_) => insert_leader_index(self.next_non_comment_item_index(i + 1))
+      JumpEngine(_) | ComputedJump(_) => insert_leader_index(self.next_non_comment_item_index(i + 1))
       _ => ()
     }
   }
@@ -498,12 +520,13 @@ fn AsmLowering::collect_basic_blocks(self: AsmLowering) -> Unit raise LoweringEr
             connect(bb, target_bb, false)
           }
           None => {
-            if label != "__ret__" { // allow special labels
+            if !self.bodiless(label) { // allow special labels
               raise LoweringError("Unknown jump target: \{label}")
             }
           }
         }
       }
+      ComputedJump(_) => ()
       JumpEngine(jump_table~, ..) => {
         for label in jump_table {
           match self.bb_by_label.get(label) {
@@ -624,6 +647,7 @@ fn AsmLowering::collect_flag_liveness(self: AsmLowering) -> Unit {
             // The emitted helper executes the exact setup accepted by the
             // dispatcher proof. Propagate flag demands through those operations
             // rather than assuming every accepted helper has SMB's ASL effects.
+            ComputedJump(_) => live = FlagLiveness::all()
             JumpEngine(site~, ..) => {
               let steps = self.program.unwrap().dispatches[site].steps
               let mut j = steps.length() - 1
@@ -664,7 +688,7 @@ pub fn AsmLowering::flag_live_after(self: AsmLowering, id: Int) -> FlagLiveness 
 }
 
 pub fn AsmLowering::is_subroutine_label(self: AsmLowering, label: String) -> Bool {
-  self.targets.subroutines.contains(label)
+  self.targets.subroutines.contains(label) || self.targets.externals.contains(label)
 }
 
 // A machine block may participate in several callable entry regions. Follow
@@ -685,7 +709,7 @@ fn AsmLowering::collect_subroutines(self: AsmLowering) -> Unit raise LoweringErr
       if seen.contains(bb.id) { continue }
       seen.add(bb.id)
       match bb.last_non_comment_item() {
-        Some({ item: JumpEngine(_) }) => ()
+        Some({ item: JumpEngine(_) | ComputedJump(_) }) => ()
         _ => for link in bb.successors { work.push(link.bb) }
       }
     }
@@ -700,7 +724,7 @@ fn AsmLowering::collect_subroutines(self: AsmLowering) -> Unit raise LoweringErr
       visited.add(bb.id)
       blocks.push(bb)
       match bb.last_non_comment_item() {
-        Some({ item: JumpEngine(_) }) => ()
+        Some({ item: JumpEngine(_) | ComputedJump(_) }) => ()
         _ => for link in bb.successors {
           if entry_names.contains(link.bb.id) && !reach[link.bb.id].contains(bb.id) {
             continue

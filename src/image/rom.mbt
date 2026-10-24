@@ -27,8 +27,8 @@
 // at that moment, among those the map names; reading the table reads the
 // bank mapped. A code table lists where computed jumps can go, through a
 // pointer in RAM or by returning through an address the routine pushed: a
-// jump in a bank may reach the addresses of that bank's code tables and of
-// the fixed bank's.
+// jump in a bank may reach the addresses of that bank's code tables, a jump
+// in the fixed bank those of the fixed bank's.
 //
 // Routines keep their names, which become C functions. Data names (tables,
 // RAM and registers) become address constants and are upper-cased so they

@@ -137,12 +137,12 @@ fn always_unwinds(image: Image, entry: Int) -> Bool {
 
 // Where a computed jump at `site` (through RAM, or returning through an
 // address the routine pushed) can go: the addresses in the map's code tables
-// of its bank and of the fixed bank.
+// of its bank (the fixed bank's for code in the fixed bank).
 fn code_targets(image: Image, site: Int) -> Array[Int] raise ImageError {
   let targets = []
   for code in image.banks.code {
     let (location, adjust) = code
-    if bank_of(location) is Some(bank) && bank_of(site) != Some(bank) { continue }
+    if bank_of(location) != bank_of(site) { continue }
     let target = rebase(location, image.word(location) + adjust)
     if !targets.contains(target) { targets.push(target) }
   }
