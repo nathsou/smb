@@ -73,6 +73,7 @@ bool gpu_renderer_init(GpuRenderer *gpu, const char *shader_path) {
     static uint8_t atlas[PATTERN_ATLAS_WIDTH * PATTERN_ATLAS_HEIGHT];
     decode_patterns(atlas);
     gpu->patterns = load_bytes(atlas, PATTERN_ATLAS_WIDTH, PATTERN_ATLAS_HEIGHT, PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
+    gpu->chr_version = video.chr_version;
     gpu->nametable = load_bytes(video.nametable, 32, NAMETABLE_SIZE / 32, PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
     for (int i = 0; i < 64 * 3; i++) gpu->colors[i] = COLOR_PALETTE[i] / 255.0f;
     gpu->target = LoadRenderTexture(SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -81,6 +82,8 @@ bool gpu_renderer_init(GpuRenderer *gpu, const char *shader_path) {
     gpu->ctrl_loc = GetShaderLocation(gpu->shader, "u_ctrl");
     gpu->mask_loc = GetShaderLocation(gpu->shader, "u_mask");
     gpu->scroll_x_loc = GetShaderLocation(gpu->shader, "u_scroll_x");
+    gpu->scroll_y_loc = GetShaderLocation(gpu->shader, "u_scroll_y");
+    gpu->mirroring_loc = GetShaderLocation(gpu->shader, "u_mirroring");
     gpu->status_bar_loc = GetShaderLocation(gpu->shader, "u_status_bar");
     gpu->flip_y_loc = GetShaderLocation(gpu->shader, "u_flip_y");
     gpu->patterns_loc = GetShaderLocation(gpu->shader, "u_patterns");
@@ -103,12 +106,21 @@ static void set_bytes(Shader shader, int loc, const uint8_t *bytes, int count) {
 
 void gpu_renderer_draw(GpuRenderer *gpu) {
     UpdateTexture(gpu->nametable, video.nametable);
+    if (gpu->chr_version != video.chr_version) {
+        // the game rewrote its tiles (CHR RAM)
+        static uint8_t atlas[PATTERN_ATLAS_WIDTH * PATTERN_ATLAS_HEIGHT];
+        decode_patterns(atlas);
+        UpdateTexture(gpu->patterns, atlas);
+        gpu->chr_version = video.chr_version;
+    }
 
     BeginTextureMode(gpu->target);
     BeginShaderMode(gpu->shader);
     set_int(gpu->shader, gpu->ctrl_loc, video.ctrl);
     set_int(gpu->shader, gpu->mask_loc, video.mask);
     set_int(gpu->shader, gpu->scroll_x_loc, video.scroll_x);
+    set_int(gpu->shader, gpu->scroll_y_loc, video.scroll_y);
+    set_int(gpu->shader, gpu->mirroring_loc, video.mirroring);
     set_int(gpu->shader, gpu->status_bar_loc, video.status_bar ? 1 : 0);
     // Render textures store their first row at the bottom.
     set_int(gpu->shader, gpu->flip_y_loc, 1);

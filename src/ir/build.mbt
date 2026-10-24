@@ -280,6 +280,17 @@ fn bit_set(value : Expr, mask : Int) -> Expr {
   Binary(Ne, Binary(And, value, Const(mask)), Const(0))
 }
 
+// The status byte with bits 4 and 5 from `base`: PHP sets the break bit, an
+// interrupt does not.
+fn push_status(b : Builder, base : Int) -> Unit {
+  let mut status = Const(base)
+  for pair in [(C, 0), (Z, 1), (I, 2), (D, 3), (V, 6), (N, 7)] {
+    let (flag, bit) = pair
+    status = Binary(Or, status, if bit == 0 { Var(flag) } else { Binary(Shl, Var(flag), Const(bit)) })
+  }
+  push(b, status)
+}
+
 fn push(b : Builder, value : Expr) -> Unit {
   b.emit(Store(Ram, Binary(Add, Const(0x100), Var(SP)), value))
   b.emit(Assign(SP, Binary(Sub, Var(SP), Const(1))))
@@ -374,14 +385,7 @@ fn Builder::instruction(self : Builder, op : @parse.OpCode, mode : @lower.AsmAdd
       self.emit(Assign(A, value))
       self.nz(Var(A))
     }
-    PHP => {
-      let mut status = Const(0x30)
-      for pair in [(C, 0), (Z, 1), (I, 2), (D, 3), (V, 6), (N, 7)] {
-        let (flag, bit) = pair
-        status = Binary(Or, status, if bit == 0 { Var(flag) } else { Binary(Shl, Var(flag), Const(bit)) })
-      }
-      push(self, status)
-    }
+    PHP => push_status(self, 0x30)
     PLP => {
       let p = self.temp("p", U8, pull(self))
       for pair in [(C, 1), (Z, 2), (I, 4), (D, 8), (V, 0x40), (N, 0x80)] {
@@ -802,7 +806,7 @@ pub fn build(low : @lower.AsmLowering, native~ : Set[String]) -> Program raise B
     let builder : Builder = { low, program, f, stmts: [], at: 0 }
     push(builder, Const(0))
     push(builder, Const(0))
-    builder.instruction(PHP, Implied)
+    push_status(builder, 0x20)
     f.blocks.push({ label: "", stmts: builder.stmts, term: Goto(f.entry) })
     f.entry = f.blocks.length() - 1
   }

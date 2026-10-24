@@ -36,7 +36,7 @@ SOURCES += codegen/lib/state.c
 SOURCES += codegen/lib/debug_chr.c
 MAIN = codegen/main.c
 
-.PHONY: codegen header clean gpu-check runtime-wasm apu-wasm game-wasm web
+.PHONY: codegen header clean gpu-check runtime-wasm runtime-mmc1-wasm apu-wasm game-wasm web
 
 # The game is recompiled from your ROM into codegen/game (not in the
 # repository).
@@ -65,6 +65,13 @@ RUNTIME_SOURCES = codegen/lib/cpu.c codegen/lib/video.c codegen/lib/render.c cod
 
 runtime-wasm:
 	$(CC) -O3 -ffunction-sections -fdata-sections --target=wasm32 -nostdlib -Wl,--gc-sections -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined $(EXTRA_CFLAGS) -o web/runtime.wasm $(RUNTIME_SOURCES)
+
+# The runtime for cartridges that drive the PPU registers and switch banks
+# (Metroid): no native routines, the register interface and MMC1 instead.
+CARTRIDGE_RUNTIME_SOURCES = codegen/lib/cpu.c codegen/lib/video.c codegen/lib/render.c codegen/lib/apu.c codegen/lib/apu_buffers.c codegen/lib/sound.c codegen/lib/state.c codegen/lib/debug_chr.c codegen/lib/prg.c codegen/lib/ppu_bus.c codegen/lib/mapper.c codegen/lib/state_hash.c
+
+runtime-mmc1-wasm:
+	$(CC) -O3 -ffunction-sections -fdata-sections --target=wasm32 -nostdlib -DPPU_BUS -DMAPPER -Wl,--gc-sections -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined $(EXTRA_CFLAGS) -o web/runtime-mmc1.wasm $(CARTRIDGE_RUNTIME_SOURCES)
 
 # The synthesizer alone, for the page's AudioWorklet (its own memory).
 apu-wasm:

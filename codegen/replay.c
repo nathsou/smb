@@ -5,6 +5,7 @@
 #include "lib/cartridge.h"
 #include "lib/rec.h"
 #include "lib/ppu_bus.h"
+#include "lib/state_hash.h"
 #ifdef MAPPER
 #include "lib/mapper.h"
 #endif
@@ -12,9 +13,8 @@
 #include <string.h>
 
 // Replays an input recording headlessly for programs that drive the PPU
-// through its registers (Metroid), and hashes the state after each frame:
-// RAM, the cartridge's RAM, the pattern tables, everything the renderer
-// draws from, and the mapper.
+// through its registers (Metroid), and hashes the state after each frame
+// (state_hash.c).
 //
 // usage: ./replay ROM.nes [--rec FILE] [--frames N] [--trace FILE]
 //                 [--write-trace FILE] [--dump N[,N...]]
@@ -25,40 +25,6 @@
 //   --write-trace FILE  record per-frame state hashes
 //   --dump N[,N...]     write those frames as frame_N.ppm
 //   --dump-every N      write every Nth frame
-
-#define HASH_OFFSET_BASIS 2166136261u
-#define HASH_PRIME 16777619u
-
-static uint32_t hash_bytes(uint32_t hash, const uint8_t *data, size_t size) {
-    for (size_t i = 0; i < size; i++) {
-        hash ^= data[i];
-        hash *= HASH_PRIME;
-    }
-    return hash;
-}
-
-static uint32_t hash_byte(uint32_t hash, uint8_t value) {
-    return hash_bytes(hash, &value, 1);
-}
-
-uint32_t hash_state(void) {
-    uint32_t hash = HASH_OFFSET_BASIS;
-    hash = hash_bytes(hash, ram, RAM_SIZE);
-#ifdef MAPPER
-    hash = hash_bytes(hash, wram, WRAM_SIZE);
-    hash = hash_byte(hash, prg_bank);
-#endif
-    hash = hash_bytes(hash, chr_rom, CHR_ROM_SIZE);
-    hash = hash_bytes(hash, video.nametable, NAMETABLE_SIZE);
-    hash = hash_bytes(hash, video.palette.u8, PALETTE_SIZE);
-    hash = hash_bytes(hash, video.oam, OAM_SIZE);
-    hash = hash_byte(hash, video.ctrl);
-    hash = hash_byte(hash, video.mask);
-    hash = hash_byte(hash, video.scroll_x);
-    hash = hash_byte(hash, video.scroll_y);
-    hash = hash_byte(hash, video.mirroring);
-    return hash;
-}
 
 static void dump_frame(uint32_t index) {
     char path[32];
