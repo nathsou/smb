@@ -32,6 +32,12 @@ pub(all) struct Program {
   // Whether the program reads return addresses, so that calls must keep
   // them on the guest stack (see stack.mbt). Set by the stack analysis.
   exact: Ref[Bool]
+  // Where the program replaces the stack pointer outside the reset routine
+  // (`ldx #$ff; txs`, then on with the reset routine's code: a game that
+  // restarts from deep in its calls). The stack analysis finds them; the IR
+  // unwinds the calls there and the reset routine continues (see the IR's
+  // restart.mbt).
+  restarts: Array[Int]
   source: Array[@parse.SourceItem]
   addresses: Array[Int]
   map: RomMap // for a ROM; empty for assembly
@@ -305,6 +311,35 @@ fn always_unwinds(image: Image, entry: Int) -> Bool {
   false
 }
 
+// Whether an RTS returns through two bytes pushed above a return address
+// to the next instruction (`lda #>rts; pha; lda #<rts; pha`, then the
+// target's address minus one, pushed, and the RTS): a computed call, which
+// comes back after the RTS.
+fn pushes_return(image: Image, site: Int) -> Bool {
+  let at = site & 0xffff
+  for back in 8..=32 {
+    let start = at - back
+    let bytes = []
+    for i in 0..<6 {
+      bytes.push(try image.read(rebase(site, start + i)) catch { _ => -1 })
+    }
+    if bytes[0] == 0xa9 && bytes[2] == 0x48 && bytes[3] == 0xa9 && bytes[5] == 0x48 &&
+      ((bytes[1] << 8) | bytes[4]) == at {
+      return true
+    }
+  }
+  false
+}
+
+// Whether the computed jump at `site` is a computed call (see
+// `pushes_return`): it comes back to the instruction after it.
+pub fn Program::computed_call(self: Program, site: Int) -> Bool {
+  match (self.instructions.get(site), self.facts.get(site)) {
+    (Some(inst), Some(f)) => inst.op == RTS && f.depth == Some(4) && self.jumps.contains(site)
+    _ => false
+  }
+}
+
 // Where a computed jump at `site` (through RAM, or returning through an
 // address the routine pushed) can go: the addresses in the map's code tables
 // of its bank (the fixed bank's for code in the fixed bank).
@@ -312,7 +347,7 @@ fn always_unwinds(image: Image, entry: Int) -> Bool {
 // Following banks (MMC3), a jump in a bank can also read the code tables of
 // banks in the other window, as mapped: their addresses are that window's,
 // whichever of those banks is there (see the window's dispatcher).
-fn code_targets(image: Image, site: Int) -> Array[Int] raise ImageError {
+fn code_targets(image: Image, site: Int, call~: Bool = false) -> Array[Int] raise ImageError {
   let targets = []
   // the tables the pointer is loaded from (lda table,x or lda table,y just
   // before the jump), when the map names them: those alone
@@ -325,9 +360,15 @@ fn code_targets(image: Image, site: Int) -> Array[Int] raise ImageError {
       loaded.push(operand)
     }
   }
-  let tables = image.banks.code.filter(fn(code) { loaded.contains(code.2) || loaded.contains(code.2 + 1) })
+  // (or, for a computed call when none starts there, read from just before
+  // one: indexed from 1 or more)
+  let exact = image.banks.code.filter(fn(code) { loaded.contains(code.2) || loaded.contains(code.2 + 1) })
+  let tables = if !exact.is_empty() || !call { exact } else {
+    image.banks.code.filter(fn(code) { loaded.iter().any(fn(l) { l < code.2 && l >= code.2 - 8 }) })
+  }
   let from_loads = !tables.is_empty()
-  let entries = if from_loads { tables } else { image.banks.code }
+  // (a computed call only goes where its table says)
+  let entries = if from_loads || call { tables } else { image.banks.code }
   // a bank without code tables of its own jumps to the other window's
   let own = image.banks.code.iter().any(fn(code) { bank_of(code.0) == bank_of(site) })
   for code in entries {
@@ -784,6 +825,17 @@ fn explore_with(image: Image, waiting: Map[Int, Int], switching: Map[Int, Int]?)
           }
         }
       }
+      (RTS, _) if f.depth == Some(4) && pushes_return(image, pc) => {
+        // a computed call, which returns after the RTS
+        let targets = code_targets(image, pc, call=true)
+        if targets.is_empty() {
+          problem("Unresolved computed call at \{show_pc(pc)}, reached from \{path(pc)}") |> ignore
+          continue
+        }
+        jumps[pc] = targets
+        for target in targets { work.push((target, { ..start, banking: f.banking }.entry(), pc)) }
+        work.push((inst.next, { ..Facts::unknown(), depth: Some(0), banking: f.banking.map(fn(_) { Banking::unknown() }) }, pc))
+      }
       (RTS, _) if f.depth == Some(2) => {
         // returning through an address the routine pushed: a computed jump
         let targets = code_targets(image, pc)
@@ -821,6 +873,8 @@ fn explore_with(image: Image, waiting: Map[Int, Int], switching: Map[Int, Int]?)
       } else { needed.add(jump_target(inst)) }
     }
     if following.get(pc) != Some(inst.next) { needed.add(inst.next) }
+    // where a restart would continue the reset routine (see `restarts`)
+    if inst.op == TXS { needed.add(pc) }
   }
   for dispatch in dispatches.values() {
     for target in dispatch.targets { needed.add(target) }
@@ -886,7 +940,8 @@ pub fn discover(image: Image) -> Program raise ImageError {
         }
         // Address overlap can put a different instruction stream next in
         // source order. Preserve the actual fallthrough explicitly.
-        let falls = inst.op != JMP && inst.op != RTS && inst.op != RTI &&
+        let call = inst.op == RTS && facts.get(pc).map(fn(f) { f.depth == Some(4) }).unwrap_or(false) && jumps.contains(pc)
+        let falls = (call || (inst.op != JMP && inst.op != RTS)) && inst.op != RTI &&
           inst.op != BRK && !dispatches.contains(pc) && branch != Some(true)
         if inst.op == JSR && always_unwinds(image, jump_target(inst)) {
           // the callee returns past this routine: nothing follows the call
@@ -902,5 +957,5 @@ pub fn discover(image: Image) -> Program raise ImageError {
       }
     }
   }
-  { image, instructions, dispatches, roots: roots.map(fn(pc) { address_name(image, pc) }), facts, idle, windows, jumps, waits, exact: Ref(false), source, addresses, map: RomMap::empty() }
+  { image, instructions, dispatches, roots: roots.map(fn(pc) { address_name(image, pc) }), facts, idle, windows, jumps, waits, exact: Ref(false), restarts: [], source, addresses, map: RomMap::empty() }
 }

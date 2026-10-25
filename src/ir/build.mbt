@@ -666,7 +666,11 @@ fn build_routine(
           }
           term = Some(Dispatch(helper, (site & 0xffff) + 2, cases))
         }
-        ComputedJump(targets~, site~) => {
+        ComputedJump(targets~, site~, call~) => {
+          let returns_at = fn(address : Int) {
+            let location = program.jumps[site].iter().find_first(fn(t) { (t & 0xffff) == address }).unwrap_or(address)
+            program.instructions.get(location).map(fn(i) { i.op == RTS }).unwrap_or(false)
+          }
           builder.at = site
           let inst = program.instructions[site]
           let address = if inst.op == JMP {
@@ -686,7 +690,41 @@ fn build_routine(
             let value = program.jumps[site][k] & 0xffff
             if !cases.iter().any(fn(c) { c.0 == value }) { cases.push((value, rename(label))) }
           }
-          term = Some(Jump(address, cases))
+          if call {
+            // the routine at the address, which returns after the RTS:
+            // through the return address left on the guest stack with
+            // exact returns, else a C call (and the address dropped)
+            let t = builder.temp("target", U16, address)
+            let back = (site & 0xffff) + 1
+            if !exact {
+              builder.emit(Assign(SP, Binary(Add, Var(SP), Const(2))))
+            }
+            let after = fallthrough(bb)
+            let traps = exits.trap(site)
+            let blocks = cases.map(fn(c) {
+              f.blocks.push({ label: "", stmts: [Call(c.1)], term: Goto(after) })
+              let at = f.blocks.length() - 1
+              if exact {
+                // returned elsewhere: past this routine too
+                f.blocks[at].term = Branch(Binary(Ne, Runtime("cpu_return"), Const(back)), exits.ret(), after)
+              }
+              (c.0, at)
+            })
+            term = Some(Switch(t, blocks, traps))
+          } else if cases.iter().any(fn(c) { returns_at(c.0) }) {
+            // a target that is an RTS returns (the bytes pushed for the
+            // jump pulled)
+            let t = builder.temp("target", U16, address)
+            let traps = exits.trap(site)
+            let blocks = cases.map(fn(c) {
+              if returns_at(c.0) { return (c.0, if exact { exits.rts(low, program) } else { exits.ret() }) }
+              f.blocks.push({ label: "", stmts: [], term: TailCall(c.1) })
+              (c.0, f.blocks.length() - 1)
+            })
+            term = Some(Switch(t, blocks, traps))
+          } else {
+            term = Some(Jump(address, cases))
+          }
         }
         _ => raise BuildError("Unexpected structured item")
       }
@@ -845,6 +883,7 @@ pub fn build(low : @lower.AsmLowering, native~ : Set[String]) -> Program raise B
     prg: program.image.bytes,
     banks: program.image.banks.contents,
     layout: @image.layout(),
+    restarts: program.restarts.map(fn(pc) { rename(@image.address_name(program.image, pc)) }),
     info: None,
   }
 }

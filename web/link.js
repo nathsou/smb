@@ -16,7 +16,7 @@ import { splitDump } from './cartridge.js';
 // `gameBytes` may be a function of the runtime's layout, to build the game
 // module once the runtime's addresses are known. `hostImports` provides
 // runtime imports other than game routines.
-export async function link(runtimeBytes, gameBytes, rom, { pages = 20, hostImports = {} } = {}) {
+export async function link(runtimeBytes, gameBytes, rom, { pages = 32, hostImports = {} } = {}) {
     const memory = new WebAssembly.Memory({ initial: pages });
     const bytes = () => new Uint8Array(memory.buffer);
     let game = null;
@@ -58,7 +58,7 @@ export const MACHINE_STATE = [
     'ram', 'data', 'a', 'x', 'y', 'sp', 'carry_flag', 'zero_flag', 'neg_flag',
     'overflow_flag', 'interrupt_disabled', 'decimal_flag',
     'wram', 'prg_slots', 'prg_bank', 'prg_bank1', 'cpu_return', 'cpu_suspended', 'cpu_resume_depth',
-    'cpu_resume_point',
+    'cpu_resume_point', 'cpu_restarting',
 ];
 
 export function runtimeLayout(runtime) {

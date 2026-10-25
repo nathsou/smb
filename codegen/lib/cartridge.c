@@ -5,6 +5,7 @@
 #include <string.h>
 
 uint8_t cartridge_mapper;
+uint8_t cartridge_vertical;
 
 int load_cartridge(const char *rom_path) {
     FILE *file = fopen(rom_path, "rb");
@@ -25,6 +26,7 @@ int load_cartridge(const char *rom_path) {
     // old dumping tools left text in bytes 12-15, where byte 7 is not to be trusted either
     bool archaic = (header[7] & 0x0c) != 8 && (header[12] | header[13] | header[14] | header[15]) != 0;
     cartridge_mapper = (uint8_t)((header[6] >> 4) | (archaic ? 0 : header[7] & 0xf0));
+    cartridge_vertical = header[6] & 1;
     if (chr_size > CHR_MAX_SIZE) {
         fprintf(stderr, "Error: %s has more CHR ROM than supported\n", rom_path);
         fclose(file);

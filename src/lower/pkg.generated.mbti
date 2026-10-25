@@ -53,7 +53,7 @@ pub(all) enum AsmItem {
   Label(String)
   Inst(id~ : Int32, op~ : @parse.OpCode, mode~ : AsmAddressingMode, comment~ : String?)
   JumpEngine(jump_table~ : Array[String], site~ : Int32)
-  ComputedJump(targets~ : Array[String], site~ : Int32)
+  ComputedJump(targets~ : Array[String], site~ : Int32, call~ : Bool)
   DoWhile(cond~ : @parse.OpCode, body~ : Array[AsmItem], comment~ : String?)
   If(comparison~ : (String, TypedExpr)?, cond~ : @parse.OpCode, then~ : Array[AsmItem], otherwise~ : Array[AsmItem]?, comment~ : String?)
   Comment(String)

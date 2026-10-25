@@ -83,7 +83,7 @@ replay:
 # The reference interpreter replay is checked against (tests/interpreter.c):
 # ./interpreter metroid.nes --waits ... --rec rec/metroid.rec
 interpreter:
-	$(CC) $(CFLAGS) -o interpreter tests/interpreter.c codegen/lib/cpu.c codegen/lib/video.c codegen/lib/render.c $(GAME_SOURCES) codegen/lib/apu.c codegen/lib/sound.c codegen/lib/prg.c codegen/lib/rec.c codegen/lib/state_hash.c $(GC_FLAGS) -lm
+	$(CC) $(CFLAGS) -o interpreter tests/interpreter.c codegen/lib/cpu.c codegen/lib/video.c codegen/lib/render.c $(GAME_SOURCES) codegen/lib/apu.c codegen/lib/sound.c codegen/lib/prg.c codegen/lib/rec.c codegen/lib/state.c codegen/lib/state_hash.c $(GC_FLAGS) -lm
 
 # Compares the GPU renderer with the software renderer over the replay
 # (needs OpenGL 3.3; under Xvfb: xvfb-run ./gpu_check --debug-chr, or

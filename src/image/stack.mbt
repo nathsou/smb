@@ -47,6 +47,7 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
   // Routines a jump with the token dropped leaves to, as a call.
   let routines: Set[Int] = Set(entries.map(fn(e) { e.0 }))
   let leaks: Array[String] = []
+  let reset_txs: Set[Int] = Set([])
   let mut index = 0
   while index < entries.length() {
     let (entry, kind, start) = entries[index]
@@ -74,7 +75,14 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
         PHA | PHP => next_depth += 1
         PLA | PLP => next_depth -= 1
         TXS => {
-          if !is_reset { raise InvalidImage("Stack-pointer replacement outside reset at \{show_pc(pc)}") }
+          if is_interrupt { raise InvalidImage("Stack-pointer replacement in an interrupt handler at \{show_pc(pc)}") }
+          if !is_reset {
+            // a restart: the reset routine continues from here, with
+            // nothing pending (checked below)
+            if !self.restarts.contains(pc) { self.restarts.push(pc) }
+            continue
+          }
+          reset_txs.add(pc)
           next_depth = 0
         }
         _ => ()
@@ -88,6 +96,11 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
       }
       if inst.op == RTI && !is_interrupt { raise InvalidImage("Interrupt return outside an interrupt entry at \{show_pc(pc)}") }
       if inst.op == RTS && is_interrupt { raise InvalidImage("Subroutine return from an interrupt entry at \{show_pc(pc)}") }
+      if inst.op == RTS && depth == 4 && self.computed_call(pc) {
+        // a computed call: back after it, the four bytes pulled
+        work.push((inst.next, 0, Facts::unknown()))
+        continue
+      }
       if inst.op == RTS && depth == 2 && self.jumps.contains(pc) { continue } // a computed jump
       if inst.op == RTS || inst.op == RTI {
         if depth > 0 && inst.op == RTS {
@@ -152,4 +165,9 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
     }
   }
   if !self.exact.val && leaks.length() > 0 { raise InvalidImage(leaks[0]) }
+  // a restart continues the reset routine: its code must be the reset's
+  for pc in self.restarts {
+    if !reset_txs.contains(pc) { raise InvalidImage("Stack-pointer replacement outside reset at \{show_pc(pc)}") }
+  }
+  self.restarts.sort()
 }

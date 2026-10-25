@@ -442,6 +442,11 @@ fn AsmLowering::collect_routine_writes(self: AsmLowering, bodies: Map[String, Ar
                 flags = flags.union(flag_writes(step.inst.op))
               }
             }
+            // whatever the routine called writes
+            ComputedJump(call=true, ..) => {
+              regs = Registers::all()
+              flags = FlagLiveness::all()
+            }
             _ => ()
           }
         }

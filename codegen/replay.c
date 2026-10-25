@@ -96,6 +96,7 @@ int main(int argc, char **argv) {
     if (load_cartridge(argv[1])) return 1;
 #ifdef MAPPER
     mapper_init(cartridge_mapper);
+    mapper_mirroring(cartridge_vertical);
 #endif
 
     NESInputRecording recording = {0};

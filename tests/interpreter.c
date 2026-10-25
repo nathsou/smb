@@ -11,8 +11,11 @@
 // usage: ./interpreter ROM.nes --waits [BANK:]FROM:TO,... [--rec FILE]
 //                     [--frames N] [--write-trace FILE] [--dump N,...]
 //                     [--profile FILE] [--poke F:ADDR=V,...]
+//                     [--save-state F:FILE]
 //   a wait in a bank names it (the bank must be mapped there);
 //   --poke writes RAM before frame F (hex address and value), as replay's;
+//   --save-state writes the state after frame F as replay's does (to compare
+//   the two where their traces differ);
 //   --dump writes those frames as frame_N.ppm;
 //   --profile writes what ran, for writing a map: the instructions run
 //   (by bank), calls and jumps into a window from outside it with the bank
@@ -28,6 +31,7 @@
 #include "rec.h"
 #include "mapper.h"
 #include "state_hash.h"
+#include "state.h"
 #include "render.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -345,6 +349,13 @@ int main(int argc, char **argv) {
     const char *profile_path = option(argc, argv, "--profile");
     const char *dispatcher_option = option(argc, argv, "--dispatcher");
     const char *pokes = option(argc, argv, "--poke");
+    const char *save_option = option(argc, argv, "--save-state");
+    unsigned save_frame = 0;
+    char save_path[256] = "";
+    if (save_option && sscanf(save_option, "%u:%255s", &save_frame, save_path) != 2) {
+        fprintf(stderr, "--save-state FRAME:FILE\n");
+        return 1;
+    }
     if (argc < 2 || !waits) {
         fprintf(stderr, "usage: %s ROM.nes --waits [BANK:]FROM:TO,... [--rec FILE] [--frames N] [--write-trace FILE] [--dump N,...] [--profile FILE] [--poke F:ADDR=V,...]\n", argv[0]);
         return 1;
@@ -373,7 +384,7 @@ int main(int argc, char **argv) {
     uint8_t header[16];
     if (!file || fread(header, 1, 16, file) != 16) { fprintf(stderr, "Cannot read %s\n", argv[1]); return 1; }
     unsigned prg_size = header[4] * 0x4000u;
-    static uint8_t prg[0x40000];
+    static uint8_t prg[0x80000];
     fseek(file, 16 + ((header[6] & 4) ? 512 : 0), SEEK_SET);
     if (prg_size > sizeof(prg) || fread(prg, 1, prg_size, file) != prg_size) { fprintf(stderr, "Truncated %s\n", argv[1]); return 1; }
     fclose(file);
@@ -383,6 +394,7 @@ int main(int argc, char **argv) {
     apu_init(48000);
     if (load_cartridge(argv[1])) return 1;
     mapper_init(cartridge_mapper);
+    mapper_mirroring(cartridge_vertical);
 
     NESInputRecording recording = {0};
     if (rec_path && rec_open(rec_path, "r", &recording) != 0) { fprintf(stderr, "Cannot open %s\n", rec_path); return 1; }
@@ -400,6 +412,14 @@ int main(int argc, char **argv) {
         run_foreground();
         sound_end_frame();
         if (trace) fprintf(trace, "%08x\n", hash_state());
+        if (save_path[0] && i == save_frame) {
+            // the bytes replay's --save-state writes, to compare them
+            static uint8_t saved[SAVE_STATE_SIZE];
+            save_state(saved);
+            FILE *file = fopen(save_path, "wb");
+            if (!file || fwrite(saved, 1, sizeof saved, file) != sizeof saved) { fprintf(stderr, "Cannot write %s\n", save_path); return 1; }
+            fclose(file);
+        }
         if (dump && dumps(dump, i)) {
             if (option(argc, argv, "--splits") || (argc > 0 && strcmp(argv[argc - 1], "--splits") == 0)) {
                 printf("frame %u: %u splits, irq latch %u enabled %u, mask %02x\n", i, video.split_count, mmc3.irq_latch, mmc3.irq_enabled, video.mask);

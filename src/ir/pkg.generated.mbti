@@ -122,12 +122,14 @@ pub(all) struct Program {
   prg : Array[Int32]
   banks : Array[Array[Int32]]
   layout : @image.Layout
+  restarts : Array[String]
   mut info : Analysis?
 } derive(@debug.Debug)
 pub fn Program::analyze(Self) -> Analysis
 pub fn Program::function(Self, String) -> Function?
 pub fn Program::inline_leaves(Self, limit? : Int32) -> Int32
 pub fn Program::is_root(Self, String) -> Bool
+pub fn Program::make_restartable(Self) -> Unit raise BuildError
 pub fn Program::make_resumable(Self) -> Unit raise BuildError
 pub fn Program::optimize(Self) -> Unit
 pub fn Program::outputs(Self, Analysis, String) -> Int32

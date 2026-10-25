@@ -639,12 +639,10 @@ fn Emitter::emit_program_c(self : Emitter, program : @ir.Program, preamble : Arr
   for f in program.functions { self.emit_function(program, f, views) }
   self.emit("void cpu_reset_entry(void) { \{program.reset}(); }")
   self.emit("void cpu_nmi_entry(void) { \{program.nmi}(); }")
-  // cartridges with a mapper: the runtime runs the IRQ handler when the
-  // mapper raises it (MMC3)
-  if !program.banks.is_empty() {
-    match program.irq {
-      Some(irq) => self.emit("void cpu_irq_entry(void) { \{irq}(); }")
-      None => self.emit("void cpu_irq_entry(void) { cpu_unresolved_jump(0xfffe); } // never enabled")
-    }
+  // the runtime of cartridges runs the IRQ handler when the mapper raises
+  // it (MMC3)
+  match program.irq {
+    Some(irq) => self.emit("void cpu_irq_entry(void) { \{irq}(); }")
+    None => self.emit("void cpu_irq_entry(void) { cpu_unresolved_jump(0xfffe); } // never enabled")
   }
 }

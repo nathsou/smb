@@ -172,6 +172,9 @@ pub(all) struct Program {
   prg : Array[Int] // the PRG ROM image, for folding constant reads (the fixed banks, with a mapper)
   banks : Array[Array[Int]] // the switchable banks, for reads of Bank(k)
   layout : @image.Layout // where the banks are at $8000-$FFFF
+  // The routines a restart continues the reset routine with (from its TXS,
+  // see restart.mbt), in the order of their restart numbers less one.
+  restarts : Array[String]
   // Filled by `analyze`.
   mut info : Analysis?
 } derive(Debug)

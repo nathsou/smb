@@ -249,10 +249,12 @@ pub(all) struct Program {
   jumps : Map[Int32, Array[Int32]]
   waits : Map[Int32, Int32]
   exact : @ref.Ref[Bool]
+  restarts : Array[Int32]
   source : Array[@parse.SourceItem]
   addresses : Array[Int32]
   map : RomMap
 } derive(@debug.Debug)
+pub fn Program::computed_call(Self, Int32) -> Bool
 pub fn Program::switching_chain(Self, Int32) -> Array[String]
 pub fn Program::validate_stacks(Self) -> Unit raise ImageError
 
@@ -263,6 +265,7 @@ pub(all) struct RomMap {
   banks : Array[MapBank]
   prg_mode : Int32
   shadows : Array[(Int32, Int32)]
+  exact : Bool
 } derive(@debug.Debug)
 pub fn RomMap::bank_name(Self, Int32) -> String
 pub fn RomMap::empty() -> Self

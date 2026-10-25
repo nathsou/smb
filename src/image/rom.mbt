@@ -33,6 +33,12 @@
 //
 //   shadow  $a000 $0720                  (the bank of the window at $A000)
 //
+// Calls are C calls, and leave no return address on the guest stack, unless
+// the program reads them (see the stack analysis) or the map asks for the
+// machine's stack, byte for byte (a game compared with the interpreter):
+//
+//   exact
+//
 // A path the game only takes when something went wrong (its RAM lost, say)
 // can be cut where it starts, which then traps:
 //
@@ -110,10 +116,11 @@ pub(all) struct RomMap {
   banks: Array[MapBank]
   prg_mode: Int // MMC3's PRG mode the game sets (bit 6 of its bank select)
   shadows: Array[(Int, Int)] // window address, RAM address
+  exact: Bool // calls keep return addresses on the guest stack (see `exact`)
 } derive(Debug)
 
 pub fn RomMap::empty() -> RomMap {
-  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [] }
+  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false }
 }
 
 // The name of a switchable bank, the prefix of its entries.
@@ -163,6 +170,7 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
   let types: Array[MapType] = []
   let banks: Array[MapBank] = []
   let mut prg_mode = 0
+  let mut exact = false
   let shadows: Array[(Int, Int)] = []
   let names: Set[String] = Set([])
   fn claim(name: String) raise ImageError {
@@ -201,6 +209,12 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
         members.push((constant, value))
       }
       types.push({ name, flags: fields[0] == "flags", members, description })
+      continue
+    }
+    // exact: calls keep their return addresses on the guest stack
+    if fields[0] == "exact" {
+      if fields.length() != 1 { raise InvalidImage("Map exact line takes nothing more: \{line}") }
+      exact = true
       continue
     }
     // prg_mode N: the MMC3 PRG mode the game sets
@@ -315,7 +329,7 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       raise InvalidImage("Unknown map type: \{entry.type_name}")
     }
   }
-  { entries, roms, types, banks, prg_mode, shadows }
+  { entries, roms, types, banks, prg_mode, shadows, exact }
 }
 
 pub(all) struct Cartridge {
@@ -656,6 +670,13 @@ pub fn discover_rom(image: Image, map: RomMap) -> Program raise ImageError {
   let { instructions, dispatches, roots, facts, idle, windows, jumps, waits, traps, needed, following, pcs } = explore(image)
   // a transfer into data names its trap instead of the data
   let target_name = fn(pc: Int) { if traps.contains(pc) { trap_name(pc) } else { address_name(image, pc) } }
+  // A branch or jump with nothing pushed to an RTS that is also a computed
+  // jump (returning through two bytes pushed on other paths) returns.
+  let transfer_name = fn(from: Int, pc: Int) {
+    let plain = facts.get(from).map(fn(f) { f.depth == Some(0) }).unwrap_or(false)
+    let computed = jumps.contains(pc) && instructions.get(pc).map(fn(i) { i.op == RTS }).unwrap_or(false)
+    if plain && computed { "__ret__" } else { target_name(pc) }
+  }
   let namer = Namer::new(map, banked=image.banked())
   let source = []
   let addresses = []
@@ -713,21 +734,26 @@ pub fn discover_rom(image: Image, map: RomMap) -> Program raise ImageError {
     if !routines.contains(pc) && name.has_prefix("loc_") && needed.contains(pc) { append(Label(name), pc) }
     let branch = if inst.mode == "rel" { condition(inst.op, facts[pc]) } else { None }
     if branch == Some(true) {
-      append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(target_name(branch_target(inst))))), pc)
+      append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(transfer_name(pc, branch_target(inst))))), pc)
     } else if inst.op == JMP && inst.mode == "ind" && rom_vector(image, inst) is Some(target) {
       append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(target_name(target)))), pc)
     } else if inst.mode == "rel" && branch != Some(false) {
-      append(Inst(op=inst.op, mode=Relative(addr=Ident(target_name(branch_target(inst))))), pc)
-    } else if (inst.op == JMP || inst.op == JSR) && inst.mode == "abs" {
+      append(Inst(op=inst.op, mode=Relative(addr=Ident(transfer_name(pc, branch_target(inst))))), pc)
+    } else if inst.op == JMP && inst.mode == "abs" {
+      append(Inst(op=inst.op, mode=AbsoluteOrZeroPage(addr=Ident(transfer_name(pc, jump_target(inst))))), pc)
+    } else if inst.op == JSR && inst.mode == "abs" {
       append(Inst(op=inst.op, mode=AbsoluteOrZeroPage(addr=Ident(target_name(jump_target(inst))))), pc)
     } else if branch != Some(false) {
       append(Inst(op=inst.op, mode=rom_mode(image, namer, inst)), pc)
     }
-    let falls = inst.op != JMP && inst.op != RTS && inst.op != RTI &&
+    let call = inst.op == RTS && facts.get(pc).map(fn(f) { f.depth == Some(4) }).unwrap_or(false) && jumps.contains(pc)
+    let falls = (call || (inst.op != JMP && inst.op != RTS)) && inst.op != RTI &&
       inst.op != BRK && !dispatches.contains(pc) && branch != Some(true)
     if inst.op == JSR && always_unwinds(image, jump_target(inst)) {
       // the callee returns past this routine: nothing follows the call
       append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(trap_name(inst.next)))), pc)
+    } else if falls && transfer_name(pc, inst.next) == "__ret__" {
+      append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident("__ret__"))), pc)
     } else if falls && (following.get(pc) != Some(inst.next) || traps.contains(inst.next)) {
       append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(target_name(inst.next)))), pc)
     }
@@ -739,5 +765,5 @@ pub fn discover_rom(image: Image, map: RomMap) -> Program raise ImageError {
     image.source.push(item)
     image.addresses.push(addresses[i])
   }
-  { image, instructions, dispatches, roots: roots.map(fn(pc) { address_name(image, pc) }), facts, idle, windows, jumps, waits, exact: Ref(false), source, addresses, map }
+  { image, instructions, dispatches, roots: roots.map(fn(pc) { address_name(image, pc) }), facts, idle, windows, jumps, waits, exact: Ref(map.exact), restarts: [], source, addresses, map }
 }

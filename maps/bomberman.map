@@ -1,0 +1,10 @@
+# Bomberman (NES): the names this project gives to the program's routines,
+# tables and variables, and what code discovery cannot recover by itself.
+
+rom 2967746c2a434c97a074b14d894ea132fab8e443899f6ca870718eeee1669039 16384 8192 ; Bomberman (USA)
+exact   ; the machine's stack, byte for byte (as the reference interpreter has it)
+
+code $e6ad sound_routines 7 2 rts   ; addresses minus one, returned through
+code $e6bb sound_routines2 7 2 rts
+code $d246 enemy_routines 11 2 rts  ; by enemy kind (from 1), called through RTS
+code $e5e6 sound_commands 8 2 rts   ; by command ($ff down)

@@ -84,6 +84,7 @@ pub fn recompile(
     err => raise fail("IR", err)
   }
   progress("resumable")
+  ir.make_restartable() catch { err => raise fail("IR", err) }
   ir.make_resumable() catch { err => raise fail("IR", err) }
   progress("optimize")
   if options.reference { ir.analyze() |> ignore } else { ir.optimize() }

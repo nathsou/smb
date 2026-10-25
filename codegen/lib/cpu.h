@@ -39,6 +39,14 @@ extern uint8_t cpu_resume_stack[CPU_RESUME_STACK];
 void cpu_suspend(uint8_t point);
 void cpu_resume_pop(void);
 
+// Restarts (a game replacing the stack pointer outside its reset routine,
+// to start over from deep in its calls): the calls on the way unwind, down
+// to the reset routine, which runs restart routine `cpu_restarting` (see the
+// IR's restart.mbt).
+extern uint8_t cpu_restarting;
+void cpu_restart(uint8_t routine);
+void cpu_restart_done(void);
+
 // PHP/PLP
 void php(void);
 void plp(void);

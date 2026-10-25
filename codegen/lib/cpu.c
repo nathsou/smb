@@ -53,6 +53,16 @@ void cpu_resume_pop(void) {
     cpu_resume_point = cpu_resume_stack[--cpu_resume_depth];
 }
 
+uint8_t cpu_restarting;
+
+void cpu_restart(uint8_t routine) {
+    cpu_restarting = routine;
+}
+
+void cpu_restart_done(void) {
+    cpu_restarting = 0;
+}
+
 uint16_t cpu_dispatch_target;
 
 // RTS used as a computed jump: pop the two bytes a dispatcher pushed.
@@ -107,6 +117,7 @@ void cpu_init(void) {
     cpu_return = 0;
     cpu_suspended = 0;
     cpu_resume_depth = 0;
+    cpu_restarting = 0;
 
     // controller
     controller1_state = 0;

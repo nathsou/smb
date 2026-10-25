@@ -4,7 +4,7 @@
 // sets the size). Native builds link the generated data.c instead.
 #include <stdint.h>
 
-uint8_t data[0x40000];
+uint8_t data[0x80000];
 unsigned prg_image_size = 0x8000;
 
 // Copies a PRG ROM of `size` bytes into the buffer (a 16 KiB image twice).

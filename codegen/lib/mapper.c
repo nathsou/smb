@@ -8,20 +8,60 @@ uint8_t wram[WRAM_SIZE];
 uint32_t prg_slots[4];
 uint8_t prg_bank, prg_bank1;
 uint8_t mapper_number;
+uint8_t mapper_header_mirroring;
 Mmc1 mmc1;
 Mmc3 mmc3;
 
+// NROM: no registers, 16 KiB of PRG ROM seen twice or 32 KiB, the
+// mirroring wired on the board.
+static void nrom_apply(void) {
+    for (int i = 0; i < 4; i++) prg_slots[i] = (uint32_t)(i * 0x2000u) % prg_image_size;
+    prg_bank = prg_bank1 = 0;
+    video.mirroring = mapper_header_mirroring;
+}
+
 static void mmc1_apply(void) {
-    // Code was recompiled for the last bank at $C000 and one switched in at
-    // $8000: other PRG modes would run code the recompiler did not see.
-    if ((mmc1.control & 0x0c) != 0x0c) __builtin_trap();
     unsigned banks = prg_image_size / 0x4000;
-    prg_bank = (uint8_t)((mmc1.prg & 0x0f) & (banks - 1));
+    unsigned mode = (mmc1.control >> 2) & 3;
+    unsigned low, high;
+    if (mode < 2) {
+        // 32 KiB at $8000 (the low bit of the bank ignored)
+        low = (mmc1.prg & 0x0e) & (banks - 1);
+        high = low + 1;
+    } else if (mode == 2) {
+        low = 0; // the first bank fixed at $8000
+        high = (mmc1.prg & 0x0f) & (banks - 1);
+    } else {
+        low = (mmc1.prg & 0x0f) & (banks - 1);
+        high = banks - 1; // the last bank fixed at $C000
+    }
+    // Code was recompiled for the last bank at $C000 and one switched in at
+    // $8000: a mode that puts another bank there would run code the
+    // recompiler did not see (32 KiB of PRG ROM is the same in every mode).
+    if (high != banks - 1) __builtin_trap();
+    prg_bank = (uint8_t)low;
     prg_bank1 = 0;
-    prg_slots[0] = prg_bank * 0x4000u;
-    prg_slots[1] = prg_bank * 0x4000u + 0x2000;
-    prg_slots[2] = (banks - 1) * 0x4000u;
-    prg_slots[3] = (banks - 1) * 0x4000u + 0x2000;
+    prg_slots[0] = low * 0x4000u;
+    prg_slots[1] = low * 0x4000u + 0x2000;
+    prg_slots[2] = high * 0x4000u;
+    prg_slots[3] = high * 0x4000u + 0x2000;
+    // CHR ROM: two 4 KiB banks, or one of 8 KiB (CHR RAM has 8 KiB, not
+    // banked)
+    if (!chr_ram) {
+        unsigned mask = video_chr_banks() - 1;
+        unsigned first, second;
+        if (mmc1.control & 0x10) {
+            first = mmc1.chr0 * 4u;
+            second = mmc1.chr1 * 4u;
+        } else {
+            first = (mmc1.chr0 & 0x1e) * 4u;
+            second = first + 4;
+        }
+        for (unsigned i = 0; i < 4; i++) {
+            video.chr_banks[i] = (uint8_t)((first + i) & mask);
+            video.chr_banks[4 + i] = (uint8_t)((second + i) & mask);
+        }
+    }
     // one screen (lower, upper), vertical, horizontal
     static const uint8_t mirroring[4] = {
         MIRROR_SINGLE_LOWER, MIRROR_SINGLE_UPPER, MIRROR_VERTICAL, MIRROR_HORIZONTAL,
@@ -55,7 +95,14 @@ static void mmc3_apply(void) {
 }
 
 void mapper_apply(void) {
-    if (mapper_number == 4) mmc3_apply(); else mmc1_apply();
+    if (mapper_number == 4) mmc3_apply();
+    else if (mapper_number == 1) mmc1_apply();
+    else nrom_apply();
+}
+
+void mapper_mirroring(uint8_t vertical) {
+    mapper_header_mirroring = vertical ? MIRROR_VERTICAL : MIRROR_HORIZONTAL;
+    mapper_apply();
 }
 
 void mapper_init(uint8_t mapper) {
@@ -86,7 +133,7 @@ static void mmc1_write(uint16_t addr, uint8_t value) {
     if (++mmc1.count < 5) return;
     switch ((addr >> 13) & 3) {
         case 0: mmc1.control = mmc1.shift; break;
-        case 1: mmc1.chr0 = mmc1.shift; break; // CHR RAM: 8 KiB, not banked here
+        case 1: mmc1.chr0 = mmc1.shift; break;
         case 2: mmc1.chr1 = mmc1.shift; break;
         case 3: mmc1.prg = mmc1.shift; break;
     }
@@ -124,7 +171,9 @@ static void mmc3_write(uint16_t addr, uint8_t value) {
 }
 
 void mapper_write(uint16_t addr, uint8_t value) {
-    if (mapper_number == 4) mmc3_write(addr, value); else mmc1_write(addr, value);
+    if (mapper_number == 4) mmc3_write(addr, value);
+    else if (mapper_number == 1) mmc1_write(addr, value);
+    // NROM has no registers: writes to ROM do nothing
 }
 
 bool mapper_scanline(void) {

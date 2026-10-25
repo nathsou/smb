@@ -283,7 +283,7 @@ fn Emitter::emit_code_h(self: Emitter, program: @ir.Program, uses_ppu_bus~: Bool
   self.emit("")
   self.emit("void cpu_reset_entry(void);")
   self.emit("void cpu_nmi_entry(void);")
-  if banked { self.emit("void cpu_irq_entry(void);") }
+  self.emit("void cpu_irq_entry(void);")
   for f in program.functions {
     if !f.helper { self.emit("void \{f.name}(void);") }
   }
