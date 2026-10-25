@@ -38,7 +38,9 @@ static void mmc1_apply(void) {
     // Code was recompiled for the last bank at $C000 and one switched in at
     // $8000: a mode that puts another bank there would run code the
     // recompiler did not see (32 KiB of PRG ROM is the same in every mode).
-    if (high != banks - 1) __builtin_trap();
+    // (with 32 KiB the code was recompiled as one image: the first bank at
+    // $8000)
+    if (high != banks - 1 || (banks == 2 && low != 0)) __builtin_trap();
     prg_bank = (uint8_t)low;
     prg_bank1 = 0;
     prg_slots[0] = low * 0x4000u;

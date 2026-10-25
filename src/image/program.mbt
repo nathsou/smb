@@ -382,6 +382,9 @@ fn code_targets(image: Image, site: Int, call~: Bool = false) -> Array[Int] rais
     let target = if other_window && bank_of(target) is Some(_) { target & 0xffff } else { target }
     if !targets.contains(target) { targets.push(target) }
   }
+  for jump in image.banks.jumps {
+    if jump.0 == site && !targets.contains(jump.1) { targets.push(jump.1) }
+  }
   targets
 }
 
@@ -773,7 +776,8 @@ fn explore_with(image: Image, waiting: Map[Int, Int], switching: Map[Int, Int]?)
     }
     match (inst.op, inst.mode) {
       (JSR, _) => {
-        let table = data_at.get(inst.next).map(fn(i) { inline_data_end(image, i) })
+        let inline = image.continuation(pc, inst.next, jump_target(inst)) != inst.next
+        let table = if inline { None } else { data_at.get(inst.next).map(fn(i) { inline_data_end(image, i) }) }
         let proven = match table {
           Some(end) =>
             match proofs.get((pc, inst.arg)) {
@@ -801,7 +805,8 @@ fn explore_with(image: Image, waiting: Map[Int, Int], switching: Map[Int, Int]?)
             work.push((jump_target(inst), f.entry(), pc))
           }
           None => {
-            work.push((jump_target(inst), f.entry(), pc)); work.push((inst.next, after, pc))
+            work.push((jump_target(inst), f.entry(), pc))
+            work.push((image.continuation(pc, inst.next, jump_target(inst)), after, pc))
           }
         }
       }
@@ -873,6 +878,7 @@ fn explore_with(image: Image, waiting: Map[Int, Int], switching: Map[Int, Int]?)
       } else { needed.add(jump_target(inst)) }
     }
     if following.get(pc) != Some(inst.next) { needed.add(inst.next) }
+    if inst.op == JSR { needed.add(image.continuation(pc, inst.next, jump_target(inst))) }
     // where a restart would continue the reset routine (see `restarts`)
     if inst.op == TXS { needed.add(pc) }
   }

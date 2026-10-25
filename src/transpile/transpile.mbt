@@ -253,6 +253,9 @@ fn Emitter::emit_code_h(self: Emitter, program: @ir.Program, uses_ppu_bus~: Bool
   if uses_ppu_bus { self.emit("#include \"ppu_bus.h\"") }
   if banked { self.emit("#include \"mapper.h\"") }
   self.emit("#include \"sound.h\"")
+  // (a board whose registers are written without switching PRG banks: the
+  // cartridge runtime's mapper.c)
+  if !banked { self.emit("void mapper_write(uint16_t addr, uint8_t value);") }
   self.emit("")
 
   if banked {

@@ -87,7 +87,13 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
         }
         _ => ()
       }
-      if next_depth > 253 { raise InvalidImage("Excessive stack depth at \{show_pc(pc)} from \{address_name(self.image, entry)}") }
+      if next_depth > 253 {
+        // with exact returns the guest stack is the machine's, whatever
+        // the depth (a loop pushing as its data says): returns go where
+        // the bytes pulled say
+        if !self.exact.val { raise InvalidImage("Excessive stack depth at \{show_pc(pc)} from \{address_name(self.image, entry)}") }
+        next_depth = 253
+      }
       if next_depth < 0 {
         // the routine reaches its return address
         if is_reset || is_interrupt { raise InvalidImage("Return-token access in an interrupt or reset entry at \{show_pc(pc)}") }
@@ -112,7 +118,10 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
           continue
         }
         // a return through part of a return address goes nowhere known
-        if depth > 0 || depth % 2 != 0 || (inst.op == RTI && depth != 0) { raise InvalidImage("Unbalanced return at \{show_pc(pc)}") }
+        // (with exact returns, wherever the bytes pulled say)
+        if (depth > 0 || depth % 2 != 0 || (inst.op == RTI && depth != 0)) && !(self.exact.val && inst.op == RTS) {
+          raise InvalidImage("Unbalanced return at \{show_pc(pc)}")
+        }
         continue
       }
       if self.idle.contains(pc) {
@@ -161,6 +170,8 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
       } else if inst.op == JSR && always_unwinds(self.image, jump_target(inst)) {
         // the callee returns from this routine, through its return address
         self.exact.val = true
+      } else if inst.op == JSR {
+        work.push((self.image.continuation(pc, inst.next, jump_target(inst)), next_depth, after))
       } else { work.push((inst.next, next_depth, after)) }
     }
   }

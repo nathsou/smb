@@ -624,6 +624,10 @@ fn build_routine(
                 Absolute(Ident(name~, ..)) if exact && id < 0 => term = Some(TailCall(rename(name)))
                 Absolute(Ident(name~, ..)) if exact => {
                   let return_address = (id & 0xffff) + 2
+                  // (past the bytes after the call, for a routine that
+                  // reads them)
+                  let inst = program.instructions[id]
+                  let back = program.image.continuation(id, inst.next, @image.jump_target(inst)) & 0xffff
                   push(builder, Const(return_address >> 8))
                   push(builder, Const(return_address & 0xff))
                   builder.emit(Call(rename(name)))
@@ -631,7 +635,7 @@ fn build_routine(
                   let next = f.blocks.length() - 1
                   f.blocks[current].stmts = builder.stmts
                   // returned elsewhere: past this routine too
-                  f.blocks[current].term = Branch(Binary(Ne, Runtime("cpu_return"), Const(return_address + 1)), exits.ret(), next)
+                  f.blocks[current].term = Branch(Binary(Ne, Runtime("cpu_return"), Const(back)), exits.ret(), next)
                   current = next
                   builder = { low, program, f, stmts: [], at: id }
                 }

@@ -110,6 +110,8 @@ pub(all) struct Banks {
   window_names : Map[Int32, String]
   code : Array[(Int32, Int32, Int32)]
   shadows : Array[(Int32, Int32)]
+  jumps : Array[(Int32, Int32)]
+  inline : Array[(Int32, Int32)]
 } derive(@debug.Debug)
 pub fn Banks::none() -> Self
 
@@ -171,6 +173,7 @@ pub(all) struct Image {
   defines : Map[String, @parse.SourceExpr]
 } derive(@debug.Debug)
 pub fn Image::banked(Self) -> Bool
+pub fn Image::continuation(Self, Int32, Int32, Int32) -> Int32
 pub fn Image::eval(Self, @parse.SourceExpr) -> Int32 raise ImageError
 pub fn Image::is_data(Self, Int32) -> Bool
 pub fn Image::new(Int32, Array[Int32], Map[String, Int32], Array[Int32], Array[@parse.SourceItem], Banks, Array[(Int32, Int32)]) -> Self
@@ -266,6 +269,8 @@ pub(all) struct RomMap {
   prg_mode : Int32
   shadows : Array[(Int32, Int32)]
   exact : Bool
+  jumps : Array[(Int32, Int32)]
+  inline : Array[(Int32, Int32)]
 } derive(@debug.Debug)
 pub fn RomMap::bank_name(Self, Int32) -> String
 pub fn RomMap::empty() -> Self

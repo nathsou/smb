@@ -1,0 +1,29 @@
+# Tetris (NES): the names this project gives to the program's routines,
+# tables and variables, and what code discovery cannot recover by itself.
+#
+# The cartridge is an MMC1 board with 32 KiB of PRG ROM (nothing to switch:
+# the program is recompiled as one image) and 16 KiB of CHR ROM in 4 KiB
+# banks. See src/image/rom.mbt for the syntax.
+
+rom 2ae5fb18a1bf841077e3872ba05060f030ea0bfc573994b2f8fe2fb570dc7853 32768 16384 ; Tetris (USA)
+exact   ; the machine's stack, byte for byte (as the reference interpreter has it)
+
+# The dispatcher: `jsr jump_by_index` with the index in A, then a table of routine
+# addresses, which it jumps through
+
+routine $ac82 jump_by_index    ; jsr jump_by_index, then the routines' addresses: to the one indexed by A
+table $8050 game_modes 10        ; by game_mode
+table $8166 play_states 14       ; by play_state
+table $81a0 play_routines 18
+table $81b7 player_routines 24
+table $81de player2_routines 24
+table $a4b6 switch_a4b6 14
+table $a540 switch_a540 12
+
+# The sound engine: what a sound starts with (by sound, from 1, from where
+# each channel's entries start), or nothing ($E091)
+code $e009 sound_inits 33
+jump $e1cb $e091
+
+# Calls followed by the address of what to write to the PPU
+inline $aa98 2

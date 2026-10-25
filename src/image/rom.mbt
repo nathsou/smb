@@ -44,6 +44,17 @@
 //
 //   trap    $f7a3                        ; optional description
 //
+// A computed jump goes to the addresses of code tables (`code`), or where
+// the map says besides (a default the game sets with immediates):
+//
+//   jump    $e1cb $e091                  (the jump at $E1CB can go to $E091)
+//
+// A routine can read bytes that follow its calls, through its return
+// address, and return past them (its calls then keep return addresses on
+// the guest stack, see `exact`):
+//
+//   inline  $aa98 2                      (two bytes after each call)
+//
 // An entry in banks becomes one per bank, named after the bank
 // (brinstar_update_objects), and one for the window as fixed-bank code sees
 // it (update_objects): a call to it goes to the routine of the bank mapped
@@ -117,10 +128,12 @@ pub(all) struct RomMap {
   prg_mode: Int // MMC3's PRG mode the game sets (bit 6 of its bank select)
   shadows: Array[(Int, Int)] // window address, RAM address
   exact: Bool // calls keep return addresses on the guest stack (see `exact`)
+  jumps: Array[(Int, Int)] // a computed jump's location, and where it can go besides the code tables
+  inline: Array[(Int, Int)] // a routine's location, and the bytes after its calls that it returns past
 } derive(Debug)
 
 pub fn RomMap::empty() -> RomMap {
-  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false }
+  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, jumps: [], inline: [] }
 }
 
 // The name of a switchable bank, the prefix of its entries.
@@ -163,6 +176,14 @@ fn parse_location(text: String) -> (Int, Array[Int]) raise ImageError {
   (address, Array::makei(last - first + 1, fn(k) { first + k }))
 }
 
+// Names that cannot be C functions or constants.
+let c_keywords : Array[String] = [
+  "auto", "break", "case", "char", "const", "continue", "default", "do", "double", "else", "enum",
+  "extern", "float", "for", "goto", "if", "inline", "int", "long", "register", "restrict", "return",
+  "short", "signed", "sizeof", "static", "struct", "switch", "typedef", "union", "unsigned", "void",
+  "volatile", "while", "main",
+]
+
 pub fn parse_map(text: String) -> RomMap raise ImageError {
   let entries = []
   let roms = []
@@ -171,10 +192,13 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
   let banks: Array[MapBank] = []
   let mut prg_mode = 0
   let mut exact = false
+  let jumps: Array[(Int, Int)] = []
+  let inline: Array[(Int, Int)] = []
   let shadows: Array[(Int, Int)] = []
   let names: Set[String] = Set([])
   fn claim(name: String) raise ImageError {
     if names.contains(name) { raise InvalidImage("Duplicate map name: \{name}") }
+    if c_keywords.contains(name) { raise InvalidImage("A map name cannot be a C keyword: \{name}") }
     names.add(name)
   }
   for raw_line in text.split("\n") {
@@ -209,6 +233,30 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
         members.push((constant, value))
       }
       types.push({ name, flags: fields[0] == "flags", members, description })
+      continue
+    }
+    // jump [BANK:]$SITE [BANK:]$TARGET: a computed jump can go there too
+    if fields[0] == "jump" {
+      if fields.length() != 3 { raise InvalidImage("Map jump line needs the jump's address and a target: \{line}") }
+      let one = fn(text: String) raise ImageError {
+        match parse_location(text) {
+          (address, []) => address
+          (address, [bank]) => bank_location(bank, address)
+          _ => raise InvalidImage("A jump and its target are in one bank each: \{line}")
+        }
+      }
+      jumps.push((one(fields[1]), one(fields[2])))
+      continue
+    }
+    // inline [BANK:]$ROUTINE BYTES: its calls are followed by that many bytes
+    if fields[0] == "inline" {
+      if fields.length() != 3 { raise InvalidImage("Map inline line needs a routine and a number of bytes: \{line}") }
+      let location = match parse_location(fields[1]) {
+        (address, []) => address
+        (address, [bank]) => bank_location(bank, address)
+        _ => raise InvalidImage("An inline routine is in one bank: \{line}")
+      }
+      inline.push((location, parse_number(fields[2])))
       continue
     }
     // exact: calls keep their return addresses on the guest stack
@@ -329,7 +377,7 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       raise InvalidImage("Unknown map type: \{entry.type_name}")
     }
   }
-  { entries, roms, types, banks, prg_mode, shadows, exact }
+  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), jumps, inline }
 }
 
 pub(all) struct Cartridge {
@@ -339,13 +387,14 @@ pub(all) struct Cartridge {
 } derive(Debug)
 
 // MMC1 boards switch 16 KiB of PRG ROM at $8000 with the last bank fixed at
-// $C000 (the mode games set at power-on); CHR is RAM, or 8 KiB of ROM.
+// $C000 (the mode games set at power-on); CHR is RAM, or up to 128 KiB of
+// ROM in 4 KiB banks.
 fn check_mmc1(prg_size: Int, chr_size: Int) -> Unit raise ImageError {
   let banks = prg_size / 16384
   if prg_size % 16384 != 0 || banks < 2 || banks > 16 || (banks & (banks - 1)) != 0 {
     raise InvalidImage("MMC1 needs 32 to 256 KiB of PRG ROM in 16 KiB banks")
   }
-  if chr_size != 0 && chr_size != 8192 { raise InvalidImage("Only MMC1 boards with CHR RAM or 8 KiB of CHR ROM are supported") }
+  if chr_size > 131072 || chr_size % 8192 != 0 { raise InvalidImage("MMC1 has CHR RAM or up to 128 KiB of CHR ROM") }
 }
 
 // MMC3 boards switch 8 KiB banks of PRG ROM and 1 or 2 KiB banks of CHR ROM
@@ -447,8 +496,11 @@ fn byte_const(value: Int) -> @parse.SourceExpr {
 // The image of a ROM before code discovery: map labels, tables as data
 // directives (they bound inline jump tables), and variable definitions.
 pub fn rom_image(cartridge: Cartridge, map: RomMap) -> Image raise ImageError {
-  let banked = cartridge.mapper != 0
+  // (MMC1 with 32 KiB of PRG ROM switches nothing: its window holds the
+  // first bank, the last fixed; its registers still bank the CHR)
+  let banked = cartridge.mapper != 0 && !(cartridge.mapper == 1 && cartridge.prg.length() == 0x8000)
   let layout = match cartridge.mapper {
+    _ if !banked => Layout::none()
     1 => Layout::mmc1(cartridge.prg.length() / 0x4000)
     4 => Layout::mmc3(cartridge.prg.length() / 0x2000, map.prg_mode)
     _ => Layout::none()
@@ -480,8 +532,12 @@ pub fn rom_image(cartridge: Cartridge, map: RomMap) -> Image raise ImageError {
       window_names: Map([]),
       code: [],
       shadows: [],
+      jumps: [],
+      inline: [],
     }
   } else { Banks::none() }
+  for jump in map.jumps { banks.jumps.push(jump) }
+  for routine in map.inline { banks.inline.push(routine) }
   for shadow in map.shadows {
     let window = window_of(shadow.0)
     if window < 0 || layout.windows[window] != shadow.0 { raise InvalidImage("Shadow of \{show_pc(shadow.0)}, which is not a window") }
@@ -749,9 +805,13 @@ pub fn discover_rom(image: Image, map: RomMap) -> Program raise ImageError {
     let call = inst.op == RTS && facts.get(pc).map(fn(f) { f.depth == Some(4) }).unwrap_or(false) && jumps.contains(pc)
     let falls = (call || (inst.op != JMP && inst.op != RTS)) && inst.op != RTI &&
       inst.op != BRK && !dispatches.contains(pc) && branch != Some(true)
+    let next = if inst.op == JSR { image.continuation(pc, inst.next, jump_target(inst)) } else { inst.next }
     if inst.op == JSR && always_unwinds(image, jump_target(inst)) {
       // the callee returns past this routine: nothing follows the call
       append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(trap_name(inst.next)))), pc)
+    } else if inst.op == JSR && next != inst.next {
+      // past the bytes the callee reads
+      append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(target_name(next)))), pc)
     } else if falls && transfer_name(pc, inst.next) == "__ret__" {
       append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident("__ret__"))), pc)
     } else if falls && (following.get(pc) != Some(inst.next) || traps.contains(inst.next)) {

@@ -49,10 +49,21 @@ pub(all) struct Banks {
   window_names: Map[Int, String] // window address -> the routine as fixed-bank code calls it
   code: Array[(Int, Int, Int)] // locations of the code addresses in the map's code tables, what to add to them, and the table's address
   shadows: Array[(Int, Int)] // a window and the RAM byte holding its bank, where nothing else tells
+  jumps: Array[(Int, Int)] // where computed jumps go besides the code tables: the jump's location and the target's
+  inline: Array[(Int, Int)] // routines that read bytes after their calls and return past them: location, bytes
 } derive(Debug)
 
 pub fn Banks::none() -> Banks {
-  { contents: [], homes: [], companions: [], names: [], windows: Map([]), window_names: Map([]), code: [], shadows: [] }
+  { contents: [], homes: [], companions: [], names: [], windows: Map([]), window_names: Map([]), code: [], shadows: [], jumps: [], inline: [] }
+}
+
+// Where a call returns: after it, or after the bytes that follow it when
+// the routine reads them and returns past them (the map's `inline`).
+pub fn Image::continuation(self: Image, call: Int, next: Int, target: Int) -> Int {
+  match self.banks.inline.iter().find_first(fn(i) { i.0 == target || (i.0 & 0xffff) == target }) {
+    Some((_, bytes)) => rebase(call, (next & 0xffff) + bytes)
+    None => next
+  }
 }
 
 pub fn Image::banked(self: Image) -> Bool {

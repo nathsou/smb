@@ -1,6 +1,6 @@
 // Cartridges: an iNES file, or a raw dump of the cartridge (PRG then CHR, no
 // header) of 24 or 40 KiB (NROM). Mapper 0 (NROM, 16 or 32 KiB of PRG ROM),
-// mapper 1 (MMC1, 32 to 256 KiB, CHR RAM or 8 KiB of CHR ROM) and mapper 4
+// mapper 1 (MMC1, 32 to 256 KiB, CHR RAM or up to 128 KiB of CHR ROM) and mapper 4
 // (MMC3, 32 to 512 KiB of PRG ROM, up to 256 KiB of CHR ROM) are supported. The recompiler applies the same rules (src/image/rom.mbt) and
 // identifies the dump by the SHA-256 of PRG and CHR.
 
@@ -18,7 +18,7 @@ export function splitDump(rom) {
         } else if (mapper === 1) {
             const banks = rom[4];
             if (banks < 2 || banks > 16 || (banks & (banks - 1)) !== 0) throw new Error('MMC1 needs 32 to 256 KiB of PRG ROM in 16 KiB banks');
-            if (chrSize !== 0 && chrSize !== 0x2000) throw new Error('Only MMC1 boards with CHR RAM or 8 KiB of CHR ROM are supported');
+            if (chrSize > 0x20000) throw new Error('MMC1 has CHR RAM or up to 128 KiB of CHR ROM');
         } else if (mapper === 4) {
             const banks = rom[4] * 2;
             if (banks < 4 || banks > 64 || (banks & (banks - 1)) !== 0) throw new Error('MMC3 needs 32 to 512 KiB of PRG ROM in 8 KiB banks');
