@@ -386,7 +386,7 @@ fn code_targets(image: Image, site: Int, call~: Bool = false) -> Array[Int] rais
       window_of(location) != window_of(site)
     if bank_of(location) != bank_of(site) && !other_window { continue }
     let word = image.word(location)
-    if word < 0x8000 { continue } // an unused entry
+    if word < 0x8000 && !image.banks.ram_code.contains(word + adjust) { continue } // an unused entry
     let target = rebase(location, word + adjust)
     let target = if other_window && bank_of(target) is Some(_) { target & 0xffff } else { target }
     if !targets.contains(target) { targets.push(target) }
@@ -722,7 +722,7 @@ fn explore_with(image: Image, waiting: Map[Int, Int], switching: Map[Int, Int]?)
       windows[pc] = targets
       continue
     }
-    let inside = if pc < 0x800 && image.banks.ram_code.contains(pc) { true } else if image.banked() {
+    let inside = if pc < 0x8000 && image.banks.ram_code.contains(pc) { true } else if image.banked() {
       (bank_of(pc) is Some(bank) && bank < image.banks.contents.length()) || fixed_bank(pc) >= 0
     } else { pc >= image.origin && pc < image.origin + image.bytes.length() }
     if !inside {

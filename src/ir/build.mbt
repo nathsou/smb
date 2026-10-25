@@ -600,14 +600,15 @@ fn build_routine(
         Label(_) | Comment(_) => ()
         Inst(id~, op~, mode~, ..) => {
           if id >= 0 { builder.at = id }
-          if id >= 0 && id < 0x800 && program.image.banks.ram_code.contains(id) {
+          if id >= 0 && id < 0x8000 && program.image.banks.ram_code.contains(id) {
             // code in RAM: what the map says the program wrote there, or a
             // trap
             let size = program.instructions[id].next - id
             let mut differs = Const(0)
             for k in 0..<size {
               let byte = program.image.banks.ram_code.get(id + k).unwrap_or(-1)
-              differs = Binary(Or, differs, Binary(Ne, Load(Ram, Const(id + k)), Const(byte)))
+              let space : Mem = if id < 0x2000 { Ram } else { Wram }
+              differs = Binary(Or, differs, Binary(Ne, Load(space, Const(id + k)), Const(byte)))
             }
             f.blocks.push({ label: "", stmts: [], term: Return })
             let next = f.blocks.length() - 1

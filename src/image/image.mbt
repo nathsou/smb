@@ -333,7 +333,7 @@ fn math_min(a: Int, b: Int) -> Int { if a < b { a } else { b } }
 fn math_max(a: Int, b: Int) -> Int { if a > b { a } else { b } }
 
 pub fn Image::read(self: Image, address: Int) -> Int raise ImageError {
-  if address < 0x2000 {
+  if address < 0x8000 {
     // code the program writes to RAM
     return self.banks.ram_code.get(address).unwrap_or_error(InvalidImage("Address outside image: \{address}"))
   }

@@ -73,6 +73,8 @@
 // bytes the map gives (the generated code traps if RAM holds others):
 //
 //   ram     $07fd 6c 00 00               (jmp ($0000), where the NMI goes)
+//   copied  $6c90 1:$a500 $1270          (code copied from bank 1 to the
+//                                         cartridge's RAM)
 //
 // An entry in banks becomes one per bank, named after the bank
 // (brinstar_update_objects), and one for the window as fixed-bank code sees
@@ -152,10 +154,11 @@ pub(all) struct RomMap {
   jumps: Array[(Int, Int)] // a computed jump's location, and where it can go besides the code tables
   inline: Array[(Int, Int)] // a routine's location, and the bytes after its calls that it returns past
   ram_code: Array[(Int, Array[Int])] // code the program writes to RAM: address and bytes
+  copied: Array[(Int, Int, Int, Int)] // code it copies from ROM to RAM: address, bank (-1: fixed), ROM address, bytes
 } derive(Debug)
 
 pub fn RomMap::empty() -> RomMap {
-  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, follow: false, preempt: 0, jumps: [], inline: [], ram_code: [] }
+  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, follow: false, preempt: 0, jumps: [], inline: [], ram_code: [], copied: [] }
 }
 
 // The name of a switchable bank, the prefix of its entries.
@@ -198,6 +201,15 @@ fn parse_location(text: String) -> (Int, Array[Int]) raise ImageError {
   (address, Array::makei(last - first + 1, fn(k) { first + k }))
 }
 
+// Where code in RAM can be: internal RAM, or the cartridge's.
+fn ram_address(address: Int, bytes: Int) -> Bool {
+  bytes > 0 && ((address >= 0 && address + bytes <= 0x800) || (address >= 0x6000 && address + bytes <= 0x8000))
+}
+
+fn count_banks(cartridge: Cartridge, layout: Layout) -> Int {
+  cartridge.prg.length() / layout.bank_size
+}
+
 // Names that cannot be C functions or constants.
 let c_keywords : Array[String] = [
   "auto", "break", "case", "char", "const", "continue", "default", "do", "double", "else", "enum",
@@ -219,6 +231,7 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
   let jumps: Array[(Int, Int)] = []
   let inline: Array[(Int, Int)] = []
   let ram_code: Array[(Int, Array[Int])] = []
+  let copied: Array[(Int, Int, Int, Int)] = []
   let shadows: Array[(Int, Int)] = []
   let names: Set[String] = Set([])
   fn claim(name: String) raise ImageError {
@@ -290,10 +303,20 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       let address = parse_number(fields[1])
       let bytes = []
       for f in fields[2:] { bytes.push(parse_number("$" + f)) }
-      if address < 0 || address + bytes.length() > 0x800 || bytes.iter().any(fn(b) { b < 0 || b > 255 }) {
-        raise InvalidImage("Code in RAM is in $0000-$07FF, a byte at a time in hexadecimal: \{line}")
+      if !ram_address(address, bytes.length()) || bytes.iter().any(fn(b) { b < 0 || b > 255 }) {
+        raise InvalidImage("Code in RAM is in $0000-$07FF or $6000-$7FFF, a byte at a time in hexadecimal: \{line}")
       }
       ram_code.push((address, bytes))
+      continue
+    }
+    // copied $ADDR [BANK:]$ROM BYTES: code the program copies from ROM to RAM
+    if fields[0] == "copied" {
+      if fields.length() != 4 { raise InvalidImage("Map copied line needs the RAM address, where in ROM, and how many bytes: \{line}") }
+      let address = parse_number(fields[1])
+      let (rom, in_banks) = parse_location(fields[2])
+      let count = parse_number(fields[3])
+      if !ram_address(address, count) || in_banks.length() > 1 { raise InvalidImage("Code copied to RAM is in $0000-$07FF or $6000-$7FFF, from one bank: \{line}") }
+      copied.push((address, if in_banks.is_empty() { -1 } else { in_banks[0] }, rom, count))
       continue
     }
     // banks follow: discovery follows what MMC1's serial writes switch in
@@ -427,7 +450,7 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       raise InvalidImage("Unknown map type: \{entry.type_name}")
     }
   }
-  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), follow, preempt, jumps, inline, ram_code }
+  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), follow, preempt, jumps, inline, ram_code, copied }
 }
 
 pub(all) struct Cartridge {
@@ -592,6 +615,20 @@ pub fn rom_image(cartridge: Cartridge, map: RomMap) -> Image raise ImageError {
   for routine in map.inline { banks.inline.push(routine) }
   for code in map.ram_code {
     for i, byte in code.1 { banks.ram_code[code.0 + i] = byte }
+  }
+  for code in map.copied {
+    let (address, bank, rom, count) = code
+    for i in 0..<count {
+      let at = rom + i
+      let byte = if bank >= 0 {
+        guard bank < count_banks(cartridge, layout) && window_of(at) >= 0 else { raise InvalidImage("Copied code from \{show_pc(rom)} in bank \{bank}, which is not in a window of the cartridge") }
+        cartridge.prg[bank * layout.bank_size + (at & (layout.bank_size - 1))]
+      } else {
+        guard at >= origin && at < 0x10000 else { raise InvalidImage("Copied code from \{show_pc(rom)}, outside the fixed PRG ROM") }
+        bytes[at - origin]
+      }
+      banks.ram_code[address + i] = byte
+    }
   }
   for shadow in map.shadows {
     let window = window_of(shadow.0)

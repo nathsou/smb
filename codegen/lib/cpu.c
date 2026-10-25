@@ -255,7 +255,7 @@ inline uint8_t zero_page(uint8_t addr) {
     return read_byte((uint16_t)addr);
 }
 
-inline uint8_t zero_page_x_addr(uint8_t addr) {
+static inline uint8_t zero_page_x_addr(uint8_t addr) {
     return addr + x;
 }
 
@@ -263,7 +263,7 @@ inline uint8_t zero_page_x(uint8_t addr) {
     return read_byte((uint16_t)zero_page_x_addr(addr));
 }
 
-inline uint8_t zero_page_y_addr(uint8_t addr) {
+static inline uint8_t zero_page_y_addr(uint8_t addr) {
     return addr + y;
 }
 
