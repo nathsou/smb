@@ -61,6 +61,19 @@ void cpu_restart(uint8_t routine) {
 
 void cpu_restart_done(void) {
     cpu_restarting = 0;
+    cpu_preempted = 0;
+    cpu_polls = 0;
+}
+
+uint8_t cpu_preempted;
+uint16_t cpu_polls, cpu_poll_budget;
+
+void cpu_preemption(uint8_t low, uint8_t high) {
+    cpu_poll_budget = (uint16_t)(low | (high << 8));
+}
+
+void cpu_poll(void) {
+    if (++cpu_polls >= cpu_poll_budget) cpu_preempted = 1;
 }
 
 uint16_t cpu_dispatch_target;
@@ -341,10 +354,18 @@ static void cpu_irq(void) {
 #endif
 
 inline void next_frame(void) {
+    // preemption counts transfers back from the frame's start
+    cpu_polls = 0;
+    cpu_preempted = 0;
     // NMI is delivered while the foreground is at a proven idle yield or
-    // suspended in a wait loop, then the frame's scanlines raise the
+    // suspended in a wait loop (when PPUCTRL enables it, for programs that
+    // drive the PPU registers), then the frame's scanlines raise the
     // mapper's IRQ.
+#ifdef PPU_BUS
+    bool enabled = (video.ctrl & VIDEO_CTRL_NMI) ? cpu_interrupt(cpu_nmi_entry) : false;
+#else
     bool enabled = cpu_interrupt(cpu_nmi_entry);
+#endif
 #ifdef MAPPER
     mapper_frame(cpu_irq, enabled || !interrupt_disabled);
 #else

@@ -1,0 +1,47 @@
+# The Chessmaster (NES): the names this project gives to the program's
+# routines, tables and variables, and what code discovery cannot recover by
+# itself.
+#
+# The cartridge is an MMC1 board: eight 16 KiB banks of PRG ROM, the last
+# fixed at $C000, and 32 KiB of CHR ROM in 4 KiB banks. See
+# src/image/rom.mbt for the syntax.
+
+rom b705f866955c7d19292b55a9b0f3ec0e970e3f2509c3da15708b7afd879d98ed 131072 32768 ; The Chessmaster (USA)
+exact   ; the machine's stack, byte for byte (as the reference interpreter has it)
+banks follow   ; lda #bank / jsr switch_prg / jsr $8000: discovery follows the bank
+
+# The NMI vector points to RAM, where the game writes jmp ($0000)
+ram $07fd 6c 00 00
+jump $07fd $802a                ; the game's NMI handler (title and board)
+jump $07fd $8070                ; while the engine thinks
+routine 0-1:$802a nmi
+routine 4:$8070 engine_nmi
+
+bank 0 game     ; the game, in English
+bank 1 game1    ; the same, another edition (by $0710 bit 0)
+bank 3 setup
+bank 4 engine   ; the chess engine
+
+# The game's banks (0 and 1) start with jumps to their routines, which the
+# fixed bank calls with whichever of the two is mapped
+routine 0-1:$8003 game_8003
+routine 0-1:$8006 game_8006
+routine 0-1:$8009 game_8009
+routine 0-1:$800f game_800f
+routine 0-1:$8012 game_8012
+routine 0-1:$8018 game_8018
+routine 0-1:$801b game_801b
+routine 0-1:$801e game_801e
+routine 0-1:$8021 game_8021
+routine 0-1:$8027 game_8027
+
+# Fixed bank
+code $d988 jumps_d988 22
+code $ed1a jumps_ed1a 6
+
+# The engine's commands, a byte and a routine each
+code 4:$8948 engine_commands 9 3
+
+# The engine thinks for seconds without waiting for the interrupt, which
+# the hardware delivers wherever it is: here it goes back 500 times a frame
+preempt 500

@@ -53,6 +53,7 @@ fn runtime_type(name : String) -> Int {
     "dynamic_ram_write" | "apu_write" | "ppu_bus_write" | "mapper_write" | "cpu_returned" => 2
     "write_joypad1" | "write_joypad2" | "cpu_yield" | "cpu_unresolved_jump" | "ppu_bus_oam_dma" | "cpu_suspend" |
     "mapper_prg_mode" | "cpu_restart" => 1
+    "cpu_preemption" => 2
     _ => 0
   }
 }

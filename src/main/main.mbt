@@ -6,6 +6,8 @@
 //   --map FILE --header FILE        only write the map's names as a C header
 //   --native FILE                   routines written by hand (see routines.txt)
 //   --reference                     the unoptimised IR (differential test)
+//   --polls FILE                    where the foreground polls (a map with
+//                                   `preempt`), for the reference interpreter
 //   --wasm FILE                     also emit the WebAssembly game module
 //     --wasm-layout FILE            "name address" lines: the runtime's addresses
 //     --wasm-dispatch               every function as a dispatch loop
@@ -66,6 +68,8 @@ fn run() -> Unit raise Error {
   let output_dir = option("--output", "codegen/game")
   if !@fs.path_exists(output_dir) { @fs.create_dir(output_dir) }
   for file in output.files { file.write(dir=output_dir) }
+  let polls_path = option("--polls", "")
+  if polls_path != "" { @fs.write_string_to_file(polls_path, output.polls.map(fn(p) { p + "\n" }).join("")) }
   if output.wasm is Some(bytes) {
     if !output.irreducible.is_empty() {
       println("Irreducible control flow (dispatch loop): \{output.irreducible.join(", ")}")

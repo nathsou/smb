@@ -3,9 +3,9 @@
 # calls must be listed; the other routines get generated names.
 io $2003 oam_address
 routine $c000 boot
-table $c045 handlers 4                   ; addresses after the call to choose
-routine $c04f choose                     ; jump through the address table after the call
-table $c069 return_handlers 4            ; return addresses (target - 1)
-routine $c073 return_dispatch            ; return through the table after the call
-routine $c08e tick
+table $c04a handlers 4                   ; addresses after the call to choose
+routine $c054 choose                     ; jump through the address table after the call
+table $c06e return_handlers 4            ; return addresses (target - 1)
+routine $c078 return_dispatch            ; return through the table after the call
+routine $c093 tick
 table $fffa vectors 6

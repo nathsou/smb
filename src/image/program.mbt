@@ -76,9 +76,16 @@ pub fn jump_target(inst: Instruction) -> Int {
   if inst.arg >= 0x10000 { inst.arg } else { rebase(inst.pc, inst.arg) }
 }
 
-// Whether discovery follows banks (MMC3: two windows).
+// Whether discovery follows banks (MMC3: two windows; MMC1 when the map
+// asks, `banks follow`).
 fn follows_banks() -> Bool {
-  layout().windows.length() >= 2
+  layout().windows.length() >= 2 || (layout().windows.length() == 1 && following_mmc1.val)
+}
+
+let following_mmc1 : Ref[Bool] = Ref(false)
+
+pub fn follow_mmc1(follow: Bool) -> Unit {
+  following_mmc1.val = follow
 }
 
 // A call or jump into a window from outside it, when the bank mapped there
@@ -367,8 +374,10 @@ fn code_targets(image: Image, site: Int, call~: Bool = false) -> Array[Int] rais
     image.banks.code.filter(fn(code) { loaded.iter().any(fn(l) { l < code.2 && l >= code.2 - 8 }) })
   }
   let from_loads = !tables.is_empty()
-  // (a computed call only goes where its table says)
-  let entries = if from_loads || call { tables } else { image.banks.code }
+  // (a computed call only goes where its table says, and a jump the map
+  // gives targets for where it says)
+  let listed = image.banks.jumps.iter().any(fn(j) { j.0 == site })
+  let entries = if from_loads || call || listed { tables } else { image.banks.code }
   // a bank without code tables of its own jumps to the other window's
   let own = image.banks.code.iter().any(fn(code) { bank_of(code.0) == bank_of(site) })
   for code in entries {
@@ -504,6 +513,10 @@ fn switched_windows(inst: Instruction, f: Facts?, shadows: Array[(Int, Int)]) ->
       Some(s) => return 1 << s.0
       None => ()
     }
+  }
+  // MMC1: its PRG register, at the fifth write
+  if layout().windows.length() == 1 {
+    return if (inst.mode == "abs" || inst.mode == "absx" || inst.mode == "absy") && inst.arg >= 0xe000 { 1 } else { 0 }
   }
   let mapper = (inst.mode == "abs" || inst.mode == "absx" || inst.mode == "absy") && inst.arg >= 0x8000 && inst.arg < 0xa000
   if !mapper { return 0 }
@@ -709,7 +722,7 @@ fn explore_with(image: Image, waiting: Map[Int, Int], switching: Map[Int, Int]?)
       windows[pc] = targets
       continue
     }
-    let inside = if image.banked() {
+    let inside = if pc < 0x800 && image.banks.ram_code.contains(pc) { true } else if image.banked() {
       (bank_of(pc) is Some(bank) && bank < image.banks.contents.length()) || fixed_bank(pc) >= 0
     } else { pc >= image.origin && pc < image.origin + image.bytes.length() }
     if !inside {
@@ -755,7 +768,7 @@ fn explore_with(image: Image, waiting: Map[Int, Int], switching: Map[Int, Int]?)
     instructions[pc] = inst
     // MMC3's scanline counter raises the IRQ once code enables interrupts
     // (the runtime raises it for no other mapper)
-    if follows_banks() && (inst.op == CLI || inst.op == PLP) {
+    if layout().windows.length() >= 2 && (inst.op == CLI || inst.op == PLP) {
       let irq = image.word(canonical(0xfffe))
       if !roots.contains(irq) { roots.push(irq); work.push((irq, start.entry(), pc)) }
     }

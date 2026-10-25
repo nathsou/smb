@@ -47,6 +47,14 @@ extern uint8_t cpu_restarting;
 void cpu_restart(uint8_t routine);
 void cpu_restart_done(void);
 
+// Preemption (a map's `preempt`): the foreground counts its transfers back
+// (`cpu_poll`) and yields past the budget (`cpu_preempted`, see the IR's
+// preempt.mbt); the count starts again each frame.
+extern uint8_t cpu_preempted;
+extern uint16_t cpu_polls, cpu_poll_budget;
+void cpu_preemption(uint8_t low, uint8_t high);
+void cpu_poll(void);
+
 // PHP/PLP
 void php(void);
 void plp(void);

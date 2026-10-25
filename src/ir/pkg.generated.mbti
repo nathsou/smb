@@ -101,6 +101,7 @@ pub(all) struct Function {
   doc : Array[String]
   native : Bool
   helper : Bool
+  polls : Array[(Int32, Int32)]
 } derive(@debug.Debug)
 pub fn Function::new_temp(Self, String, Width) -> Int32
 
@@ -129,6 +130,7 @@ pub fn Program::analyze(Self) -> Analysis
 pub fn Program::function(Self, String) -> Function?
 pub fn Program::inline_leaves(Self, limit? : Int32) -> Int32
 pub fn Program::is_root(Self, String) -> Bool
+pub fn Program::make_preemptible(Self) -> Array[Int32]
 pub fn Program::make_restartable(Self) -> Unit raise BuildError
 pub fn Program::make_resumable(Self) -> Unit raise BuildError
 pub fn Program::optimize(Self) -> Unit

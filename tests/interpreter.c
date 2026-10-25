@@ -11,11 +11,14 @@
 // usage: ./interpreter ROM.nes --waits [BANK:]FROM:TO,... [--rec FILE]
 //                     [--frames N] [--write-trace FILE] [--dump N,...]
 //                     [--profile FILE] [--poke F:ADDR=V,...]
-//                     [--save-state F:FILE]
+//                     [--save-state F:FILE] [--preempt K --polls FILE]
 //   a wait in a bank names it (the bank must be mapped there);
 //   --poke writes RAM before frame F (hex address and value), as replay's;
 //   --save-state writes the state after frame F as replay's does (to compare
 //   the two where their traces differ);
+//   --preempt K: the foreground also ends a frame at the K-th transfer back
+//   in it at the poll points of --polls ([BANK:]PC lines, the recompiler's
+//   --polls), as the recompiled code of a map with `preempt K` does;
 //   --dump writes those frames as frame_N.ppm;
 //   --profile writes what ran, for writing a map: the instructions run
 //   (by bank), calls and jumps into a window from outside it with the bank
@@ -51,9 +54,11 @@ static uint16_t wait_from[MAX_WAITS], wait_to[MAX_WAITS];
 static int wait_bank[MAX_WAITS]; // -1: a fixed bank
 static int wait_count;
 
-// The bank mapped at an address of PRG ROM (8 KiB banks).
+// The bank mapped at an address of PRG ROM, in the mapper's banks (MMC1's
+// of 16 KiB, MMC3's of 8 KiB), as maps number them.
 static int bank_at(uint16_t addr) {
-    return addr >= 0x8000 ? (int)(prg_slots[(addr >> 13) & 3] / 0x2000) : -1;
+    unsigned size = mapper_number == 1 ? 0x4000 : 0x2000;
+    return addr >= 0x8000 ? (int)(prg_slots[(addr >> 13) & 3] / size) : -1;
 }
 
 // --profile: what ran.
@@ -196,7 +201,7 @@ static uint8_t dec(uint8_t v) { return (uint8_t)(v - 1); }
 // One instruction. Returns false at an RTI (the end of the interrupt).
 static bool step(void) {
     uint16_t at = pc;
-    if (profile && at >= 0x8000) ran[bank_at(at)][at & 0x1fff] = 1;
+    if (profile && at >= 0x8000) ran[prg_slots[(at >> 13) & 3] / 0x2000][at & 0x1fff] = 1;
     uint8_t code = rd(pc++);
     Op op = ops[code];
     if (!op.name) { fprintf(stderr, "Unsupported opcode %02x at %04x\n", code, at); exit(2); }
@@ -276,13 +281,38 @@ static bool step(void) {
     return true;
 }
 
-// Runs the foreground to the next transfer back to a wait loop's start.
+// Preemption (--preempt K --polls FILE, as the recompiler's map `preempt`
+// and its --polls list): the foreground also ends its frame at a poll point
+// (a transfer back that the recompiled code checks) once it went back K
+// times in the frame.
+static unsigned preempt_budget, polls_taken;
+#define MAX_POLLS 8192
+static uint16_t poll_pc[MAX_POLLS];
+static int poll_bank[MAX_POLLS];
+static int poll_count = -1; // -1: every transfer back
+
+static bool polls_at(uint16_t at) {
+    if (poll_count < 0) return true;
+    for (int i = 0; i < poll_count; i++) {
+        if (poll_pc[i] == at && (poll_bank[i] < 0 || poll_bank[i] == bank_at(at))) return true;
+    }
+    return false;
+}
+
+// Runs the foreground to the next transfer back to a wait loop's start, or
+// to a poll point past the budget.
 static void run_foreground(void) {
     for (long count = 0;; count++) {
         uint16_t at = pc;
         step();
         for (int i = 0; i < wait_count; i++) {
             if (wait_from[i] == at && wait_to[i] == pc && (wait_bank[i] < 0 || wait_bank[i] == bank_at(at))) return;
+        }
+        // a taken branch or a jump back, at or before itself
+        if (preempt_budget && pc <= at && pc != (uint16_t)(at + 2) && pc != (uint16_t)(at + 3) && polls_at(at)) {
+            uint8_t code = rd(at);
+            bool back = (code & 0x1f) == 0x10 || code == 0x4c;
+            if (back && ++polls_taken >= preempt_budget) return;
         }
         if (count > 50000000) { fprintf(stderr, "The foreground does not reach a wait (at %04x)\n", pc); exit(3); }
     }
@@ -303,7 +333,8 @@ static void interrupt_through(uint16_t vector) {
     pc = resume;
 }
 
-static void interrupt(void) { interrupt_through(0xfffa); }
+// (the PPU raises it only when PPUCTRL enables it)
+static void interrupt(void) { if (video.ctrl & VIDEO_CTRL_NMI) interrupt_through(0xfffa); }
 static void irq(void) { interrupt_through(0xfffe); }
 
 // Whether frame `i` is in the comma-separated list.
@@ -349,6 +380,21 @@ int main(int argc, char **argv) {
     const char *profile_path = option(argc, argv, "--profile");
     const char *dispatcher_option = option(argc, argv, "--dispatcher");
     const char *pokes = option(argc, argv, "--poke");
+    const char *preempt = option(argc, argv, "--preempt");
+    const char *polls_path = option(argc, argv, "--polls");
+    if (preempt) preempt_budget = (unsigned)strtoul(preempt, NULL, 10);
+    if (polls_path) {
+        FILE *list = fopen(polls_path, "r");
+        if (!list) { fprintf(stderr, "Cannot open %s\n", polls_path); return 1; }
+        char line[64];
+        poll_count = 0;
+        while (fgets(line, sizeof line, list) && poll_count < MAX_POLLS) {
+            unsigned bank, at;
+            if (sscanf(line, "%u:%x", &bank, &at) == 2) { poll_bank[poll_count] = (int)bank; poll_pc[poll_count++] = (uint16_t)at; }
+            else if (sscanf(line, "%x", &at) == 1) { poll_bank[poll_count] = -1; poll_pc[poll_count++] = (uint16_t)at; }
+        }
+        fclose(list);
+    }
     const char *save_option = option(argc, argv, "--save-state");
     unsigned save_frame = 0;
     char save_path[256] = "";
@@ -407,6 +453,7 @@ int main(int argc, char **argv) {
     for (uint32_t i = 0; i < frames; i++) {
         update_controller1(rec_path ? rec_state_at_frame(&recording, i) : 0);
         rec_pokes(pokes, i, poke);
+        polls_taken = 0;
         interrupt();
         mapper_frame(irq, left_enabled || !interrupt_disabled);
         run_foreground();

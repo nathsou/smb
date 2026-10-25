@@ -51,10 +51,11 @@ pub(all) struct Banks {
   shadows: Array[(Int, Int)] // a window and the RAM byte holding its bank, where nothing else tells
   jumps: Array[(Int, Int)] // where computed jumps go besides the code tables: the jump's location and the target's
   inline: Array[(Int, Int)] // routines that read bytes after their calls and return past them: location, bytes
+  ram_code: Map[Int, Int] // code the program writes to RAM and runs there: address -> byte (the map's `ram`)
 } derive(Debug)
 
 pub fn Banks::none() -> Banks {
-  { contents: [], homes: [], companions: [], names: [], windows: Map([]), window_names: Map([]), code: [], shadows: [], jumps: [], inline: [] }
+  { contents: [], homes: [], companions: [], names: [], windows: Map([]), window_names: Map([]), code: [], shadows: [], jumps: [], inline: [], ram_code: Map([]) }
 }
 
 // Where a call returns: after it, or after the bytes that follow it when
@@ -332,6 +333,10 @@ fn math_min(a: Int, b: Int) -> Int { if a < b { a } else { b } }
 fn math_max(a: Int, b: Int) -> Int { if a > b { a } else { b } }
 
 pub fn Image::read(self: Image, address: Int) -> Int raise ImageError {
+  if address < 0x2000 {
+    // code the program writes to RAM
+    return self.banks.ram_code.get(address).unwrap_or_error(InvalidImage("Address outside image: \{address}"))
+  }
   if self.banked() {
     let a = address & 0xffff
     if in_window(a) {

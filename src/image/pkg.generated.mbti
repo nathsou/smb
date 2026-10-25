@@ -37,6 +37,8 @@ pub fn encoding(@parse.OpCode, String) -> Int32?
 
 pub fn fixed_bank(Int32) -> Int32
 
+pub fn follow_mmc1(Bool) -> Unit
+
 pub fn in_window(Int32) -> Bool
 
 pub fn jump_target(Instruction) -> Int32
@@ -92,6 +94,8 @@ pub(all) struct Banking {
   ram : Array[(Int32, Array[Int32])]
   select : Int32?
   banks : Array[Array[Int32]]
+  serial : Int32
+  shift : Array[Int32]
 } derive(Eq, @debug.Debug)
 pub fn Banking::bank(Self, Int32) -> Array[Int32]
 pub fn Banking::join(Self, Self) -> Self
@@ -112,6 +116,7 @@ pub(all) struct Banks {
   shadows : Array[(Int32, Int32)]
   jumps : Array[(Int32, Int32)]
   inline : Array[(Int32, Int32)]
+  ram_code : Map[Int32, Int32]
 } derive(@debug.Debug)
 pub fn Banks::none() -> Self
 
@@ -269,8 +274,11 @@ pub(all) struct RomMap {
   prg_mode : Int32
   shadows : Array[(Int32, Int32)]
   exact : Bool
+  follow : Bool
+  preempt : Int32
   jumps : Array[(Int32, Int32)]
   inline : Array[(Int32, Int32)]
+  ram_code : Array[(Int32, Array[Int32])]
 } derive(@debug.Debug)
 pub fn RomMap::bank_name(Self, Int32) -> String
 pub fn RomMap::empty() -> Self

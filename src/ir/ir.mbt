@@ -161,6 +161,9 @@ pub(all) struct Function {
   doc : Array[String]
   native : Bool // body supplied by hand-written code; kept for analysis
   helper : Bool // dispatcher helper: takes the return address, returns a target
+  // Preemption polls (see preempt.mbt): the block of each, and the location
+  // of the transfer back it polls at.
+  polls : Array[(Int, Int)]
 } derive(Debug)
 
 pub(all) struct Program {

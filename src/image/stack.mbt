@@ -38,7 +38,9 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
         for target in callees(jump_target(inst)) { add_entry(target, 2, 0) }
       }
     }
-    if self.jumps.get(inst.pc) is Some(targets) {
+    // (a computed jump at an interrupt's entry continues the interrupt:
+    // its targets are checked as such below)
+    if self.jumps.get(inst.pc) is Some(targets) && !self.roots[1:].iter().any(fn(r) { self.image.symbols.get(r) == Some(inst.pc) }) {
       for target in targets {
         for callee in callees(target) { add_entry(callee, 2, 0) }
       }
@@ -88,10 +90,10 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
         _ => ()
       }
       if next_depth > 253 {
-        // with exact returns the guest stack is the machine's, whatever
-        // the depth (a loop pushing as its data says): returns go where
-        // the bytes pulled say
-        if !self.exact.val { raise InvalidImage("Excessive stack depth at \{show_pc(pc)} from \{address_name(self.image, entry)}") }
+        // with the machine's stack the map asks for, whatever the depth (a
+        // loop pushing as its data says): returns go where the bytes pulled
+        // say
+        if !self.map.exact { raise InvalidImage("Excessive stack depth at \{show_pc(pc)} from \{address_name(self.image, entry)}") }
         next_depth = 253
       }
       if next_depth < 0 {
@@ -118,8 +120,9 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
           continue
         }
         // a return through part of a return address goes nowhere known
-        // (with exact returns, wherever the bytes pulled say)
-        if (depth > 0 || depth % 2 != 0 || (inst.op == RTI && depth != 0)) && !(self.exact.val && inst.op == RTS) {
+        // (with the machine's stack the map asks for, wherever the bytes
+        // pulled say)
+        if (depth > 0 || depth % 2 != 0 || (inst.op == RTI && depth != 0)) && !(self.map.exact && inst.op == RTS) {
           raise InvalidImage("Unbalanced return at \{show_pc(pc)}")
         }
         continue
@@ -159,7 +162,15 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
           Some(targets) if window && next_depth > 0 =>
             for target in targets { add_entry(target, kind, next_depth) }
           Some(targets) if window => for target in targets { add_entry(target, 2, 0) }
-          Some(_) => if next_depth > 0 { raise InvalidImage("Tail jump with pending data stack at \{show_pc(pc)}") }
+          Some(targets) => {
+            if next_depth > 0 { raise InvalidImage("Tail jump with pending data stack at \{show_pc(pc)}") }
+            // a computed jump continues this entry (an interrupt's, say)
+            if !window && inst.mode != "abs" {
+              for target in targets {
+                for callee in callees(target) { add_entry(callee, kind, 0) }
+              }
+            }
+          }
           None =>
             if inst.mode == "abs" { work.push((jump_target(inst), next_depth, after)) }
             else {

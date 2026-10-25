@@ -426,7 +426,7 @@ fn cond_of(op : @parse.OpCode) -> Expr {
 }
 
 fn new_function(name : String, doc : Array[String], native : Bool, helper : Bool) -> Function {
-  { name, blocks: [], entry: 0, temps: [], doc, native, helper }
+  { name, blocks: [], entry: 0, temps: [], doc, native, helper, polls: [] }
 }
 
 // Blocks for terminators reached by edges (returns, tail calls, traps).
@@ -550,6 +550,17 @@ fn build_routine(
   f.entry = index[sub.entry.id]
   let exact = program.exact.val
   let exits : Exits = { f, tails: Map([]), traps: Map([]), suspends: Map([]), ret: None, rts: None }
+  // with preemption, a transfer back to `to` from the instruction at `id`
+  // polls (see preempt.mbt)
+  let preempt = program.map.preempt > 0
+  fn poll(id : Int, to : Int, block : Int) -> Int {
+    if !preempt || id < 0 || @image.bank_of(id) != @image.bank_of(to) || (to & 0xffff) > (id & 0xffff) { return block }
+    f.blocks.push({ label: "", stmts: [], term: Suspend(block) })
+    let suspend = f.blocks.length() - 1
+    f.blocks.push({ label: "", stmts: [Effect("cpu_poll", [])], term: Branch(Runtime("cpu_preempted"), suspend, block) })
+    f.polls.push((f.blocks.length() - 1, id))
+    f.blocks.length() - 1
+  }
   fn target(label : String) -> Int raise BuildError {
     if label == "__ret__" { return if exact { exits.rts(low, program) } else { exits.ret() } }
     if @image.trap_address(label) is Some(pc) { return exits.trap(pc) }
@@ -589,6 +600,22 @@ fn build_routine(
         Label(_) | Comment(_) => ()
         Inst(id~, op~, mode~, ..) => {
           if id >= 0 { builder.at = id }
+          if id >= 0 && id < 0x800 && program.image.banks.ram_code.contains(id) {
+            // code in RAM: what the map says the program wrote there, or a
+            // trap
+            let size = program.instructions[id].next - id
+            let mut differs = Const(0)
+            for k in 0..<size {
+              let byte = program.image.banks.ram_code.get(id + k).unwrap_or(-1)
+              differs = Binary(Or, differs, Binary(Ne, Load(Ram, Const(id + k)), Const(byte)))
+            }
+            f.blocks.push({ label: "", stmts: [], term: Return })
+            let next = f.blocks.length() - 1
+            f.blocks[current].stmts = builder.stmts
+            f.blocks[current].term = Branch(differs, exits.trap(id), next)
+            current = next
+            builder = { low, program, f, stmts: [], at: id }
+          }
           match op {
             BCC | BCS | BEQ | BNE | BMI | BPL | BVC | BVS => {
               let label = match mode {
@@ -604,6 +631,8 @@ fn build_routine(
                 } else {
                   not_taken = exits.suspend(not_taken)
                 }
+              } else if program.instructions.get(id) is Some(inst) && low.bb_by_label.get(label) is Some(_) {
+                taken = poll(id, @image.branch_target(inst), taken)
               }
               term = Some(Branch(cond_of(op), taken, not_taken))
             }
@@ -613,7 +642,13 @@ fn build_routine(
               } else {
                 match mode {
                   Absolute(Ident(name~, ..)) =>
-                    term = Some(if program.waits.contains(id) { Suspend(target(name)) } else { Goto(target(name)) })
+                    term = Some(if program.waits.contains(id) { Suspend(target(name)) }
+                      else if program.instructions.get(id) is Some(inst) && inst.op == JMP && low.bb_by_label.get(name) is Some(_) {
+                        Goto(poll(id, @image.jump_target(inst), target(name)))
+                      } else if program.instructions.get(id) is Some(inst) && inst.mode == "rel" && low.bb_by_label.get(name) is Some(_) {
+                        // a branch always taken
+                        Goto(poll(id, @image.branch_target(inst), target(name)))
+                      } else { Goto(target(name)) })
                   _ => raise BuildError("Unresolved jump")
                 }
               }
@@ -869,6 +904,13 @@ pub fn build(low : @lower.AsmLowering, native~ : Set[String]) -> Program raise B
     f.entry = f.blocks.length() - 1
   }
   let reset = rename(program.roots[0])
+  // preemption: the runtime counts transfers back against the map's budget
+  if program.map.preempt > 0 && by_name.get(reset) is Some(i) {
+    let f = functions[i]
+    let budget = program.map.preempt
+    f.blocks.push({ label: "", stmts: [Effect("cpu_preemption", [Const(budget & 0xff), Const(budget >> 8)])], term: Goto(f.entry) })
+    f.entry = f.blocks.length() - 1
+  }
   // MMC3: the runtime checks the game selects the PRG mode it was
   // recompiled for
   let layout = @image.layout()

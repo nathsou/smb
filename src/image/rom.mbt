@@ -33,6 +33,20 @@
 //
 //   shadow  $a000 $0720                  (the bank of the window at $A000)
 //
+// For MMC1 it follows the bank the five serial writes to the PRG register
+// switch in when the map asks (`lda #3 / jsr switch / jsr $8000` calls bank
+// 3's routine):
+//
+//   banks   follow
+//
+// The interrupt runs where the foreground waits for it. A game that computes
+// for frames on end in the foreground (a chess engine thinking) also yields
+// to it: after a number of transfers back (taken branches and jumps to an
+// address at or before them) in a frame, at the next one, outside the code
+// the interrupt handlers run:
+//
+//   preempt 500
+//
 // Calls are C calls, and leave no return address on the guest stack, unless
 // the program reads them (see the stack analysis) or the map asks for the
 // machine's stack, byte for byte (a game compared with the interpreter):
@@ -54,6 +68,11 @@
 // the guest stack, see `exact`):
 //
 //   inline  $aa98 2                      (two bytes after each call)
+//
+// Code the program writes to RAM and runs there is recompiled from the
+// bytes the map gives (the generated code traps if RAM holds others):
+//
+//   ram     $07fd 6c 00 00               (jmp ($0000), where the NMI goes)
 //
 // An entry in banks becomes one per bank, named after the bank
 // (brinstar_update_objects), and one for the window as fixed-bank code sees
@@ -128,12 +147,15 @@ pub(all) struct RomMap {
   prg_mode: Int // MMC3's PRG mode the game sets (bit 6 of its bank select)
   shadows: Array[(Int, Int)] // window address, RAM address
   exact: Bool // calls keep return addresses on the guest stack (see `exact`)
+  follow: Bool // discovery follows MMC1's bank (see `banks follow`)
+  preempt: Int // transfers back in a frame after which the foreground yields (0: never, see `preempt`)
   jumps: Array[(Int, Int)] // a computed jump's location, and where it can go besides the code tables
   inline: Array[(Int, Int)] // a routine's location, and the bytes after its calls that it returns past
+  ram_code: Array[(Int, Array[Int])] // code the program writes to RAM: address and bytes
 } derive(Debug)
 
 pub fn RomMap::empty() -> RomMap {
-  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, jumps: [], inline: [] }
+  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, follow: false, preempt: 0, jumps: [], inline: [], ram_code: [] }
 }
 
 // The name of a switchable bank, the prefix of its entries.
@@ -192,8 +214,11 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
   let banks: Array[MapBank] = []
   let mut prg_mode = 0
   let mut exact = false
+  let mut follow = false
+  let mut preempt = 0
   let jumps: Array[(Int, Int)] = []
   let inline: Array[(Int, Int)] = []
+  let ram_code: Array[(Int, Array[Int])] = []
   let shadows: Array[(Int, Int)] = []
   let names: Set[String] = Set([])
   fn claim(name: String) raise ImageError {
@@ -257,6 +282,31 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
         _ => raise InvalidImage("An inline routine is in one bank: \{line}")
       }
       inline.push((location, parse_number(fields[2])))
+      continue
+    }
+    // ram $ADDR BYTE...: code the program writes to RAM and runs there
+    if fields[0] == "ram" {
+      if fields.length() < 3 { raise InvalidImage("Map ram line needs an address and the code's bytes: \{line}") }
+      let address = parse_number(fields[1])
+      let bytes = []
+      for f in fields[2:] { bytes.push(parse_number("$" + f)) }
+      if address < 0 || address + bytes.length() > 0x800 || bytes.iter().any(fn(b) { b < 0 || b > 255 }) {
+        raise InvalidImage("Code in RAM is in $0000-$07FF, a byte at a time in hexadecimal: \{line}")
+      }
+      ram_code.push((address, bytes))
+      continue
+    }
+    // banks follow: discovery follows what MMC1's serial writes switch in
+    if fields[0] == "banks" {
+      if fields.length() != 2 || fields[1] != "follow" { raise InvalidImage("Map banks line: banks follow") }
+      follow = true
+      continue
+    }
+    // preempt N: the foreground yields after N transfers back in a frame
+    if fields[0] == "preempt" {
+      if fields.length() != 2 { raise InvalidImage("Map preempt line needs a number of transfers back: \{line}") }
+      preempt = parse_number(fields[1])
+      if preempt <= 0 || preempt > 65535 { raise InvalidImage("Map preempt is 1 to 65535: \{line}") }
       continue
     }
     // exact: calls keep their return addresses on the guest stack
@@ -377,7 +427,7 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       raise InvalidImage("Unknown map type: \{entry.type_name}")
     }
   }
-  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), jumps, inline }
+  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), follow, preempt, jumps, inline, ram_code }
 }
 
 pub(all) struct Cartridge {
@@ -506,6 +556,7 @@ pub fn rom_image(cartridge: Cartridge, map: RomMap) -> Image raise ImageError {
     _ => Layout::none()
   }
   set_layout(layout)
+  follow_mmc1(map.follow)
   let size = layout.bank_size
   let count = if banked { cartridge.prg.length() / size } else { 0 }
   // with banks, the fixed ones from the lowest to $FFFF (the windows between
@@ -534,10 +585,14 @@ pub fn rom_image(cartridge: Cartridge, map: RomMap) -> Image raise ImageError {
       shadows: [],
       jumps: [],
       inline: [],
+      ram_code: Map([]),
     }
   } else { Banks::none() }
   for jump in map.jumps { banks.jumps.push(jump) }
   for routine in map.inline { banks.inline.push(routine) }
+  for code in map.ram_code {
+    for i, byte in code.1 { banks.ram_code[code.0 + i] = byte }
+  }
   for shadow in map.shadows {
     let window = window_of(shadow.0)
     if window < 0 || layout.windows[window] != shadow.0 { raise InvalidImage("Shadow of \{show_pc(shadow.0)}, which is not a window") }
