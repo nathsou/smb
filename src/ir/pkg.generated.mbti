@@ -124,6 +124,7 @@ pub(all) struct Program {
   banks : Array[Array[Int32]]
   layout : @image.Layout
   restarts : Array[String]
+  threads : Array[String]
   mut info : Analysis?
 } derive(@debug.Debug)
 pub fn Program::analyze(Self) -> Analysis
@@ -133,6 +134,7 @@ pub fn Program::is_root(Self, String) -> Bool
 pub fn Program::make_preemptible(Self) -> Array[Int32]
 pub fn Program::make_restartable(Self) -> Unit raise BuildError
 pub fn Program::make_resumable(Self) -> Unit raise BuildError
+pub fn Program::make_switchable(Self) -> Unit raise BuildError
 pub fn Program::optimize(Self) -> Unit
 pub fn Program::outputs(Self, Analysis, String) -> Int32
 pub fn Program::roots(Self) -> Array[String]

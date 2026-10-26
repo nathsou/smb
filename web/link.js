@@ -58,7 +58,7 @@ export const MACHINE_STATE = [
     'ram', 'data', 'a', 'x', 'y', 'sp', 'carry_flag', 'zero_flag', 'neg_flag',
     'overflow_flag', 'interrupt_disabled', 'decimal_flag',
     'wram', 'prg_slots', 'prg_bank', 'prg_bank1', 'cpu_return', 'cpu_suspended', 'cpu_resume_depth',
-    'cpu_resume_point', 'cpu_restarting', 'cpu_preempted',
+    'cpu_resume_point', 'cpu_restarting', 'cpu_preempted', 'cpu_switching', 'cpu_thread',
 ];
 
 export function runtimeLayout(runtime) {

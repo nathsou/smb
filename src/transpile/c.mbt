@@ -286,6 +286,7 @@ fn CFunc::stmt(self : CFunc, s : @ir.Stmt) -> String {
       "write_joypad1(\{v}); write_joypad2(\{v});"
     }
     Effect("apu_write" | "mapper_write" as name, args) => "\{name}(\{self.word(args[0])}, \{self.byte(args[1])});"
+    Effect("cpu_await", args) => "cpu_await(\{self.word(args[0])});"
     Effect("ppu_bus_write", args) => "ppu_bus_write(\{self.expr(args[0])}, \{self.byte(args[1])});"
     Effect(name, args) => name + "(" + args.map(fn(a) { self.byte(a) }).join(", ") + ");"
     Eval(e) => "(void)\{self.expr(e)};"

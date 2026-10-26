@@ -52,7 +52,7 @@ fn runtime_type(name : String) -> Int {
     "read_byte" => 3
     "dynamic_ram_write" | "apu_write" | "ppu_bus_write" | "mapper_write" | "cpu_returned" => 2
     "write_joypad1" | "write_joypad2" | "cpu_yield" | "cpu_unresolved_jump" | "ppu_bus_oam_dma" | "cpu_suspend" |
-    "mapper_prg_mode" | "cpu_restart" => 1
+    "mapper_prg_mode" | "cpu_restart" | "cpu_start_thread" | "cpu_await" => 1
     "cpu_preemption" => 2
     _ => 0
   }
@@ -490,6 +490,10 @@ fn Gen::stmt(self : Gen, s : @ir.Stmt) -> Unit raise WasmError {
       self.expr(args[0])
       self.masked(args[1], 0xff)
       self.call("ppu_bus_write")
+    }
+    Effect("cpu_await", args) => {
+      self.masked(args[0], 0xffff)
+      self.call("cpu_await")
     }
     Effect(name, args) => {
       for a in args { self.masked(a, 0xff) }

@@ -42,6 +42,11 @@ code $ed1a jumps_ed1a 6
 # The engine's commands, a byte and a routine each
 code 4:$8948 engine_commands 9 3
 
+# The engine runs as a coroutine on a stack of its own (at $01D0 down):
+# the game switches to it ($CDFA), and it switches back from where it polls
+# ($CDBD), each saving its stack pointer ($6494, $6495)
+thread $d11a
+
 # The engine thinks for seconds without waiting for the interrupt, which
 # the hardware delivers wherever it is: here it goes back 500 times a frame
 preempt 500

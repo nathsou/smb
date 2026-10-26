@@ -59,10 +59,70 @@ void cpu_restart(uint8_t routine) {
     cpu_restarting = routine;
 }
 
+uint8_t cpu_thread, cpu_switching;
+static uint8_t cpu_thread_starting;
+static uint16_t cpu_awaited;
+CpuThread cpu_threads[CPU_THREADS];
+
+void cpu_switch(void) {
+    cpu_switching = 1;
+}
+
+void cpu_await(uint16_t back) {
+    cpu_awaited = back;
+    cpu_switching = 2;
+}
+
+void cpu_start_thread(uint8_t thread) {
+    if (thread >= CPU_THREADS) __builtin_trap();
+    cpu_switching = 1;
+    cpu_thread_starting = thread;
+    // (no call of the coroutine switching away waits for this)
+    cpu_return = 0;
+}
+
+// The reset routine returned in the middle of a switch: the coroutine that
+// ran keeps its resume points, and the one the switch goes to runs (from
+// the reset routine again).
+static void cpu_switch_threads(void) {
+    CpuThread *from = &cpu_threads[cpu_thread];
+    from->parked = 1;
+    from->awaited = cpu_awaited;
+    from->depth = cpu_resume_depth;
+    for (int i = 0; i < cpu_resume_depth; i++) from->points[i] = cpu_resume_stack[i];
+    cpu_switching = 0;
+    cpu_suspended = 0;
+    if (cpu_thread_starting) {
+        cpu_thread = cpu_thread_starting;
+        cpu_thread_starting = 0;
+        cpu_threads[cpu_thread].parked = 0;
+        cpu_resume_depth = 0;
+        return;
+    }
+    for (int k = 0; k < CPU_THREADS; k++) {
+        CpuThread *to = &cpu_threads[k];
+        if (!to->parked || to->awaited != cpu_return) continue;
+        to->parked = 0;
+        cpu_thread = (uint8_t)k;
+        cpu_resume_depth = to->depth;
+        for (int i = 0; i < to->depth; i++) cpu_resume_stack[i] = to->points[i];
+        return;
+    }
+    cpu_unresolved_jump(cpu_return); // no coroutine waits there
+}
+
+// Runs the switches under way (each to the coroutine that goes on).
+static void cpu_switches(void) {
+    // (one still under way, the foreground preempted on its way to the
+    // return, goes on when the foreground resumes)
+    while (cpu_switching == 2) {
+        cpu_switch_threads();
+        cpu_reset_entry();
+    }
+}
+
 void cpu_restart_done(void) {
     cpu_restarting = 0;
-    cpu_preempted = 0;
-    cpu_polls = 0;
 }
 
 uint8_t cpu_preempted;
@@ -131,6 +191,10 @@ void cpu_init(void) {
     cpu_suspended = 0;
     cpu_resume_depth = 0;
     cpu_restarting = 0;
+    cpu_thread = 0;
+    cpu_switching = 0;
+    cpu_thread_starting = 0;
+    for (int k = 0; k < CPU_THREADS; k++) cpu_threads[k].parked = 0;
 
     // controller
     controller1_state = 0;
@@ -356,6 +420,8 @@ static void cpu_irq(void) {
 #endif
 
 inline void next_frame(void) {
+    // (a switch under way when the game started: on with it)
+    cpu_switches();
     // preemption counts transfers back from the frame's start
     cpu_polls = 0;
     cpu_preempted = 0;
@@ -378,9 +444,15 @@ inline void next_frame(void) {
     // A suspended foreground resumes and runs to its next wait; or, when
     // the interrupt handler restarted the game, the reset routine runs its
     // restart instead (see the IR's restart.mbt).
-    if (cpu_restarting) cpu_resume_depth = 0;
+    if (cpu_restarting) {
+        // (the coroutines too)
+        cpu_resume_depth = 0;
+        cpu_thread = 0;
+        for (int k = 0; k < CPU_THREADS; k++) cpu_threads[k].parked = 0;
+    }
     if (cpu_resume_depth != 0 || cpu_restarting) {
         cpu_suspended = 0;
         cpu_reset_entry();
+        cpu_switches();
     }
 }

@@ -382,6 +382,8 @@ fn AsmLowering::collect_basic_block_leaders(self: AsmLowering) -> Array[Int] {
     for root in p.roots { self.targets.subroutines.add(root) }
     // a restart continues the reset routine from its TXS, an entry of its own
     for pc in p.restarts { self.targets.subroutines.add(@image.address_name(p.image, pc)) }
+    // so does a coroutine, on a stack of its own
+    for pc in p.map.threads { self.targets.subroutines.add(@image.address_name(p.image, pc)) }
     // Calls into the window from the fixed bank go to a dispatcher on the
     // bank mapped; the routines it chooses are entries.
     for address, targets in p.windows {
@@ -713,10 +715,11 @@ fn AsmLowering::collect_subroutines(self: AsmLowering) -> Unit raise LoweringErr
   entries.sort_by(fn(a, b) { self.bb_by_label[a].id - self.bb_by_label[b].id })
   let entry_names: Map[Int, String] = Map([])
   let reach: Map[Int, Set[Int]] = Map([])
-  // restarts are always calls (they unwind, see the IR's restart.mbt)
+  // restarts are always calls (they unwind, see the IR's restart.mbt), and
+  // coroutines (they start from the runtime, see the IR's switch.mbt)
   let restarts: Set[Int] = Set([])
   if self.program is Some(p) {
-    for pc in p.restarts {
+    for pc in p.restarts.iter().concat(p.map.threads.iter()) {
       if self.bb_by_label.get(@image.address_name(p.image, pc)) is Some(bb) { restarts.add(bb.id) }
     }
   }

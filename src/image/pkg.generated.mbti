@@ -263,6 +263,7 @@ pub(all) struct Program {
   waits : Map[Int32, Int32]
   exact : @ref.Ref[Bool]
   restarts : Array[Int32]
+  switches : Array[Int32]
   source : Array[@parse.SourceItem]
   addresses : Array[Int32]
   map : RomMap
@@ -286,6 +287,7 @@ pub(all) struct RomMap {
   inline : Array[(Int32, Int32)]
   ram_code : Array[(Int32, Array[Int32])]
   copied : Array[(Int32, Int32, Int32, Int32)]
+  threads : Array[Int32]
 } derive(@debug.Debug)
 pub fn RomMap::bank_name(Self, Int32) -> String
 pub fn RomMap::empty() -> Self

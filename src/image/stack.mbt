@@ -23,6 +23,8 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
   for i, root in self.roots {
     add_entry(self.image.symbols[root], if i == 0 { 0 } else { 1 }, 0)
   }
+  // a coroutine starts on a stack of its own, as the reset routine does
+  for thread in self.map.threads { add_entry(thread, 3, 0) }
   // A call into the window from the fixed bank calls whichever routine is
   // mapped there; a computed jump continues in its target.
   fn callees(target: Int) -> Array[Int] {
@@ -57,6 +59,7 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
     index += 1
     let is_reset = kind == 0
     let is_interrupt = kind == 1
+    let is_thread = kind == 3
     let states: Map[(Int, Int), Facts] = Map([])
     let work = [(entry, start, self.facts[entry])]
     while !work.is_empty() {
@@ -78,14 +81,23 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
         PHA | PHP => next_depth += 1
         PLA | PLP => next_depth -= 1
         TXS => {
-          if !is_reset {
+          if is_thread {
+            next_depth = 0
+          } else if !self.map.threads.is_empty() && state.x is None {
+            // a switch to another coroutine's stack: what follows pulls
+            // what that coroutine pushed before it switched, and returns
+            // where it called the switch from
+            if !self.switches.contains(pc) { self.switches.push(pc) }
+            next_depth = 0
+          } else if !is_reset {
             // a restart: the reset routine continues from here, with
             // nothing pending (checked below)
             if !self.restarts.contains(pc) { self.restarts.push(pc) }
             continue
+          } else {
+            reset_txs.add(pc)
+            next_depth = 0
           }
-          reset_txs.add(pc)
-          next_depth = 0
         }
         _ => ()
       }
@@ -147,6 +159,9 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
         let condition = condition(inst.op, state)
         if condition != Some(false) { work.push((branch_target(inst), next_depth, assume_condition(inst.op, true, after))) }
         if condition != Some(true) { work.push((inst.next, next_depth, assume_condition(inst.op, false, after))) }
+      } else if inst.op == JMP && inst.mode == "abs" && self.map.threads.contains(jump_target(inst)) {
+        // a coroutine started: an entry of its own
+        ()
       } else if inst.op == JMP {
         // Jumps into the window or through RAM leave as tail calls, which
         // the targets' own entries check, so they leave nothing pending; so
@@ -190,4 +205,5 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
     if !reset_txs.contains(pc) { raise InvalidImage("Stack-pointer replacement outside reset at \{show_pc(pc)}") }
   }
   self.restarts.sort()
+  self.switches.sort()
 }

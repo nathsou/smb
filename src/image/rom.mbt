@@ -59,6 +59,13 @@
 //
 //   trap    $f7a3                        ; optional description
 //
+// A program can run coroutines, each on a stack of its own, switching
+// between them by saving the stack pointer and loading the other's (`tsx /
+// stx saved / ldx other / txs`, then returning on the other stack). The map
+// gives where a coroutine starts (the switch jumps there the first time):
+//
+//   thread  $d11a                        (a chess engine thinking)
+//
 // A computed jump goes to the addresses of code tables (`code`), or where
 // the map says besides (a default the game sets with immediates):
 //
@@ -162,10 +169,11 @@ pub(all) struct RomMap {
   inline: Array[(Int, Int)] // a routine's location, and the bytes after its calls that it returns past
   ram_code: Array[(Int, Array[Int])] // code the program writes to RAM: address and bytes
   copied: Array[(Int, Int, Int, Int)] // code it copies from ROM to RAM: address, bank (-1: fixed), ROM address, bytes
+  threads: Array[Int] // where the program starts coroutines, on stacks of their own (see `thread`)
 } derive(Debug)
 
 pub fn RomMap::empty() -> RomMap {
-  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, follow: false, preempt: 0, jumps: [], jump_tables: [], inline: [], ram_code: [], copied: [] }
+  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, follow: false, preempt: 0, jumps: [], jump_tables: [], inline: [], ram_code: [], copied: [], threads: [] }
 }
 
 // The name of a switchable bank, the prefix of its entries.
@@ -241,6 +249,7 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
   let inline: Array[(Int, Int)] = []
   let ram_code: Array[(Int, Array[Int])] = []
   let copied: Array[(Int, Int, Int, Int)] = []
+  let threads: Array[Int] = []
   let shadows: Array[(Int, Int)] = []
   let names: Set[String] = Set([])
   fn claim(name: String) raise ImageError {
@@ -309,6 +318,16 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
         _ => raise InvalidImage("An inline routine is in one bank: \{line}")
       }
       inline.push((location, parse_number(fields[2])))
+      continue
+    }
+    // thread [BANK:]$ADDR: a coroutine starts there, on a stack of its own
+    if fields[0] == "thread" {
+      if fields.length() != 2 { raise InvalidImage("Map thread line needs the coroutine's address: \{line}") }
+      threads.push(match parse_location(fields[1]) {
+        (address, []) => address
+        (address, [bank]) => bank_location(bank, address)
+        _ => raise InvalidImage("A coroutine starts in one bank: \{line}")
+      })
       continue
     }
     // ram $ADDR BYTE...: code the program writes to RAM and runs there
@@ -480,7 +499,7 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       raise InvalidImage("Unknown map type: \{entry.type_name}")
     }
   }
-  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), follow, preempt, jumps, jump_tables, inline, ram_code, copied }
+  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), follow, preempt, jumps, jump_tables, inline, ram_code, copied, threads }
 }
 
 pub(all) struct Cartridge {
@@ -958,5 +977,5 @@ pub fn discover_rom(image: Image, map: RomMap) -> Program raise ImageError {
     image.source.push(item)
     image.addresses.push(addresses[i])
   }
-  { image, instructions, dispatches, roots: roots.map(fn(pc) { address_name(image, pc) }), facts, idle, windows, jumps, waits, exact: Ref(map.exact), restarts: [], source, addresses, map }
+  { image, instructions, dispatches, roots: roots.map(fn(pc) { address_name(image, pc) }), facts, idle, windows, jumps, waits, exact: Ref(map.exact), restarts: [], switches: [], source, addresses, map }
 }

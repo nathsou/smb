@@ -178,6 +178,9 @@ pub(all) struct Program {
   // The routines a restart continues the reset routine with (from its TXS,
   // see restart.mbt), in the order of their restart numbers less one.
   restarts : Array[String]
+  // The routines coroutines start with, on stacks of their own (see
+  // switch.mbt), in the order of their thread numbers less one.
+  threads : Array[String]
   // Filled by `analyze`.
   mut info : Analysis?
 } derive(Debug)

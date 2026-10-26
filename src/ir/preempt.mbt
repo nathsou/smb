@@ -54,10 +54,11 @@ pub fn Program::make_preemptible(self : Program) -> Array[Int] {
     for poll in f.polls {
       let (block, location) = poll
       if banned.contains(location) {
-        // straight on to the target
-        guard f.blocks[block].term is Branch(_, _, target) else { continue }
+        // straight on to the target (and no suspension left behind)
+        guard f.blocks[block].term is Branch(_, suspend, target) else { continue }
         f.blocks[block].stmts = []
         f.blocks[block].term = Goto(target)
+        f.blocks[suspend].term = Goto(target)
       } else {
         kept.add(location)
       }

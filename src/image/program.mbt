@@ -54,6 +54,11 @@ pub(all) struct Program {
   // unwinds the calls there and the reset routine continues (see the IR's
   // restart.mbt).
   restarts: Array[Int]
+  // Where it switches between stacks (`tsx / stx saved / ldx other / txs`,
+  // a program running coroutines, see the map's `thread`): the stack
+  // analysis finds them; the IR suspends the calls there and the runtime
+  // resumes those of the other stack (see the IR's switch.mbt).
+  switches: Array[Int]
   source: Array[@parse.SourceItem]
   addresses: Array[Int]
   map: RomMap // for a ROM; empty for assembly
@@ -1046,5 +1051,5 @@ pub fn discover(image: Image) -> Program raise ImageError {
       }
     }
   }
-  { image, instructions, dispatches, roots: roots.map(fn(pc) { address_name(image, pc) }), facts, idle, windows, jumps, waits, exact: Ref(false), restarts: [], source, addresses, map: RomMap::empty() }
+  { image, instructions, dispatches, roots: roots.map(fn(pc) { address_name(image, pc) }), facts, idle, windows, jumps, waits, exact: Ref(false), restarts: [], switches: [], source, addresses, map: RomMap::empty() }
 }

@@ -88,6 +88,7 @@ pub fn recompile(
   }
   progress("resumable")
   let polls = ir.make_preemptible()
+  ir.make_switchable() catch { err => raise fail("IR", err) }
   ir.make_restartable() catch { err => raise fail("IR", err) }
   ir.make_resumable() catch { err => raise fail("IR", err) }
   progress("optimize")

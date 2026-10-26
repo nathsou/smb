@@ -218,11 +218,13 @@ fn Builder::store(self : Builder, mode : @lower.AsmAddressingMode, value : Expr)
 }
 
 // A read-modify-write location: a register, RAM (read again after the
-// write), or a bus address read once into a temporary.
+// write), or a bus address read once into a temporary (the mapper's
+// registers take the new value, as the reference interpreter has it).
 priv enum Place {
   InVar(Var)
   InRam(Expr)
   OnBus(Expr) // address temporary
+  OnMapper(Expr)
 }
 
 fn Builder::place(self : Builder, mode : @lower.AsmAddressingMode) -> Place raise BuildError {
@@ -231,8 +233,7 @@ fn Builder::place(self : Builder, mode : @lower.AsmAddressingMode) -> Place rais
     _ =>
       match self.operand(mode) {
         At(Ram, addr) => InRam(addr)
-        At(_, addr) if self.program.image.banked() && addr.value() is Some(a) && a >= 0x8000 =>
-          raise BuildError("Read-modify-write of the mapper at \{a} is not supported")
+        At(_, addr) if self.program.image.banked() && addr.value() is Some(a) && a >= 0x8000 => OnMapper(addr)
         At(_, addr) => OnBus(self.temp("address", U16, addr))
         Imm(_) => raise BuildError("Read-modify-write of an immediate")
       }
@@ -244,24 +245,24 @@ fn Builder::place(self : Builder, mode : @lower.AsmAddressingMode) -> Place rais
 // carry, so its new carry goes through a temporary.
 fn Builder::modify(self : Builder, place : Place, update : (Expr) -> Expr, carry_out : ((Expr) -> Expr)?, rotates~ : Bool = false) -> Expr {
   match place {
-    OnBus(address) => {
+    OnBus(address) | OnMapper(address) => {
       let old = self.temp("m", U8, Load(Bus, address))
       let new = self.temp("m", U8, update(old))
       if carry_out is Some(out) { self.emit(Assign(C, out(old))) }
-      self.emit(Store(Bus, address, new))
+      if place is OnMapper(_) { self.emit(Effect("mapper_write", [address, new])) } else { self.emit(Store(Bus, address, new)) }
       new
     }
     _ => {
       let old = match place {
         InVar(v) => Var(v)
         InRam(addr) => Load(Ram, addr)
-        OnBus(_) => abort("unreachable")
+        OnBus(_) | OnMapper(_) => abort("unreachable")
       }
       let write = fn(value) {
         match place {
           InVar(v) => self.emit(Assign(v, value))
           InRam(addr) => self.emit(Store(Ram, addr, value))
-          OnBus(_) => ()
+          OnBus(_) | OnMapper(_) => ()
         }
       }
       match carry_out {
@@ -633,6 +634,8 @@ fn build_routine(
             current = next
             builder = { low, program, f, stmts: [], at: id }
           }
+          // a switch to another coroutine's stack (see switch.mbt)
+          if op == TXS && program.switches.contains(id) { builder.emit(Effect("cpu_switch", [])) }
           match op {
             BCC | BCS | BEQ | BNE | BMI | BPL | BVC | BVS => {
               let label = match mode {
@@ -949,6 +952,7 @@ pub fn build(low : @lower.AsmLowering, native~ : Set[String]) -> Program raise B
     banks: program.image.banks.contents,
     layout: @image.layout(),
     restarts: program.restarts.map(fn(pc) { rename(@image.address_name(program.image, pc)) }),
+    threads: program.map.threads.map(fn(pc) { rename(@image.address_name(program.image, pc)) }),
     info: None,
   }
 }

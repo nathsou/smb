@@ -49,6 +49,25 @@ extern uint8_t cpu_restarting;
 void cpu_restart(uint8_t routine);
 void cpu_restart_done(void);
 
+// Coroutines (a map's `thread`, see the IR's switch.mbt): a switch to
+// another stack (`cpu_switch`) suspends the calls of the coroutine running,
+// from the one whose return address the switch left (`cpu_await`), and the
+// runtime resumes the coroutine waiting for the address the switch returned
+// to, or starts one (`cpu_start_thread`): the reset routine runs coroutine
+// `cpu_thread` (0: its own code).
+#define CPU_THREADS 4
+extern uint8_t cpu_thread, cpu_switching;
+void cpu_switch(void);
+void cpu_await(uint16_t back);
+void cpu_start_thread(uint8_t thread);
+typedef struct {
+    uint8_t parked; // suspended, waiting for a return to `awaited`
+    uint8_t depth;
+    uint16_t awaited;
+    uint8_t points[CPU_RESUME_STACK];
+} CpuThread;
+extern CpuThread cpu_threads[CPU_THREADS];
+
 // Preemption (a map's `preempt`): the foreground counts its transfers back
 // (`cpu_poll`) and yields past the budget (`cpu_preempted`, see the IR's
 // preempt.mbt); the count starts again each frame.

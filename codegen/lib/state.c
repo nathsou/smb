@@ -38,6 +38,16 @@ static void cartridge_state(uint8_t *state, bool save) {
     BYTE(return_low, uint8_t); BYTE(return_high, uint8_t);
     BYTE(cpu_resume_depth, uint8_t);
     BYTES(cpu_resume_stack, CPU_RESUME_STACK);
+    // the coroutines: the one running, and the others' resume points
+    BYTE(cpu_thread, uint8_t);
+    for (int k = 0; k < CPU_THREADS; k++) {
+        CpuThread *t = &cpu_threads[k];
+        uint8_t awaited_low = (uint8_t)t->awaited, awaited_high = (uint8_t)(t->awaited >> 8);
+        BYTE(t->parked, uint8_t); BYTE(t->depth, uint8_t);
+        BYTE(awaited_low, uint8_t); BYTE(awaited_high, uint8_t);
+        BYTES(t->points, CPU_RESUME_STACK);
+        if (!save) t->awaited = (uint16_t)(awaited_low | (awaited_high << 8));
+    }
     if (!save) {
         ppu_vram_addr = (uint16_t)(vram_low | (vram_high << 8));
         ppu_temp_addr = (uint16_t)(temp_low | (temp_high << 8));
