@@ -1,0 +1,93 @@
+# The Legend of Zelda (NES): the names this project gives to the program's
+# routines, tables and variables, and what code discovery cannot recover by
+# itself.
+#
+# The cartridge is an MMC1 board: eight 16 KiB banks of PRG ROM, the last
+# fixed at $C000, 8 KiB of battery-backed RAM at $6000 and CHR RAM. See
+# src/image/rom.mbt for the syntax.
+
+rom 085e5397a3487357c263dfa159fb0fe20a5f3ea8ef82d7af6a7e848d3b9364e8 131072 0 ; The Legend of Zelda (USA)
+exact   ; the machine's stack, byte for byte (as the reference interpreter has it)
+banks follow
+
+# At power-on the game copies code from bank 1 to its RAM, and runs it there
+copied $6c90 1:$a500 $1270
+
+# The dispatcher: `jsr jump_by_index` with the index in A, then a table of
+# routine addresses (in the bank, or the window as mapped from the fixed
+# bank), which it jumps through
+routine $e5e2 jump_by_index
+table 1:$8724 jumps_1_8724 18
+table 1:$8a07 jumps_1_8a07 20
+table 1:$8af2 jumps_1_8af2 6
+table 1:$8b3b jumps_1_8b3b 10
+table 1:$8bbd jumps_1_8bbd 10
+table 1:$8c74 jumps_1_8c74 8
+table 2:$900e jumps_2_900e 6
+table 2:$901a jumps_2_901a 6
+table 2:$9035 jumps_2_9035 6
+table 2:$90da jumps_2_90da 4
+table 2:$90e4 jumps_2_90e4 10
+table 2:$a292 jumps_2_a292 14
+table 2:$a596 jumps_2_a596 4
+table 2:$a6b2 jumps_2_a6b2 6
+table 2:$a905 jumps_2_a905 10
+table 2:$aa15 jumps_2_aa15 10
+table 4:$81fe jumps_4_81fe 6
+table 4:$84a7 jumps_4_84a7 12
+table 4:$84e6 jumps_4_84e6 6
+table 4:$900b jumps_4_900b 12
+table 4:$905d jumps_4_905d 12
+table 4:$9508 jumps_4_9508 8
+table 4:$9694 jumps_4_9694 4
+table 4:$98c2 jumps_4_98c2 6
+table 4:$9906 jumps_4_9906 10
+table 4:$9d87 jumps_4_9d87 4
+table 4:$9fc1 jumps_4_9fc1 8
+table 4:$a4b2 jumps_4_a4b2 8
+table 4:$a675 jumps_4_a675 18
+table 4:$abb4 jumps_4_abb4 8
+table 4:$ac83 jumps_4_ac83 6
+table 4:$b1c4 jumps_4_b1c4 6
+table 4:$b23b jumps_4_b23b 8
+table 5:$800f jumps_5_800f 18
+table 5:$8024 jumps_5_8024 20
+table 5:$82ad jumps_5_82ad 14
+table 5:$8429 jumps_5_8429 16
+table 5:$8bea jumps_5_8bea 16
+table 5:$8c82 jumps_5_8c82 26
+table 5:$8e26 jumps_5_8e26 18
+table 5:$9085 jumps_5_9085 18   ; the eighth entry unused
+table 5:$909c jumps_5_909c 18   ; the eighth entry unused
+table 5:$910f jumps_5_910f 20
+table 5:$9225 jumps_5_9225 16
+table 5:$a863 jumps_5_a863 10
+table 5:$b101 jumps_5_b101 22
+table 6:$8043 jumps_6_8043 4
+table $e6a6 jumps_e6a6 18
+table $e923 jumps_e923 40
+table $e9e5 jumps_e9e5 18
+table $eb3a jumps_eb3a 40
+table $f1a7 jumps_f1a7 8
+table $fbb4 jumps_fbb4 212
+table $fd82 jumps_fd82 190
+
+# Each bank ends with the same routines that switch banks ($BF98, $BFAC:
+# the bank mapped at power-on is not known)
+routine 0-6:$bf98 window_switch_bf98
+routine 0-6:$bfac window_switch_bfac
+
+# Calls into the window where the bank mapped is not known here: to the
+# routine of the bank mapped, among those with code there
+routine 4-5:$8346 window_8346
+routine 1:$8aad window_8aad
+routine 4-5:$8aad window_8aad
+routine 2:$a5f3 window_a5f3
+routine 4-5:$a5f3 window_a5f3
+routine 2:$a440 window_a440
+routine 4:$a440 window_a440
+routine 1-2:$a1b1 window_a1b1
+routine 4:$a1b1 window_a1b1
+routine 1:$a8de window_a8de
+routine 4-5:$a8de window_a8de
+routine 5:$b0b6 window_b0b6
