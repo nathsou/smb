@@ -8,11 +8,30 @@ import { createProgress, RECOMPILER_STEPS } from './progress.js';
 const SCREEN_WIDTH = 256;
 const SCREEN_HEIGHT = 240;
 
-// The games the page recompiles, told apart by their board: Super Mario
-// Bros. (NROM), with its hand-written display routines, Metroid (MMC1) and
-// Super Mario Bros. 3 (MMC3), which drive the PPU through their registers
-// and switch banks, with the runtime module for such cartridges. The debug
-// tiles replace SMB's (Metroid writes its own, SMB3 switches banks of them).
+// The games the page recompiles: Super Mario Bros. (NROM), with its
+// hand-written display routines, and cartridges that drive the PPU through
+// its registers, with the runtime module for such cartridges: Metroid, Super
+// Mario Bros. 3, Bomberman, Tetris, The Legend of Zelda, The Chessmaster and
+// Kirby's Adventure. A dump is told apart by the SHA-256 of its PRG and CHR
+// (as the maps' `rom` lines give it), else by its board (another NROM dump
+// is recompiled as SMB, an MMC1 one as Metroid, an MMC3 one as SMB3). The
+// debug tiles replace SMB's (the others write their own or switch banks of
+// them).
+function cartridge(id, title, pageTitle, sha256) {
+    return {
+        title,
+        pageTitle,
+        map: `${id}.map`,
+        runtime: 'runtime-cartridge.wasm',
+        native: null,
+        display: null,
+        debugTiles: false,
+        mapKey: `map:${id}`,
+        saveKey: `save_state:${id}`,
+        sha256,
+    };
+}
+
 const GAMES = {
     smb: {
         title: 'SUPER MARIO BROS.',
@@ -24,35 +43,34 @@ const GAMES = {
         debugTiles: true,
         mapKey: 'map',
         saveKey: 'save_state',
+        sha256: 'fcb6a0ef3a20c19b356005fbb21dc8009563b1cb5a9aaebc8e9386b4a8c5912e',
     },
-    metroid: {
-        title: 'METROID',
-        pageTitle: 'Metroid Recompiled',
-        map: 'metroid.map',
-        runtime: 'runtime-cartridge.wasm',
-        native: null,
-        display: null,
-        debugTiles: false,
-        mapKey: 'map:metroid',
-        saveKey: 'save_state:metroid',
-    },
-    smb3: {
-        title: 'SUPER MARIO BROS. 3',
-        pageTitle: 'SMB3 Recompiled',
-        map: 'smb3.map',
-        runtime: 'runtime-cartridge.wasm',
-        native: null,
-        display: null,
-        debugTiles: false,
-        mapKey: 'map:smb3',
-        saveKey: 'save_state:smb3',
-    },
+    metroid: cartridge('metroid', 'METROID', 'Metroid Recompiled',
+        '649db8035018f2512ccea70aca6606c3b3a6988cd9ed43953b38dc5103dec7bb'),
+    smb3: cartridge('smb3', 'SUPER MARIO BROS. 3', 'SMB3 Recompiled',
+        '959fdd32c71735d6fb2bd16a646d39f4ee65623273dd035e6a968e991bd13ef8'),
+    bomberman: cartridge('bomberman', 'BOMBERMAN', 'Bomberman Recompiled',
+        '2967746c2a434c97a074b14d894ea132fab8e443899f6ca870718eeee1669039'),
+    tetris: cartridge('tetris', 'TETRIS', 'Tetris Recompiled',
+        '2ae5fb18a1bf841077e3872ba05060f030ea0bfc573994b2f8fe2fb570dc7853'),
+    zelda: cartridge('zelda', 'THE LEGEND OF ZELDA', 'Zelda Recompiled',
+        '085e5397a3487357c263dfa159fb0fe20a5f3ea8ef82d7af6a7e848d3b9364e8'),
+    chessmaster: cartridge('chessmaster', 'THE CHESSMASTER', 'Chessmaster Recompiled',
+        'b705f866955c7d19292b55a9b0f3ec0e970e3f2509c3da15708b7afd879d98ed'),
+    kirby: cartridge('kirby', "KIRBY'S ADVENTURE", 'Kirby Recompiled',
+        '1250a80faf865aa5ee5585ad7639e5ef2b3fa541554effda5fad2cc5dc2acef5'),
 };
 
 const BOARDS = { 0: GAMES.smb, 1: GAMES.metroid, 4: GAMES.smb3 };
 
-function gameOf(rom) {
-    return BOARDS[splitDump(rom).mapper] ?? GAMES.smb;
+async function gameOf(rom) {
+    const { prg, chr, mapper } = splitDump(rom);
+    const contents = new Uint8Array(prg.length + chr.length);
+    contents.set(prg);
+    contents.set(chr, prg.length);
+    const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', contents));
+    const sha256 = Array.from(hash, b => b.toString(16).padStart(2, '0')).join('');
+    return Object.values(GAMES).find(game => game.sha256 === sha256) ?? BOARDS[mapper] ?? GAMES.smb;
 }
 
 // A game's files, fetched once.
@@ -547,7 +565,8 @@ async function main() {
             rom = await askForRom();
             if (stale()) return;
         }
-        currentGame = gameOf(rom);
+        currentGame = await gameOf(rom);
+        if (stale()) return;
         document.title = currentGame.pageTitle;
         document.getElementById('game-title').textContent = currentGame.title;
         debugTiles.parentElement.hidden = !currentGame.debugTiles;
@@ -586,7 +605,7 @@ async function main() {
         let saveStateReady = false;
 
         const chrRomPtr = runtime.chr_rom.value;
-        const { chr, mapper } = splitDump(rom);
+        const { chr, mapper, vertical } = splitDump(rom);
         if (debugTiles.checked && currentGame.debugTiles) {
             runtime.debug_chr_generate(chrRomPtr);
         } else {
@@ -602,6 +621,7 @@ async function main() {
         runtime.video_init_chr?.(Math.max(chr.length, 0x2000));
         runtime.render_init();
         runtime.mapper_init?.(mapper);
+        runtime.mapper_mirroring?.(vertical ? 1 : 0);
 
         // Draw with WebGL2 unless unavailable or ?software is in the URL.
         await renderer?.setTheme?.('original'); // frees the last run's theme

@@ -47,6 +47,12 @@ fn report(program: @image.Program) -> Unit raise {
   for w in waits {
     println("Wait loop at \{location(program.waits[w])}, back from \{location(w)}")
   }
+  // an idle loop (`jmp *`) waits too, back to itself
+  let idle = program.idle.to_array()
+  idle.sort()
+  for pc in idle {
+    println("Wait loop at \{location(pc)}, back from \{location(pc)}")
+  }
 }
 
 fn main {

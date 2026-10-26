@@ -31,6 +31,8 @@ export function splitDump(rom) {
         return {
             headered,
             mapper,
+            // the nametables' mirroring (NROM's is wired on the board)
+            vertical: (rom[6] & 1) !== 0,
             prg: rom.subarray(start, start + prgSize),
             chr: rom.subarray(start + prgSize, start + prgSize + chrSize),
         };
@@ -39,5 +41,5 @@ export function splitDump(rom) {
         throw new Error(`Not an iNES file, nor a raw NROM dump (24 or 40 KiB): ${rom.length} bytes`);
     }
     const prgSize = rom.length - 0x2000;
-    return { headered, mapper: 0, prg: rom.subarray(0, prgSize), chr: rom.subarray(prgSize) };
+    return { headered, mapper: 0, vertical: true, prg: rom.subarray(0, prgSize), chr: rom.subarray(prgSize) };
 }

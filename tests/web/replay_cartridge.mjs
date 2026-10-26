@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Replays a recording with the split WebAssembly build of a program that
-// drives the hardware registers (Metroid, SMB3): the runtime module for such
+// drives the hardware registers (Metroid, SMB3 and the other cartridges): the runtime module for such
 // cartridges (web/runtime-cartridge.wasm) and the game module the recompiler
 // emits from the ROM, built with the runtime's layout. Compares each frame's
 // state hash (codegen/lib/state_hash.c) with a trace of the native build or
@@ -24,7 +24,7 @@ const expected = fs.readFileSync(tracePath, 'utf8').trim().split('\n');
 
 wasm.cpu_init();
 wasm.apu_init(48000);
-const { chr, mapper } = splitDump(rom);
+const { chr, mapper, vertical } = splitDump(rom);
 const bytes = new Uint8Array(memory.buffer);
 bytes.fill(0, wasm.chr_rom.value, wasm.chr_rom.value + 0x2000);
 bytes.set(chr, wasm.chr_rom.value);
@@ -32,6 +32,7 @@ bytes[wasm.chr_ram.value] = chr.length === 0 ? 1 : 0;
 wasm.video_init_chr(Math.max(chr.length, 0x2000));
 wasm.render_init();
 wasm.mapper_init(mapper);
+wasm.mapper_mirroring(vertical ? 1 : 0);
 game.cpu_reset_entry();
 
 let state = 0;
