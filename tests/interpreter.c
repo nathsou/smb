@@ -22,7 +22,8 @@
 //   --dump writes those frames as frame_N.ppm;
 //   --profile writes what ran, for writing a map: the instructions run
 //   (by bank), calls and jumps into a window from outside it with the bank
-//   mapped, and the largest index of each jump table after a dispatcher.
+//   mapped, the targets of jumps through pointers, and the largest index of
+//   each jump table after a dispatcher.
 //
 // Like the recompiled program it calls the interrupt with the return address
 // zero and the status as the hardware pushes it, and returns from it to
@@ -48,6 +49,7 @@ void cpu_nmi_entry(void) {}
 void cpu_irq_entry(void) {}
 
 static uint16_t pc;
+static bool replaced_stack; // TXS ran (in an interrupt: a restart)
 static bool left_enabled; // the interrupt handler enabled interrupts (as cpu.c's cpu_interrupt)
 #define MAX_WAITS 64
 static uint16_t wait_from[MAX_WAITS], wait_to[MAX_WAITS];
@@ -64,7 +66,7 @@ static int bank_at(uint16_t addr) {
 // --profile: what ran.
 static FILE *profile;
 static uint8_t ran[64][0x2000]; // by 8 KiB bank and offset
-#define MAX_EDGES 8192
+#define MAX_EDGES 32768
 typedef struct { uint16_t site; int site_bank; uint16_t target; int bank; } Edge;
 static Edge edges[MAX_EDGES];
 static int edge_count;
@@ -231,7 +233,8 @@ static bool step(void) {
     if (!strcmp(n, "RTI")) { if (!interrupt_disabled) left_enabled = true; set_status(pull()); pull(); pull(); return false; }
     if (!strcmp(n, "JMP")) {
         pc = address(op.mode);
-        if (profile && (pc >> 13) != (at >> 13) && pc >= 0x8000) note_edge(at, pc);
+        // (every target of a jump through a pointer)
+        if (profile && (((pc >> 13) != (at >> 13) && pc >= 0x8000) || op.mode == IND)) note_edge(at, pc);
         return true;
     }
     uint16_t addr = (op.mode == IMP || op.mode == ACC) ? 0 : address(op.mode);
@@ -266,7 +269,7 @@ static bool step(void) {
     else if (!strcmp(n, "TXA")) nz(a = x);
     else if (!strcmp(n, "TYA")) nz(a = y);
     else if (!strcmp(n, "TSX")) nz(x = sp);
-    else if (!strcmp(n, "TXS")) sp = x;
+    else if (!strcmp(n, "TXS")) { sp = x; replaced_stack = true; }
     else if (!strcmp(n, "PHA")) push(a);
     else if (!strcmp(n, "PHP")) push(status(0x30));
     else if (!strcmp(n, "PLA")) nz(a = pull());
@@ -328,7 +331,13 @@ static void interrupt_through(uint16_t vector) {
     push(0); push(0);
     push(status(0x20));
     pc = word_at(vector);
-    while (step()) {}
+    replaced_stack = false;
+    while (step()) {
+        // the handler restarts the game (jumps to the reset routine, which
+        // replaces the stack): the foreground goes on from there, as the
+        // recompiled program's reset routine does
+        if (replaced_stack) return;
+    }
     carry_flag = c; zero_flag = z; neg_flag = n; overflow_flag = v; interrupt_disabled = i; decimal_flag = d;
     pc = resume;
 }
@@ -454,8 +463,11 @@ int main(int argc, char **argv) {
         update_controller1(rec_path ? rec_state_at_frame(&recording, i) : 0);
         rec_pokes(pokes, i, poke);
         polls_taken = 0;
+        replaced_stack = false;
         interrupt();
-        mapper_frame(irq, left_enabled || !interrupt_disabled);
+        // (not when the NMI handler restarted the game, as next_frame)
+        if (!replaced_stack) mapper_frame(irq, left_enabled || !interrupt_disabled);
+        replaced_stack = false;
         run_foreground();
         sound_end_frame();
         if (trace) fprintf(trace, "%08x\n", hash_state());

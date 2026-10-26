@@ -44,6 +44,9 @@ pub(all) struct Banking {
   // it), and what they make
   serial: Int
   shift: Values
+  // the values pushed since what is known began, the last last (a routine
+  // that switches banks with what it pushed: pha / ... / pla / sta $8001)
+  pushed: Array[Values]
 } derive(Debug, Eq)
 
 // The values a byte can have, ascending; empty when unknown.
@@ -86,7 +89,7 @@ fn map_values(a: Values, f: (Int) -> Int) -> Values {
 }
 
 pub fn Banking::unknown() -> Banking {
-  { a: [], x: [], y: [], ram: [], select: None, banks: [], serial: 0, shift: [0] }
+  { a: [], x: [], y: [], ram: [], select: None, banks: [], serial: 0, shift: [0], pushed: [] }
 }
 
 pub fn Banking::join(self: Banking, other: Banking) -> Banking {
@@ -105,7 +108,8 @@ pub fn Banking::join(self: Banking, other: Banking) -> Banking {
   { a: join_values(self.a, other.a), x: join_values(self.x, other.x), y: join_values(self.y, other.y),
     ram, select: if self.select == other.select { self.select } else { None }, banks,
     serial: if self.serial == other.serial { self.serial } else { -1 },
-    shift: join_values(self.shift, other.shift) }
+    shift: join_values(self.shift, other.shift),
+    pushed: if self.pushed.length() == other.pushed.length() { self.pushed.mapi(fn(i, v) { join_values(v, other.pushed[i]) }) } else { [] } }
 }
 
 // The banks window `window` can hold (empty: unknown).
@@ -269,10 +273,24 @@ pub fn Banking::transfer(self: Banking, inst: Instruction, table~: (Int) -> Valu
     // (shifting A, as MMC1's serial writes do)
     ASL if inst.mode == "acc" => { ..self, a: map_values(self.a, fn(v) { (v << 1) & 255 }) }
     LSR if inst.mode == "acc" => { ..self, a: map_values(self.a, fn(v) { v >> 1 }) }
-    ASL | LSR | ROL | ROR | ADC | SBC | PLA =>
-      if inst.mode == "acc" || inst.op == ADC || inst.op == SBC || inst.op == PLA { { ..self, a: [] } }
+    PHA => {
+      let pushed = self.pushed.copy()
+      pushed.push(self.a)
+      while pushed.length() > 8 { pushed.remove(0) |> ignore }
+      { ..self, pushed }
+    }
+    PLA => {
+      let pushed = self.pushed.copy()
+      let a = match pushed.pop() { Some(v) => v; None => [] }
+      { ..self, a, pushed }
+    }
+    PHP => { ..self, pushed: { let p = self.pushed.copy(); p.push([]); p } }
+    PLP => { ..self, pushed: { let p = self.pushed.copy(); p.pop() |> ignore; p } }
+    ASL | LSR | ROL | ROR | ADC | SBC =>
+      if inst.mode == "acc" || inst.op == ADC || inst.op == SBC { { ..self, a: [] } }
       else { store(self, []) }
     TSX => { ..self, x: [] }
+    TXS => { ..self, pushed: [] }
     STA => store(self, self.a)
     STX => store(self, self.x)
     STY => store(self, self.y)
@@ -392,7 +410,25 @@ fn transfer_registers(inst: Instruction, f: Facts) -> Facts {
       }
       { ..f.nz(a), c: carry, a: if inst.mode == "acc" { a } else { f.a } }
     }
-    ADC | SBC => { ..f.nz(None), a: None, c: None, v: None }
+    ADC | SBC =>
+      match (f.a, operand, f.c) {
+        (Some(a), Some(m), Some(c)) => {
+          let m = if inst.op == SBC { 255 - m } else { m }
+          let sum = a + m + (if c { 1 } else { 0 })
+          let v = ((a ^ sum) & (m ^ sum) & 0x80) != 0
+          { ..f.nz(Some(sum & 255)), a: Some(sum & 255), c: Some(sum > 255), v: Some(v) }
+        }
+        // the carry unknown: what both sums agree on
+        (Some(a), Some(m), None) => {
+          let m = if inst.op == SBC { 255 - m } else { m }
+          let low = (a + m) & 255
+          let high = (a + m + 1) & 255
+          let agree = fn(x: Bool, y: Bool) { if x == y { Some(x) } else { None } }
+          { ..f, a: None, c: agree(a + m > 255, a + m + 1 > 255), v: None,
+            z: agree(low == 0, high == 0), n: agree((low & 0x80) != 0, (high & 0x80) != 0) }
+        }
+        _ => { ..f.nz(None), a: None, c: None, v: None }
+      }
     BIT => { ..f.nz(None), v: None }
     PLA => { ..f.nz(None), a: None, depth: f.depth.map(fn(d) { d - 1 }) }
     PHA | PHP => { ..f, depth: f.depth.map(fn(d) { d + 1 }) }

@@ -342,6 +342,8 @@ static bool cpu_interrupt(void (*handler)(void)) {
     cpu_interrupts_were_enabled = 0;
     handler();
     bool enabled = cpu_interrupts_were_enabled || !interrupt_disabled;
+    // (a handler that restarts the game does not return to the foreground)
+    if (cpu_restarting) return enabled;
     carry_flag = c; zero_flag = z; neg_flag = n; overflow_flag = v;
     interrupt_disabled = i; decimal_flag = d;
     return enabled;
@@ -367,12 +369,17 @@ inline void next_frame(void) {
     bool enabled = cpu_interrupt(cpu_nmi_entry);
 #endif
 #ifdef MAPPER
-    mapper_frame(cpu_irq, enabled || !interrupt_disabled);
+    // (not when the NMI handler restarted the game: the reset routine runs
+    // first)
+    if (!cpu_restarting) mapper_frame(cpu_irq, enabled || !interrupt_disabled);
 #else
     (void)enabled;
 #endif
-    // A suspended foreground resumes and runs to its next wait.
-    if (cpu_resume_depth != 0) {
+    // A suspended foreground resumes and runs to its next wait; or, when
+    // the interrupt handler restarted the game, the reset routine runs its
+    // restart instead (see the IR's restart.mbt).
+    if (cpu_restarting) cpu_resume_depth = 0;
+    if (cpu_resume_depth != 0 || cpu_restarting) {
         cpu_suspended = 0;
         cpu_reset_entry();
     }

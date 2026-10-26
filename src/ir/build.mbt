@@ -156,6 +156,17 @@ fn Builder::operand(self : Builder, mode : @lower.AsmAddressingMode) -> Operand 
       }
     }
     IndirectIndexed(e) => At(Bus, Binary(Add, pointer(self.expr(e)), Var(Y)))
+    // an absolute operand the program changes in its code in RAM: through
+    // the operand's bytes
+    Indirect(e) =>
+      match self.expr(e).value() {
+        Some(p) if p < 0xff => At(Bus, pointer(Const(p)))
+        Some(p) => {
+          let space : Mem = if p < 0x800 { Ram } else { Bus }
+          At(Bus, Binary(Or, Load(space, Const(p)), Binary(Shl, Load(space, Const(p + 1)), Const(8))))
+        }
+        None => raise BuildError("Unknown operand address")
+      }
     IndexedIndirect(e) =>
       At(Bus, pointer(Unary(Byte, Binary(Add, self.expr(e), Var(X)))))
     _ => raise BuildError("Operand expected")
@@ -530,6 +541,7 @@ fn build_routine(
     }
   }
   let f = new_function(rename(sub.name), doc, native, false)
+  let used : Set[String] = Set([])
   for bb in blocks {
     let mut label = ""
     for item in bb.items {
@@ -545,6 +557,9 @@ fn build_routine(
         _ => ()
       }
     }
+    // (a label once: a block made of what follows a call can carry the
+    // call's address)
+    if used.contains(label) { label = "" } else if label != "" { used.add(label) }
     f.blocks.push({ label, stmts: [], term: Return })
   }
   f.entry = index[sub.entry.id]
@@ -608,7 +623,8 @@ fn build_routine(
             for k in 0..<size {
               let byte = program.image.banks.ram_code.get(id + k).unwrap_or(-1)
               let space : Mem = if id < 0x2000 { Ram } else { Wram }
-              differs = Binary(Or, differs, Binary(Ne, Load(space, Const(id + k)), Const(byte)))
+              // (not the bytes the program changes)
+              if byte >= 0 { differs = Binary(Or, differs, Binary(Ne, Load(space, Const(id + k)), Const(byte))) }
             }
             f.blocks.push({ label: "", stmts: [], term: Return })
             let next = f.blocks.length() - 1
@@ -659,10 +675,12 @@ fn build_routine(
                 // tail call: the routine returns for both
                 Absolute(Ident(name~, ..)) if exact && id < 0 => term = Some(TailCall(rename(name)))
                 Absolute(Ident(name~, ..)) if exact => {
-                  let return_address = (id & 0xffff) + 2
+                  // (a push of an address before the code it calls, see
+                  // `pushed_call`, returns to that address)
+                  let inst = program.instructions[id]
+                  let return_address = (inst.next - 1) & 0xffff
                   // (past the bytes after the call, for a routine that
                   // reads them)
-                  let inst = program.instructions[id]
                   let back = program.image.continuation(id, inst.next, @image.jump_target(inst)) & 0xffff
                   push(builder, Const(return_address >> 8))
                   push(builder, Const(return_address & 0xff))

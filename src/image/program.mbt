@@ -9,6 +9,22 @@ pub(all) struct Instruction {
 pub fn decode(image: Image, pc: Int) -> Instruction raise ImageError {
   let (op, mode) = decoding(image.read(pc)).unwrap_or_error(InvalidImage("Unsupported opcode at \{show_pc(pc)}"))
   let size = width(mode)
+  // code in RAM whose operand the program changes: an instruction that
+  // reads it (an immediate, the byte itself; an address, through it; jmp,
+  // a computed jump through it)
+  let changed = pc < 0x8000 && size > 1 && image.banks.ram_code.get(pc + 1) == Some(-1)
+  if changed {
+    if size == 3 && image.banks.ram_code.get(pc + 2) != Some(-1) {
+      raise InvalidImage("Only part of the operand at \{show_pc(pc)} changes")
+    }
+    let next = pc + size
+    return match (op, mode) {
+      (_, "imm") => { pc, op, mode: if pc + 1 < 0x100 { "zp" } else { "abs" }, arg: pc + 1, next }
+      (JSR, _) => raise InvalidImage("A call whose target the program changes at \{show_pc(pc)}")
+      (_, "abs") => { pc, op, mode: "ind", arg: pc + 1, next }
+      _ => raise InvalidImage("An operand the program changes at \{show_pc(pc)} (\{mode})")
+    }
+  }
   let arg = if size == 1 { 0 } else if size == 2 { image.read(pc + 1) } else { image.word(pc + 1) }
   { pc, op, mode, arg, next: rebase(pc, (pc & 0xffff) + size) }
 }
@@ -99,7 +115,7 @@ fn resolve(image: Image, inst: Instruction, f: Facts) -> Instruction {
         // (a bank the map does not name there and without code there is a
         // path the program does not take: the window decides)
         [bank] if bank < image.banks.contents.length() &&
-          (image.banks.windows.get(target).unwrap_or([]).contains(bank) || candidate(image, bank, target)) =>
+          (image.banks.windows.get(target).unwrap_or([]).contains(bank) || known_bank(image, bank, target)) =>
           { ..inst, arg: bank_location(bank, target) }
         _ => { ..inst, arg: inst.arg & 0xffff }
       }
@@ -115,6 +131,15 @@ fn candidate(image: Image, bank: Int, pc: Int) -> Bool {
   (image.banks.homes[bank] < 0 || image.banks.homes[bank] == window_of(pc)) &&
   fixed_bank_number(bank) < 0 &&
   looks_like_code(image, bank_location(bank, pc))
+}
+
+// Whether a bank known exactly to be mapped at `pc` (the game switched it
+// in) can be: made for that window when the map says, and not fixed. (Its
+// bytes are not judged: the game's own switch says it runs there.)
+fn known_bank(image: Image, bank: Int, pc: Int) -> Bool {
+  bank < image.banks.contents.length() &&
+  (image.banks.homes[bank] < 0 || image.banks.homes[bank] == window_of(pc)) &&
+  fixed_bank_number(bank) < 0
 }
 
 // The fixed region a bank is fixed in, or -1 (fixed banks never switch in).
@@ -338,6 +363,34 @@ fn pushes_return(image: Image, site: Int) -> Bool {
   false
 }
 
+// A routine that pushes an address and goes on (`lda #>back-1; pha; lda
+// #<back-1; pha`, then code returning with RTS) calls the code that follows,
+// which returns to `back`: the second push becomes that call (a JSR leaving
+// the same two bytes, to `back`), and the first one nothing. (Not a computed
+// call or jump: what follows pushes or returns, or the address is an RTS;
+// nor an address passed on the stack.)
+fn pushed_call(image: Image, inst: Instruction) -> Instruction {
+  guard inst.op == PHA else { return inst }
+  let at = inst.pc & 0xffff
+  let byte = fn(address: Int) { try image.read(rebase(inst.pc, address)) catch { _ => -1 } }
+  // (the push of the high byte at `at`, or of the low byte)
+  let (first, low_push) = if byte(at - 2) == 0xa9 && byte(at + 1) == 0xa9 && byte(at + 3) == 0x48 {
+    (at, at + 3)
+  } else if byte(at - 5) == 0xa9 && byte(at - 3) == 0x48 && byte(at - 2) == 0xa9 {
+    (at - 3, at)
+  } else { return inst }
+  let address = (byte(first - 1) << 8) | byte(low_push - 1)
+  let body = low_push + 1
+  guard address >= 0x8000 && address < 0xffff &&
+    (!image.banked() || !in_window(at) || (in_window(address + 1) && window_of(address + 1) == window_of(at))) &&
+    byte(address) != 0x60 && ![0x60, 0x48, 0x08, 0x6c].contains(byte(body)) &&
+    // (back a little further in the routine, at code: not data the
+    // routine passes)
+    address + 1 > body && address + 1 - body < 0x400 && looks_like_code(image, rebase(inst.pc, address + 1)) else { return inst }
+  if at == first { return { ..inst, op: NOP } }
+  { ..inst, op: JSR, mode: "abs", arg: body, next: rebase(inst.pc, address + 1) }
+}
+
 // Whether the computed jump at `site` is a computed call (see
 // `pushes_return`): it comes back to the instruction after it.
 pub fn Program::computed_call(self: Program, site: Int) -> Bool {
@@ -359,7 +412,7 @@ fn code_targets(image: Image, site: Int, call~: Bool = false) -> Array[Int] rais
   // the tables the pointer is loaded from (lda table,x or lda table,y just
   // before the jump), when the map names them: those alone
   let loaded = []
-  for back in 3..=24 {
+  for back in 3..=32 {
     let at = (site & 0xffff) - back
     let op = try image.read(rebase(site, at)) catch { _ => continue }
     if op == 0xb9 || op == 0xbd {
@@ -369,7 +422,11 @@ fn code_targets(image: Image, site: Int, call~: Bool = false) -> Array[Int] rais
   }
   // (or, for a computed call when none starts there, read from just before
   // one: indexed from 1 or more)
-  let exact = image.banks.code.filter(fn(code) { loaded.contains(code.2) || loaded.contains(code.2 + 1) })
+  // (and those the map says it reads)
+  let read = image.banks.jump_tables.filter(fn(j) { j.0 == site }).map(fn(j) { j.1 })
+  let exact = image.banks.code.filter(fn(code) {
+    loaded.contains(code.2) || loaded.contains(code.2 + 1) || (read.contains(code.2) && bank_of(code.0) == bank_of(site))
+  })
   let tables = if !exact.is_empty() || !call { exact } else {
     image.banks.code.filter(fn(code) { loaded.iter().any(fn(l) { l < code.2 && l >= code.2 - 8 }) })
   }
@@ -377,7 +434,13 @@ fn code_targets(image: Image, site: Int, call~: Bool = false) -> Array[Int] rais
   // (a computed call only goes where its table says, and a jump the map
   // gives targets for where it says)
   let listed = image.banks.jumps.iter().any(fn(j) { j.0 == site })
-  let entries = if from_loads || call || listed { tables } else { image.banks.code }
+  // (a pointer loaded from a table in the jump's own bank that the map does
+  // not name goes nowhere known yet)
+  let own_table = image.banked() && loaded.iter().any(fn(l) {
+    if bank_of(site) is Some(_) { in_window(l) && window_of(l) == window_of(site & 0xffff) }
+    else { fixed_bank(l) >= 0 && fixed_bank(l) == fixed_bank(site) }
+  })
+  let entries = if from_loads || call || listed || own_table { tables } else { image.banks.code }
   // a bank without code tables of its own jumps to the other window's
   let own = image.banks.code.iter().any(fn(code) { bank_of(code.0) == bank_of(site) })
   for code in entries {
@@ -385,10 +448,14 @@ fn code_targets(image: Image, site: Int, call~: Bool = false) -> Array[Int] rais
     let other_window = follows_banks() && (from_loads || !own) && bank_of(site) is Some(_) && bank_of(location) is Some(_) &&
       window_of(location) != window_of(site)
     if bank_of(location) != bank_of(site) && !other_window { continue }
-    let word = image.word(location)
+    let word = image.code_word(location)
     if word < 0x8000 && !image.banks.ram_code.contains(word + adjust) { continue } // an unused entry
     let target = rebase(location, word + adjust)
-    let target = if other_window && bank_of(target) is Some(_) { target & 0xffff } else { target }
+    // (a target in the window of the jump, not the table's, is in the
+    // jump's bank)
+    let target = if other_window && window_of(word + adjust) == window_of(site) {
+      rebase(site, word + adjust)
+    } else if other_window && bank_of(target) is Some(_) { target & 0xffff } else { target }
     if !targets.contains(target) { targets.push(target) }
   }
   for jump in image.banks.jumps {
@@ -697,9 +764,10 @@ fn explore_with(image: Image, waiting: Map[Int, Int], switching: Map[Int, Int]?)
       // calls into data; if it did, the dispatcher traps)
       let named = image.banks.windows.get(pc)
       let derived = match (named, derived) {
-        // a bank known exactly, whose bytes there look like code
-        (Some(banks), [bank]) if !banks.contains(bank) && candidate(image, bank, pc) => [bank]
+        // a bank known exactly
+        (Some(banks), [bank]) if !banks.contains(bank) && known_bank(image, bank, pc) => [bank]
         (Some(banks), _) => derived.filter(fn(b) { banks.contains(b) })
+        (None, [bank]) => if known_bank(image, bank, pc) { [bank] } else { [] }
         (None, _) => derived.filter(fn(b) { candidate(image, b, pc) })
       }
       let banks = if !derived.is_empty() { derived } else {
@@ -764,7 +832,7 @@ fn explore_with(image: Image, waiting: Map[Int, Int], switching: Map[Int, Int]?)
         continue
       }
     }
-    let inst = resolve(image, decoded, f)
+    let inst = resolve(image, pushed_call(image, decoded), f)
     instructions[pc] = inst
     // MMC3's scanline counter raises the IRQ once code enables interrupts
     // (the runtime raises it for no other mapper)
@@ -857,7 +925,9 @@ fn explore_with(image: Image, waiting: Map[Int, Int], switching: Map[Int, Int]?)
       (RTS, _) if f.depth == Some(2) => {
         // returning through an address the routine pushed: a computed jump
         let targets = code_targets(image, pc)
-        if !targets.is_empty() {
+        if targets.is_empty() {
+          problem("Unresolved computed jump at \{show_pc(pc)} (an RTS through two bytes pushed), reached from \{path(pc)}") |> ignore
+        } else {
           jumps[pc] = targets
           for target in targets { work.push((target, { ..start, banking: f.banking }.entry(), pc)) }
         }

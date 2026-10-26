@@ -30,8 +30,10 @@ void cpu_returned(uint8_t low, uint8_t high);
 
 // Suspension in wait loops: the functions on the way to a wait push their
 // resume points and return, down to the reset routine, which next_frame
-// calls again after the interrupt (see the IR's escape.mbt).
-#define CPU_RESUME_STACK 64
+// calls again after the interrupt (see the IR's escape.mbt). (Games whose
+// routines leave without returning nest deep: as many as the depth's byte
+// counts.)
+#define CPU_RESUME_STACK 255
 extern uint8_t cpu_suspended;
 extern uint8_t cpu_resume_depth;
 extern uint8_t cpu_resume_point;

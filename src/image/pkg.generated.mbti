@@ -96,6 +96,7 @@ pub(all) struct Banking {
   banks : Array[Array[Int32]]
   serial : Int32
   shift : Array[Int32]
+  pushed : Array[Array[Int32]]
 } derive(Eq, @debug.Debug)
 pub fn Banking::bank(Self, Int32) -> Array[Int32]
 pub fn Banking::join(Self, Self) -> Self
@@ -115,8 +116,10 @@ pub(all) struct Banks {
   code : Array[(Int32, Int32, Int32)]
   shadows : Array[(Int32, Int32)]
   jumps : Array[(Int32, Int32)]
+  jump_tables : Array[(Int32, Int32)]
   inline : Array[(Int32, Int32)]
   ram_code : Map[Int32, Int32]
+  high : Map[Int32, Int32]
 } derive(@debug.Debug)
 pub fn Banks::none() -> Self
 
@@ -178,6 +181,7 @@ pub(all) struct Image {
   defines : Map[String, @parse.SourceExpr]
 } derive(@debug.Debug)
 pub fn Image::banked(Self) -> Bool
+pub fn Image::code_word(Self, Int32) -> Int32 raise ImageError
 pub fn Image::continuation(Self, Int32, Int32, Int32) -> Int32
 pub fn Image::eval(Self, @parse.SourceExpr) -> Int32 raise ImageError
 pub fn Image::is_data(Self, Int32) -> Bool
@@ -227,6 +231,7 @@ pub(all) struct MapEntry {
   bank : Int32
   stride : Int32
   adjust : Int32
+  high : Int32
 } derive(@debug.Debug)
 pub fn MapEntry::code_addresses(Self) -> Array[Int32]
 
@@ -277,6 +282,7 @@ pub(all) struct RomMap {
   follow : Bool
   preempt : Int32
   jumps : Array[(Int32, Int32)]
+  jump_tables : Array[(Int32, String)]
   inline : Array[(Int32, Int32)]
   ram_code : Array[(Int32, Array[Int32])]
   copied : Array[(Int32, Int32, Int32, Int32)]

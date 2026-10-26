@@ -40,7 +40,8 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
     }
     // (a computed jump at an interrupt's entry continues the interrupt:
     // its targets are checked as such below)
-    if self.jumps.get(inst.pc) is Some(targets) && !self.roots[1:].iter().any(fn(r) { self.image.symbols.get(r) == Some(inst.pc) }) {
+    if self.jumps.get(inst.pc) is Some(targets) && !self.roots[1:].iter().any(fn(r) { self.image.symbols.get(r) == Some(inst.pc) }) &&
+      !(inst.op == JMP && self.image.banks.ram_code.contains(inst.pc)) {
       for target in targets {
         for callee in callees(target) { add_entry(callee, 2, 0) }
       }
@@ -70,14 +71,13 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
       }
       states[(pc, depth)] = state
       if self.image.is_data(pc) { continue } // a trap
-      let inst = self.instructions.get(pc).unwrap_or_error(InvalidImage("Missing instruction in stack analysis: \{pc}"))
+      let inst = self.instructions.get(pc).unwrap_or_error(InvalidImage("Missing instruction in stack analysis at \{show_pc(pc)}, from \{show_pc(entry)}"))
       let after = transfer(inst, state)
       let mut next_depth = depth
       match inst.op {
         PHA | PHP => next_depth += 1
         PLA | PLP => next_depth -= 1
         TXS => {
-          if is_interrupt { raise InvalidImage("Stack-pointer replacement in an interrupt handler at \{show_pc(pc)}") }
           if !is_reset {
             // a restart: the reset routine continues from here, with
             // nothing pending (checked below)
@@ -162,15 +162,13 @@ pub fn Program::validate_stacks(self: Program) -> Unit raise ImageError {
           Some(targets) if window && next_depth > 0 =>
             for target in targets { add_entry(target, kind, next_depth) }
           Some(targets) if window => for target in targets { add_entry(target, 2, 0) }
-          Some(targets) => {
-            if next_depth > 0 { raise InvalidImage("Tail jump with pending data stack at \{show_pc(pc)}") }
-            // a computed jump continues this entry (an interrupt's, say)
-            if !window && inst.mode != "abs" {
-              for target in targets {
-                for callee in callees(target) { add_entry(callee, kind, 0) }
-              }
+          // a computed jump at an interrupt's entry (or in the code in RAM
+          // the vector leads to) continues it, with its data
+          Some(targets) if !window && inst.mode != "abs" && is_interrupt && (pc == entry || self.image.banks.ram_code.contains(pc)) =>
+            for target in targets {
+              for callee in callees(target) { add_entry(callee, kind, next_depth) }
             }
-          }
+          Some(_) => if next_depth > 0 { raise InvalidImage("Tail jump with pending data stack at \{show_pc(pc)}") }
           None =>
             if inst.mode == "abs" { work.push((jump_target(inst), next_depth, after)) }
             else {

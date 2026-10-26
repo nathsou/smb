@@ -261,6 +261,16 @@ fn find_waits(instructions: Map[Int, Instruction], facts: Map[Int, Facts], idle:
   let claimed: Set[Int] = Set([])
   let starts = instructions.keys().to_array()
   starts.sort()
+  // A branch to itself (`bcs *`, a game halting where it should never
+  // be) waits for ever when taken: each frame the interrupt runs, and the
+  // flags still say the same.
+  for pc in starts {
+    let inst = instructions[pc]
+    if inst.mode == "rel" && branch_target(inst) == pc && condition(inst.op, facts[pc]) != Some(false) {
+      waits[pc] = pc
+      claimed.add(pc)
+    }
+  }
   for start in starts {
     if claimed.contains(start) || pure_at(instructions, idle, start) is None { continue }
     let body = wait_body(instructions, facts, idle, start)

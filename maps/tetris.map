@@ -24,6 +24,7 @@ table $a540 switch_a540 12
 # each channel's entries start), or nothing ($E091)
 code $e009 sound_inits 33
 jump $e1cb $e091
+jump $e1cb sound_inits      ; through a pointer it reads from there
 
 # Calls followed by the address of what to write to the PPU
 inline $aa98 2
