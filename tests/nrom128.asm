@@ -25,6 +25,8 @@ Boot:
     sta $ff,x               ; indexed zero-page destination wraps to $00
     jsr RawEntry
     jsr Alternate
+    lda #$80
+    sta $2000               ; the PPU raises the NMI from now on
 Idle:
     jmp Idle
 

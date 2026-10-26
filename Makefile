@@ -5,8 +5,9 @@ CFLAGS += -I./raylib-quickstart/build/external/raylib-master/src
 CFLAGS += -O3 -std=c99
 CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -ferror-limit=0
-# The game: smb (Super Mario Bros.), metroid or smb3, recompiled from your
-# ROM.
+# The game: smb (Super Mario Bros.), metroid, smb3, bomberman, tetris, zelda,
+# chessmaster or kirby, recompiled from your ROM (all but SMB drive the PPU
+# through its registers, on the cartridge runtime: NROM, MMC1 or MMC3).
 GAME ?= smb
 ifeq ($(GAME),metroid)
 ROM ?= metroid.nes
@@ -23,6 +24,41 @@ GAME_DIR = codegen/smb3
 NATIVE_ROUTINES =
 # the PPU registers too, and MMC3's banks and scanline IRQ
 GAME_FLAGS = -DPPU_BUS -DMAPPER -DGAME_TITLE='"Super Mario Bros. 3"' -DROM_PATH='"$(ROM)"' -DSAVE_FILE='"smb3.sav"' -DREC_FILE='"rec/smb3.rec"'
+GAME_SOURCES = codegen/lib/ppu_bus.c codegen/lib/mapper.c codegen/lib/cartridge.c
+else ifeq ($(GAME),bomberman)
+ROM ?= bomberman.nes
+MAP = maps/bomberman.map
+GAME_DIR = codegen/bomberman
+NATIVE_ROUTINES =
+GAME_FLAGS = -DPPU_BUS -DMAPPER -DGAME_TITLE='"Bomberman"' -DROM_PATH='"$(ROM)"' -DSAVE_FILE='"bomberman.sav"' -DREC_FILE='"rec/bomberman.rec"'
+GAME_SOURCES = codegen/lib/ppu_bus.c codegen/lib/mapper.c codegen/lib/cartridge.c
+else ifeq ($(GAME),tetris)
+ROM ?= tetris.nes
+MAP = maps/tetris.map
+GAME_DIR = codegen/tetris
+NATIVE_ROUTINES =
+GAME_FLAGS = -DPPU_BUS -DMAPPER -DGAME_TITLE='"Tetris"' -DROM_PATH='"$(ROM)"' -DSAVE_FILE='"tetris.sav"' -DREC_FILE='"rec/tetris.rec"'
+GAME_SOURCES = codegen/lib/ppu_bus.c codegen/lib/mapper.c codegen/lib/cartridge.c
+else ifeq ($(GAME),zelda)
+ROM ?= zelda.nes
+MAP = maps/zelda.map
+GAME_DIR = codegen/zelda
+NATIVE_ROUTINES =
+GAME_FLAGS = -DPPU_BUS -DMAPPER -DGAME_TITLE='"The Legend of Zelda"' -DROM_PATH='"$(ROM)"' -DSAVE_FILE='"zelda.sav"' -DREC_FILE='"rec/zelda.rec"'
+GAME_SOURCES = codegen/lib/ppu_bus.c codegen/lib/mapper.c codegen/lib/cartridge.c
+else ifeq ($(GAME),chessmaster)
+ROM ?= chessmaster.nes
+MAP = maps/chessmaster.map
+GAME_DIR = codegen/chessmaster
+NATIVE_ROUTINES =
+GAME_FLAGS = -DPPU_BUS -DMAPPER -DGAME_TITLE='"The Chessmaster"' -DROM_PATH='"$(ROM)"' -DSAVE_FILE='"chessmaster.sav"' -DREC_FILE='"rec/chessmaster.rec"'
+GAME_SOURCES = codegen/lib/ppu_bus.c codegen/lib/mapper.c codegen/lib/cartridge.c
+else ifeq ($(GAME),kirby)
+ROM ?= kirby.nes
+MAP = maps/kirby.map
+GAME_DIR = codegen/kirby
+NATIVE_ROUTINES =
+GAME_FLAGS = -DPPU_BUS -DMAPPER -DGAME_TITLE='"Kirby'\''s Adventure"' -DROM_PATH='"$(ROM)"' -DSAVE_FILE='"kirby.sav"' -DREC_FILE='"rec/kirby.rec"'
 GAME_SOURCES = codegen/lib/ppu_bus.c codegen/lib/mapper.c codegen/lib/cartridge.c
 else
 ROM ?= smb.nes
@@ -63,10 +99,11 @@ MAIN = codegen/main.c
 
 .PHONY: codegen header clean gpu-check runtime-wasm runtime-cartridge-wasm apu-wasm game-wasm web replay interpreter
 
-# The game is recompiled from your ROM into codegen/game, or codegen/metroid
-# or codegen/smb3 with GAME=metroid or GAME=smb3 (not in the repository).
+# The game is recompiled from your ROM into codegen/game, or codegen/GAME
+# with GAME=metroid, smb3, ... (not in the repository). The poll points of a
+# map's `preempt` go to $(GAME_DIR)/polls.txt, for the interpreter.
 codegen:
-	moon run src/main -- --rom $(ROM) --map $(MAP) $(NATIVE_ROUTINES) --output $(GAME_DIR)
+	moon run src/main -- --rom $(ROM) --map $(MAP) $(NATIVE_ROUTINES) --output $(GAME_DIR) --polls $(GAME_DIR)/polls.txt
 
 # The map's names for the hand-written code (committed; no ROM needed).
 header:
@@ -83,7 +120,7 @@ replay:
 # The reference interpreter replay is checked against (tests/interpreter.c):
 # ./interpreter metroid.nes --waits ... --rec rec/metroid.rec
 interpreter:
-	$(CC) $(CFLAGS) -o interpreter tests/interpreter.c codegen/lib/cpu.c codegen/lib/video.c codegen/lib/render.c $(GAME_SOURCES) codegen/lib/apu.c codegen/lib/sound.c codegen/lib/prg.c codegen/lib/rec.c codegen/lib/state_hash.c $(GC_FLAGS) -lm
+	$(CC) $(CFLAGS) -o interpreter tests/interpreter.c codegen/lib/cpu.c codegen/lib/video.c codegen/lib/render.c $(GAME_SOURCES) codegen/lib/apu.c codegen/lib/sound.c codegen/lib/prg.c codegen/lib/rec.c codegen/lib/state.c codegen/lib/state_hash.c $(GC_FLAGS) -lm
 
 # Compares the GPU renderer with the software renderer over the replay
 # (needs OpenGL 3.3; under Xvfb: xvfb-run ./gpu_check --debug-chr, or
@@ -127,6 +164,7 @@ web: runtime-wasm runtime-cartridge-wasm apu-wasm
 	cp maps/smb.map web/smb.map
 	cp maps/metroid.map web/metroid.map
 	cp maps/smb3.map web/smb3.map
+	cp maps/bomberman.map maps/tetris.map maps/zelda.map maps/chessmaster.map maps/kirby.map web/
 	cp codegen/native/routines.txt web/routines.txt
 	cp codegen/native/display.c web/display.c
 
@@ -134,4 +172,4 @@ hash: clean
 	$(CC) $(CFLAGS) -o hash codegen/hash.c $(SOURCES) codegen/lib/rec.c codegen/lib/common.c $(GC_FLAGS)
 
 clean:
-	rm -f smb metroid smb3 hash gpu_check replay interpreter smb.wasm audio_queue
+	rm -f smb metroid smb3 bomberman tetris zelda chessmaster kirby hash gpu_check replay interpreter smb.wasm audio_queue

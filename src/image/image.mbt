@@ -49,10 +49,33 @@ pub(all) struct Banks {
   window_names: Map[Int, String] // window address -> the routine as fixed-bank code calls it
   code: Array[(Int, Int, Int)] // locations of the code addresses in the map's code tables, what to add to them, and the table's address
   shadows: Array[(Int, Int)] // a window and the RAM byte holding its bank, where nothing else tells
+  jumps: Array[(Int, Int)] // where computed jumps go besides the code tables: the jump's location and the target's
+  jump_tables: Array[(Int, Int)] // the code tables computed jumps read (when not loaded just before): the jump's location and the table's address
+  inline: Array[(Int, Int)] // routines that read bytes after their calls and return past them: location, bytes
+  ram_code: Map[Int, Int] // code the program writes to RAM and runs there: address -> byte (the map's `ram`)
+  high: Map[Int, Int] // split code tables: the location of a code address's low byte -> its high byte's
 } derive(Debug)
 
 pub fn Banks::none() -> Banks {
-  { contents: [], homes: [], companions: [], names: [], windows: Map([]), window_names: Map([]), code: [], shadows: [] }
+  { contents: [], homes: [], companions: [], names: [], windows: Map([]), window_names: Map([]), code: [], shadows: [], jumps: [], jump_tables: [], inline: [], ram_code: Map([]), high: Map([]) }
+}
+
+// The code address in a code table at `location` (split tables keep the
+// high bytes elsewhere).
+pub fn Image::code_word(self: Image, location: Int) -> Int raise ImageError {
+  match self.banks.high.get(location) {
+    Some(high) => self.read(location) | (self.read(high) << 8)
+    None => self.word(location)
+  }
+}
+
+// Where a call returns: after it, or after the bytes that follow it when
+// the routine reads them and returns past them (the map's `inline`).
+pub fn Image::continuation(self: Image, call: Int, next: Int, target: Int) -> Int {
+  match self.banks.inline.iter().find_first(fn(i) { i.0 == target || (i.0 & 0xffff) == target }) {
+    Some((_, bytes)) => rebase(call, (next & 0xffff) + bytes)
+    None => next
+  }
 }
 
 pub fn Image::banked(self: Image) -> Bool {
@@ -321,6 +344,14 @@ fn math_min(a: Int, b: Int) -> Int { if a < b { a } else { b } }
 fn math_max(a: Int, b: Int) -> Int { if a > b { a } else { b } }
 
 pub fn Image::read(self: Image, address: Int) -> Int raise ImageError {
+  if address < 0x8000 {
+    // code the program writes to RAM (not the bytes it changes)
+    return match self.banks.ram_code.get(address) {
+      Some(byte) if byte >= 0 => byte
+      Some(_) => raise InvalidImage("The program changes the byte at \{show_pc(address)}")
+      None => raise InvalidImage("Address outside image: \{address}")
+    }
+  }
   if self.banked() {
     let a = address & 0xffff
     if in_window(a) {

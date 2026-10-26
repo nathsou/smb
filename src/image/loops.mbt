@@ -79,7 +79,10 @@ fn pure_effects(inst: Instruction) -> (Int, Int)? {
 // From each pure instruction p, follow pure paths while tracking which state
 // bits still hold p's incoming values and which of those were consumed. If a
 // path returns to p having changed nothing it consumed, every later iteration
-// consumes the same values and repeats the same path.
+// consumes the same values and repeats the same path. Paths follow what they
+// know of the registers and flags (from p on), so that a path no execution
+// takes is not one (`tya; bne out` leaves A zero, which a comparison then
+// knows).
 fn check_wait_loops(image: Image, instructions: Map[Int, Instruction], facts: Map[Int, Facts], idle: Set[Int], waits: Map[Int, Int]) -> Unit raise ImageError {
   let waiting: Set[Int] = Set([])
   for _, start in waits {
@@ -93,27 +96,92 @@ fn check_wait_loops(image: Image, instructions: Map[Int, Instruction], facts: Ma
     if pure(start) is None || waiting.contains(start) { continue }
     // `tainted`: state holding values read from memory on this path;
     // `decided`: whether a branch on this path depended on one
-    let seen: Set[(Int, Int, Int, Int, Bool)] = Set([])
-    let work = [(start, ALL_STATE, 0, 0, false)]
-    while work.pop() is Some((pc, untouched, consumed, tainted, decided)) {
-      if seen.contains((pc, untouched, consumed, tainted, decided)) { continue }
-      seen.add((pc, untouched, consumed, tainted, decided))
+    let seen: Set[(Int, Int, Int, Int, Bool, PathFacts)] = Set([])
+    let work = [(start, ALL_STATE, 0, 0, false, PathFacts::unknown())]
+    while work.pop() is Some((pc, untouched, consumed, tainted, decided, known)) {
+      if seen.contains((pc, untouched, consumed, tainted, decided, known)) { continue }
+      // (paths that keep counting are not followed for ever: as before)
+      if seen.length() > 20000 { break }
+      seen.add((pc, untouched, consumed, tainted, decided, known))
       let inst = instructions[pc]
       let (reads, writes) = pure(pc).unwrap()
       let consumed = consumed | (reads & untouched)
       let untouched = untouched & (ALL_STATE ^ writes)
       let decided = decided || (inst.mode == "rel" && (reads & tainted) != 0)
       let tainted = if reads_memory(inst) || (reads & tainted) != 0 { tainted | writes } else { tainted & (ALL_STATE ^ writes) }
-      for next in successors(inst, facts) {
+      for step in known.successors(inst, facts) {
+        let (next, after) = step
         if next == start {
           if (consumed & (ALL_STATE ^ untouched)) == 0 && !decided {
             raise InvalidImage("Loop at \{show_pc(start)} (\{address_name(image, start)}) can only exit through an interrupt; the frame-based backend requires a `jmp *` idle loop")
           }
         } else if pure(next) is Some(_) {
-          work.push((next, untouched, consumed, tainted, decided))
+          work.push((next, untouched, consumed, tainted, decided, after))
         }
       }
     }
+  }
+}
+
+// What a path knows of the registers and flags, and which register the Z
+// flag tells of (REG_A, REG_X, REG_Y, or 0): a branch on it tells whether
+// that register is zero.
+priv struct PathFacts {
+  a: Int?
+  x: Int?
+  y: Int?
+  c: Bool?
+  z: Bool?
+  n: Bool?
+  v: Bool?
+  zero_of: Int
+} derive(Eq, Hash)
+
+fn PathFacts::unknown() -> PathFacts {
+  { a: None, x: None, y: None, c: None, z: None, n: None, v: None, zero_of: 0 }
+}
+
+fn PathFacts::facts(self: PathFacts) -> Facts {
+  { ..Facts::unknown(), a: self.a, x: self.x, y: self.y, c: self.c, z: self.z, n: self.n, v: self.v }
+}
+
+fn path_facts(f: Facts, zero_of: Int) -> PathFacts {
+  { a: f.a, x: f.x, y: f.y, c: f.c, z: f.z, n: f.n, v: f.v, zero_of }
+}
+
+// The successors a path can take, with what it knows after the instruction.
+fn PathFacts::successors(self: PathFacts, inst: Instruction, facts: Map[Int, Facts]) -> Array[(Int, PathFacts)] {
+  let after = transfer(inst, self.facts())
+  let zero_of = match inst.op {
+    LDA | TXA | TYA | AND | ORA | EOR | PLA => REG_A
+    LDX | TAX | INX | DEX | TSX => REG_X
+    LDY | TAY | INY | DEY => REG_Y
+    _ => if (match pure_effects(inst) { Some((_, writes)) => (writes & FLAG_Z) != 0; None => true }) { 0 } else { self.zero_of }
+  }
+  let known = path_facts(after, zero_of)
+  if inst.op == JMP { return [(jump_target(inst), known)] }
+  if inst.mode != "rel" { return [(inst.next, known)] }
+  let outcome = match condition(inst.op, facts[inst.pc]) {
+    Some(decided) => Some(decided)
+    None => condition(inst.op, self.facts())
+  }
+  let taken = fn(yes: Bool) {
+    let f = assume_condition(inst.op, yes, self.facts())
+    // a register the Z flag says is zero
+    let f = if (inst.op == BEQ || inst.op == BNE) && f.z == Some(true) {
+      match zero_of {
+        1 => { ..f, a: Some(0), n: Some(false) }
+        2 => { ..f, x: Some(0), n: Some(false) }
+        4 => { ..f, y: Some(0), n: Some(false) }
+        _ => f
+      }
+    } else { f }
+    path_facts(f, zero_of)
+  }
+  match outcome {
+    Some(true) => [(branch_target(inst), taken(true))]
+    Some(false) => [(inst.next, taken(false))]
+    None => [(branch_target(inst), taken(true)), (inst.next, taken(false))]
   }
 }
 
@@ -193,6 +261,16 @@ fn find_waits(instructions: Map[Int, Instruction], facts: Map[Int, Facts], idle:
   let claimed: Set[Int] = Set([])
   let starts = instructions.keys().to_array()
   starts.sort()
+  // A branch to itself (`bcs *`, a game halting where it should never
+  // be) waits for ever when taken: each frame the interrupt runs, and the
+  // flags still say the same.
+  for pc in starts {
+    let inst = instructions[pc]
+    if inst.mode == "rel" && branch_target(inst) == pc && condition(inst.op, facts[pc]) != Some(false) {
+      waits[pc] = pc
+      claimed.add(pc)
+    }
+  }
   for start in starts {
     if claimed.contains(start) || pure_at(instructions, idle, start) is None { continue }
     let body = wait_body(instructions, facts, idle, start)

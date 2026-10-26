@@ -37,6 +37,8 @@ pub fn encoding(@parse.OpCode, String) -> Int32?
 
 pub fn fixed_bank(Int32) -> Int32
 
+pub fn follow_mmc1(Bool) -> Unit
+
 pub fn in_window(Int32) -> Bool
 
 pub fn jump_target(Instruction) -> Int32
@@ -92,6 +94,9 @@ pub(all) struct Banking {
   ram : Array[(Int32, Array[Int32])]
   select : Int32?
   banks : Array[Array[Int32]]
+  serial : Int32
+  shift : Array[Int32]
+  pushed : Array[Array[Int32]]
 } derive(Eq, @debug.Debug)
 pub fn Banking::bank(Self, Int32) -> Array[Int32]
 pub fn Banking::join(Self, Self) -> Self
@@ -110,6 +115,11 @@ pub(all) struct Banks {
   window_names : Map[Int32, String]
   code : Array[(Int32, Int32, Int32)]
   shadows : Array[(Int32, Int32)]
+  jumps : Array[(Int32, Int32)]
+  jump_tables : Array[(Int32, Int32)]
+  inline : Array[(Int32, Int32)]
+  ram_code : Map[Int32, Int32]
+  high : Map[Int32, Int32]
 } derive(@debug.Debug)
 pub fn Banks::none() -> Self
 
@@ -171,6 +181,8 @@ pub(all) struct Image {
   defines : Map[String, @parse.SourceExpr]
 } derive(@debug.Debug)
 pub fn Image::banked(Self) -> Bool
+pub fn Image::code_word(Self, Int32) -> Int32 raise ImageError
+pub fn Image::continuation(Self, Int32, Int32, Int32) -> Int32
 pub fn Image::eval(Self, @parse.SourceExpr) -> Int32 raise ImageError
 pub fn Image::is_data(Self, Int32) -> Bool
 pub fn Image::new(Int32, Array[Int32], Map[String, Int32], Array[Int32], Array[@parse.SourceItem], Banks, Array[(Int32, Int32)]) -> Self
@@ -219,6 +231,7 @@ pub(all) struct MapEntry {
   bank : Int32
   stride : Int32
   adjust : Int32
+  high : Int32
 } derive(@debug.Debug)
 pub fn MapEntry::code_addresses(Self) -> Array[Int32]
 
@@ -249,10 +262,13 @@ pub(all) struct Program {
   jumps : Map[Int32, Array[Int32]]
   waits : Map[Int32, Int32]
   exact : @ref.Ref[Bool]
+  restarts : Array[Int32]
+  switches : Array[Int32]
   source : Array[@parse.SourceItem]
   addresses : Array[Int32]
   map : RomMap
 } derive(@debug.Debug)
+pub fn Program::computed_call(Self, Int32) -> Bool
 pub fn Program::switching_chain(Self, Int32) -> Array[String]
 pub fn Program::validate_stacks(Self) -> Unit raise ImageError
 
@@ -263,6 +279,15 @@ pub(all) struct RomMap {
   banks : Array[MapBank]
   prg_mode : Int32
   shadows : Array[(Int32, Int32)]
+  exact : Bool
+  follow : Bool
+  preempt : Int32
+  jumps : Array[(Int32, Int32)]
+  jump_tables : Array[(Int32, String)]
+  inline : Array[(Int32, Int32)]
+  ram_code : Array[(Int32, Array[Int32])]
+  copied : Array[(Int32, Int32, Int32, Int32)]
+  threads : Array[Int32]
 } derive(@debug.Debug)
 pub fn RomMap::bank_name(Self, Int32) -> String
 pub fn RomMap::empty() -> Self

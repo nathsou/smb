@@ -6,9 +6,12 @@
 
 // Cartridge mappers, for builds that define MAPPER:
 //
+// - NROM (iNES mapper 0): no registers, the mirroring wired on the board
+//   (`mapper_mirroring`), for games that drive the PPU registers;
 // - MMC1 (iNES mapper 1): a 16 KiB bank of PRG ROM switched in at $8000,
-//   the last bank fixed at $C000, and the nametable mirroring, configured
-//   with serial writes to $8000-$FFFF;
+//   the last bank fixed at $C000 (or 32 KiB switched at once, which for 32
+//   KiB of PRG ROM is the same), CHR ROM in banks of 4 or 8 KiB, and the
+//   nametable mirroring, configured with serial writes to $8000-$FFFF;
 // - MMC3 (iNES mapper 4): 8 KiB banks of PRG ROM in two windows ($8000 and
 //   $A000, or $A000 and $C000 in PRG mode 1), the last two banks fixed,
 //   1 and 2 KiB banks of CHR, the mirroring, and a scanline counter that
@@ -42,9 +45,11 @@ typedef struct {
 extern Mmc1 mmc1;
 extern Mmc3 mmc3;
 
-// The power-on state of mapper `mapper` (1 or 4): MMC1's control $0C (the
-// last bank fixed at $C000), bank 0; MMC3's registers cleared.
+// The power-on state of mapper `mapper` (0, 1 or 4): MMC1's control $0C
+// (the last bank fixed at $C000), bank 0; MMC3's registers cleared.
 void mapper_init(uint8_t mapper);
+// NROM: the mirroring of the board (the iNES header's), vertical or not.
+void mapper_mirroring(uint8_t vertical);
 void mapper_write(uint16_t addr, uint8_t value);
 // Applies the registers (after loading them).
 void mapper_apply(void);

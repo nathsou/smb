@@ -40,13 +40,14 @@ async function run() {
     // as the page starts a cartridge
     wasm.cpu_init();
     wasm.apu_init(48000);
-    const { chr, mapper } = splitDump(rom);
+    const { chr, mapper, vertical } = splitDump(rom);
     view().fill(0, wasm.chr_rom.value, wasm.chr_rom.value + 0x2000);
     view().set(chr, wasm.chr_rom.value);
     view()[wasm.chr_ram.value] = chr.length === 0 ? 1 : 0;
     wasm.video_init_chr(Math.max(chr.length, 0x2000));
     wasm.render_init();
     wasm.mapper_init(mapper);
+    wasm.mapper_mirroring(vertical ? 1 : 0);
 
     const canvas = document.createElement('canvas');
     const gpu = await createGpuRenderer(canvas, wasm, memory, '../../web/video.frag', { map });

@@ -16,6 +16,7 @@ fn function_of(terms : Array[@ir.Term]) -> @ir.Function {
     doc: [],
     native: false,
     helper: false,
+    polls: [],
   }
 }
 

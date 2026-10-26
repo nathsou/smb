@@ -156,6 +156,17 @@ fn Builder::operand(self : Builder, mode : @lower.AsmAddressingMode) -> Operand 
       }
     }
     IndirectIndexed(e) => At(Bus, Binary(Add, pointer(self.expr(e)), Var(Y)))
+    // an absolute operand the program changes in its code in RAM: through
+    // the operand's bytes
+    Indirect(e) =>
+      match self.expr(e).value() {
+        Some(p) if p < 0xff => At(Bus, pointer(Const(p)))
+        Some(p) => {
+          let space : Mem = if p < 0x800 { Ram } else { Bus }
+          At(Bus, Binary(Or, Load(space, Const(p)), Binary(Shl, Load(space, Const(p + 1)), Const(8))))
+        }
+        None => raise BuildError("Unknown operand address")
+      }
     IndexedIndirect(e) =>
       At(Bus, pointer(Unary(Byte, Binary(Add, self.expr(e), Var(X)))))
     _ => raise BuildError("Operand expected")
@@ -207,11 +218,13 @@ fn Builder::store(self : Builder, mode : @lower.AsmAddressingMode, value : Expr)
 }
 
 // A read-modify-write location: a register, RAM (read again after the
-// write), or a bus address read once into a temporary.
+// write), or a bus address read once into a temporary (the mapper's
+// registers take the new value, as the reference interpreter has it).
 priv enum Place {
   InVar(Var)
   InRam(Expr)
   OnBus(Expr) // address temporary
+  OnMapper(Expr)
 }
 
 fn Builder::place(self : Builder, mode : @lower.AsmAddressingMode) -> Place raise BuildError {
@@ -220,8 +233,7 @@ fn Builder::place(self : Builder, mode : @lower.AsmAddressingMode) -> Place rais
     _ =>
       match self.operand(mode) {
         At(Ram, addr) => InRam(addr)
-        At(_, addr) if self.program.image.banked() && addr.value() is Some(a) && a >= 0x8000 =>
-          raise BuildError("Read-modify-write of the mapper at \{a} is not supported")
+        At(_, addr) if self.program.image.banked() && addr.value() is Some(a) && a >= 0x8000 => OnMapper(addr)
         At(_, addr) => OnBus(self.temp("address", U16, addr))
         Imm(_) => raise BuildError("Read-modify-write of an immediate")
       }
@@ -233,24 +245,24 @@ fn Builder::place(self : Builder, mode : @lower.AsmAddressingMode) -> Place rais
 // carry, so its new carry goes through a temporary.
 fn Builder::modify(self : Builder, place : Place, update : (Expr) -> Expr, carry_out : ((Expr) -> Expr)?, rotates~ : Bool = false) -> Expr {
   match place {
-    OnBus(address) => {
+    OnBus(address) | OnMapper(address) => {
       let old = self.temp("m", U8, Load(Bus, address))
       let new = self.temp("m", U8, update(old))
       if carry_out is Some(out) { self.emit(Assign(C, out(old))) }
-      self.emit(Store(Bus, address, new))
+      if place is OnMapper(_) { self.emit(Effect("mapper_write", [address, new])) } else { self.emit(Store(Bus, address, new)) }
       new
     }
     _ => {
       let old = match place {
         InVar(v) => Var(v)
         InRam(addr) => Load(Ram, addr)
-        OnBus(_) => abort("unreachable")
+        OnBus(_) | OnMapper(_) => abort("unreachable")
       }
       let write = fn(value) {
         match place {
           InVar(v) => self.emit(Assign(v, value))
           InRam(addr) => self.emit(Store(Ram, addr, value))
-          OnBus(_) => ()
+          OnBus(_) | OnMapper(_) => ()
         }
       }
       match carry_out {
@@ -426,7 +438,7 @@ fn cond_of(op : @parse.OpCode) -> Expr {
 }
 
 fn new_function(name : String, doc : Array[String], native : Bool, helper : Bool) -> Function {
-  { name, blocks: [], entry: 0, temps: [], doc, native, helper }
+  { name, blocks: [], entry: 0, temps: [], doc, native, helper, polls: [] }
 }
 
 // Blocks for terminators reached by edges (returns, tail calls, traps).
@@ -530,6 +542,7 @@ fn build_routine(
     }
   }
   let f = new_function(rename(sub.name), doc, native, false)
+  let used : Set[String] = Set([])
   for bb in blocks {
     let mut label = ""
     for item in bb.items {
@@ -545,11 +558,25 @@ fn build_routine(
         _ => ()
       }
     }
+    // (a label once: a block made of what follows a call can carry the
+    // call's address)
+    if used.contains(label) { label = "" } else if label != "" { used.add(label) }
     f.blocks.push({ label, stmts: [], term: Return })
   }
   f.entry = index[sub.entry.id]
   let exact = program.exact.val
   let exits : Exits = { f, tails: Map([]), traps: Map([]), suspends: Map([]), ret: None, rts: None }
+  // with preemption, a transfer back to `to` from the instruction at `id`
+  // polls (see preempt.mbt)
+  let preempt = program.map.preempt > 0
+  fn poll(id : Int, to : Int, block : Int) -> Int {
+    if !preempt || id < 0 || @image.bank_of(id) != @image.bank_of(to) || (to & 0xffff) > (id & 0xffff) { return block }
+    f.blocks.push({ label: "", stmts: [], term: Suspend(block) })
+    let suspend = f.blocks.length() - 1
+    f.blocks.push({ label: "", stmts: [Effect("cpu_poll", [])], term: Branch(Runtime("cpu_preempted"), suspend, block) })
+    f.polls.push((f.blocks.length() - 1, id))
+    f.blocks.length() - 1
+  }
   fn target(label : String) -> Int raise BuildError {
     if label == "__ret__" { return if exact { exits.rts(low, program) } else { exits.ret() } }
     if @image.trap_address(label) is Some(pc) { return exits.trap(pc) }
@@ -589,6 +616,26 @@ fn build_routine(
         Label(_) | Comment(_) => ()
         Inst(id~, op~, mode~, ..) => {
           if id >= 0 { builder.at = id }
+          if id >= 0 && id < 0x8000 && program.image.banks.ram_code.contains(id) {
+            // code in RAM: what the map says the program wrote there, or a
+            // trap
+            let size = program.instructions[id].next - id
+            let mut differs = Const(0)
+            for k in 0..<size {
+              let byte = program.image.banks.ram_code.get(id + k).unwrap_or(-1)
+              let space : Mem = if id < 0x2000 { Ram } else { Wram }
+              // (not the bytes the program changes)
+              if byte >= 0 { differs = Binary(Or, differs, Binary(Ne, Load(space, Const(id + k)), Const(byte))) }
+            }
+            f.blocks.push({ label: "", stmts: [], term: Return })
+            let next = f.blocks.length() - 1
+            f.blocks[current].stmts = builder.stmts
+            f.blocks[current].term = Branch(differs, exits.trap(id), next)
+            current = next
+            builder = { low, program, f, stmts: [], at: id }
+          }
+          // a switch to another coroutine's stack (see switch.mbt)
+          if op == TXS && program.switches.contains(id) { builder.emit(Effect("cpu_switch", [])) }
           match op {
             BCC | BCS | BEQ | BNE | BMI | BPL | BVC | BVS => {
               let label = match mode {
@@ -604,6 +651,8 @@ fn build_routine(
                 } else {
                   not_taken = exits.suspend(not_taken)
                 }
+              } else if program.instructions.get(id) is Some(inst) && low.bb_by_label.get(label) is Some(_) {
+                taken = poll(id, @image.branch_target(inst), taken)
               }
               term = Some(Branch(cond_of(op), taken, not_taken))
             }
@@ -613,7 +662,13 @@ fn build_routine(
               } else {
                 match mode {
                   Absolute(Ident(name~, ..)) =>
-                    term = Some(if program.waits.contains(id) { Suspend(target(name)) } else { Goto(target(name)) })
+                    term = Some(if program.waits.contains(id) { Suspend(target(name)) }
+                      else if program.instructions.get(id) is Some(inst) && inst.op == JMP && low.bb_by_label.get(name) is Some(_) {
+                        Goto(poll(id, @image.jump_target(inst), target(name)))
+                      } else if program.instructions.get(id) is Some(inst) && inst.mode == "rel" && low.bb_by_label.get(name) is Some(_) {
+                        // a branch always taken
+                        Goto(poll(id, @image.branch_target(inst), target(name)))
+                      } else { Goto(target(name)) })
                   _ => raise BuildError("Unresolved jump")
                 }
               }
@@ -623,7 +678,13 @@ fn build_routine(
                 // tail call: the routine returns for both
                 Absolute(Ident(name~, ..)) if exact && id < 0 => term = Some(TailCall(rename(name)))
                 Absolute(Ident(name~, ..)) if exact => {
-                  let return_address = (id & 0xffff) + 2
+                  // (a push of an address before the code it calls, see
+                  // `pushed_call`, returns to that address)
+                  let inst = program.instructions[id]
+                  let return_address = (inst.next - 1) & 0xffff
+                  // (past the bytes after the call, for a routine that
+                  // reads them)
+                  let back = program.image.continuation(id, inst.next, @image.jump_target(inst)) & 0xffff
                   push(builder, Const(return_address >> 8))
                   push(builder, Const(return_address & 0xff))
                   builder.emit(Call(rename(name)))
@@ -631,7 +692,7 @@ fn build_routine(
                   let next = f.blocks.length() - 1
                   f.blocks[current].stmts = builder.stmts
                   // returned elsewhere: past this routine too
-                  f.blocks[current].term = Branch(Binary(Ne, Runtime("cpu_return"), Const(return_address + 1)), exits.ret(), next)
+                  f.blocks[current].term = Branch(Binary(Ne, Runtime("cpu_return"), Const(back)), exits.ret(), next)
                   current = next
                   builder = { low, program, f, stmts: [], at: id }
                 }
@@ -666,7 +727,11 @@ fn build_routine(
           }
           term = Some(Dispatch(helper, (site & 0xffff) + 2, cases))
         }
-        ComputedJump(targets~, site~) => {
+        ComputedJump(targets~, site~, call~) => {
+          let returns_at = fn(address : Int) {
+            let location = program.jumps[site].iter().find_first(fn(t) { (t & 0xffff) == address }).unwrap_or(address)
+            program.instructions.get(location).map(fn(i) { i.op == RTS }).unwrap_or(false)
+          }
           builder.at = site
           let inst = program.instructions[site]
           let address = if inst.op == JMP {
@@ -686,7 +751,41 @@ fn build_routine(
             let value = program.jumps[site][k] & 0xffff
             if !cases.iter().any(fn(c) { c.0 == value }) { cases.push((value, rename(label))) }
           }
-          term = Some(Jump(address, cases))
+          if call {
+            // the routine at the address, which returns after the RTS:
+            // through the return address left on the guest stack with
+            // exact returns, else a C call (and the address dropped)
+            let t = builder.temp("target", U16, address)
+            let back = (site & 0xffff) + 1
+            if !exact {
+              builder.emit(Assign(SP, Binary(Add, Var(SP), Const(2))))
+            }
+            let after = fallthrough(bb)
+            let traps = exits.trap(site)
+            let blocks = cases.map(fn(c) {
+              f.blocks.push({ label: "", stmts: [Call(c.1)], term: Goto(after) })
+              let at = f.blocks.length() - 1
+              if exact {
+                // returned elsewhere: past this routine too
+                f.blocks[at].term = Branch(Binary(Ne, Runtime("cpu_return"), Const(back)), exits.ret(), after)
+              }
+              (c.0, at)
+            })
+            term = Some(Switch(t, blocks, traps))
+          } else if cases.iter().any(fn(c) { returns_at(c.0) }) {
+            // a target that is an RTS returns (the bytes pushed for the
+            // jump pulled)
+            let t = builder.temp("target", U16, address)
+            let traps = exits.trap(site)
+            let blocks = cases.map(fn(c) {
+              if returns_at(c.0) { return (c.0, if exact { exits.rts(low, program) } else { exits.ret() }) }
+              f.blocks.push({ label: "", stmts: [], term: TailCall(c.1) })
+              (c.0, f.blocks.length() - 1)
+            })
+            term = Some(Switch(t, blocks, traps))
+          } else {
+            term = Some(Jump(address, cases))
+          }
         }
         _ => raise BuildError("Unexpected structured item")
       }
@@ -827,6 +926,13 @@ pub fn build(low : @lower.AsmLowering, native~ : Set[String]) -> Program raise B
     f.entry = f.blocks.length() - 1
   }
   let reset = rename(program.roots[0])
+  // preemption: the runtime counts transfers back against the map's budget
+  if program.map.preempt > 0 && by_name.get(reset) is Some(i) {
+    let f = functions[i]
+    let budget = program.map.preempt
+    f.blocks.push({ label: "", stmts: [Effect("cpu_preemption", [Const(budget & 0xff), Const(budget >> 8)])], term: Goto(f.entry) })
+    f.entry = f.blocks.length() - 1
+  }
   // MMC3: the runtime checks the game selects the PRG mode it was
   // recompiled for
   let layout = @image.layout()
@@ -845,6 +951,8 @@ pub fn build(low : @lower.AsmLowering, native~ : Set[String]) -> Program raise B
     prg: program.image.bytes,
     banks: program.image.banks.contents,
     layout: @image.layout(),
+    restarts: program.restarts.map(fn(pc) { rename(@image.address_name(program.image, pc)) }),
+    threads: program.map.threads.map(fn(pc) { rename(@image.address_name(program.image, pc)) }),
     info: None,
   }
 }

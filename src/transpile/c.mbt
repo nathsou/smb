@@ -286,6 +286,7 @@ fn CFunc::stmt(self : CFunc, s : @ir.Stmt) -> String {
       "write_joypad1(\{v}); write_joypad2(\{v});"
     }
     Effect("apu_write" | "mapper_write" as name, args) => "\{name}(\{self.word(args[0])}, \{self.byte(args[1])});"
+    Effect("cpu_await", args) => "cpu_await(\{self.word(args[0])});"
     Effect("ppu_bus_write", args) => "ppu_bus_write(\{self.expr(args[0])}, \{self.byte(args[1])});"
     Effect(name, args) => name + "(" + args.map(fn(a) { self.byte(a) }).join(", ") + ");"
     Eval(e) => "(void)\{self.expr(e)};"
@@ -639,12 +640,10 @@ fn Emitter::emit_program_c(self : Emitter, program : @ir.Program, preamble : Arr
   for f in program.functions { self.emit_function(program, f, views) }
   self.emit("void cpu_reset_entry(void) { \{program.reset}(); }")
   self.emit("void cpu_nmi_entry(void) { \{program.nmi}(); }")
-  // cartridges with a mapper: the runtime runs the IRQ handler when the
-  // mapper raises it (MMC3)
-  if !program.banks.is_empty() {
-    match program.irq {
-      Some(irq) => self.emit("void cpu_irq_entry(void) { \{irq}(); }")
-      None => self.emit("void cpu_irq_entry(void) { cpu_unresolved_jump(0xfffe); } // never enabled")
-    }
+  // the runtime of cartridges runs the IRQ handler when the mapper raises
+  // it (MMC3)
+  match program.irq {
+    Some(irq) => self.emit("void cpu_irq_entry(void) { \{irq}(); }")
+    None => self.emit("void cpu_irq_entry(void) { cpu_unresolved_jump(0xfffe); } // never enabled")
   }
 }

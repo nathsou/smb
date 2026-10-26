@@ -39,6 +39,14 @@ pub(all) struct Banking {
   ram: Array[(Int, Values)] // address and values, ascending, at most RAM_FACTS
   select: Int?
   banks: Array[Values] // by window
+  // MMC1's serial port: the bits written since the last register write
+  // (the port is taken to be idle where nothing is known, as games leave
+  // it), and what they make
+  serial: Int
+  shift: Values
+  // the values pushed since what is known began, the last last (a routine
+  // that switches banks with what it pushed: pha / ... / pla / sta $8001)
+  pushed: Array[Values]
 } derive(Debug, Eq)
 
 // The values a byte can have, ascending; empty when unknown.
@@ -81,7 +89,7 @@ fn map_values(a: Values, f: (Int) -> Int) -> Values {
 }
 
 pub fn Banking::unknown() -> Banking {
-  { a: [], x: [], y: [], ram: [], select: None, banks: [] }
+  { a: [], x: [], y: [], ram: [], select: None, banks: [], serial: 0, shift: [0], pushed: [] }
 }
 
 pub fn Banking::join(self: Banking, other: Banking) -> Banking {
@@ -98,7 +106,10 @@ pub fn Banking::join(self: Banking, other: Banking) -> Banking {
   let count = if self.banks.length() > other.banks.length() { self.banks.length() } else { other.banks.length() }
   let banks = Array::makei(count, fn(i) { join_values(self.bank(i), other.bank(i)) })
   { a: join_values(self.a, other.a), x: join_values(self.x, other.x), y: join_values(self.y, other.y),
-    ram, select: if self.select == other.select { self.select } else { None }, banks }
+    ram, select: if self.select == other.select { self.select } else { None }, banks,
+    serial: if self.serial == other.serial { self.serial } else { -1 },
+    shift: join_values(self.shift, other.shift),
+    pushed: if self.pushed.length() == other.pushed.length() { self.pushed.mapi(fn(i, v) { join_values(v, other.pushed[i]) }) } else { [] } }
 }
 
 // The banks window `window` can hold (empty: unknown).
@@ -172,8 +183,32 @@ fn Banking::unmapped(self: Banking) -> Banking {
   { ..self, select: None, banks: [] }
 }
 
-// A write to MMC3's bank select ($8000, even) or bank data ($8001, odd).
+// A write to MMC1's serial port: a bit, and with the fifth the register the
+// address names (the PRG bank at $E000-$FFFF; the others leave the bank).
+fn Banking::serial_write(self: Banking, address: Int, value: Values) -> Banking {
+  if !value.is_empty() && value.iter().all(fn(v) { (v & 0x80) != 0 }) { return { ..self, serial: 0, shift: [0] } }
+  if self.serial < 0 || value.is_empty() || value.iter().any(fn(v) { (v & 0x80) != 0 }) {
+    // a bit of the PRG bank, or a reset, lost
+    let b = if address >= 0xe000 { self.unmapped() } else { self }
+    return { ..b, serial: -1, shift: [] }
+  }
+  let combined = []
+  for s in self.shift {
+    for v in value { combined.push((s >> 1) | ((v & 1) << 4)) }
+  }
+  let shift = values_of(combined)
+  if self.serial < 4 { return { ..self, serial: self.serial + 1, shift } }
+  let b = if address >= 0xe000 {
+    // (with 16 KiB banks, the low four bits)
+    { ..self, banks: [map_values(shift, fn(v) { v & 0x0f })] }
+  } else { self }
+  { ..b, serial: 0, shift: [0] }
+}
+
+// A write to MMC3's bank select ($8000, even) or bank data ($8001, odd), or
+// to MMC1's serial port.
 fn Banking::mapper(self: Banking, address: Int, value: Values) -> Banking {
+  if layout().windows.length() == 1 { return self.serial_write(address, value) }
   if address >= 0xa000 { return self } // mirroring, RAM protection, IRQ
   if (address & 1) == 0 { return { ..self, select: if value.length() == 1 { Some(value[0]) } else { None } } }
   guard self.select is Some(select) else { return self.unmapped() }
@@ -228,14 +263,34 @@ pub fn Banking::transfer(self: Banking, inst: Instruction, table~: (Int) -> Valu
     AND | ORA | EOR => {
       let a = if loaded.length() == 1 {
         let b = loaded[0]
-        map_values(self.a, fn(a) { match inst.op { AND => a & b; ORA => a | b; _ => a ^ b } })
+        // (MMC1: an unknown byte masked to a few bits, `and #1` choosing
+        // between two banks, is one of those few values)
+        let from = if self.a.is_empty() && inst.op == AND && layout().windows.length() == 1 { Array::makei(256, fn(v) { v }) } else { self.a }
+        map_values(from, fn(a) { match inst.op { AND => a & b; ORA => a | b; _ => a ^ b } })
       } else { [] }
       { ..self, a }
     }
-    ASL | LSR | ROL | ROR | ADC | SBC | PLA =>
-      if inst.mode == "acc" || inst.op == ADC || inst.op == SBC || inst.op == PLA { { ..self, a: [] } }
+    // (shifting A, as MMC1's serial writes do)
+    ASL if inst.mode == "acc" => { ..self, a: map_values(self.a, fn(v) { (v << 1) & 255 }) }
+    LSR if inst.mode == "acc" => { ..self, a: map_values(self.a, fn(v) { v >> 1 }) }
+    PHA => {
+      let pushed = self.pushed.copy()
+      pushed.push(self.a)
+      while pushed.length() > 8 { pushed.remove(0) |> ignore }
+      { ..self, pushed }
+    }
+    PLA => {
+      let pushed = self.pushed.copy()
+      let a = match pushed.pop() { Some(v) => v; None => [] }
+      { ..self, a, pushed }
+    }
+    PHP => { ..self, pushed: { let p = self.pushed.copy(); p.push([]); p } }
+    PLP => { ..self, pushed: { let p = self.pushed.copy(); p.pop() |> ignore; p } }
+    ASL | LSR | ROL | ROR | ADC | SBC =>
+      if inst.mode == "acc" || inst.op == ADC || inst.op == SBC { { ..self, a: [] } }
       else { store(self, []) }
     TSX => { ..self, x: [] }
+    TXS => { ..self, pushed: [] }
     STA => store(self, self.a)
     STX => store(self, self.x)
     STY => store(self, self.y)
@@ -355,7 +410,25 @@ fn transfer_registers(inst: Instruction, f: Facts) -> Facts {
       }
       { ..f.nz(a), c: carry, a: if inst.mode == "acc" { a } else { f.a } }
     }
-    ADC | SBC => { ..f.nz(None), a: None, c: None, v: None }
+    ADC | SBC =>
+      match (f.a, operand, f.c) {
+        (Some(a), Some(m), Some(c)) => {
+          let m = if inst.op == SBC { 255 - m } else { m }
+          let sum = a + m + (if c { 1 } else { 0 })
+          let v = ((a ^ sum) & (m ^ sum) & 0x80) != 0
+          { ..f.nz(Some(sum & 255)), a: Some(sum & 255), c: Some(sum > 255), v: Some(v) }
+        }
+        // the carry unknown: what both sums agree on
+        (Some(a), Some(m), None) => {
+          let m = if inst.op == SBC { 255 - m } else { m }
+          let low = (a + m) & 255
+          let high = (a + m + 1) & 255
+          let agree = fn(x: Bool, y: Bool) { if x == y { Some(x) } else { None } }
+          { ..f, a: None, c: agree(a + m > 255, a + m + 1 > 255), v: None,
+            z: agree(low == 0, high == 0), n: agree((low & 0x80) != 0, (high & 0x80) != 0) }
+        }
+        _ => { ..f.nz(None), a: None, c: None, v: None }
+      }
     BIT => { ..f.nz(None), v: None }
     PLA => { ..f.nz(None), a: None, depth: f.depth.map(fn(d) { d - 1 }) }
     PHA | PHP => { ..f, depth: f.depth.map(fn(d) { d + 1 }) }

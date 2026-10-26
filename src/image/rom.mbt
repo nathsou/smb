@@ -26,6 +26,7 @@
 //   code    $c51f area_inits 6           (6 code addresses, a word each)
 //   code    0-5:$b290 sound_defaults 9 5 (9 code addresses, 5 bytes apart)
 //   code    1-5:$8048 moves 8 2 rts      (addresses minus one, for RTS)
+//   code    34:$88b9 states 8 high $88c1 (low bytes, and high bytes there)
 //
 // Games keep the bank they want in each window in RAM and switch from
 // there; where discovery does not otherwise know the bank mapped in a
@@ -33,10 +34,59 @@
 //
 //   shadow  $a000 $0720                  (the bank of the window at $A000)
 //
+// For MMC1 it follows the bank the five serial writes to the PRG register
+// switch in when the map asks (`lda #3 / jsr switch / jsr $8000` calls bank
+// 3's routine):
+//
+//   banks   follow
+//
+// The interrupt runs where the foreground waits for it. A game that computes
+// for frames on end in the foreground (a chess engine thinking) also yields
+// to it: after a number of transfers back (taken branches and jumps to an
+// address at or before them) in a frame, at the next one, outside the code
+// the interrupt handlers run:
+//
+//   preempt 500
+//
+// Calls are C calls, and leave no return address on the guest stack, unless
+// the program reads them (see the stack analysis) or the map asks for the
+// machine's stack, byte for byte (a game compared with the interpreter):
+//
+//   exact
+//
 // A path the game only takes when something went wrong (its RAM lost, say)
 // can be cut where it starts, which then traps:
 //
 //   trap    $f7a3                        ; optional description
+//
+// A program can run coroutines, each on a stack of its own, switching
+// between them by saving the stack pointer and loading the other's (`tsx /
+// stx saved / ldx other / txs`, then returning on the other stack). The map
+// gives where a coroutine starts (the switch jumps there the first time):
+//
+//   thread  $d11a                        (a chess engine thinking)
+//
+// A computed jump goes to the addresses of code tables (`code`), or where
+// the map says besides (a default the game sets with immediates):
+//
+//   jump    $e1cb $e091                  (the jump at $E1CB can go to $E091)
+//   jump    $e1cb sound_inits            (and where that code table says)
+//
+// A routine can read bytes that follow its calls, through its return
+// address, and return past them (its calls then keep return addresses on
+// the guest stack, see `exact`):
+//
+//   inline  $aa98 2                      (two bytes after each call)
+//
+// Code the program writes to RAM and runs there is recompiled from the
+// bytes the map gives (the generated code traps if RAM holds others):
+//
+//   ram     $07fd 6c 00 00               (jmp ($0000), where the NMI goes)
+//   ram     $0029 a9 .. 4c .. ..         (operands the program changes: lda
+//                                         reads the byte, jmp is a computed
+//                                         jump, see `jump`)
+//   copied  $6c90 1:$a500 $1270          (code copied from bank 1 to the
+//                                         cartridge's RAM)
 //
 // An entry in banks becomes one per bank, named after the bank
 // (brinstar_update_objects), and one for the window as fixed-bank code sees
@@ -76,6 +126,7 @@ pub(all) struct MapEntry {
   bank: Int // the switchable bank of a window address; -1 for the window as mapped, and outside it
   stride: Int // bytes from one code address to the next (code tables)
   adjust: Int // added to code addresses: 1 when they are pushed for RTS
+  high: Int // a code table split in two: where its high bytes are (-1: words)
 } derive(Debug)
 
 // Names for the values of a variable: an enumeration, or bits that combine.
@@ -110,10 +161,19 @@ pub(all) struct RomMap {
   banks: Array[MapBank]
   prg_mode: Int // MMC3's PRG mode the game sets (bit 6 of its bank select)
   shadows: Array[(Int, Int)] // window address, RAM address
+  exact: Bool // calls keep return addresses on the guest stack (see `exact`)
+  follow: Bool // discovery follows MMC1's bank (see `banks follow`)
+  preempt: Int // transfers back in a frame after which the foreground yields (0: never, see `preempt`)
+  jumps: Array[(Int, Int)] // a computed jump's location, and where it can go besides the code tables
+  jump_tables: Array[(Int, String)] // a computed jump's location, and a code table it reads
+  inline: Array[(Int, Int)] // a routine's location, and the bytes after its calls that it returns past
+  ram_code: Array[(Int, Array[Int])] // code the program writes to RAM: address and bytes
+  copied: Array[(Int, Int, Int, Int)] // code it copies from ROM to RAM: address, bank (-1: fixed), ROM address, bytes
+  threads: Array[Int] // where the program starts coroutines, on stacks of their own (see `thread`)
 } derive(Debug)
 
 pub fn RomMap::empty() -> RomMap {
-  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [] }
+  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, follow: false, preempt: 0, jumps: [], jump_tables: [], inline: [], ram_code: [], copied: [], threads: [] }
 }
 
 // The name of a switchable bank, the prefix of its entries.
@@ -128,6 +188,7 @@ pub fn RomMap::bank_name(self: RomMap, bank: Int) -> String {
 // pointers it holds.
 pub fn MapEntry::code_addresses(self: MapEntry) -> Array[Int] {
   guard self.kind == Code else { return [] }
+  if self.high >= 0 { return Array::makei(self.length, fn(i) { self.address + i }) }
   let count = (self.length - 2) / self.stride + 1
   Array::makei(count, fn(i) { self.address + i * self.stride })
 }
@@ -156,17 +217,44 @@ fn parse_location(text: String) -> (Int, Array[Int]) raise ImageError {
   (address, Array::makei(last - first + 1, fn(k) { first + k }))
 }
 
+// Where code in RAM can be: internal RAM, or the cartridge's.
+fn ram_address(address: Int, bytes: Int) -> Bool {
+  bytes > 0 && ((address >= 0 && address + bytes <= 0x800) || (address >= 0x6000 && address + bytes <= 0x8000))
+}
+
+fn count_banks(cartridge: Cartridge, layout: Layout) -> Int {
+  cartridge.prg.length() / layout.bank_size
+}
+
+// Names that cannot be C functions or constants.
+let c_keywords : Array[String] = [
+  "auto", "break", "case", "char", "const", "continue", "default", "do", "double", "else", "enum",
+  "extern", "float", "for", "goto", "if", "inline", "int", "long", "register", "restrict", "return",
+  "short", "signed", "sizeof", "static", "struct", "switch", "typedef", "union", "unsigned", "void",
+  "volatile", "while", "main",
+]
+
 pub fn parse_map(text: String) -> RomMap raise ImageError {
   let entries = []
   let roms = []
-  let pending: Array[(MapKind, Int, String, Int, String, Int, Int, Array[Int])] = []
+  let pending: Array[(MapKind, Int, String, Int, String, Int, Int, Int, Array[Int])] = []
   let types: Array[MapType] = []
   let banks: Array[MapBank] = []
   let mut prg_mode = 0
+  let mut exact = false
+  let mut follow = false
+  let mut preempt = 0
+  let jumps: Array[(Int, Int)] = []
+  let jump_tables: Array[(Int, String)] = []
+  let inline: Array[(Int, Int)] = []
+  let ram_code: Array[(Int, Array[Int])] = []
+  let copied: Array[(Int, Int, Int, Int)] = []
+  let threads: Array[Int] = []
   let shadows: Array[(Int, Int)] = []
   let names: Set[String] = Set([])
   fn claim(name: String) raise ImageError {
     if names.contains(name) { raise InvalidImage("Duplicate map name: \{name}") }
+    if c_keywords.contains(name) { raise InvalidImage("A map name cannot be a C keyword: \{name}") }
     names.add(name)
   }
   for raw_line in text.split("\n") {
@@ -203,6 +291,87 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       types.push({ name, flags: fields[0] == "flags", members, description })
       continue
     }
+    // jump [BANK:]$SITE [BANK:]$TARGET: a computed jump can go there too
+    if fields[0] == "jump" {
+      if fields.length() != 3 { raise InvalidImage("Map jump line needs the jump's address and a target: \{line}") }
+      let one = fn(text: String) raise ImageError {
+        match parse_location(text) {
+          (address, []) => address
+          (address, [bank]) => bank_location(bank, address)
+          _ => raise InvalidImage("A jump and its target are in one bank each: \{line}")
+        }
+      }
+      // (or the addresses in a code table, by name)
+      if fields[2].has_prefix("$") || fields[2].contains(":") {
+        jumps.push((one(fields[1]), one(fields[2])))
+      } else {
+        jump_tables.push((one(fields[1]), fields[2]))
+      }
+      continue
+    }
+    // inline [BANK:]$ROUTINE BYTES: its calls are followed by that many bytes
+    if fields[0] == "inline" {
+      if fields.length() != 3 { raise InvalidImage("Map inline line needs a routine and a number of bytes: \{line}") }
+      let location = match parse_location(fields[1]) {
+        (address, []) => address
+        (address, [bank]) => bank_location(bank, address)
+        _ => raise InvalidImage("An inline routine is in one bank: \{line}")
+      }
+      inline.push((location, parse_number(fields[2])))
+      continue
+    }
+    // thread [BANK:]$ADDR: a coroutine starts there, on a stack of its own
+    if fields[0] == "thread" {
+      if fields.length() != 2 { raise InvalidImage("Map thread line needs the coroutine's address: \{line}") }
+      threads.push(match parse_location(fields[1]) {
+        (address, []) => address
+        (address, [bank]) => bank_location(bank, address)
+        _ => raise InvalidImage("A coroutine starts in one bank: \{line}")
+      })
+      continue
+    }
+    // ram $ADDR BYTE...: code the program writes to RAM and runs there
+    if fields[0] == "ram" {
+      if fields.length() < 3 { raise InvalidImage("Map ram line needs an address and the code's bytes: \{line}") }
+      let address = parse_number(fields[1])
+      // (`..`: a byte the program changes, the operand of its instruction)
+      let bytes = []
+      for f in fields[2:] { bytes.push(if f == ".." { -1 } else { parse_number("$" + f) }) }
+      if !ram_address(address, bytes.length()) || bytes.iter().any(fn(b) { b < -1 || b > 255 }) {
+        raise InvalidImage("Code in RAM is in $0000-$07FF or $6000-$7FFF, a byte at a time in hexadecimal: \{line}")
+      }
+      ram_code.push((address, bytes))
+      continue
+    }
+    // copied $ADDR [BANK:]$ROM BYTES: code the program copies from ROM to RAM
+    if fields[0] == "copied" {
+      if fields.length() != 4 { raise InvalidImage("Map copied line needs the RAM address, where in ROM, and how many bytes: \{line}") }
+      let address = parse_number(fields[1])
+      let (rom, in_banks) = parse_location(fields[2])
+      let count = parse_number(fields[3])
+      if !ram_address(address, count) || in_banks.length() > 1 { raise InvalidImage("Code copied to RAM is in $0000-$07FF or $6000-$7FFF, from one bank: \{line}") }
+      copied.push((address, if in_banks.is_empty() { -1 } else { in_banks[0] }, rom, count))
+      continue
+    }
+    // banks follow: discovery follows what MMC1's serial writes switch in
+    if fields[0] == "banks" {
+      if fields.length() != 2 || fields[1] != "follow" { raise InvalidImage("Map banks line: banks follow") }
+      follow = true
+      continue
+    }
+    // preempt N: the foreground yields after N transfers back in a frame
+    if fields[0] == "preempt" {
+      if fields.length() != 2 { raise InvalidImage("Map preempt line needs a number of transfers back: \{line}") }
+      preempt = parse_number(fields[1])
+      if preempt <= 0 || preempt > 65535 { raise InvalidImage("Map preempt is 1 to 65535: \{line}") }
+      continue
+    }
+    // exact: calls keep their return addresses on the guest stack
+    if fields[0] == "exact" {
+      if fields.length() != 1 { raise InvalidImage("Map exact line takes nothing more: \{line}") }
+      exact = true
+      continue
+    }
     // prg_mode N: the MMC3 PRG mode the game sets
     if fields[0] == "prg_mode" {
       if fields.length() != 2 || (fields[1] != "0" && fields[1] != "1") { raise InvalidImage("Map prg_mode line needs 0 or 1: \{line}") }
@@ -235,10 +404,10 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       let (address, in_banks) = parse_location(fields[1])
       let name = "__trap__" + fields[1]
       if in_banks.is_empty() {
-        entries.push({ kind: Trap, address, name, length: 1, type_name: "", description, bank: -1, stride: 0, adjust: 0 })
+        entries.push({ kind: Trap, address, name, length: 1, type_name: "", description, bank: -1, stride: 0, adjust: 0, high: -1 })
       } else {
         for bank in in_banks {
-          entries.push({ kind: Trap, address, name: name + "_" + bank.to_string(), length: 1, type_name: "", description, bank, stride: 0, adjust: 0 })
+          entries.push({ kind: Trap, address, name: name + "_" + bank.to_string(), length: 1, type_name: "", description, bank, stride: 0, adjust: 0, high: -1 })
         }
       }
       continue
@@ -259,6 +428,7 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
     let mut length = 0
     let mut stride = 0
     let mut adjust = 0
+    let mut high = -1
     let mut type_name = ""
     let mut i = 3
     while i < fields.length() {
@@ -275,6 +445,10 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       } else if field == "rts" && kind == Code && i >= 4 {
         adjust = 1
         i += 1
+      } else if field == "high" && kind == Code && i >= 4 && i + 1 < fields.length() {
+        // the low bytes here, the high bytes there
+        high = parse_number(fields[i + 1])
+        i += 2
       } else if i == 4 && kind == Code {
         stride = parse_number(field)
         i += 1
@@ -284,29 +458,39 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
     }
     if (kind == Table || kind == Code) && length <= 0 { raise InvalidImage("Table \{name} needs a length") }
     if type_name != "" && kind != Var { raise InvalidImage("Only variables have a type: \{line}") }
-    if kind == Code {
+    if kind == Code && high >= 0 {
+      // a byte each, and the high bytes as a table of their own
+      if stride != 0 { raise InvalidImage("A split code table has no stride: \{line}") }
+      stride = 1
+      let high_name = name + "_HIGH"
+      if in_banks.is_empty() {
+        entries.push({ kind: Table, address: high, name: high_name, length, type_name: "", description: "", bank: -1, stride: 0, adjust: 0, high: -1 })
+      } else {
+        pending.push((Table, high, high_name, length, "", 0, 0, -1, in_banks))
+      }
+    } else if kind == Code {
       if stride == 0 { stride = 2 }
       if stride < 2 { raise InvalidImage("Code addresses are two bytes: \{line}") }
       length = (length - 1) * stride + 2 // count to bytes
     }
     // one entry per bank, and the window as fixed-bank code sees it
     if in_banks.is_empty() {
-      entries.push({ kind, address, name, length, type_name, description, bank: -1, stride, adjust })
+      entries.push({ kind, address, name, length, type_name, description, bank: -1, stride, adjust, high })
     } else {
-      pending.push((kind, address, name, length, description, stride, adjust, in_banks))
+      pending.push((kind, address, name, length, description, stride, adjust, high, in_banks))
     }
   }
   // Bank names can follow their entries: expand those in banks now.
   for item in pending {
-    let (kind, address, name, length, description, stride, adjust, in_banks) = item
+    let (kind, address, name, length, description, stride, adjust, high, in_banks) = item
     for bank in in_banks {
       let prefix = { ..RomMap::empty(), banks }.bank_name(bank)
       let prefix = if kind == Routine { prefix } else { prefix.to_upper() }
-      entries.push({ kind, address, name: prefix + "_" + name, length, type_name: "", description, bank, stride, adjust })
+      entries.push({ kind, address, name: prefix + "_" + name, length, type_name: "", description, bank, stride, adjust, high })
     }
     // the same name at the same window address from several lines is one
     if !entries.iter().any(fn(e) { e.name == name && e.address == address && e.bank == -1 }) {
-      entries.push({ kind, address, name, length, type_name: "", description, bank: -1, stride, adjust })
+      entries.push({ kind, address, name, length, type_name: "", description, bank: -1, stride, adjust, high })
     }
   }
   for entry in entries { claim(entry.name) }
@@ -315,7 +499,7 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       raise InvalidImage("Unknown map type: \{entry.type_name}")
     }
   }
-  { entries, roms, types, banks, prg_mode, shadows }
+  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), follow, preempt, jumps, jump_tables, inline, ram_code, copied, threads }
 }
 
 pub(all) struct Cartridge {
@@ -325,13 +509,14 @@ pub(all) struct Cartridge {
 } derive(Debug)
 
 // MMC1 boards switch 16 KiB of PRG ROM at $8000 with the last bank fixed at
-// $C000 (the mode games set at power-on); CHR is RAM, or 8 KiB of ROM.
+// $C000 (the mode games set at power-on); CHR is RAM, or up to 128 KiB of
+// ROM in 4 KiB banks.
 fn check_mmc1(prg_size: Int, chr_size: Int) -> Unit raise ImageError {
   let banks = prg_size / 16384
   if prg_size % 16384 != 0 || banks < 2 || banks > 16 || (banks & (banks - 1)) != 0 {
     raise InvalidImage("MMC1 needs 32 to 256 KiB of PRG ROM in 16 KiB banks")
   }
-  if chr_size != 0 && chr_size != 8192 { raise InvalidImage("Only MMC1 boards with CHR RAM or 8 KiB of CHR ROM are supported") }
+  if chr_size > 131072 || chr_size % 8192 != 0 { raise InvalidImage("MMC1 has CHR RAM or up to 128 KiB of CHR ROM") }
 }
 
 // MMC3 boards switch 8 KiB banks of PRG ROM and 1 or 2 KiB banks of CHR ROM
@@ -433,13 +618,17 @@ fn byte_const(value: Int) -> @parse.SourceExpr {
 // The image of a ROM before code discovery: map labels, tables as data
 // directives (they bound inline jump tables), and variable definitions.
 pub fn rom_image(cartridge: Cartridge, map: RomMap) -> Image raise ImageError {
-  let banked = cartridge.mapper != 0
+  // (MMC1 with 32 KiB of PRG ROM switches nothing: its window holds the
+  // first bank, the last fixed; its registers still bank the CHR)
+  let banked = cartridge.mapper != 0 && !(cartridge.mapper == 1 && cartridge.prg.length() == 0x8000)
   let layout = match cartridge.mapper {
+    _ if !banked => Layout::none()
     1 => Layout::mmc1(cartridge.prg.length() / 0x4000)
     4 => Layout::mmc3(cartridge.prg.length() / 0x2000, map.prg_mode)
     _ => Layout::none()
   }
   set_layout(layout)
+  follow_mmc1(map.follow)
   let size = layout.bank_size
   let count = if banked { cartridge.prg.length() / size } else { 0 }
   // with banks, the fixed ones from the lowest to $FFFF (the windows between
@@ -466,8 +655,38 @@ pub fn rom_image(cartridge: Cartridge, map: RomMap) -> Image raise ImageError {
       window_names: Map([]),
       code: [],
       shadows: [],
+      jumps: [],
+      jump_tables: [],
+      inline: [],
+      ram_code: Map([]),
+      high: Map([]),
     }
   } else { Banks::none() }
+  for jump in map.jumps { banks.jumps.push(jump) }
+  for jump in map.jump_tables {
+    match map.entries.iter().find_first(fn(e) { e.kind == Code && e.name.to_lower() == jump.1.to_lower() }) {
+      Some(entry) => banks.jump_tables.push((jump.0, entry.address))
+      None => raise InvalidImage("A jump at \{show_pc(jump.0)} reads \{jump.1}, which is not a code table of the map")
+    }
+  }
+  for routine in map.inline { banks.inline.push(routine) }
+  for code in map.ram_code {
+    for i, byte in code.1 { banks.ram_code[code.0 + i] = byte }
+  }
+  for code in map.copied {
+    let (address, bank, rom, count) = code
+    for i in 0..<count {
+      let at = rom + i
+      let byte = if bank >= 0 {
+        guard bank < count_banks(cartridge, layout) && window_of(at) >= 0 else { raise InvalidImage("Copied code from \{show_pc(rom)} in bank \{bank}, which is not in a window of the cartridge") }
+        cartridge.prg[bank * layout.bank_size + (at & (layout.bank_size - 1))]
+      } else {
+        guard at >= origin && at < 0x10000 else { raise InvalidImage("Copied code from \{show_pc(rom)}, outside the fixed PRG ROM") }
+        bytes[at - origin]
+      }
+      banks.ram_code[address + i] = byte
+    }
+  }
   for shadow in map.shadows {
     let window = window_of(shadow.0)
     if window < 0 || layout.windows[window] != shadow.0 { raise InvalidImage("Shadow of \{show_pc(shadow.0)}, which is not a window") }
@@ -539,12 +758,15 @@ pub fn rom_image(cartridge: Cartridge, map: RomMap) -> Image raise ImageError {
         let args = Array::makei(entry.length, fn(i) { byte_const(data[entry.address - start + i]) })
         items.push((location, Directive(name="db", args~)))
         named_data.push((location, entry.length))
-        for address in entry.code_addresses() {
-          banks.code.push((if entry.bank >= 0 { bank_location(entry.bank, address) } else { address }, entry.adjust, entry.address))
+        for k, address in entry.code_addresses() {
+          let location = if entry.bank >= 0 { bank_location(entry.bank, address) } else { address }
+          banks.code.push((location, entry.adjust, entry.address))
+          if entry.high >= 0 { banks.high[location] = rebase(location, entry.high + k) }
           // a code address of a bank in its window: the bank has a routine
           // there, which code outside the window reaches as mapped
           if entry.bank >= 0 {
-            let target = (data[address - start] | (data[address - start + 1] << 8)) + entry.adjust
+            let high = if entry.high >= 0 { entry.high + k } else { address + 1 }
+            let target = (data[address - start] | (data[high - start] << 8)) + entry.adjust
             if window_of(target) == window_of(entry.address) {
               if !banks.windows.contains(target) { banks.windows[target] = [] }
               if !banks.windows[target].contains(entry.bank) { banks.windows[target].push(entry.bank) }
@@ -656,6 +878,13 @@ pub fn discover_rom(image: Image, map: RomMap) -> Program raise ImageError {
   let { instructions, dispatches, roots, facts, idle, windows, jumps, waits, traps, needed, following, pcs } = explore(image)
   // a transfer into data names its trap instead of the data
   let target_name = fn(pc: Int) { if traps.contains(pc) { trap_name(pc) } else { address_name(image, pc) } }
+  // A branch or jump with nothing pushed to an RTS that is also a computed
+  // jump (returning through two bytes pushed on other paths) returns.
+  let transfer_name = fn(from: Int, pc: Int) {
+    let plain = facts.get(from).map(fn(f) { f.depth == Some(0) }).unwrap_or(false)
+    let computed = jumps.contains(pc) && instructions.get(pc).map(fn(i) { i.op == RTS }).unwrap_or(false)
+    if plain && computed { "__ret__" } else { target_name(pc) }
+  }
   let namer = Namer::new(map, banked=image.banked())
   let source = []
   let addresses = []
@@ -713,21 +942,30 @@ pub fn discover_rom(image: Image, map: RomMap) -> Program raise ImageError {
     if !routines.contains(pc) && name.has_prefix("loc_") && needed.contains(pc) { append(Label(name), pc) }
     let branch = if inst.mode == "rel" { condition(inst.op, facts[pc]) } else { None }
     if branch == Some(true) {
-      append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(target_name(branch_target(inst))))), pc)
+      append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(transfer_name(pc, branch_target(inst))))), pc)
     } else if inst.op == JMP && inst.mode == "ind" && rom_vector(image, inst) is Some(target) {
       append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(target_name(target)))), pc)
     } else if inst.mode == "rel" && branch != Some(false) {
-      append(Inst(op=inst.op, mode=Relative(addr=Ident(target_name(branch_target(inst))))), pc)
-    } else if (inst.op == JMP || inst.op == JSR) && inst.mode == "abs" {
+      append(Inst(op=inst.op, mode=Relative(addr=Ident(transfer_name(pc, branch_target(inst))))), pc)
+    } else if inst.op == JMP && inst.mode == "abs" {
+      append(Inst(op=inst.op, mode=AbsoluteOrZeroPage(addr=Ident(transfer_name(pc, jump_target(inst))))), pc)
+    } else if inst.op == JSR && inst.mode == "abs" {
       append(Inst(op=inst.op, mode=AbsoluteOrZeroPage(addr=Ident(target_name(jump_target(inst))))), pc)
     } else if branch != Some(false) {
       append(Inst(op=inst.op, mode=rom_mode(image, namer, inst)), pc)
     }
-    let falls = inst.op != JMP && inst.op != RTS && inst.op != RTI &&
+    let call = inst.op == RTS && facts.get(pc).map(fn(f) { f.depth == Some(4) }).unwrap_or(false) && jumps.contains(pc)
+    let falls = (call || (inst.op != JMP && inst.op != RTS)) && inst.op != RTI &&
       inst.op != BRK && !dispatches.contains(pc) && branch != Some(true)
+    let next = if inst.op == JSR { image.continuation(pc, inst.next, jump_target(inst)) } else { inst.next }
     if inst.op == JSR && always_unwinds(image, jump_target(inst)) {
       // the callee returns past this routine: nothing follows the call
       append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(trap_name(inst.next)))), pc)
+    } else if inst.op == JSR && next != inst.next {
+      // past the bytes the callee reads
+      append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(target_name(next)))), pc)
+    } else if falls && transfer_name(pc, inst.next) == "__ret__" {
+      append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident("__ret__"))), pc)
     } else if falls && (following.get(pc) != Some(inst.next) || traps.contains(inst.next)) {
       append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(target_name(inst.next)))), pc)
     }
@@ -739,5 +977,5 @@ pub fn discover_rom(image: Image, map: RomMap) -> Program raise ImageError {
     image.source.push(item)
     image.addresses.push(addresses[i])
   }
-  { image, instructions, dispatches, roots: roots.map(fn(pc) { address_name(image, pc) }), facts, idle, windows, jumps, waits, exact: Ref(false), source, addresses, map }
+  { image, instructions, dispatches, roots: roots.map(fn(pc) { address_name(image, pc) }), facts, idle, windows, jumps, waits, exact: Ref(map.exact), restarts: [], switches: [], source, addresses, map }
 }

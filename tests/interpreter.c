@@ -11,12 +11,19 @@
 // usage: ./interpreter ROM.nes --waits [BANK:]FROM:TO,... [--rec FILE]
 //                     [--frames N] [--write-trace FILE] [--dump N,...]
 //                     [--profile FILE] [--poke F:ADDR=V,...]
+//                     [--save-state F:FILE] [--preempt K --polls FILE]
 //   a wait in a bank names it (the bank must be mapped there);
 //   --poke writes RAM before frame F (hex address and value), as replay's;
+//   --save-state writes the state after frame F as replay's does (to compare
+//   the two where their traces differ);
+//   --preempt K: the foreground also ends a frame at the K-th transfer back
+//   in it at the poll points of --polls ([BANK:]PC lines, the recompiler's
+//   --polls), as the recompiled code of a map with `preempt K` does;
 //   --dump writes those frames as frame_N.ppm;
 //   --profile writes what ran, for writing a map: the instructions run
 //   (by bank), calls and jumps into a window from outside it with the bank
-//   mapped, and the largest index of each jump table after a dispatcher.
+//   mapped, the targets of jumps through pointers, and the largest index of
+//   each jump table after a dispatcher.
 //
 // Like the recompiled program it calls the interrupt with the return address
 // zero and the status as the hardware pushes it, and returns from it to
@@ -28,6 +35,7 @@
 #include "rec.h"
 #include "mapper.h"
 #include "state_hash.h"
+#include "state.h"
 #include "render.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,21 +49,24 @@ void cpu_nmi_entry(void) {}
 void cpu_irq_entry(void) {}
 
 static uint16_t pc;
+static bool replaced_stack; // TXS ran (in an interrupt: a restart)
 static bool left_enabled; // the interrupt handler enabled interrupts (as cpu.c's cpu_interrupt)
 #define MAX_WAITS 64
 static uint16_t wait_from[MAX_WAITS], wait_to[MAX_WAITS];
 static int wait_bank[MAX_WAITS]; // -1: a fixed bank
 static int wait_count;
 
-// The bank mapped at an address of PRG ROM (8 KiB banks).
+// The bank mapped at an address of PRG ROM, in the mapper's banks (MMC1's
+// of 16 KiB, MMC3's of 8 KiB), as maps number them.
 static int bank_at(uint16_t addr) {
-    return addr >= 0x8000 ? (int)(prg_slots[(addr >> 13) & 3] / 0x2000) : -1;
+    unsigned size = mapper_number == 1 ? 0x4000 : 0x2000;
+    return addr >= 0x8000 ? (int)(prg_slots[(addr >> 13) & 3] / size) : -1;
 }
 
 // --profile: what ran.
 static FILE *profile;
 static uint8_t ran[64][0x2000]; // by 8 KiB bank and offset
-#define MAX_EDGES 8192
+#define MAX_EDGES 32768
 typedef struct { uint16_t site; int site_bank; uint16_t target; int bank; } Edge;
 static Edge edges[MAX_EDGES];
 static int edge_count;
@@ -192,7 +203,7 @@ static uint8_t dec(uint8_t v) { return (uint8_t)(v - 1); }
 // One instruction. Returns false at an RTI (the end of the interrupt).
 static bool step(void) {
     uint16_t at = pc;
-    if (profile && at >= 0x8000) ran[bank_at(at)][at & 0x1fff] = 1;
+    if (profile && at >= 0x8000) ran[prg_slots[(at >> 13) & 3] / 0x2000][at & 0x1fff] = 1;
     uint8_t code = rd(pc++);
     Op op = ops[code];
     if (!op.name) { fprintf(stderr, "Unsupported opcode %02x at %04x\n", code, at); exit(2); }
@@ -222,7 +233,8 @@ static bool step(void) {
     if (!strcmp(n, "RTI")) { if (!interrupt_disabled) left_enabled = true; set_status(pull()); pull(); pull(); return false; }
     if (!strcmp(n, "JMP")) {
         pc = address(op.mode);
-        if (profile && (pc >> 13) != (at >> 13) && pc >= 0x8000) note_edge(at, pc);
+        // (every target of a jump through a pointer)
+        if (profile && (((pc >> 13) != (at >> 13) && pc >= 0x8000) || op.mode == IND)) note_edge(at, pc);
         return true;
     }
     uint16_t addr = (op.mode == IMP || op.mode == ACC) ? 0 : address(op.mode);
@@ -257,7 +269,7 @@ static bool step(void) {
     else if (!strcmp(n, "TXA")) nz(a = x);
     else if (!strcmp(n, "TYA")) nz(a = y);
     else if (!strcmp(n, "TSX")) nz(x = sp);
-    else if (!strcmp(n, "TXS")) sp = x;
+    else if (!strcmp(n, "TXS")) { sp = x; replaced_stack = true; }
     else if (!strcmp(n, "PHA")) push(a);
     else if (!strcmp(n, "PHP")) push(status(0x30));
     else if (!strcmp(n, "PLA")) nz(a = pull());
@@ -272,13 +284,38 @@ static bool step(void) {
     return true;
 }
 
-// Runs the foreground to the next transfer back to a wait loop's start.
+// Preemption (--preempt K --polls FILE, as the recompiler's map `preempt`
+// and its --polls list): the foreground also ends its frame at a poll point
+// (a transfer back that the recompiled code checks) once it went back K
+// times in the frame.
+static unsigned preempt_budget, polls_taken;
+#define MAX_POLLS 8192
+static uint16_t poll_pc[MAX_POLLS];
+static int poll_bank[MAX_POLLS];
+static int poll_count = -1; // -1: every transfer back
+
+static bool polls_at(uint16_t at) {
+    if (poll_count < 0) return true;
+    for (int i = 0; i < poll_count; i++) {
+        if (poll_pc[i] == at && (poll_bank[i] < 0 || poll_bank[i] == bank_at(at))) return true;
+    }
+    return false;
+}
+
+// Runs the foreground to the next transfer back to a wait loop's start, or
+// to a poll point past the budget.
 static void run_foreground(void) {
     for (long count = 0;; count++) {
         uint16_t at = pc;
         step();
         for (int i = 0; i < wait_count; i++) {
             if (wait_from[i] == at && wait_to[i] == pc && (wait_bank[i] < 0 || wait_bank[i] == bank_at(at))) return;
+        }
+        // a taken branch or a jump back, at or before itself
+        if (preempt_budget && pc <= at && pc != (uint16_t)(at + 2) && pc != (uint16_t)(at + 3) && polls_at(at)) {
+            uint8_t code = rd(at);
+            bool back = (code & 0x1f) == 0x10 || code == 0x4c;
+            if (back && ++polls_taken >= preempt_budget) return;
         }
         if (count > 50000000) { fprintf(stderr, "The foreground does not reach a wait (at %04x)\n", pc); exit(3); }
     }
@@ -294,12 +331,19 @@ static void interrupt_through(uint16_t vector) {
     push(0); push(0);
     push(status(0x20));
     pc = word_at(vector);
-    while (step()) {}
+    replaced_stack = false;
+    while (step()) {
+        // the handler restarts the game (jumps to the reset routine, which
+        // replaces the stack): the foreground goes on from there, as the
+        // recompiled program's reset routine does
+        if (replaced_stack) return;
+    }
     carry_flag = c; zero_flag = z; neg_flag = n; overflow_flag = v; interrupt_disabled = i; decimal_flag = d;
     pc = resume;
 }
 
-static void interrupt(void) { interrupt_through(0xfffa); }
+// (the PPU raises it only when PPUCTRL enables it)
+static void interrupt(void) { if (video.ctrl & VIDEO_CTRL_NMI) interrupt_through(0xfffa); }
 static void irq(void) { interrupt_through(0xfffe); }
 
 // Whether frame `i` is in the comma-separated list.
@@ -345,6 +389,28 @@ int main(int argc, char **argv) {
     const char *profile_path = option(argc, argv, "--profile");
     const char *dispatcher_option = option(argc, argv, "--dispatcher");
     const char *pokes = option(argc, argv, "--poke");
+    const char *preempt = option(argc, argv, "--preempt");
+    const char *polls_path = option(argc, argv, "--polls");
+    if (preempt) preempt_budget = (unsigned)strtoul(preempt, NULL, 10);
+    if (polls_path) {
+        FILE *list = fopen(polls_path, "r");
+        if (!list) { fprintf(stderr, "Cannot open %s\n", polls_path); return 1; }
+        char line[64];
+        poll_count = 0;
+        while (fgets(line, sizeof line, list) && poll_count < MAX_POLLS) {
+            unsigned bank, at;
+            if (sscanf(line, "%u:%x", &bank, &at) == 2) { poll_bank[poll_count] = (int)bank; poll_pc[poll_count++] = (uint16_t)at; }
+            else if (sscanf(line, "%x", &at) == 1) { poll_bank[poll_count] = -1; poll_pc[poll_count++] = (uint16_t)at; }
+        }
+        fclose(list);
+    }
+    const char *save_option = option(argc, argv, "--save-state");
+    unsigned save_frame = 0;
+    char save_path[256] = "";
+    if (save_option && sscanf(save_option, "%u:%255s", &save_frame, save_path) != 2) {
+        fprintf(stderr, "--save-state FRAME:FILE\n");
+        return 1;
+    }
     if (argc < 2 || !waits) {
         fprintf(stderr, "usage: %s ROM.nes --waits [BANK:]FROM:TO,... [--rec FILE] [--frames N] [--write-trace FILE] [--dump N,...] [--profile FILE] [--poke F:ADDR=V,...]\n", argv[0]);
         return 1;
@@ -373,7 +439,7 @@ int main(int argc, char **argv) {
     uint8_t header[16];
     if (!file || fread(header, 1, 16, file) != 16) { fprintf(stderr, "Cannot read %s\n", argv[1]); return 1; }
     unsigned prg_size = header[4] * 0x4000u;
-    static uint8_t prg[0x40000];
+    static uint8_t prg[0x80000];
     fseek(file, 16 + ((header[6] & 4) ? 512 : 0), SEEK_SET);
     if (prg_size > sizeof(prg) || fread(prg, 1, prg_size, file) != prg_size) { fprintf(stderr, "Truncated %s\n", argv[1]); return 1; }
     fclose(file);
@@ -383,6 +449,7 @@ int main(int argc, char **argv) {
     apu_init(48000);
     if (load_cartridge(argv[1])) return 1;
     mapper_init(cartridge_mapper);
+    mapper_mirroring(cartridge_vertical);
 
     NESInputRecording recording = {0};
     if (rec_path && rec_open(rec_path, "r", &recording) != 0) { fprintf(stderr, "Cannot open %s\n", rec_path); return 1; }
@@ -395,11 +462,23 @@ int main(int argc, char **argv) {
     for (uint32_t i = 0; i < frames; i++) {
         update_controller1(rec_path ? rec_state_at_frame(&recording, i) : 0);
         rec_pokes(pokes, i, poke);
+        polls_taken = 0;
+        replaced_stack = false;
         interrupt();
-        mapper_frame(irq, left_enabled || !interrupt_disabled);
+        // (not when the NMI handler restarted the game, as next_frame)
+        if (!replaced_stack) mapper_frame(irq, left_enabled || !interrupt_disabled);
+        replaced_stack = false;
         run_foreground();
         sound_end_frame();
         if (trace) fprintf(trace, "%08x\n", hash_state());
+        if (save_path[0] && i == save_frame) {
+            // the bytes replay's --save-state writes, to compare them
+            static uint8_t saved[SAVE_STATE_SIZE];
+            save_state(saved);
+            FILE *file = fopen(save_path, "wb");
+            if (!file || fwrite(saved, 1, sizeof saved, file) != sizeof saved) { fprintf(stderr, "Cannot write %s\n", save_path); return 1; }
+            fclose(file);
+        }
         if (dump && dumps(dump, i)) {
             if (option(argc, argv, "--splits") || (argc > 0 && strcmp(argv[argc - 1], "--splits") == 0)) {
                 printf("frame %u: %u splits, irq latch %u enabled %u, mask %02x\n", i, video.split_count, mmc3.irq_latch, mmc3.irq_enabled, video.mask);

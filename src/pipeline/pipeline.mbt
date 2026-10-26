@@ -67,6 +67,9 @@ pub(all) struct Output {
   files : Array[@transpile.File] // the C program
   wasm : Bytes?
   irreducible : Array[String] // functions structured as dispatch loops
+  // with preemption, where the foreground polls ([BANK:]ADDRESS, hex), for
+  // the reference interpreter
+  polls : Array[String]
 }
 
 pub fn recompile(
@@ -84,6 +87,9 @@ pub fn recompile(
     err => raise fail("IR", err)
   }
   progress("resumable")
+  let polls = ir.make_preemptible()
+  ir.make_switchable() catch { err => raise fail("IR", err) }
+  ir.make_restartable() catch { err => raise fail("IR", err) }
   ir.make_resumable() catch { err => raise fail("IR", err) }
   progress("optimize")
   if options.reference { ir.analyze() |> ignore } else { ir.optimize() }
@@ -91,7 +97,13 @@ pub fn recompile(
   let c = @transpile.Transpiler::transpile(low, ir, native=options.native) catch {
     err => raise fail("C", err)
   }
-  if !options.wasm { return { files: c.files, wasm: None, irreducible: [] } }
+  let polls = polls.map(fn(location) {
+    match @image.bank_of(location) {
+      Some(bank) => "\{bank}:" + (location & 0xffff).to_string(radix=16)
+      None => location.to_string(radix=16)
+    }
+  })
+  if !options.wasm { return { files: c.files, wasm: None, irreducible: [], polls } }
   // The WebAssembly build also inlines small leaf routines; the C keeps one
   // function per routine.
   if !options.reference && options.inline {
@@ -108,7 +120,7 @@ pub fn recompile(
   ) catch {
     err => raise fail("WebAssembly", err)
   }
-  { files: c.files, wasm: Some(output.bytes), irreducible: output.irreducible }
+  { files: c.files, wasm: Some(output.bytes), irreducible: output.irreducible, polls }
 }
 
 // Routine names, one per line, `#` comments.

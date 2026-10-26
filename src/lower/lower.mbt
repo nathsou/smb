@@ -276,7 +276,7 @@ fn AsmLowering::collect_instructions(self: AsmLowering) -> Unit raise LoweringEr
           let p = self.program.unwrap()
           let site = p.addresses[item_idx]
           let targets = p.jumps[site].map(fn(t) { @image.address_name(p.image, t) })
-          self.lowered.push(ComputedJump(targets~, site~))
+          self.lowered.push(ComputedJump(targets~, site~, call=p.computed_call(site)))
         } else if op == JSR && (match self.program { Some(p) => p.dispatches.contains(p.addresses[item_idx]); None => false }) {
           // Targets come from the dispatch proof, not from the table's
           // source spelling. The table's data items are skipped below.
@@ -380,6 +380,10 @@ fn AsmLowering::next_non_comment_item_index(self: AsmLowering, start: Int) -> In
 fn AsmLowering::collect_basic_block_leaders(self: AsmLowering) -> Array[Int] {
   if self.program is Some(p) {
     for root in p.roots { self.targets.subroutines.add(root) }
+    // a restart continues the reset routine from its TXS, an entry of its own
+    for pc in p.restarts { self.targets.subroutines.add(@image.address_name(p.image, pc)) }
+    // so does a coroutine, on a stack of its own
+    for pc in p.map.threads { self.targets.subroutines.add(@image.address_name(p.image, pc)) }
     // Calls into the window from the fixed bank go to a dispatcher on the
     // bank mapped; the routines it chooses are entries.
     for address, targets in p.windows {
@@ -464,6 +468,8 @@ fn BasicBlock::has_fallthrough(self: BasicBlock) -> Bool raise LoweringError {
         _ => true
       }
     }
+    // a computed call returns to the next instruction
+    ComputedJump(call~, ..) => call
     _ => false
   }
 }
@@ -709,6 +715,14 @@ fn AsmLowering::collect_subroutines(self: AsmLowering) -> Unit raise LoweringErr
   entries.sort_by(fn(a, b) { self.bb_by_label[a].id - self.bb_by_label[b].id })
   let entry_names: Map[Int, String] = Map([])
   let reach: Map[Int, Set[Int]] = Map([])
+  // restarts are always calls (they unwind, see the IR's restart.mbt), and
+  // coroutines (they start from the runtime, see the IR's switch.mbt)
+  let restarts: Set[Int] = Set([])
+  if self.program is Some(p) {
+    for pc in p.restarts.iter().concat(p.map.threads.iter()) {
+      if self.bb_by_label.get(@image.address_name(p.image, pc)) is Some(bb) { restarts.add(bb.id) }
+    }
+  }
   fn reachable(entry: BasicBlock) -> Set[Int] {
     let seen: Set[Int] = Set([])
     let work = [entry]
@@ -716,7 +730,7 @@ fn AsmLowering::collect_subroutines(self: AsmLowering) -> Unit raise LoweringErr
       if seen.contains(bb.id) { continue }
       seen.add(bb.id)
       match bb.last_non_comment_item() {
-        Some({ item: JumpEngine(_) | ComputedJump(_) }) => ()
+        Some({ item: JumpEngine(_) | ComputedJump(call=false, ..) }) => ()
         _ => for link in bb.successors { work.push(link.bb) }
       }
     }
@@ -731,9 +745,9 @@ fn AsmLowering::collect_subroutines(self: AsmLowering) -> Unit raise LoweringErr
       visited.add(bb.id)
       blocks.push(bb)
       match bb.last_non_comment_item() {
-        Some({ item: JumpEngine(_) | ComputedJump(_) }) => ()
+        Some({ item: JumpEngine(_) | ComputedJump(call=false, ..) }) => ()
         _ => for link in bb.successors {
-          if entry_names.contains(link.bb.id) && !reach[link.bb.id].contains(bb.id) {
+          if entry_names.contains(link.bb.id) && (!reach[link.bb.id].contains(bb.id) || restarts.contains(link.bb.id)) {
             continue
           }
           pending.push(link.bb)

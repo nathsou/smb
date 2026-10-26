@@ -161,6 +161,9 @@ pub(all) struct Function {
   doc : Array[String]
   native : Bool // body supplied by hand-written code; kept for analysis
   helper : Bool // dispatcher helper: takes the return address, returns a target
+  // Preemption polls (see preempt.mbt): the block of each, and the location
+  // of the transfer back it polls at.
+  polls : Array[(Int, Int)]
 } derive(Debug)
 
 pub(all) struct Program {
@@ -172,6 +175,12 @@ pub(all) struct Program {
   prg : Array[Int] // the PRG ROM image, for folding constant reads (the fixed banks, with a mapper)
   banks : Array[Array[Int]] // the switchable banks, for reads of Bank(k)
   layout : @image.Layout // where the banks are at $8000-$FFFF
+  // The routines a restart continues the reset routine with (from its TXS,
+  // see restart.mbt), in the order of their restart numbers less one.
+  restarts : Array[String]
+  // The routines coroutines start with, on stacks of their own (see
+  // switch.mbt), in the order of their thread numbers less one.
+  threads : Array[String]
   // Filled by `analyze`.
   mut info : Analysis?
 } derive(Debug)

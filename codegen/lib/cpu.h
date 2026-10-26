@@ -30,14 +30,51 @@ void cpu_returned(uint8_t low, uint8_t high);
 
 // Suspension in wait loops: the functions on the way to a wait push their
 // resume points and return, down to the reset routine, which next_frame
-// calls again after the interrupt (see the IR's escape.mbt).
-#define CPU_RESUME_STACK 64
+// calls again after the interrupt (see the IR's escape.mbt). (Games whose
+// routines leave without returning nest deep: as many as the depth's byte
+// counts.)
+#define CPU_RESUME_STACK 255
 extern uint8_t cpu_suspended;
 extern uint8_t cpu_resume_depth;
 extern uint8_t cpu_resume_point;
 extern uint8_t cpu_resume_stack[CPU_RESUME_STACK];
 void cpu_suspend(uint8_t point);
 void cpu_resume_pop(void);
+
+// Restarts (a game replacing the stack pointer outside its reset routine,
+// to start over from deep in its calls): the calls on the way unwind, down
+// to the reset routine, which runs restart routine `cpu_restarting` (see the
+// IR's restart.mbt).
+extern uint8_t cpu_restarting;
+void cpu_restart(uint8_t routine);
+void cpu_restart_done(void);
+
+// Coroutines (a map's `thread`, see the IR's switch.mbt): a switch to
+// another stack (`cpu_switch`) suspends the calls of the coroutine running,
+// from the one whose return address the switch left (`cpu_await`), and the
+// runtime resumes the coroutine waiting for the address the switch returned
+// to, or starts one (`cpu_start_thread`): the reset routine runs coroutine
+// `cpu_thread` (0: its own code).
+#define CPU_THREADS 4
+extern uint8_t cpu_thread, cpu_switching;
+void cpu_switch(void);
+void cpu_await(uint16_t back);
+void cpu_start_thread(uint8_t thread);
+typedef struct {
+    uint8_t parked; // suspended, waiting for a return to `awaited`
+    uint8_t depth;
+    uint16_t awaited;
+    uint8_t points[CPU_RESUME_STACK];
+} CpuThread;
+extern CpuThread cpu_threads[CPU_THREADS];
+
+// Preemption (a map's `preempt`): the foreground counts its transfers back
+// (`cpu_poll`) and yields past the budget (`cpu_preempted`, see the IR's
+// preempt.mbt); the count starts again each frame.
+extern uint8_t cpu_preempted;
+extern uint16_t cpu_polls, cpu_poll_budget;
+void cpu_preemption(uint8_t low, uint8_t high);
+void cpu_poll(void);
 
 // PHP/PLP
 void php(void);

@@ -39,6 +39,7 @@ pub(all) struct Output {
   files : Array[@transpile.File]
   wasm : Bytes?
   irreducible : Array[String]
+  polls : Array[String]
 }
 
 // Type aliases

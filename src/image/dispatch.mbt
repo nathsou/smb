@@ -280,8 +280,9 @@ fn same_path(a: Array[DispatchStep], b: Array[DispatchStep]) -> Bool {
 // Other indices are left to the emitted runtime trap.
 fn dispatch_at(image: Image, call: Instruction, table_end: Int) -> Dispatch? {
   let within = fn(address: Int) { address >= call.next && address < table_end }
-  // a target outside ROM (an unused entry) is left to the trap
-  let code = fn(address: Int) { (address & 0xffff) >= 0x8000 }
+  // a target outside ROM (an unused entry) is left to the trap, but for
+  // code the program copies to RAM
+  let code = fn(address: Int) { (address & 0xffff) >= 0x8000 || image.banks.ram_code.contains(address & 0xffff) }
   for carrier in 0..<3 {
     let return_pc = ((call.next & 0xffff) - 1) & 0xffff
     // the path of the first entry that is code (unused entries are zero)

@@ -86,6 +86,7 @@ int main(int argc, char **argv) {
     (void)debug_chr;
     if (load_cartridge(ROM_PATH)) return 1;
     mapper_init(cartridge_mapper);
+    mapper_mirroring(cartridge_vertical);
 #else
     if (debug_chr) {
         uint8_t chr[DEBUG_CHR_SIZE];

@@ -53,6 +53,89 @@ void cpu_resume_pop(void) {
     cpu_resume_point = cpu_resume_stack[--cpu_resume_depth];
 }
 
+uint8_t cpu_restarting;
+
+void cpu_restart(uint8_t routine) {
+    cpu_restarting = routine;
+}
+
+uint8_t cpu_thread, cpu_switching;
+static uint8_t cpu_thread_starting;
+static uint16_t cpu_awaited;
+CpuThread cpu_threads[CPU_THREADS];
+
+void cpu_switch(void) {
+    cpu_switching = 1;
+}
+
+void cpu_await(uint16_t back) {
+    cpu_awaited = back;
+    cpu_switching = 2;
+}
+
+void cpu_start_thread(uint8_t thread) {
+    if (thread >= CPU_THREADS) __builtin_trap();
+    cpu_switching = 1;
+    cpu_thread_starting = thread;
+    // (no call of the coroutine switching away waits for this)
+    cpu_return = 0;
+}
+
+// The reset routine returned in the middle of a switch: the coroutine that
+// ran keeps its resume points, and the one the switch goes to runs (from
+// the reset routine again).
+static void cpu_switch_threads(void) {
+    CpuThread *from = &cpu_threads[cpu_thread];
+    from->parked = 1;
+    from->awaited = cpu_awaited;
+    from->depth = cpu_resume_depth;
+    for (int i = 0; i < cpu_resume_depth; i++) from->points[i] = cpu_resume_stack[i];
+    cpu_switching = 0;
+    cpu_suspended = 0;
+    if (cpu_thread_starting) {
+        cpu_thread = cpu_thread_starting;
+        cpu_thread_starting = 0;
+        cpu_threads[cpu_thread].parked = 0;
+        cpu_resume_depth = 0;
+        return;
+    }
+    for (int k = 0; k < CPU_THREADS; k++) {
+        CpuThread *to = &cpu_threads[k];
+        if (!to->parked || to->awaited != cpu_return) continue;
+        to->parked = 0;
+        cpu_thread = (uint8_t)k;
+        cpu_resume_depth = to->depth;
+        for (int i = 0; i < to->depth; i++) cpu_resume_stack[i] = to->points[i];
+        return;
+    }
+    cpu_unresolved_jump(cpu_return); // no coroutine waits there
+}
+
+// Runs the switches under way (each to the coroutine that goes on).
+static void cpu_switches(void) {
+    // (one still under way, the foreground preempted on its way to the
+    // return, goes on when the foreground resumes)
+    while (cpu_switching == 2) {
+        cpu_switch_threads();
+        cpu_reset_entry();
+    }
+}
+
+void cpu_restart_done(void) {
+    cpu_restarting = 0;
+}
+
+uint8_t cpu_preempted;
+uint16_t cpu_polls, cpu_poll_budget;
+
+void cpu_preemption(uint8_t low, uint8_t high) {
+    cpu_poll_budget = (uint16_t)(low | (high << 8));
+}
+
+void cpu_poll(void) {
+    if (++cpu_polls >= cpu_poll_budget) cpu_preempted = 1;
+}
+
 uint16_t cpu_dispatch_target;
 
 // RTS used as a computed jump: pop the two bytes a dispatcher pushed.
@@ -107,6 +190,11 @@ void cpu_init(void) {
     cpu_return = 0;
     cpu_suspended = 0;
     cpu_resume_depth = 0;
+    cpu_restarting = 0;
+    cpu_thread = 0;
+    cpu_switching = 0;
+    cpu_thread_starting = 0;
+    for (int k = 0; k < CPU_THREADS; k++) cpu_threads[k].parked = 0;
 
     // controller
     controller1_state = 0;
@@ -231,7 +319,7 @@ inline uint8_t zero_page(uint8_t addr) {
     return read_byte((uint16_t)addr);
 }
 
-inline uint8_t zero_page_x_addr(uint8_t addr) {
+static inline uint8_t zero_page_x_addr(uint8_t addr) {
     return addr + x;
 }
 
@@ -239,7 +327,7 @@ inline uint8_t zero_page_x(uint8_t addr) {
     return read_byte((uint16_t)zero_page_x_addr(addr));
 }
 
-inline uint8_t zero_page_y_addr(uint8_t addr) {
+static inline uint8_t zero_page_y_addr(uint8_t addr) {
     return addr + y;
 }
 
@@ -318,6 +406,8 @@ static bool cpu_interrupt(void (*handler)(void)) {
     cpu_interrupts_were_enabled = 0;
     handler();
     bool enabled = cpu_interrupts_were_enabled || !interrupt_disabled;
+    // (a handler that restarts the game does not return to the foreground)
+    if (cpu_restarting) return enabled;
     carry_flag = c; zero_flag = z; neg_flag = n; overflow_flag = v;
     interrupt_disabled = i; decimal_flag = d;
     return enabled;
@@ -330,18 +420,39 @@ static void cpu_irq(void) {
 #endif
 
 inline void next_frame(void) {
+    // (a switch under way when the game started: on with it)
+    cpu_switches();
+    // preemption counts transfers back from the frame's start
+    cpu_polls = 0;
+    cpu_preempted = 0;
     // NMI is delivered while the foreground is at a proven idle yield or
-    // suspended in a wait loop, then the frame's scanlines raise the
+    // suspended in a wait loop (when PPUCTRL enables it, for programs that
+    // drive the PPU registers), then the frame's scanlines raise the
     // mapper's IRQ.
+#ifdef PPU_BUS
+    bool enabled = (video.ctrl & VIDEO_CTRL_NMI) ? cpu_interrupt(cpu_nmi_entry) : false;
+#else
     bool enabled = cpu_interrupt(cpu_nmi_entry);
+#endif
 #ifdef MAPPER
-    mapper_frame(cpu_irq, enabled || !interrupt_disabled);
+    // (not when the NMI handler restarted the game: the reset routine runs
+    // first)
+    if (!cpu_restarting) mapper_frame(cpu_irq, enabled || !interrupt_disabled);
 #else
     (void)enabled;
 #endif
-    // A suspended foreground resumes and runs to its next wait.
-    if (cpu_resume_depth != 0) {
+    // A suspended foreground resumes and runs to its next wait; or, when
+    // the interrupt handler restarted the game, the reset routine runs its
+    // restart instead (see the IR's restart.mbt).
+    if (cpu_restarting) {
+        // (the coroutines too)
+        cpu_resume_depth = 0;
+        cpu_thread = 0;
+        for (int k = 0; k < CPU_THREADS; k++) cpu_threads[k].parked = 0;
+    }
+    if (cpu_resume_depth != 0 || cpu_restarting) {
         cpu_suspended = 0;
         cpu_reset_entry();
+        cpu_switches();
     }
 }
