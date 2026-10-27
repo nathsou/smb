@@ -220,3 +220,19 @@ test "a loop deciding on memory alone waits for the interrupt" {
   let entered = discover(fixture(".org $8000\nBoot:\n ldy $20\n jsr Next\nIdle:\n jmp Idle\nRetry:\n ldy $21\nNext:\n lda $8100,y\n cmp #$ff\n beq Retry\n rts\nNmi:\n rti\n.org $fffa\n.dw Nmi, Boot, Nmi\n"))
   assert_eq(entered.waits.length(), 0)
 }
+
+test "a loop doing work of its own waits where the map says" {
+  let source = ".org $8000\nBoot:\n lda #$80\n sta $2000\nMain:\n jsr Stir\nBack:\n jmp Main\nStir:\n inc $10\n rts\nNmi:\n rti\n.org $fffa\n.dw Nmi, Boot, Nmi\n"
+  // the loop changes memory: nothing tells it waits for the interrupt
+  assert_eq(discover(fixture(source)).waits.length(), 0)
+  let image = fixture(source)
+  assert_eq(parse_map("wait $8008 ; jmp back\n").waits, [0x8008])
+  image.banks.waits.push(image.symbols["Back"])
+  let p = discover(image)
+  assert_eq(p.waits.length(), 1)
+  assert_eq(p.waits[image.symbols["Back"]], image.symbols["Main"])
+  // only a transfer can wait
+  let wrong = fixture(source)
+  wrong.banks.waits.push(image.symbols["Stir"])
+  try discover(wrong) catch { _ => () } noraise { _ => fail("a wait at an increment") }
+}

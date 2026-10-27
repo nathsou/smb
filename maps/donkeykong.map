@@ -1,0 +1,20 @@
+# Donkey Kong (NES): the names this project gives to the program's routines,
+# tables and variables, and what code discovery cannot recover by itself.
+#
+# The cartridge is an NROM board with 16 KiB of PRG ROM and 8 KiB of CHR
+# ROM. See src/image/rom.mbt for the syntax.
+
+rom aa408f5a6b97c0d738e7e8b489a5617ad4a9ecdee2b05c4ee504210ce31b2825 16384 8192 ; Donkey Kong (World) (Rev 1)
+exact   ; the machine's stack, byte for byte (as the reference interpreter has it)
+
+# The game runs in the NMI; after the reset the foreground only stirs the
+# random bytes, calling stir_random until the interrupt comes (once a frame
+# here)
+routine $c79e reset
+routine $c85f nmi
+routine $f4ed stir_random       ; shifts the random bytes right, a feedback bit in
+wait $c7e4                      ; jsr stir_random / jmp back: waits for the interrupt
+var $18 random_bytes 8
+
+var $46 mario_x
+var $47 mario_y

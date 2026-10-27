@@ -54,10 +54,11 @@ pub(all) struct Banks {
   inline: Array[(Int, Int)] // routines that read bytes after their calls and return past them: location, bytes
   ram_code: Map[Int, Int] // code the program writes to RAM and runs there: address -> byte (the map's `ram`)
   high: Map[Int, Int] // split code tables: the location of a code address's low byte -> its high byte's
+  waits: Array[Int] // transfers back that wait for the interrupt (the map's `wait`)
 } derive(Debug)
 
 pub fn Banks::none() -> Banks {
-  { contents: [], homes: [], companions: [], names: [], windows: Map([]), window_names: Map([]), code: [], shadows: [], jumps: [], jump_tables: [], inline: [], ram_code: Map([]), high: Map([]) }
+  { contents: [], homes: [], companions: [], names: [], windows: Map([]), window_names: Map([]), code: [], shadows: [], jumps: [], jump_tables: [], inline: [], ram_code: Map([]), high: Map([]), waits: [] }
 }
 
 // The code address in a code table at `location` (split tables keep the

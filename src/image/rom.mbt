@@ -48,6 +48,13 @@
 //
 //   preempt 500
 //
+// A loop the foreground runs until the interrupt comes, doing work of its
+// own on the way (calling a random number generator, say), cannot be told
+// from the code: the map names the transfer back to its start, which then
+// waits there, as a wait loop does (once around the loop per frame):
+//
+//   wait    $c7e4                        (jmp back to the loop's start)
+//
 // Calls are C calls, and leave no return address on the guest stack, unless
 // the program reads them (see the stack analysis) or the map asks for the
 // machine's stack, byte for byte (a game compared with the interpreter):
@@ -170,10 +177,11 @@ pub(all) struct RomMap {
   ram_code: Array[(Int, Array[Int])] // code the program writes to RAM: address and bytes
   copied: Array[(Int, Int, Int, Int)] // code it copies from ROM to RAM: address, bank (-1: fixed), ROM address, bytes
   threads: Array[Int] // where the program starts coroutines, on stacks of their own (see `thread`)
+  waits: Array[Int] // transfers back that wait for the interrupt (see `wait`)
 } derive(Debug)
 
 pub fn RomMap::empty() -> RomMap {
-  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, follow: false, preempt: 0, jumps: [], jump_tables: [], inline: [], ram_code: [], copied: [], threads: [] }
+  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, follow: false, preempt: 0, jumps: [], jump_tables: [], inline: [], ram_code: [], copied: [], threads: [], waits: [] }
 }
 
 // The name of a switchable bank, the prefix of its entries.
@@ -250,6 +258,7 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
   let ram_code: Array[(Int, Array[Int])] = []
   let copied: Array[(Int, Int, Int, Int)] = []
   let threads: Array[Int] = []
+  let waits: Array[Int] = []
   let shadows: Array[(Int, Int)] = []
   let names: Set[String] = Set([])
   fn claim(name: String) raise ImageError {
@@ -318,6 +327,16 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
         _ => raise InvalidImage("An inline routine is in one bank: \{line}")
       }
       inline.push((location, parse_number(fields[2])))
+      continue
+    }
+    // wait [BANK:]$ADDR: the transfer back there waits for the interrupt
+    if fields[0] == "wait" {
+      if fields.length() != 2 { raise InvalidImage("Map wait line needs the address of a transfer back: \{line}") }
+      waits.push(match parse_location(fields[1]) {
+        (address, []) => address
+        (address, [bank]) => bank_location(bank, address)
+        _ => raise InvalidImage("A wait is in one bank: \{line}")
+      })
       continue
     }
     // thread [BANK:]$ADDR: a coroutine starts there, on a stack of its own
@@ -499,7 +518,7 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       raise InvalidImage("Unknown map type: \{entry.type_name}")
     }
   }
-  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), follow, preempt, jumps, jump_tables, inline, ram_code, copied, threads }
+  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), follow, preempt, jumps, jump_tables, inline, ram_code, copied, threads, waits }
 }
 
 pub(all) struct Cartridge {
@@ -660,6 +679,7 @@ pub fn rom_image(cartridge: Cartridge, map: RomMap) -> Image raise ImageError {
       inline: [],
       ram_code: Map([]),
       high: Map([]),
+      waits: [],
     }
   } else { Banks::none() }
   for jump in map.jumps { banks.jumps.push(jump) }
@@ -670,6 +690,7 @@ pub fn rom_image(cartridge: Cartridge, map: RomMap) -> Image raise ImageError {
     }
   }
   for routine in map.inline { banks.inline.push(routine) }
+  for wait in map.waits { banks.waits.push(wait) }
   for code in map.ram_code {
     for i, byte in code.1 { banks.ram_code[code.0 + i] = byte }
   }

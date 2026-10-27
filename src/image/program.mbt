@@ -977,6 +977,14 @@ fn explore_with(image: Image, waiting: Map[Int, Int], switching: Map[Int, Int]?)
     for target in targets { needed.add(target) }
   }
   let waits = find_waits(instructions, facts, idle)
+  // the transfers back the map says wait (loops that do work of their own)
+  for pc in image.banks.waits {
+    waits[pc] = match instructions.get(pc) {
+      Some(inst) if inst.op == JMP && inst.mode == "abs" => jump_target(inst)
+      Some(inst) if inst.mode == "rel" => branch_target(inst)
+      _ => raise InvalidImage("The map's wait at \{show_pc(pc)} is not a jump or branch that discovery reaches")
+    }
+  }
   check_wait_loops(image, instructions, facts, idle, waits)
   { instructions, dispatches, roots, facts, idle, windows, jumps, waits, traps, needed, following, pcs }
 }

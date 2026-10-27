@@ -14,10 +14,11 @@ natively (save states loaded back along the way) and in WebAssembly, with
 registers in locals and, structured as dispatch loops, in memory. With
 --smb3 (smb3.nes in the root): the same for Super Mario Bros. 3, over
 rec/smb3.rec against tests/golden/smb3.trace, and likewise --bomberman,
---tetris, --zelda, --chessmaster (with preemption, as its map says) and
---kirby. For each, the page's WebGL renderer is compared with the software
-renderer and the themes are drawn (tests/web/cartridge_gpu.cjs,
-Playwright), and for SMB3 the desktop GPU renderer too (under Xvfb)."""
+--tetris, --zelda, --chessmaster (with preemption, as its map says),
+--kirby, --drmario and --donkeykong. For each, the page's WebGL renderer
+is compared with the software renderer and the themes are drawn
+(tests/web/cartridge_gpu.cjs, Playwright), and for SMB3 the desktop GPU
+renderer too (under Xvfb)."""
 import argparse
 import pathlib
 import re
@@ -44,6 +45,8 @@ CARTRIDGES = {
     "zelda": "1200,2200",
     "chessmaster": "1700,4300",
     "kirby": "1500,3000",
+    "drmario": "1250,4500",
+    "donkeykong": "1200,1580",
 }
 
 

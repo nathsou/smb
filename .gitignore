@@ -54,3 +54,9 @@ codegen/chessmaster/
 web/kirby.map
 codegen/kirby/
 /kirby
+web/drmario.map
+codegen/drmario/
+/drmario
+web/donkeykong.map
+codegen/donkeykong/
+/donkeykong

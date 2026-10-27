@@ -1,14 +1,14 @@
-# Five more games
+# Seven more games
 
 After Super Mario Bros., Metroid and Super Mario Bros. 3, the recompiler
-handles Bomberman, Tetris, The Legend of Zelda, The Chessmaster and Kirby's
-Adventure. As for the others, the repository holds no game code or data:
+handles Bomberman, Tetris, The Legend of Zelda, The Chessmaster, Kirby's
+Adventure, Dr. Mario and Donkey Kong. As for the others, the repository holds no game code or data:
 each map in `maps/` names routines and tables and records the facts discovery
 cannot recover on its own. The recompiler reads your own dump.
 
 ```bash
-make codegen GAME=kirby          # kirby.nes -> codegen/kirby/ (likewise bomberman,
-make build GAME=kirby            # tetris, zelda, chessmaster): ./kirby (raylib)
+make codegen GAME=kirby          # kirby.nes -> codegen/kirby/ (likewise bomberman, tetris,
+make build GAME=kirby            # zelda, chessmaster, drmario, donkeykong): ./kirby (raylib)
 python3 tests/check_codegen.py --kirby
 ```
 
@@ -19,8 +19,10 @@ python3 tests/check_codegen.py --kirby
 | The Legend of Zelda | MMC1, 128 KiB, CHR RAM | 19,016 | 1,125 (47,100) | 570 KB | 2,400 frames |
 | The Chessmaster | MMC1, 128 KiB | 15,445 | 561 (48,700) | 660 KB | 6,019 frames |
 | Kirby's Adventure | MMC3, 512 KiB | 18,470 | 1,128 (47,100) | 640 KB | 3,200 frames |
+| Dr. Mario | MMC1, 32 KiB, CHR banks | 5,753 | 248 (11,400) | 145 KB | 4,600 frames |
+| Donkey Kong | NROM, 16 KiB | 6,012 | 185 (11,300) | 140 KB | 4,500 frames |
 
-All five drive the PPU through its registers and run on the runtime module
+All seven drive the PPU through its registers and run on the runtime module
 for cartridges, NROM included (the header's mirroring is applied). Each is
 checked like Metroid: the reference interpreter (`tests/interpreter.c`)
 writes `tests/golden/NAME.trace` over `rec/NAME.rec`, and the recompiled
@@ -117,3 +119,29 @@ that code outside them reaches, in the banks the game maps there, and the
 tables the pointers of computed jumps are loaded from: generated from the
 code, the far calls and a recording of the interpreter (`--profile`), then
 checked by discovery, which rejects guesses that lead to bytes no code has.
+
+## Dr. Mario: Tetris's engine
+
+Dr. Mario is Tetris's sibling: a 32 KiB MMC1 game with CHR banks, built on
+the same engine. Its map is Tetris's facts at other addresses: the
+dispatcher that jumps through the table after its call (`routine $b8c6
+jump_by_index` and its four tables), the routine that reads the address of
+what to draw after its call (`inline $b6dc 2`), and the sound engine's
+computed jump, which reads a table of 55 routines through a pointer each
+channel starts at (`code $d200 sound_routines 55`, `jump $d42a
+sound_routines`). Its recording clears the first level with twelve pills,
+loses the second, goes through the settings and starts a game for two.
+
+## Donkey Kong: a loop that waits doing work
+
+Donkey Kong runs its whole game in the NMI handler. After the reset, the
+foreground calls the random number generator over and over (`jsr
+stir_random / jmp back`) until the interrupt comes. Nothing in the code
+says that this loop waits: it changes memory every time around, so it is no
+wait loop to discovery, and recompiled as it is it would never yield to the
+interrupt. `wait $c7e4` names the jump back: it waits for the interrupt
+there, as a wait loop's transfer back does, so the loop goes around once a
+frame (the hardware goes around as many times as the frame leaves time for:
+the random bytes differ from the console's, the same in the interpreter and
+the recompiled game). Its recording climbs to the top girder, jumps
+barrels, loses its three lives, and starts game B.

@@ -1,0 +1,37 @@
+# Dr. Mario (NES): the names this project gives to the program's routines,
+# tables and variables, and what code discovery cannot recover by itself.
+#
+# The cartridge is an MMC1 board with 32 KiB of PRG ROM (nothing to switch:
+# the program is recompiled as one image) and 32 KiB of CHR ROM in 4 KiB
+# banks. Its engine is Tetris's. See src/image/rom.mbt for the syntax.
+
+rom d2fbe8b10f762099d320016ddfd4d2961a591fe6dfaaab2efbeb77282264d06a 32768 32768 ; Dr. Mario (Japan, USA)
+exact   ; the machine's stack, byte for byte (as the reference interpreter has it)
+
+routine $ff00 reset
+routine $8005 nmi
+
+# The dispatcher: `jsr jump_by_index` with the index in A, then a table of routine
+# addresses, which it jumps through
+routine $b8c6 jump_by_index    ; jsr jump_by_index, then the routines' addresses: to the one indexed by A
+table $816c game_modes 18
+table $8c88 switch_8c88 18
+table $9bd8 switch_9bd8 14
+table $b45e switch_b45e 62
+
+# The sound engine: what each channel's sound runs, through a pointer into
+# this table (from where each channel's entries start)
+code $d200 sound_routines 55
+jump $d42a sound_routines
+
+# Calls followed by the address of what to write to the PPU
+inline $b6dc 2
+
+# Player 1's pill and bottle
+var $0301 pill_left        ; colours: 0 yellow, 1 red, 2 blue
+var $0302 pill_right
+var $0305 pill_x           ; column, from the left
+var $0306 pill_y           ; row, from the bottom
+var $0325 pill_rotation
+var $0400 bottle 128       ; 16 rows of 8, from the top ($ff empty, $d0-$d2 viruses)
+var $0780 pill_sequence 128 ; the pills of a level, two colours each (left * 3 + right)

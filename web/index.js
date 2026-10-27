@@ -11,12 +11,12 @@ const SCREEN_HEIGHT = 240;
 // The games the page recompiles: Super Mario Bros. (NROM), with its
 // hand-written display routines, and cartridges that drive the PPU through
 // its registers, with the runtime module for such cartridges: Metroid, Super
-// Mario Bros. 3, Bomberman, Tetris, The Legend of Zelda, The Chessmaster and
-// Kirby's Adventure. A dump is told apart by the SHA-256 of its PRG and CHR
-// (as the maps' `rom` lines give it), else by its board (another NROM dump
-// is recompiled as SMB, an MMC1 one as Metroid, an MMC3 one as SMB3). The
-// debug tiles replace SMB's (the others write their own or switch banks of
-// them).
+// Mario Bros. 3, Bomberman, Tetris, The Legend of Zelda, The Chessmaster,
+// Kirby's Adventure, Dr. Mario and Donkey Kong. A dump is told apart by the
+// SHA-256 of its PRG and CHR (as the maps' `rom` lines give it), else by its
+// board (another NROM dump is recompiled as SMB, an MMC1 one as Metroid, an
+// MMC3 one as SMB3). The debug tiles replace SMB's (the others write their
+// own or switch banks of them).
 function cartridge(id, title, pageTitle, sha256) {
     return {
         title,
@@ -59,6 +59,10 @@ const GAMES = {
         'b705f866955c7d19292b55a9b0f3ec0e970e3f2509c3da15708b7afd879d98ed'),
     kirby: cartridge('kirby', "KIRBY'S ADVENTURE", 'Kirby Recompiled',
         '1250a80faf865aa5ee5585ad7639e5ef2b3fa541554effda5fad2cc5dc2acef5'),
+    drmario: cartridge('drmario', 'DR. MARIO', 'Dr. Mario Recompiled',
+        'd2fbe8b10f762099d320016ddfd4d2961a591fe6dfaaab2efbeb77282264d06a'),
+    donkeykong: cartridge('donkeykong', 'DONKEY KONG', 'Donkey Kong Recompiled',
+        'aa408f5a6b97c0d738e7e8b489a5617ad4a9ecdee2b05c4ee504210ce31b2825'),
 };
 
 const BOARDS = { 0: GAMES.smb, 1: GAMES.metroid, 4: GAMES.smb3 };

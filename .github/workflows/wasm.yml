@@ -53,7 +53,7 @@ jobs:
       - name: Prepare deployment
         run: |
           mkdir -p dist
-          cp web/*.html web/*.js web/*.frag web/runtime.wasm web/runtime-cartridge.wasm web/apu.wasm web/smb.map web/metroid.map web/smb3.map web/bomberman.map web/tetris.map web/zelda.map web/chessmaster.map web/kirby.map web/routines.txt web/display.c dist/
+          cp web/*.html web/*.js web/*.frag web/runtime.wasm web/runtime-cartridge.wasm web/apu.wasm web/smb.map web/metroid.map web/smb3.map web/bomberman.map web/tetris.map web/zelda.map web/chessmaster.map web/kirby.map web/drmario.map web/donkeykong.map web/routines.txt web/display.c dist/
           cp -r web/themes dist/
       - name: Deploy to GitHub Pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

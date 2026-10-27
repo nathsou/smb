@@ -3,8 +3,8 @@
 [Play it online](https://nathsou.github.io/smb/)
 
 Static recompilation of Super Mario Bros., Metroid, Super Mario Bros. 3,
-Bomberman, Tetris, The Legend of Zelda, The Chessmaster and Kirby's
-Adventure from the ROM into C and WebAssembly. The repository contains no
+Bomberman, Tetris, The Legend of Zelda, The Chessmaster, Kirby's
+Adventure, Dr. Mario and Donkey Kong from the ROM into C and WebAssembly. The repository contains no
 game code or data: the recompiler reads your own copy of the ROM, and the
 maps in `maps/` (`smb.map`, `metroid.map`, `smb3.map`, ...) give its
 routines, tables and variables this project's own names. The page recompiles the ROM in the browser and shows the
@@ -39,13 +39,14 @@ generated C next to the game.
 - [x] A second game: Metroid (MMC1 banks, waits for the interrupt, return-address tricks)
 - [x] A third game: Super Mario Bros. 3 (MMC3: two bank windows, CHR banks, frames split by the scanline IRQ)
 - [x] Five more: Bomberman, Tetris, Zelda, The Chessmaster and Kirby's Adventure (restarts, code in RAM, coroutines, preemption)
+- [x] Two more: Dr. Mario and Donkey Kong (a loop that waits for the interrupt while doing work)
 - [ ] Registers as C locals and parameters
 - [ ] Manually rewrite portions of the code to higher level C
 
 See [toward a modern C program](docs/modern-runtime.md) for how these steps are
 done and checked, [recompiling Metroid](docs/metroid.md) for the second
 game, [recompiling Super Mario Bros. 3](docs/smb3.md) for the third and
-[five more games](docs/more-games.md) for the others.
+[seven more games](docs/more-games.md) for the others.
 
 ## Building
 
@@ -74,8 +75,9 @@ folder and add `GAME=metroid`: `make codegen GAME=metroid` recompiles it into
 `codegen/metroid/` and `make build GAME=metroid` builds `./metroid` (it saves
 states to `metroid.sav`). Likewise for Super Mario Bros. 3 with `smb3.nes`
 and `GAME=smb3` (`codegen/smb3/`, `./smb3`), and for `bomberman.nes`,
-`tetris.nes`, `zelda.nes`, `chessmaster.nes` and `kirby.nes` with
-`GAME=bomberman`, `tetris`, `zelda`, `chessmaster` and `kirby`.
+`tetris.nes`, `zelda.nes`, `chessmaster.nes`, `kirby.nes`, `drmario.nes` and
+`donkeykong.nes` with `GAME=bomberman`, `tetris`, `zelda`, `chessmaster`,
+`kirby`, `drmario` and `donkeykong`.
 
 ## WebAssembly
 
@@ -153,8 +155,8 @@ in WebAssembly against `tests/golden/metroid.trace`, which an independent
 6502 interpreter (`tests/interpreter.c`) wrote and is checked to reproduce;
 with your `smb3.nes`, `--smb3` does the same for SMB3 over `rec/smb3.rec`
 (3,201 frames, `tests/golden/smb3.trace`), and `--bomberman`, `--tetris`,
-`--zelda`, `--chessmaster` and `--kirby` for the others (`rec/NAME.rec`,
-`tests/golden/NAME.trace`). Each also compares the page's WebGL renderer
+`--zelda`, `--chessmaster`, `--kirby`, `--drmario` and `--donkeykong` for the
+others (`rec/NAME.rec`, `tests/golden/NAME.trace`). Each also compares the page's WebGL renderer
 with the software renderer and draws the themes
 (`tests/web/cartridge_gpu.cjs`, Playwright). These checks do not require
 Raylib, except SMB3's desktop GPU check.

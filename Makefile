@@ -6,8 +6,9 @@ CFLAGS += -O3 -std=c99
 CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -ferror-limit=0
 # The game: smb (Super Mario Bros.), metroid, smb3, bomberman, tetris, zelda,
-# chessmaster or kirby, recompiled from your ROM (all but SMB drive the PPU
-# through its registers, on the cartridge runtime: NROM, MMC1 or MMC3).
+# chessmaster, kirby, drmario or donkeykong, recompiled from your ROM (all
+# but SMB drive the PPU through its registers, on the cartridge runtime:
+# NROM, MMC1 or MMC3).
 GAME ?= smb
 ifeq ($(GAME),metroid)
 ROM ?= metroid.nes
@@ -59,6 +60,20 @@ MAP = maps/kirby.map
 GAME_DIR = codegen/kirby
 NATIVE_ROUTINES =
 GAME_FLAGS = -DPPU_BUS -DMAPPER -DGAME_TITLE='"Kirby'\''s Adventure"' -DROM_PATH='"$(ROM)"' -DSAVE_FILE='"kirby.sav"' -DREC_FILE='"rec/kirby.rec"'
+GAME_SOURCES = codegen/lib/ppu_bus.c codegen/lib/mapper.c codegen/lib/cartridge.c
+else ifeq ($(GAME),drmario)
+ROM ?= drmario.nes
+MAP = maps/drmario.map
+GAME_DIR = codegen/drmario
+NATIVE_ROUTINES =
+GAME_FLAGS = -DPPU_BUS -DMAPPER -DGAME_TITLE='"Dr. Mario"' -DROM_PATH='"$(ROM)"' -DSAVE_FILE='"drmario.sav"' -DREC_FILE='"rec/drmario.rec"'
+GAME_SOURCES = codegen/lib/ppu_bus.c codegen/lib/mapper.c codegen/lib/cartridge.c
+else ifeq ($(GAME),donkeykong)
+ROM ?= donkeykong.nes
+MAP = maps/donkeykong.map
+GAME_DIR = codegen/donkeykong
+NATIVE_ROUTINES =
+GAME_FLAGS = -DPPU_BUS -DMAPPER -DGAME_TITLE='"Donkey Kong"' -DROM_PATH='"$(ROM)"' -DSAVE_FILE='"donkeykong.sav"' -DREC_FILE='"rec/donkeykong.rec"'
 GAME_SOURCES = codegen/lib/ppu_bus.c codegen/lib/mapper.c codegen/lib/cartridge.c
 else
 ROM ?= smb.nes
@@ -164,7 +179,7 @@ web: runtime-wasm runtime-cartridge-wasm apu-wasm
 	cp maps/smb.map web/smb.map
 	cp maps/metroid.map web/metroid.map
 	cp maps/smb3.map web/smb3.map
-	cp maps/bomberman.map maps/tetris.map maps/zelda.map maps/chessmaster.map maps/kirby.map web/
+	cp maps/bomberman.map maps/tetris.map maps/zelda.map maps/chessmaster.map maps/kirby.map maps/drmario.map maps/donkeykong.map web/
 	cp codegen/native/routines.txt web/routines.txt
 	cp codegen/native/display.c web/display.c
 
@@ -172,4 +187,4 @@ hash: clean
 	$(CC) $(CFLAGS) -o hash codegen/hash.c $(SOURCES) codegen/lib/rec.c codegen/lib/common.c $(GC_FLAGS)
 
 clean:
-	rm -f smb metroid smb3 bomberman tetris zelda chessmaster kirby hash gpu_check replay interpreter smb.wasm audio_queue
+	rm -f smb metroid smb3 bomberman tetris zelda chessmaster kirby drmario donkeykong hash gpu_check replay interpreter smb.wasm audio_queue

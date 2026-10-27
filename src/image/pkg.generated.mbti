@@ -120,6 +120,7 @@ pub(all) struct Banks {
   inline : Array[(Int32, Int32)]
   ram_code : Map[Int32, Int32]
   high : Map[Int32, Int32]
+  waits : Array[Int32]
 } derive(@debug.Debug)
 pub fn Banks::none() -> Self
 
@@ -288,6 +289,7 @@ pub(all) struct RomMap {
   ram_code : Array[(Int32, Array[Int32])]
   copied : Array[(Int32, Int32, Int32, Int32)]
   threads : Array[Int32]
+  waits : Array[Int32]
 } derive(@debug.Debug)
 pub fn RomMap::bank_name(Self, Int32) -> String
 pub fn RomMap::empty() -> Self
