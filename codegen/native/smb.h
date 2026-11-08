@@ -53,6 +53,59 @@ enum {
   AREA_KIND_CASTLE = 3,
 };
 
+// pulse1_sfx bits: pulse 1's sound effects (stomp also for a swim stroke)
+enum {
+  PULSE1_SFX_BIG_JUMP = 0x01,
+  PULSE1_SFX_BUMP = 0x02,
+  PULSE1_SFX_STOMP = 0x04,
+  PULSE1_SFX_SMACK = 0x08,
+  PULSE1_SFX_PIPE_INJURY = 0x10,
+  PULSE1_SFX_FIREBALL = 0x20,
+  PULSE1_SFX_FLAGPOLE = 0x40,
+  PULSE1_SFX_SMALL_JUMP = 0x80,
+};
+
+// pulse2_sfx bits: pulse 2's sound effects
+enum {
+  PULSE2_SFX_COIN = 0x01,
+  PULSE2_SFX_GROW_POWERUP = 0x02,
+  PULSE2_SFX_GROW_VINE = 0x04,
+  PULSE2_SFX_BLAST = 0x08,
+  PULSE2_SFX_TIMER_TICK = 0x10,
+  PULSE2_SFX_POWERUP_GRAB = 0x20,
+  PULSE2_SFX_EXTRA_LIFE = 0x40,
+  PULSE2_SFX_BOWSER_FALL = 0x80,
+};
+
+// noise_sfx bits: the noise channel's sound effects
+enum {
+  NOISE_SFX_BRICK_SHATTER = 0x01,
+  NOISE_SFX_BOWSER_FLAME = 0x02,
+};
+
+// event_music bits: event music
+enum {
+  EVENT_MUSIC_DEATH = 0x01,
+  EVENT_MUSIC_GAME_OVER = 0x02,
+  EVENT_MUSIC_VICTORY = 0x04,
+  EVENT_MUSIC_CASTLE_CLEAR = 0x08,
+  EVENT_MUSIC_LEVEL_CLEAR = 0x20,
+  EVENT_MUSIC_HURRY_UP = 0x40,
+  EVENT_MUSIC_SILENCE = 0x80,
+};
+
+// area_music bits: area music
+enum {
+  AREA_MUSIC_WATER = 0x01,
+  AREA_MUSIC_GROUND = 0x02,
+  AREA_MUSIC_UNDERGROUND = 0x04,
+  AREA_MUSIC_CASTLE = 0x08,
+  AREA_MUSIC_CLOUD = 0x10,
+  AREA_MUSIC_PIPE_INTRO = 0x20,
+  AREA_MUSIC_STAR = 0x40,
+  AREA_MUSIC_SILENCE = 0x80,
+};
+
 // enemy_kind values
 enum {
   ENEMY_KIND_RED_KOOPA_OFF_LEDGES = 1,

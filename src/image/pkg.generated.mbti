@@ -49,6 +49,8 @@ pub fn load_dump(Bytes, RomMap) -> Dump raise ImageError
 
 pub fn load_ines(Bytes) -> Cartridge raise ImageError
 
+pub let map_labels : @ref.Ref[Map[Int32, String]]
+
 pub let map_registers : Array[String]
 
 pub fn operand(@parse.SourceAddressingMode) -> @parse.SourceExpr?
@@ -315,6 +317,7 @@ pub(all) struct RomMap {
   scratch : Array[MapScratch]
   params : Array[MapParam]
   results : Array[MapParam]
+  labels : Array[(Int32, String, String)]
 } derive(@debug.Debug)
 pub fn RomMap::bank_name(Self, Int32) -> String
 pub fn RomMap::empty() -> Self

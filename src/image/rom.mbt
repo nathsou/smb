@@ -174,6 +174,7 @@ pub(all) struct RomMap {
   scratch: Array[MapScratch] // names of the scratch bytes in routines (see `scratch`)
   params: Array[MapParam] // names of routines' register parameters (see `param`)
   results: Array[MapParam] // names of their results (see `result`)
+  labels: Array[(Int, String, String)] // names of places inside routines (see `label`): address, name, description
 } derive(Debug)
 
 // record NAME VAR...: arrays of RAM indexed alike (one object slot's
@@ -212,7 +213,7 @@ pub(all) struct MapParam {
 pub let map_registers : Array[String] = ["a", "x", "y", "carry", "zero", "negative", "overflow"]
 
 pub fn RomMap::empty() -> RomMap {
-  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, follow: false, preempt: 0, jumps: [], jump_tables: [], inline: [], ram_code: [], copied: [], threads: [], records: [], scratch: [], params: [], results: [] }
+  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, follow: false, preempt: 0, jumps: [], jump_tables: [], inline: [], ram_code: [], copied: [], threads: [], records: [], scratch: [], params: [], results: [], labels: [] }
 }
 
 // The name of a switchable bank, the prefix of its entries.
@@ -293,6 +294,7 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
   let scratch: Array[MapScratch] = []
   let params: Array[MapParam] = []
   let results: Array[MapParam] = []
+  let labels: Array[(Int, String, String)] = []
   let shadows: Array[(Int, Int)] = []
   let names: Set[String] = Set([])
   fn claim(name: String) raise ImageError {
@@ -351,6 +353,14 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
         raise InvalidImage("Duplicate map \{fields[0]} name: \{line}")
       }
       list.push({ routine: fields[1], register: fields[2], name: fields[3], variable: if every { fields[4] } else { "" }, description })
+      continue
+    }
+    // label $ADDR NAME: a place inside a routine (a branch's target), named
+    // where it would be `loc_ADDR`
+    if fields[0] == "label" {
+      if fields.length() != 3 { raise InvalidImage("Map label line needs an address and a name: \{line}") }
+      claim(fields[2])
+      labels.push((parse_number(fields[1]), fields[2], description))
       continue
     }
     // scratch ROUTINE $0K NAME
@@ -585,6 +595,11 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       raise InvalidImage("Scratch name for an unknown routine: \{e.routine}")
     }
   }
+  for l in labels {
+    if entries.iter().any(fn(e) { e.kind == Routine && e.address == l.0 && e.bank < 0 }) {
+      raise InvalidImage("Map label at a routine's address: \{l.1}")
+    }
+  }
   for e in params + results {
     if e.routine != "*" && !entries.iter().any(fn(r) { r.kind == Routine && r.name == e.routine }) {
       raise InvalidImage("Parameter or result name for an unknown routine: \{e.routine}")
@@ -593,7 +608,7 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       raise InvalidImage("Parameter name for an unknown variable: \{e.variable}")
     }
   }
-  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), follow, preempt, jumps, jump_tables, inline, ram_code, copied, threads, records, scratch, params, results }
+  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), follow, preempt, jumps, jump_tables, inline, ram_code, copied, threads, records, scratch, params, results, labels }
 }
 
 pub(all) struct Cartridge {
@@ -969,6 +984,7 @@ fn rom_mode(image: Image, namer: Namer, inst: Instruction) -> @parse.SourceAddre
 // view the lowering consumes, with map names for routines, tables and
 // variables, and the map's descriptions as comments.
 pub fn discover_rom(image: Image, map: RomMap) -> Program raise ImageError {
+  map_labels.val = Map::from_array(map.labels.map(fn(l) { (l.0, l.1) }))
   let { instructions, dispatches, roots, facts, idle, windows, jumps, waits, traps, needed, following, pcs } = explore(image)
   // a transfer into data names its trap instead of the data
   let target_name = fn(pc: Int) { if traps.contains(pc) { trap_name(pc) } else { address_name(image, pc) } }
@@ -1033,7 +1049,7 @@ pub fn discover_rom(image: Image, map: RomMap) -> Program raise ImageError {
     }
     guard instructions.get(pc) is Some(inst) else { continue }
     let name = address_name(image, pc)
-    if !routines.contains(pc) && name.has_prefix("loc_") && needed.contains(pc) { append(Label(name), pc) }
+    if !routines.contains(pc) && (name.has_prefix("loc_") || map_labels.val.contains(pc)) && needed.contains(pc) { append(Label(name), pc) }
     let branch = if inst.mode == "rel" { condition(inst.op, facts[pc]) } else { None }
     if branch == Some(true) {
       append(Inst(op=JMP, mode=AbsoluteOrZeroPage(addr=Ident(transfer_name(pc, branch_target(inst))))), pc)

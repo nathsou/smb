@@ -20,6 +20,11 @@ flags direction right=$01 left=$02
 enum player_state on_ground=0 jumping=1 falling=2 climbing=3 ; jumping also while swimming up
 enum power small=0 big=1 fiery=2
 enum area_kind water=0 ground=1 underground=2 castle=3
+flags pulse1_sfx big_jump=$01 bump=$02 stomp=$04 smack=$08 pipe_injury=$10 fireball=$20 flagpole=$40 small_jump=$80 ; pulse 1's sound effects (stomp also for a swim stroke)
+flags pulse2_sfx coin=$01 grow_powerup=$02 grow_vine=$04 blast=$08 timer_tick=$10 powerup_grab=$20 extra_life=$40 bowser_fall=$80 ; pulse 2's sound effects
+flags noise_sfx brick_shatter=$01 bowser_flame=$02 ; the noise channel's sound effects
+flags event_music death=$01 game_over=$02 victory=$04 castle_clear=$08 level_clear=$20 hurry_up=$40 silence=$80 ; event music
+flags area_music water=$01 ground=$02 underground=$04 castle=$08 cloud=$10 pipe_intro=$20 star=$40 silence=$80 ; area music
 
 # Records: arrays of RAM indexed alike, as one structure's fields in the C
 # (enemy(x).kind for enemy_kind(x)). The bytes stay where they are.
@@ -141,21 +146,20 @@ var $00e4 bubble_y 3
 var $00e7 area_data_ptr 2       ; level layout being decoded
 var $00e9 enemy_data_ptr 2      ; enemy list being decoded
 var $00f0 note_length_offset
-var $00f1 pulse1_sfx_playing
-var $00f2 pulse2_sfx_playing
-var $00f3 noise_sfx_playing
-var $00f4 area_music_playing
+var $00f1 pulse1_sfx_playing : pulse1_sfx
+var $00f2 pulse2_sfx_playing : pulse2_sfx
+var $00f3 noise_sfx_playing : noise_sfx
+var $00f4 area_music_playing : area_music
 var $00f5 music_ptr 2
 var $00f7 pulse2_music_pos
 var $00f8 pulse1_music_pos
 var $00f9 triangle_music_pos
 var $00fa pause_sound_request
-var $00fb area_music_request
-var $00fc event_music_request
-var $00fd noise_sfx_request
-var $00fe pulse2_sfx_request
-var $00ff pulse1_sfx_request
-
+var $00fb area_music_request : area_music
+var $00fc event_music_request : event_music
+var $00fd noise_sfx_request : noise_sfx
+var $00fe pulse2_sfx_request : pulse2_sfx
+var $00ff pulse1_sfx_request : pulse1_sfx
 # Stack page
 var $0109 flip_vertically
 var $010d flag_score_y
@@ -453,7 +457,7 @@ var $07a7 random 7
 
 # Sound engine
 var $07b0 noise_music_pos
-var $07b1 event_music_playing
+var $07b1 event_music_playing : event_music
 var $07b2 pause_sound_playing
 var $07b3 pulse2_note_length
 var $07b4 pulse2_note_counter
@@ -491,6 +495,7 @@ table $806d vram_lists_high 19
 table $8080 vram_list_reset_offsets 2
 routine $8082 frame_interrupt           ; once per frame: present the display updates, then run the game
 routine $8182 handle_pause              ; start toggles pause while playing
+label $81c2 store_pause_state ; keep the pause state as it is
 routine $81c6 shuffle_sprite_slots      ; rotate OAM slots so that dropped sprites flicker instead of vanishing
 result shuffle_sprite_slots x leftover_x ; where the slot loop leaves X (the game mode gets it)
 routine $8212 run_game_mode             ; dispatch on the game mode (title, playing, victory, game over)
@@ -506,6 +511,10 @@ param title_mode x leftover_x ; the X the frame interrupt leaves
 table $8237 title_mode_tasks 8
 table $823f world_select_template 6
 routine $8245 title_menu                ; title screen input: start, world select, demo
+label $82d8 start_pressed ; start begins the game
+label $82c9 restart_title ; the demo is over: back to the title
+label $82c0 run_title_frame ; run a frame of the attract mode
+label $82bb no_world_select ; world select is locked
 routine $830e start_continue            ; continue from the world in A, at its first area
 param start_continue a world ; the world to continue from
 result start_continue x leftover_x ; 0, where its loop leaves X
@@ -523,7 +532,11 @@ table $83a6 victory_tasks 10
 routine $83b0 start_victory             ; aim the walk at the next page and start the victory music
 routine $83bd victory_walk              ; walk the player right and scroll until the page past the bridge
 param victory_walk x leftover_x ; the X the frame interrupt leaves
+label $83d0 drive_victory_walk ; walk the player on
 routine $83f6 show_victory_messages     ; queue the thank-you messages one by one, then set the end timer
+label $8456 messages_done ; every message is shown
+label $8443 advance_message ; the next message
+label $8434 message_music ; the music for the message
 routine $845d next_game_mode_task       ; advance to the next game mode task
 routine $8461 finish_world              ; when the timer ends, go to the next world, or after world 8 wait for B to replay
 table $849f popup_tiles 24
@@ -531,6 +544,7 @@ table $84b7 popup_score_digits 12
 routine $84c3 update_score_popups       ; floating score numbers after defeating enemies
 param update_score_popups x popup_slot ; the floating score's slot
 result update_score_popups x popup_slot ; the slot, or the object slot when one was drawn
+label $852b draw_popup ; draw the floating score
 routine $8567 run_screen_task           ; dispatch on the screen setup task: clear, palettes, status bar, intermission, columns
 param run_screen_task x leftover_x ; the X the frame interrupt leaves
 table $856d screen_tasks 30
@@ -561,6 +575,7 @@ routine $8693 show_time_up              ; show TIME UP after the time ran out, e
 routine $86a8 show_intermission         ; show the lives screen, or GAME OVER, unless the area skips it
 routine $86c7 start_intermission        ; queue text A, start the screen timer and turn the screen on
 param start_intermission a text ; the text list to queue
+label $86e0 skip_intermission ; the area skips the lives screen
 routine $86e6 render_area_columns       ; build the screen column by column while the display is off
 param render_area_columns x leftover_x ; the X the frame interrupt leaves
 routine $86ff draw_title_screen         ; queue the title screen's layout, stored in CHR ROM (hand-written)
@@ -581,10 +596,14 @@ table $87f2 text_warp_numbers 12
 table $87fe text_offsets 10
 routine $8808 queue_text                ; copy one of the text lists into the VRAM update list
 param queue_text a text ; the text list to queue
+label $882e text_end ; the end of the text list
 routine $889d wait_screen_timer         ; when the screen timer ends, hide the sprites and restart it
 routine $88a5 restart_screen_timer      ; restart the screen timer and advance the screen task
 routine $88ae render_column             ; turn one column of metatiles into a VRAM update
 result render_column x list_end ; VRAM list 2's length after the column
+label $8930 store_attribute ; merge the bits into the attribute byte
+label $892e count_attribute_row ; the next row of attributes
+label $892a shift_attribute_bits ; move the attribute bits to the metatile's quarter
 routine $896a render_attributes         ; queue the attribute bytes of the column just rendered in VRAM list 2
 result render_attributes x list_end ; VRAM list 2's length after the attributes
 routine $89bd select_vram_list2         ; select VRAM list 2 for the next frame
@@ -673,6 +692,11 @@ result queue_counter_digits x list_end ; VRAM list 1's length after the digits, 
 routine $8f5f add_digits                ; decimal add with carry across score or time digits
 param add_digits y digit_offset ; the offset of the last digit to add to
 result add_digits x leftover_x ; 6, where the digit loop leaves X
+label $8f8e carry_digit ; carry into the next digit
+label $8f87 borrow_digit ; borrow from the next digit
+label $8f7c clear_score_add ; clear the pending score
+label $8f75 store_digit ; store the digit
+label $8f68 add_next_digit ; add the next digit
 routine $8f97 update_top_score          ; copy either player's score to the top score when higher
 routine $8f9e check_top_score           ; copy the player's score at X to the top score when higher
 param check_top_score x score_offset ; the offset of the player's score
@@ -680,11 +704,14 @@ table $8fbc default_sprite_slots 15
 table $8fcb sprite_zero 4
 routine $8fcf start_game                ; clear game memory and enter the first area
 routine $8fe4 start_area                ; reset area state and position the player at the entrance
+label $904a check_halfway ; start at the halfway page if reached
 routine $9061 setup_new_game            ; reset the lives and time for a new game, then set up the area
 routine $9071 setup_area_display        ; reset the area's display state and sprite slots, and start the area music
 routine $90cc clear_memory              ; clear RAM below the offset in Y, sparing the stack in use
+label $90de skip_stack_byte ; spare the byte in use by the stack
 table $90e7 area_music_kinds 6
 routine $90ed queue_area_music          ; request the music of the area's kind, entrance or clouds
+label $9110 queue_music_kind ; request the music of the area's kind
 table $9116 entrance_x_positions 4
 table $911a entrance_alt_y 2
 table $911c entrance_y_positions 9
@@ -722,13 +749,24 @@ table $93d8 terrain_metatiles 4
 table $93dc terrain_patterns 32
 routine $93fc parse_area_column         ; decode the level layout for one metatile column
 result parse_area_column x leftover_x ; where the decoding loop leaves X
+label $94d3 column_done ; the column's metatiles are drawn
+label $947e draw_terrain ; draw the terrain's metatiles
+label $9455 draw_foreground ; draw the foreground scenery's metatiles
+label $941f draw_background_scenery ; draw the background scenery's metatiles
 table $9504 block_buffer_limits 4
 routine $9508 process_area_objects      ; decode the area objects of the three slots for the current column
 result process_area_objects x leftover_x ; where the slot loop leaves X
+label $9571 next_object_slot ; the next slot
+label $956e advance_object ; go to the next area object
+label $956b object_behind ; the object is behind the parser
+label $9565 decode_next ; decode the object in the slot
+label $955d check_object_page ; whether the object's page is reached
 routine $9589 next_area_object          ; move past the area object just decoded
 routine $9595 decode_area_object        ; decode the area object in slot X and draw its part of the current column
 param decode_area_object y kept_y ; Y as the caller has it
+label $9616 decode_object_kind ; decode the object's kind
 routine $9645 check_loop_object         ; nothing: loop commands are handled elsewhere
+label $9656 object_pending ; the object waits for its page
 table $9667 area_object_handlers 94
 routine $96c5 change_area_attributes    ; set the terrain and scenery, or the background color, from an attribute object
 routine $96f2 warp_zone_lock            ; show the warp zone message for the world, remove the piranhas and lock the scroll
@@ -739,6 +777,7 @@ param remove_enemies a kind_to_remove ; the enemy kind to deactivate
 table $9728 frenzy_kinds 3
 routine $972b start_frenzy              ; queue the frenzy of the object kind in $00, unless one of its enemies is out
 scratch start_frenzy $00 object_kind ; the frenzy's object kind
+label $973c queue_frenzy ; queue the frenzy
 routine $9740 draw_area_style_object    ; draw a tree ledge, mushroom ledge or cannon, by the area's style
 table $9746 area_style_handlers 6
 routine $974c draw_tree_ledge           ; draw a column of a tree ledge: its left end, middle or right end, and the trunk
@@ -753,6 +792,7 @@ table $97b7 pulley_rope_metatiles 3
 routine $97ba draw_pulley_rope          ; draw a column of a pulley's rope: its left end, middle or right end
 table $97cf castle_metatiles 55
 routine $9806 draw_castle               ; draw a column of a castle, and put the star flag on a large one
+label $9869 castle_door ; the castle's door
 routine $986f draw_water_pipe           ; draw a column of a water pipe
 routine $9882 draw_intro_pipe           ; draw a column of the pipe the player enters at the start of an area
 table $989f side_pipe_shafts 4
@@ -835,6 +875,7 @@ param fill_column_down x row ; the first row
 param fill_column_down y rows ; the rows after the first
 result fill_column_down x row ; the row after the last
 result fill_column_down y rows ; what is left of the rows
+label $9ba0 next_fill_row ; the next row to fill
 routine $9bac get_object_length         ; the object's row and height, setting its length on its first column (carry set then)
 result get_object_length y height ; the object's height
 result get_object_length carry first_column ; the object's first column (its length was set)
@@ -946,6 +987,8 @@ table $aec0 water_layout_3 28
 routine $aedc playing_mode              ; dispatch on the playing task: start the area, set up the screen, run a frame
 table $aee2 playing_mode_tasks 8
 routine $aeea run_game_frame            ; one frame of play: player, enemies, objects, scrolling, drawing
+label $af67 end_game_frame ; the frame's last steps
+label $af64 reset_palette ; reset the player's palette
 routine $af6f update_scroll_column      ; build the next column when 32 pixels have scrolled, unless VRAM list 2 is pending
 param update_scroll_column x leftover_x ; the X the frame interrupt leaves
 routine $af93 scroll_with_player        ; scroll the screen with the player past the middle, unless it is locked
@@ -954,6 +997,7 @@ param scroll_screen y pixels_to_scroll ; the pixels to scroll by
 result scroll_screen x leftover_x ; the X the edge check leaves
 routine $b000 check_player_offscreen    ; push the player back inside the screen's edges, stopping it against them
 result check_player_offscreen x leftover_x ; where the check leaves X
+label $b02e stop_platform_scroll ; no scroll from a platform
 table $b034 screen_edge_offsets 2
 table $b036 offscreen_joypad_masks 2
 routine $b038 update_screen_edges       ; the screen's right edge from its left
@@ -962,10 +1006,13 @@ routine $b04a run_player_task           ; dispatch on the player's task: enterin
 param run_player_task x leftover_x ; the X the frame interrupt leaves
 table $b04f player_tasks 26
 routine $b069 enter_area                ; walk in, come up a pipe or climb a vine
+label $b0d3 finish_entry ; the player is in the area
 routine $b0e6 drive_player              ; control the player as if the joypad held A
 param drive_player a buttons ; the buttons to hold
 routine $b0e9 control_player            ; joypad to movement, collisions, animation
 param control_player x leftover_x ; the X the frame interrupt leaves
+label $b1aa check_death_fall ; whether the player has fallen into a pit
+label $b104 read_player_buttons ; take the joypad's buttons
 routine $b1c7 vine_climb_in             ; climb the player up the vine into the area above, then enter it
 routine $b1dd set_alt_entrance          ; enter the next area by its vine entrance
 routine $b1e5 enter_down_pipe           ; move the player down into a pipe, then enter the area it leads to
@@ -991,10 +1038,12 @@ table $b2c2 hidden_1up_coin_counts 8
 routine $b2ca walk_to_castle            ; walk the player to the castle, raise the star flag, then go to the next area (and arm the hidden 1-up)
 routine $b315 next_area                 ; go to the next area of the world
 routine $b329 move_player               ; move the player by its state: on the ground, jumping or swimming, falling, climbing
+label $b33b move_by_state ; move by the player's state
 table $b351 player_movement_states 8
 routine $b35a move_on_ground            ; move the player on the ground, with friction and facing the joypad
 routine $b36d move_falling              ; move the player in the air with falling gravity
 routine $b376 move_jumping_or_swimming  ; move the player up, cutting the jump short when A is released, or swimming
+label $b393 hold_jump ; the jump button is held
 routine $b3ac move_in_air               ; move the player in the air, with gravity
 table $b3c7 climb_steps_low 4
 table $b3cb climb_steps_high 4
@@ -1011,10 +1060,20 @@ table $b44d climb_forces 3
 routine $b450 player_physics            ; jumping, swimming, climbing and walking speeds
 param player_physics x leftover_x ; the X the frame interrupt leaves
 result player_physics x leftover_x ; where the speed choice leaves X
+label $b55e set_max_speeds ; the maximum speeds
+label $b559 reset_running_timer ; keep the running timer up
+label $b545 running_physics ; the speeds when running
+label $b51c ground_physics ; the speeds on the ground
 table $b58c player_anim_periods 3
 routine $b58f set_player_anim_speed     ; the player's walking animation speed and running state from its speed
+label $b5c5 set_anim_period ; the animation's period
+label $b5b3 turn_or_skid ; the player turns or skids
 routine $b5cc apply_friction            ; accelerate or slow the player horizontally, up to its maximum speed
 param apply_friction a direction ; the left and right buttons held
+label $b620 store_abs_speed ; keep the speed's magnitude
+label $b617 abs_speed ; the speed's magnitude
+label $b5fc accelerate_left ; speed up to the left
+label $b5de accelerate_right ; speed up to the right
 routine $b624 update_fireballs_and_bubbles; throw a fireball on B when fiery, update both fireballs and the air bubbles
 table $b687 fireball_speeds 2
 routine $b689 update_fireball           ; move a fireball, bounce it off the floor, and explode it on a wall or enemy
@@ -1032,9 +1091,12 @@ table $b74d bubble_intervals 2
 routine $b74f tick_time_limit           ; count the time down, warn when it runs low, and end the player when it runs out
 routine $b7a4 warp_zone_trigger         ; once the player reaches the warp zone's pipes, unlock the scroll and enable the warps
 routine $b7b8 update_whirlpools         ; pull the player toward the whirlpools of water areas
+label $b83b pull_player ; pull the player toward the whirlpool
+label $b7f5 whirlpool_area ; the player is in a whirlpool
 table $b84b flagpole_score_bounds 5
 table $b850 flagpole_score_digits 5
 routine $b855 update_flagpole           ; lower the flag while the player slides down the pole, and award the flag's score
+label $b899 flagpole_score ; the flagpole's score
 table $b8b6 spring_offsets 4
 routine $b8ba update_spring             ; compress and release the spring, launching the player higher with A
 routine $b91e spawn_vine                ; start a vine growing from the bumped block
@@ -1044,14 +1106,19 @@ table $b949 vine_heights 2
 routine $b94b update_vine               ; grow the vine and draw it
 table $b9ba cannon_masks 2
 routine $b9bc update_cannons            ; fire bullets from the cannons on screen, at random
+label $ba1a update_cannon_slot ; the cannon in this slot
 table $ba31 bullet_speeds 2
 routine $ba33 update_bullet             ; move a bullet toward the player and remove it off screen
 scratch update_bullet $00 distance ; the horizontal distance to the player
+label $ba85 bullet_gone ; the bullet left the screen
 table $ba89 hammer_slots 9
 table $ba92 hammer_speeds 2
 routine $ba94 spawn_hammer              ; give the hammer bro in slot a hammer, when a free one comes up (carry set then)
 result spawn_hammer carry spawned ; a hammer was thrown
 routine $bac3 update_hammer             ; throw a hammer, then let it fly in an arc
+label $bb2b hammer_position ; the hammer's screen position and box
+label $bb28 hammer_hits_player ; test the hammer against the player
+label $bb09 hammer_in_hand ; the hammer follows the bro's hand
 routine $bb38 spawn_block_coin          ; launch a coin out of a bumped block
 param spawn_block_coin x block_slot ; the bumped block's slot
 param spawn_block_coin carry carry_in ; the carry the coin's height is computed with
@@ -1066,7 +1133,10 @@ routine $bb84 find_free_misc_slot       ; a free slot for a coin or score (the l
 param find_free_misc_slot carry none_free ; whether no slot was free before
 result find_free_misc_slot y misc_slot ; the free slot, or the last
 result find_free_misc_slot carry none_free ; no slot is free
+label $bb92 misc_slot_found ; the slot is free
 routine $bb96 update_misc_objects       ; update the hammers and jumping coins, scrolling the rest with the screen
+label $bbf4 next_misc_slot ; the next misc slot
+label $bbe8 jumping_coin ; a coin jumping out of a block
 table $bbf8 coin_digit_offsets 2
 table $bbfa score_digit_offsets 2
 table $bbfc counter_selectors 2
@@ -1074,11 +1144,15 @@ routine $bbfe give_coin                 ; count a coin, with a 1-up every 100, a
 routine $bc27 add_score                 ; add the pending score to the current player's and queue it
 routine $bc30 queue_counters_for_player ; queue the current player's score and coins
 routine $bc36 queue_counters            ; queue the counters chosen by A
+label $bc49 place_powerup ; place the powerup in its slot
 routine $bc60 spawn_powerup             ; bring out the powerup from its block, a mushroom or flower by the player's size
 routine $bc85 update_powerup            ; raise the powerup out of its block, then move it by its kind
+label $bcaa move_powerup ; move the powerup
 table $bceb block_y_offsets 2
 routine $bced bump_head                 ; the player hit a block from below
 param bump_head a hit_metatile ; the metatile hit
+label $bd62 block_height ; the block's height above the player
+label $bd41 bumped_metatile ; the block's metatile once bumped
 routine $bd84 place_block_object        ; put a block object at the block the player hit
 param place_block_object x block_slot ; the bumped block's slot
 routine $bd9b bump_block                ; bounce the block the player hit, and give what it holds
@@ -1108,6 +1182,8 @@ result collect_coin_above x block_slot ; the bumped block's slot
 routine $be41 spawn_brick_chunks        ; start the four chunks of a broken brick
 param spawn_brick_chunks x block_slot ; the brick's slot
 routine $be70 update_block_objects      ; move a bumped block or brick chunks, and replace the block when it lands
+label $bed1 block_gone ; the block's slot is cleared
+label $becf block_rest ; the block comes to rest
 routine $bed4 update_block_metatiles    ; write the metatile of a hit block to the block buffer and redraw it
 routine $bf02 move_enemy_x              ; move the enemy in slot X horizontally
 result move_enemy_x a pixels_moved ; the whole pixels moved, with the sub-pixel carry
@@ -1125,6 +1201,8 @@ routine $bf63 move_enemy_down_fast      ; move an enemy down quickly, or a falli
 routine $bf6b move_falling_platform     ; move a falling platform down, its speed limited
 routine $bf6d move_vertically           ; move an object down with gravity, the force in Y
 param move_vertically y down_force ; force added each frame while falling
+label $bf77 paratroopa_move ; move the paratroopa
+label $bf75 paratroopa_down ; the paratroopa moves down
 routine $bf88 move_drop_platform        ; move a dropping platform down
 routine $bf8c move_enemy_down_slow      ; move an enemy down slowly
 routine $bf8e set_max_speed_mid         ; apply gravity to the enemy with the middle speed limit
@@ -1161,8 +1239,20 @@ table $c076 loop_pages 11
 table $c081 loop_y_positions 11
 routine $c08c load_enemies_and_loops    ; loop commands and spawning enemies from the enemy list
 param load_enemies_and_loops y loop_index ; the loop command's index
+label $c12f check_frenzy ; start a queued frenzy
+label $c12a loop_done ; the loop command is spent
+label $c122 loop_cleared ; the loop is cleared
+label $c11c loop_back ; send the player back
+label $c115 loop_wrong_path ; the player is not at the loop's height
+label $c102 loop_passed ; the player took the right path
+label $c0d8 next_loop ; the next loop command
+label $c0cc check_loops ; check the loop commands
 routine $c226 spawn_enemy               ; initialize the enemy just loaded into slot X
 result spawn_enemy x object ; the object slot
+label $c25e page_set ; the page is set
+label $c25b skip_world_mismatch ; the entry is for another world
+label $c250 read_enemy_data ; read the next enemy data
+label $c231 enemy_data_page ; a page command in the enemy data
 routine $c26c init_enemy                ; initialize the enemy in slot X by its kind
 param init_enemy x object ; the slot of the enemy just loaded
 result init_enemy x object ; the same slot
@@ -1214,6 +1304,9 @@ param setup_lakitu x object ; the enemy's slot
 table $c398 lakitu_aim_offsets 12
 routine $c3a4 update_lakitu_spawner     ; bring Lakitu back and throw spinies
 param update_lakitu_spawner x object ; the frenzy object's slot
+label $c3e6 lakitu_present ; a lakitu is already out
+label $c3e3 lakitu_done ; back to the object slot
+label $c3d3 lakitu_slot_found ; a free slot for the lakitu
 table $c44f firebar_speeds 5
 table $c454 firebar_directions 5
 routine $c459 init_long_firebar         ; initialize a long firebar, as two firebars
@@ -1248,6 +1341,12 @@ table $c692 frenzy_y_positions 8
 table $c69a swimming_fish_kinds 2
 routine $c69c spawn_frenzy_enemy        ; bullet bills or cheep cheeps arriving from the side
 param spawn_frenzy_enemy x object ; the frenzy object's slot
+label $c71b spawn_group ; a group of enemies
+label $c711 frenzy_cannon_sound ; play the cannon's sound
+label $c6ff frenzy_slot_found ; a free slot for the frenzy enemy
+label $c6fd water_frenzy ; the frenzy in water areas
+label $c6d6 frenzy_bit_test ; test the frenzy's move bit
+label $c6c3 frenzy_kind_set ; the frenzy enemy's kind
 routine $c787 init_piranha              ; initialize a piranha plant inside its pipe
 param init_piranha x object ; the enemy's slot
 routine $c7a0 init_frenzy               ; start a frenzy by the enemy's kind: lakitu's spinies, flying cheep cheeps, flames, fireworks, bullets
@@ -1293,6 +1392,7 @@ routine $c871 offset_platform           ; move the platform by the offset Y
 param offset_platform x object ; the enemy's slot
 param offset_platform y offset_index ; the offset's index in platform_offset_low/high
 routine $c881 finish_enemy_init         ; no initialization
+label $c882 run_object ; run the object in the slot
 table $c892 enemy_runners 68
 routine $c8d6 run_nothing               ; nothing to run
 routine $c8d7 run_retainer              ; draw the retainer
@@ -1322,6 +1422,8 @@ param hammer_bro_jump y jump_speed ; the vertical speed of the jump
 routine $ca58 hammer_bro_walk           ; walk a hammer bro back and forth, facing the player
 routine $ca77 move_walker               ; walk an enemy, move it as a shell or kicked, revive a shell, remove a squashed goomba
 result move_walker y page_step ; $ff when it moved left, else 0
+label $cac8 shell_revive ; time the shell's revival
+label $cab4 shell_moving ; the enemy is a moving shell
 routine $cae5 move_defeated_enemy       ; let a defeated enemy fall off the screen
 routine $caf9 move_hopping_paratroopa   ; bounce a paratroopa along
 routine $caff move_red_paratroopa       ; fly a red paratroopa up and down
@@ -1329,6 +1431,8 @@ routine $cb25 move_green_paratroopa     ; fly a green paratroopa back and forth,
 routine $cb45 sway_green_paratroopa     ; sway a flying paratroopa
 routine $cb47 sway_counters             ; oscillating primary/secondary counters for back-and-forth motion
 param sway_counters a sway_limit ; the counters' limit
+label $cb60 sway_check ; which way the sway goes
+label $cb5d sway_down ; sway down
 routine $cb66 sway_offset               ; move the enemy by its sway speed, in the sway's direction
 scratch sway_offset $00 moved ; the step of the sway
 table $cb87 blooper_masks 2
@@ -1336,6 +1440,7 @@ routine $cb89 move_blooper              ; swim a blooper toward the player in sp
 param move_blooper carry carry_in ; the carry the caller leaves
 routine $cbdf blooper_swim              ; time a blooper's spurts up and its sinking
 param blooper_swim carry carry_in ; the carry the distance check leaves
+label $cc21 blooper_sink ; the blooper sinks
 routine $cc36 move_bullet               ; fly a bullet left, or let it fall once stomped
 table $cc46 swimming_fish_speeds 4
 routine $cc4a move_swimming_fish        ; swim a cheep cheep along, drifting up and down
@@ -1344,6 +1449,7 @@ table $cd2a firebar_mirrors 4
 table $cd2e firebar_table_offsets 12
 table $cd3a firebar_y_positions 2
 routine $cd3c update_firebar            ; rotate a firebar, draw its balls and collide them with the player
+label $cd6a firebar_ball_loop ; place the next ball
 routine $cdbb draw_firebar_ball         ; place a firebar ball's sprite by its offsets from the center
 scratch draw_firebar_ball $01 offset_x ; the ball's horizontal offset from the center
 scratch draw_firebar_ball $02 offset_y ; the ball's vertical offset from the center
@@ -1353,6 +1459,10 @@ routine $ce08 firebar_ball_collision    ; draw a firebar ball and hurt the playe
 param firebar_ball_collision y oam_offset ; the ball's sprite in the OAM copy
 scratch firebar_ball_collision $06 ball_y ; the ball's screen Y
 scratch firebar_ball_collision $07 ball_x ; the ball's screen X
+label $ce85 next_ball_offset ; the next ball's offset
+label $ce6f ball_hits_player ; the ball touches the player
+label $ce32 ball_distance_x ; the horizontal distance to the ball
+label $ce31 player_ball_height ; the player's height against the ball
 routine $ce8e firebar_ball_position     ; a firebar ball's offsets from the center at the bar's angle
 param firebar_ball_position a angle ; the bar's angle
 scratch firebar_ball_position $00 ball ; which ball of the bar
@@ -1363,12 +1473,15 @@ table $cf25 lakitu_speed_adjust 3
 routine $cf28 move_lakitu               ; float a lakitu after the player, throwing spinies, or let it leave
 routine $cf6c lakitu_chase              ; a lakitu's speed toward the player, matching the player's scrolling
 scratch lakitu_chase $00 distance ; the horizontal distance to the player
+label $cfd1 lakitu_aim ; aim at the player
 table $cfdd bridge_tile_columns 15
 routine $cfec collapse_bridge           ; collapse Bowser's bridge one piece at a time, then drop Bowser
 routine $d00f move_dying_bowser         ; let a defeated Bowser fall
+label $d015 bridge_fall_done ; the bridge is gone
 table $d061 bowser_move_ranges 4
 routine $d065 run_bowser                ; walk, jump, breathe fire and throw hammers as Bowser
 routine $d071 kill_all_enemies          ; clear every enemy slot
+label $d10f bowser_turn ; Bowser turns around
 routine $d17b draw_bowser               ; draw both halves of Bowser
 routine $d1bc bowser_half               ; draw one half of Bowser and collide it with the player
 result bowser_half x object ; the object slot
@@ -1377,6 +1490,7 @@ routine $d1d9 next_flame_timer          ; the next interval between Bowser's fla
 result next_flame_timer a flame_timer ; frames until the next flame
 routine $d1eb update_bowser_flame       ; move a flame left toward its height and draw it
 routine $d295 run_firework              ; burst a firework and award its points
+label $d2bd firework_done ; the firework is over
 table $d2cd star_flag_y_offsets 4
 table $d2d1 star_flag_x_offsets 4
 table $d2d5 star_flag_tiles 4
@@ -1394,14 +1508,20 @@ routine $d39e next_star_flag_task_b     ; advance to the next star flag task
 routine $d3a2 wait_area_end             ; keep the star flag drawn until its timer and the music end
 routine $d3b0 move_piranha              ; raise and lower a piranha plant, staying in its pipe while the player is near
 scratch move_piranha $00 distance ; the horizontal distance to the player
+label $d40a piranha_hide ; the piranha stays hidden
 routine $d410 spin_firebar              ; turn a firebar's angle by its speed, in its direction
 param spin_firebar a spin_speed ; the angle's step
 result spin_firebar a angle ; the bar's new angle
 routine $d432 update_balance_platform   ; move a balance lift's two platforms against each other with the player's weight, and drop them past the top
+label $d4a7 balance_partner ; move the other platform by as much
+label $d4a4 balance_fall ; move the platform down
+label $d49e balance_stop ; stop the platforms
+label $d498 balance_rise ; move the platform up
 routine $d541 draw_platform_rope        ; queue the rope tiles above a balance lift's platform
 param draw_platform_rope a platform_speed ; the platform's vertical speed
 param draw_platform_rope y platform_slot ; the platform's slot
 result draw_platform_rope x list_index ; the rope's offset in VRAM list 1
+label $d598 balance_fall_off ; the platforms fall
 routine $d5b1 stop_balance_platforms    ; stop both platforms of a balance lift
 param stop_balance_platforms y partner_slot ; the other platform's slot
 routine $d5d3 move_vertical_platform    ; move a platform up and down between its limits, carrying the player
@@ -1417,11 +1537,14 @@ routine $d655 move_small_lift           ; move a small lift, carrying the player
 routine $d65b move_lift                 ; move a lift by its vertical speed
 routine $d67a check_enemy_offscreen     ; remove an enemy that left the screen's range
 param check_enemy_offscreen x object ; the enemy's slot
+label $d68f offscreen_range ; the range the enemy may be in
 routine $d6d9 fireball_enemy_collision  ; check a fireball against the enemies, every other frame
+label $d72c fireball_enemy_box ; test the enemy's box
 table $d736 bowser_lookalikes 8
 routine $d73e fireball_hit_enemy        ; hurt the enemy a fireball hit, or Bowser
 param fireball_hit_enemy x fireball_slot ; the fireball's slot
 scratch fireball_hit_enemy $01 enemy_hit ; the slot of the enemy hit
+label $d75c fireball_hits_bowser ; the fireball hit Bowser
 routine $d795 defeat_enemy              ; knock an enemy out, with its score
 param defeat_enemy x object ; the enemy's slot
 result defeat_enemy y leftover_y ; what the score leaves in Y
@@ -1429,6 +1552,9 @@ routine $d7bc smack_enemy_score         ; show score A over the enemy and play t
 param smack_enemy_score a score ; the score to show
 param smack_enemy_score x object ; the enemy's slot
 routine $d7c4 player_hammer_collision   ; hurt the player a hammer hits, unless invincible
+label $d847 set_powerup_task ; start the player's powerup task
+label $d840 grow_player ; the player grows
+label $d83a powerup_score ; the powerup's score
 table $d84d leftover_speeds 2
 table $d84f kicked_shell_speeds 2
 table $d851 demoted_koopa_speeds 2
@@ -1437,10 +1563,16 @@ table $d892 kicked_shell_points 3
 routine $d92c injure_player             ; hurt the player, unless already blinking
 routine $d931 force_injury              ; shrink the player, or kill a small one
 param force_injury a power ; the player's power after the injury
+label $d946 injury_state ; the player's injured state
 routine $d948 set_player_routine        ; set the player's task and state, pausing the timers
 param set_player_routine a new_task ; the player's task
 param set_player_routine y new_state ; the player's state
 routine $d955 end_injury_check          ; the slot being processed
+label $d9ff turn_and_injure ; turn the enemy and hurt the player
+label $d9f6 enemy_from_left ; the enemy is left of the player
+label $d9b3 stomp_enemy ; the player stomps the enemy
+label $d969 enemy_contact ; the player touches the enemy
+label $d958 kill_player ; the small player dies
 table $d965 stomp_points 4
 table $d9d2 revival_rates 2
 routine $da05 face_player               ; turn the enemy toward the player
@@ -1452,6 +1584,7 @@ result spawn_floating_score a score_x ; the score's X
 table $da25 set_bit_masks 7
 table $da2c clear_bit_masks 7
 routine $da33 enemy_enemy_collisions    ; collide the enemy with the others, turning or knocking them out
+label $daaa enemy_pair_tested ; the pair was tested this frame
 routine $dab4 enemy_pair_collision      ; settle a collision between two enemies: a shell or a kicked enemy knocks the other out, else both turn
 param enemy_pair_collision y other ; the other enemy's slot
 scratch enemy_pair_collision $01 other_slot ; the other enemy's slot
@@ -1466,9 +1599,12 @@ routine $db5f player_on_large_platform  ; land the player on a large platform it
 param player_on_large_platform x object ; the platform's slot
 routine $db78 large_platform_collision_done; the slot being processed
 routine $db7b small_platform_collision  ; check the player against a small lift's two halves
+label $dbba small_platform_land ; land the player on the platform
+label $dbb7 small_platform_off ; the platform is off screen
 routine $dbbc platform_landing          ; land the player on a platform, or stop it against its side or bottom
 param platform_landing x object ; the platform's slot
 param platform_landing y box_offset ; the platform's box offset in boxes
+label $dc14 platform_landed ; the player stands on it
 table $dc17 small_platform_y_offsets 2
 routine $dc19 place_player_on_small_platform; put the player on top of a small lift
 param place_player_on_small_platform a offset_index ; one more than the offset's index in small_platform_y_offsets
@@ -1488,9 +1624,21 @@ result enemy_box_offset_for y box_offset ; the enemy's box offset in boxes
 result enemy_box_offset_for a edge_bits ; the enemy's offscreen bits
 table $dc62 player_bg_top_extents 2
 routine $dc64 player_bg_collision       ; collide the player with the background: ceilings and bumped blocks, floors and springs, walls, coins, vines, the flagpole and pipes
+label $de0e touch_axe ; the player reached the axe
+label $de05 collect_coin ; take the coin
+label $ddff stop_at_side ; stop the player at the block's side
+label $dd9c not_climbable ; the metatile cannot be climbed
+label $dd5e probe_sides ; test the player's sides
+label $dcf6 probe_feet ; test the player's feet
+label $dcf2 water_ceiling ; the player at the water's top
+label $dc86 climbing_collision ; collisions while climbing
 table $de03 area_change_timers 2
 routine $de1c erase_metatile            ; clear the metatile the player touched (a coin) and redraw it
 scratch erase_metatile $07 buffer_high ; the high byte of the block's address in the block buffer
+label $de88 start_climbing ; the player starts climbing
+label $de7a vine_top ; the vine's top
+label $de70 flagpole_height ; the score of the height on the flagpole
+label $de2e climb_metatile ; the player holds a vine or the flagpole
 table $de25 climb_x_offsets 2
 table $de27 climb_page_offsets 2
 table $de29 flagpole_heights 5
@@ -1506,6 +1654,7 @@ routine $dee8 enter_pipe                ; enter the pipe under the player when d
 scratch enter_pipe $00 left_metatile ; the metatile under the player's left foot
 scratch enter_pipe $01 right_metatile ; the metatile under the player's right foot
 routine $df4b block_player_side         ; push the player out of a block at its side and stop it
+label $df81 side_blocked ; the side is blocked
 table $df8b solid_metatile_limits 4
 routine $df8f is_solid_metatile         ; whether metatile A is solid (carry set then)
 param is_solid_metatile a touched_metatile ; the metatile
@@ -1532,6 +1681,8 @@ param check_stun_enemy x object ; the enemy's slot
 routine $e02f stun_enemy                ; flip an enemy over, bouncing it away from the player
 param stun_enemy x object ; the enemy's slot
 result stun_enemy y leftover_y ; what the bounce leaves in Y
+label $e0cd enemy_on_ground ; land the enemy on the ground
+label $e04a stun_bounce ; bounce the stunned enemy
 routine $e0fe enemy_side_check          ; turn an enemy that walks into a wall
 routine $e124 enemy_bump                ; turn an enemy around, or make a hammer bro jump
 routine $e143 player_enemy_distance     ; the enemy's horizontal distance from the player ($00; negative when left of it)
@@ -1552,6 +1703,7 @@ routine $e1b5 is_passable_metatile      ; whether metatile A lets objects throug
 param is_passable_metatile a touched_metatile ; the metatile
 result is_passable_metatile zero passable ; objects pass through it
 routine $e1c8 fireball_bg_collision     ; bounce a fireball off the floor, or explode it against a wall
+label $e1f4 fireball_bounce ; bounce the fireball off the floor
 table $e1fd box_sizes 48                ; left, top, right and bottom offsets by box kind
 routine $e22d fireball_box              ; the fireball's collision box
 routine $e236 misc_box                  ; the collision box of a hammer or coin
@@ -1587,6 +1739,7 @@ routine $e327 objects_collide           ; bounding box overlap test, carry set o
 param objects_collide x first_box ; one box's offset in boxes
 param objects_collide y second_box ; the other's
 result objects_collide carry collided ; the boxes overlap
+label $e37e next_axis ; test the boxes on the other axis
 scratch objects_collide $07 axes_left ; the axes left to test
 routine $e388 enemy_block_check         ; the metatile at probe Y around the enemy (zero set when none)
 param enemy_block_check a kept_a ; given back on the way
@@ -1646,6 +1799,8 @@ table $e4d0 hammer_first_tiles 4
 table $e4d4 hammer_second_tiles 4
 table $e4d8 hammer_attributes 4
 routine $e4dc draw_hammer               ; draw a hammer, spinning while thrown
+label $e4f7 draw_hammer_frame ; draw the hammer's frame
+label $e4f0 hammer_spinning ; the hammer spins
 table $e541 flagpole_score_tiles 10
 routine $e54b draw_flagpole_flag        ; draw the flag and the score it shows
 routine $e5b3 hide_six_sprites          ; move six sprites below the screen
@@ -1664,6 +1819,7 @@ param fill_two_sprites a top_y ; the sprites' Y
 param fill_two_sprites y oam_offset ; the first sprite's offset in the OAM copy
 routine $e5c8 draw_large_platform       ; draw a large platform, shorter in castles and in late hard mode
 result draw_large_platform x object ; the object slot
+label $e5eb platform_width ; the platform's width
 table $e682 jumping_coin_tiles 4
 routine $e686 draw_coin_or_score        ; draw a jumping coin, then the score it leaves
 table $e6be powerup_tiles 16
@@ -1675,6 +1831,12 @@ table $e85b enemy_attributes 27
 table $e876 enemy_animation_masks 2
 table $e878 spring_tile_offsets 5
 routine $e87d draw_enemy                ; draw an enemy's sprites by its kind and animation frame, flipped when defeated
+label $e94c bowser_tiles ; Bowser's tiles
+label $e946 enemy_flip ; flip the enemy vertically
+label $eb12 enemy_attributes ; the sprites' attributes
+label $ea4b draw_enemy_rows ; draw the enemy's rows
+label $ea37 check_enemy_flip ; whether to flip the enemy upside down
+label $ea29 enemy_animation ; the enemy's animation frame
 routine $eb64 clip_enemy_sprites        ; hide the rows and columns of the enemy's sprites that are off screen, and remove it below the screen
 routine $ebaa draw_enemy_row            ; draw a row of the enemy's tiles
 param draw_enemy_row x tile_index ; the row's index in enemy_tiles
@@ -1706,8 +1868,10 @@ routine $ec4a hide_column               ; hide a column of two sprites at Y
 param hide_column y oam_offset ; the column's offset in the OAM copy
 result hide_column a hidden_y ; the Y below the screen
 routine $ec53 draw_brick_chunks         ; draw the four flying chunks of a broken brick
+label $ecde draw_fireball ; draw the fireball
 routine $eced draw_firebar_tile         ; set a firebar ball's tile and flip, spinning with the frame count
 param draw_firebar_tile y oam_offset ; the ball's sprite in the OAM copy
+label $ed09 draw_fireball_explosion ; draw the fireball's explosion
 table $ed06 explosion_tiles 3
 routine $ed17 draw_explosion            ; draw frame A of a fireball's or firework's explosion
 param draw_explosion a frame ; the explosion's frame
@@ -1729,8 +1893,16 @@ routine $efdc draw_player_rows          ; draw the player's rows of tiles
 param draw_player_rows x tile_index ; the first row's index in player_tiles
 routine $efec player_action_offset      ; the tile offset of the player's pose: walking, skidding, jumping, swimming, climbing, crouching
 result player_action_offset a gfx_offset ; the pose's tile offset
+label $f050 swim_pose ; the swimming pose
+label $f044 climb_pose ; the climbing pose
+label $f03c walk_pose ; the walking pose
+label $f034 fall_pose ; the falling pose
+label $f028 jump_pose ; the jumping pose
 routine $f062 animate_player            ; the tile offset of the player's animation frame
 param animate_player y pose ; the player's pose
+label $f06f animate_pose ; the pose's frame
+label $f06d swim_frames ; the swim's frames
+label $f068 walk_frames ; the walk's frames
 routine $f091 size_offset               ; the pose offset for the player's size
 param size_offset y pose ; the pose
 result size_offset y pose ; the pose for the player's size
@@ -1742,6 +1914,7 @@ param animation_offset a frame ; the animation frame
 param animation_offset y pose ; the pose
 result animation_offset a gfx_offset ; the frame's tile offset
 routine $f0e9 fix_player_attributes     ; fix the flip of the player's sprites for some poses
+label $f117 mirror_player_rows ; mirror the player's rows
 routine $f12a player_screen_position    ; the player's position relative to the screen
 result player_screen_position y screen_slot ; the player's slot
 routine $f131 bubble_screen_position    ; an air bubble's position relative to the screen
@@ -1807,6 +1980,13 @@ scratch edge_distance_bits $07 distance ; the object's distance from the edge
 result edge_distance_bits x edge_bits ; the offscreen bits
 routine $f2d0 update_sound              ; per-frame sound engine entry point
 param update_sound x leftover_x ; the X the frame interrupt leaves
+label $f37d skip_dmc_level ; leave the DMC level
+label $f35d clear_sound_requests ; clear the requests
+label $f34b run_sound_effects ; the sound effects and music
+label $f32e end_pause_sound ; the pause sound ends
+label $f327 play_pause_note ; play the pause sound's note
+label $f316 continue_pause_sound ; the pause sound goes on
+label $f312 pause_note_high ; the pause sound's high note
 routine $f381 set_square1_regs          ; set pulse 1's control (X) and sweep (Y)
 param set_square1_regs x control ; pulse 1's control byte
 param set_square1_regs y sweep ; pulse 1's sweep byte
@@ -1844,12 +2024,41 @@ result set_square2_freq zero silent ; the note is a rest
 result set_square2_freq a period_high ; the period's high byte written
 routine $f3ad set_triangle_freq         ; set the triangle's period to note A
 param set_triangle_freq a note ; the note
+label $f40d continue_bump_sfx ; the bump sound goes on
+label $f403 start_short_sfx ; start the bump or fireball sound
+label $f3ff start_bump_sfx ; start the bump sound
+label $f3f9 start_fireball_sfx ; start the fireball sound
+label $f3f4 set_pulse1_regs ; set pulse 1's control and sweep
+label $f3f2 flagpole_sweep ; the flagpole sound's sweep
+label $f3df continue_jump_sfx ; the jump sound goes on
+label $f3d3 start_jump_sfx ; start a jump sound
+label $f3d1 start_big_jump_sfx ; start the big jump sound
+label $f3cd start_small_jump_sfx ; start the small jump sound
+label $f3bf start_flagpole_sfx ; start the flagpole sound
 table $f3b1 swim_stomp_envelope 14
 routine $f41b square1_sfx               ; start or continue the pulse 1 sound effects: jump, swim, stomp, bump, flagpole, fireball, pipe and injury
 param square1_sfx x leftover_x ; the X the sound engine passes along
 result square1_sfx x leftover_x ; the X it passes along
+label $f4a2 count_pulse1_sfx ; count the pulse 1 sound down
+label $f48d continue_smack_sfx ; the smack sound goes on
+label $f47d start_smack_sfx ; start the enemy smack sound
+label $f469 continue_stomp_sfx ; the stomp sound goes on
+label $f45b start_stomp_sfx ; start the stomp or swim sound
 routine $f4a7 stop_square1_sfx          ; end the pulse 1 sound effect
 result stop_square1_sfx x leftover_x ; the X it passes along
+label $f56d end_pulse2_sfx ; the pulse 2 sound ends
+label $f568 count_pulse2_sfx ; count the pulse 2 sound down
+label $f565 play_pulse2_note ; play pulse 2's note
+label $f557 continue_powerup_grab_sfx ; the powerup grab sound goes on
+label $f552 start_powerup_grab_sfx ; start the powerup grab sound
+label $f545 continue_blast_sfx ; the blast goes on
+label $f53a start_blast_sfx ; start the blast sound
+label $f52c continue_coin_sfx ; the coin or tick goes on
+label $f522 start_coin_or_tick ; the coin's or tick's note
+label $f51e start_timer_tick_sfx ; start the timer tick
+label $f518 start_coin_sfx ; start the coin sound
+label $f4bb continue_pipe_sfx ; the pipe sound goes on
+label $f4b6 start_pipe_sfx ; start the pipe or injury sound
 table $f4d4 extra_life_notes 6
 table $f4da powerup_grab_notes 30
 table $f4f8 powerup_reveal_notes 32
@@ -1858,15 +2067,45 @@ result stop_square2_sfx x leftover_x ; the X it passes along
 routine $f57c square2_sfx               ; start or continue the pulse 2 sound effects: coin, powerup, vine, 1-up, timer and Bowser's fall
 param square2_sfx x leftover_x ; the X the sound engine passes along
 result square2_sfx x leftover_x ; the X it passes along
+label $f658 count_noise_sfx ; count the noise down
+label $f64d set_noise_regs ; set the noise channel
+label $f640 continue_brick_sfx ; the brick shatter goes on
+label $f63b start_brick_sfx ; start the brick shatter
+label $f60f continue_growing_sfx ; a growing sound goes on
+label $f602 start_growing_sfx ; a growing sound's start
+label $f600 start_grow_vine_sfx ; start the vine's growing sound
+label $f5fc start_grow_powerup_sfx ; start the powerup's growing sound
+label $f5e7 continue_extra_life_sfx ; the 1-up sound goes on
+label $f5e2 start_extra_life_sfx ; start the 1-up sound
+label $f5de pulse2_control ; pulse 2's control byte
+label $f5d3 continue_bowser_fall_sfx ; Bowser's fall goes on
+label $f5c8 start_bowser_fall_sfx ; start the sound of Bowser's fall
 table $f62b brick_shatter_notes 16
 routine $f667 noise_sfx                 ; start or continue the noise sound effects: brick shatter and Bowser's flame
 param noise_sfx x leftover_x ; the X the sound engine passes along
 result noise_sfx x leftover_x ; the X it passes along
+label $f685 continue_flame_sfx ; the flame goes on
+label $f680 start_flame_sfx ; start Bowser's flame
 routine $f691 continue_music            ; play the next notes of the music on each channel
 param continue_music x leftover_x ; the X the sound engine passes along
 result continue_music x leftover_x ; the X it passes along
 routine $f694 update_music              ; start the requested area or event music, then play its next notes
 param update_music x leftover_x ; the X the sound engine passes along
+label $f8b9 noise_volume ; the beat's volume
+label $f88a noise_length ; the beat's length
+label $f86d noise_notes ; the noise's next beat
+label $f86a triangle_off ; silence the triangle
+label $f81a triangle_notes ; the triangle's next note
+label $f7c5 pulse1_notes ; pulse 1's next note
+label $f786 pulse2_note ; play pulse 2's note
+label $f77a pulse2_length ; pulse 2's note length
+label $f73a pulse2_notes ; pulse 2's next note
+label $f6f5 load_song_header ; load the song's header
+label $f6f1 find_song ; find the song's header
+label $f6d4 start_area_music ; start the requested area music
+label $f6d1 set_ground_header ; the ground music's header
+label $f6c8 check_area_music ; the area music requested
+label $f6a4 start_event_music ; start the requested event music
 routine $f8c5 alternate_length          ; the length of a note from its alternate encoding
 param alternate_length a note_byte ; the note byte
 result alternate_length x note_copy ; the note byte
