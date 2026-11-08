@@ -6,11 +6,13 @@
 let last : Ref[@pipeline.Output?] = Ref(None)
 let last_warning : Ref[String] = Ref("")
 
-// `layout`: "name address" lines, the runtime module's addresses.
+// `layout`: "name address" lines, the runtime module's addresses; `locals`:
+// registers and flags as C locals and parameters in the C.
 pub fn recompile(
   rom : Bytes,
   map : String,
   native : String,
+  locals : Bool,
   layout : String,
   progress : (String) -> Unit,
 ) -> String {
@@ -26,7 +28,7 @@ pub fn recompile(
   try {
     let (program, warning) = @pipeline.from_rom(rom, map, progress~)
     last_warning.val = warning.unwrap_or("")
-    let options = { ..@pipeline.Options::default(), native: @pipeline.parse_names(native), wasm: true, layout: addresses }
+    let options = { ..@pipeline.Options::default(), native: @pipeline.parse_names(native), locals, wasm: true, layout: addresses }
     last.val = Some(@pipeline.recompile(program, options, progress~))
     ""
   } catch {

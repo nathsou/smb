@@ -65,6 +65,9 @@ ROM ?= smb.nes
 MAP = maps/smb.map
 GAME_DIR = codegen/game
 NATIVE_ROUTINES = --native codegen/native/routines.txt
+# registers and flags as each routine's parameters, results and locals in
+# the C (src/transpile/locals.mbt)
+CODEGEN_OPTIONS = --locals
 GAME_FLAGS =
 GAME_SOURCES = codegen/native/display.c
 endif
@@ -103,7 +106,7 @@ MAIN = codegen/main.c
 # with GAME=metroid, smb3, ... (not in the repository). The poll points of a
 # map's `preempt` go to $(GAME_DIR)/polls.txt, for the interpreter.
 codegen:
-	moon run src/main -- --rom $(ROM) --map $(MAP) $(NATIVE_ROUTINES) --output $(GAME_DIR) --polls $(GAME_DIR)/polls.txt
+	moon run src/main -- --rom $(ROM) --map $(MAP) $(NATIVE_ROUTINES) $(CODEGEN_OPTIONS) --output $(GAME_DIR) --polls $(GAME_DIR)/polls.txt
 
 # The map's names for the hand-written code (committed; no ROM needed).
 header:
@@ -154,7 +157,7 @@ apu-wasm:
 # Bakes the runtime's addresses into the game module (as the page does).
 game-wasm: runtime-wasm
 	node web/layout.mjs web/runtime.wasm > web/layout.txt
-	moon run src/main -- --rom $(ROM) --map maps/smb.map --native codegen/native/routines.txt --wasm web/game.wasm --wasm-layout web/layout.txt
+	moon run src/main -- --rom $(ROM) --map maps/smb.map --native codegen/native/routines.txt --locals --wasm web/game.wasm --wasm-layout web/layout.txt
 
 # The page: the C runtime, the recompiler compiled to JavaScript, and the
 # inputs it recompiles the player's ROM with. Serve web/ over HTTP.

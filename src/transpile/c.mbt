@@ -34,15 +34,30 @@ priv struct CFunc {
   f : @ir.Function
   names : Array[String]
   views : Views
+  conv : Convention
+  // Registers and flags are this function's locals (see locals.mbt), not
+  // the machine's globals.
+  locals : Bool
+  // With locals, what is live after each statement of each block.
+  after : Array[Array[Int]]
 }
 
-fn temp_names(f : @ir.Function) -> Array[String] {
+// The registers and flags as locals, which temporaries must not shadow.
+let local_names : Array[String] = ["a", "x", "y", "carry", "zero", "negative", "overflow"]
+
+fn temp_names(f : @ir.Function, locals~ : Bool = false) -> Array[String] {
   let seen : Map[String, Int] = Map([])
   f.temps.map(fn(t) {
-    let n = seen.get(t.hint).unwrap_or(0) + 1
-    seen[t.hint] = n
-    if n == 1 { t.hint } else { t.hint + n.to_string() }
+    // the bit a rotate shifts out, `carry_out` beside the local `carry`
+    let hint = if locals && local_names.contains(t.hint) { t.hint + "_out" } else { t.hint }
+    let n = seen.get(hint).unwrap_or(0) + 1
+    seen[hint] = n
+    if n == 1 { hint } else { hint + n.to_string() }
   })
+}
+
+fn CFunc::reg(self : CFunc, v : @ir.Var) -> String {
+  if self.locals { local_name(v) } else { v.c_name() }
 }
 
 // `(uint8_t)` is needed unless the value is evidently a byte (clang's
@@ -87,14 +102,19 @@ fn CFunc::indirect(self : CFunc, e : @ir.Expr) -> String? {
       _ => None
     }
   }
+  // (the runtime's helpers read the machine's X and Y; with locals, the
+  // pointer is read and the index added here)
   match e {
     Binary(Add, base, Var(Y)) =>
       match pointer(base) {
+        Some(p) if p.is_atom() && self.locals => Some("(uint16_t)(zero_page_pointer(\{self.expr(p)}) + y)")
         Some(p) if p.is_atom() => Some("indirect_y_addr(\{self.expr(p)})")
         _ => None
       }
     _ =>
       match pointer(e) {
+        Some(Unary(Byte, Binary(Add, p, Var(X)))) if p.is_atom() && self.locals =>
+          Some("zero_page_pointer((uint8_t)(\{self.paren(p, 4)} + x))")
         Some(Unary(Byte, Binary(Add, p, Var(X)))) if p.is_atom() => Some("indirect_x_addr(\{self.expr(p)})")
         _ => None
       }
@@ -182,7 +202,7 @@ fn CFunc::expr_prec(self : CFunc, e : @ir.Expr) -> (String, Int) {
   match e {
     Const(v) => (show_number(v), 0)
     Sym(name, _) => (name, 0)
-    Var(v) => (v.c_name(), 0)
+    Var(v) => (self.reg(v), 0)
     Temp(t) => (self.names[t], 0)
     Param => ("return_address", 0)
     Runtime(name) => (name, 0)
@@ -237,7 +257,7 @@ fn CFunc::expr_prec(self : CFunc, e : @ir.Expr) -> (String, Int) {
 }
 
 fn CFunc::assign(self : CFunc, v : @ir.Var, e : @ir.Expr) -> String {
-  let name = v.c_name()
+  let name = self.reg(v)
   if v.is_flag() {
     return match e {
       Const(0) => "\{name} = false;"
@@ -254,7 +274,8 @@ fn CFunc::assign(self : CFunc, v : @ir.Var, e : @ir.Expr) -> String {
   }
 }
 
-fn CFunc::stmt(self : CFunc, s : @ir.Stmt) -> String {
+// `live`: the registers and flags live after the statement.
+fn CFunc::stmt(self : CFunc, s : @ir.Stmt, live~ : Int = local_vars) -> String {
   match s {
     Assign(v, e) => self.assign(v, e)
     Let(t, e) => {
@@ -290,22 +311,101 @@ fn CFunc::stmt(self : CFunc, s : @ir.Stmt) -> String {
     Effect("ppu_bus_write", args) => "ppu_bus_write(\{self.expr(args[0])}, \{self.byte(args[1])});"
     Effect(name, args) => name + "(" + args.map(fn(a) { self.byte(a) }).join(", ") + ");"
     Eval(e) => "(void)\{self.expr(e)};"
-    Call(name) => "\{name}();"
-    CallValue(t, helper, return_address) => "uint16_t \{self.names[t]} = \{helper}(0x\{hex(return_address)});"
+    Call(name) => self.call(name, live~)
+    CallValue(t, helper, return_address) => "uint16_t \{self.names[t]} = \{self.helper_call(helper, return_address)};"
   }
+}
+
+// The arguments of a call of a routine with locals: its parameters by
+// value, then the results it writes back.
+fn CFunc::arguments(self : CFunc, g : String) -> Array[String] {
+  let s = self.conv.sig(g)
+  let args = []
+  for v in @ir.vars_of(s.value_bits()) { args.push(self.reg(v)) }
+  for v in @ir.vars_of(s.pointer_bits()) { args.push("&" + self.reg(v)) }
+  args
+}
+
+// A call of `g` and the result it returns, if any.
+fn CFunc::call_parts(self : CFunc, g : String) -> (String, @ir.Var?) {
+  ("\{g}(\{self.arguments(g).join(", ")})", self.conv.sig(g).primary)
+}
+
+// A call as statements, its results assigned: with locals, those `live`
+// afterwards (the machine's registers take every result).
+fn CFunc::call(self : CFunc, g : String, live~ : Int = local_vars) -> String {
+  let live = if self.locals { live } else { local_vars }
+  if self.conv.has_locals(g) {
+    let (call, primary) = self.call_parts(g)
+    return match primary {
+      Some(p) if (live & p.bit()) != 0 => "\{self.reg(p)} = \{call};"
+      _ => call + ";"
+    }
+  }
+  if !self.locals { return "\{g}();" }
+  // to a routine that keeps the machine's registers, through them
+  let s = self.conv.sig(g)
+  let parts = []
+  for v in @ir.vars_of(s.params) { parts.push("*machine.\{local_name(v)} = \{local_name(v)};") }
+  parts.push("\{g}();")
+  for v in @ir.vars_of(s.outputs & live) { parts.push("\{local_name(v)} = *machine.\{local_name(v)};") }
+  parts.join(" ")
+}
+
+fn CFunc::helper_call(self : CFunc, helper : String, return_address : Int) -> String {
+  let args = ["0x\{hex(return_address)}"]
+  if self.conv.has_locals(helper) { args.append(self.arguments(helper)) }
+  "\{helper}(\{args.join(", ")})"
+}
+
+// Whether the function returns a value (a result, or a helper's target).
+fn CFunc::returns_value(self : CFunc) -> Bool {
+  self.f.helper || (self.locals && self.conv.sig(self.f.name).primary is Some(_))
+}
+
+// Writing back the results passed by pointer, before a return.
+fn CFunc::write_back(self : CFunc) -> String {
+  if !self.locals { return "" }
+  let s = self.conv.sig(self.f.name)
+  @ir.vars_of(s.pointer_bits()).map(fn(v) { "*\{pointer_name(s, v)} = \{local_name(v)}; " }).join("")
+}
+
+fn CFunc::return_code(self : CFunc) -> String {
+  let value = match self.conv.sig(self.f.name).primary {
+    Some(p) if self.locals => " " + local_name(p)
+    _ => ""
+  }
+  self.write_back() + "return\{value};"
+}
+
+// A call of `g` in tail position: its results, then the routine's.
+fn CFunc::tail_call(self : CFunc, g : String) -> String {
+  if self.locals && self.conv.has_locals(g) {
+    let own = self.conv.sig(self.f.name)
+    let s = self.conv.sig(g)
+    // the callee's results are the routine's
+    if own.outputs == s.outputs && own.pointer_bits() == 0 && s.pointer_bits() == 0 {
+      let (call, primary) = self.call_parts(g)
+      return if primary is Some(_) { "return \{call};" } else { "\{call}; return;" }
+    }
+  }
+  self.call(g, live=self.conv.sig(self.f.name).outputs) + " " + self.return_code()
+}
+
+// After an unproven transfer, which never returns: `return;` keeps the
+// shape of the other exits, except where a value would be due.
+fn CFunc::after_trap(self : CFunc) -> String {
+  if self.returns_value() { "" } else { " return;" }
 }
 
 // What a block that only leaves the function does, as one line.
 fn CFunc::exit_code(self : CFunc, term : @ir.Term) -> String? {
   match term {
-    Return => Some("return;")
-    TailCall(g) => Some("\{g}(); return;")
+    Return => Some(self.return_code())
+    TailCall(g) => Some(self.tail_call(g))
     Yield(pc) => Some("cpu_yield(0x\{hex(pc & 0xffff)}); return;")
-    Trap(pc) => {
-      let address = "0x\{hex(pc & 0xffff)}"
-      Some(if self.f.helper { "cpu_unresolved_jump(\{address});" } else { "cpu_unresolved_jump(\{address}); return;" })
-    }
-    ReturnValue(e) => Some("return cpu_dispatch_target = \{self.word(e)};")
+    Trap(pc) => Some("cpu_unresolved_jump(0x\{hex(pc & 0xffff)});\{self.after_trap()}")
+    ReturnValue(e) => Some(self.write_back() + "return cpu_dispatch_target = \{self.word(e)};")
     _ => None
   }
 }
@@ -378,7 +478,11 @@ fn Structurer::cond(self : Structurer, e : @ir.Expr) -> String {
 }
 
 fn Structurer::stmts(self : Structurer, b : Int) -> Unit {
-  for s in self.c.f.blocks[b].stmts { self.emit(self.c.stmt(s)) }
+  for k, s in self.c.f.blocks[b].stmts {
+    let live = if self.c.locals { self.c.after[b][k] } else { local_vars }
+    if self.c.locals && dead(s, live) { continue }
+    self.emit(self.c.stmt(s, live~))
+  }
 }
 
 // The latest conditional back edge to the block at position i that closes
@@ -501,12 +605,12 @@ fn Structurer::range(self : Structurer, s : Int, e : Int, follow : Int, skip_loo
         self.emit("if (\{self.cond(when)}) { \{self.jump(other)} }")
       }
       Dispatch(helper, return_address, cases) => {
-        self.emit("switch (\{helper}(0x\{hex(return_address)})) {")
+        self.emit("switch (\{self.c.helper_call(helper, return_address)}) {")
         self.indent += 1
         for case in cases {
-          self.emit("case 0x\{hex(case.0)}: \{case.1}(); return;")
+          self.emit("case 0x\{hex(case.0)}: \{self.c.tail_call(case.1)}")
         }
-        self.emit("default: cpu_unresolved_jump(cpu_dispatch_target); return; // index outside the proven table")
+        self.emit("default: cpu_unresolved_jump(cpu_dispatch_target);\{self.c.after_trap()} // index outside the proven table")
         self.indent -= 1
         self.emit("}")
       }
@@ -515,9 +619,9 @@ fn Structurer::range(self : Structurer, s : Int, e : Int, follow : Int, skip_loo
         self.emit("switch (\{value}) {")
         self.indent += 1
         for case in cases {
-          self.emit("case 0x\{hex(case.0)}: \{case.1}(); return;")
+          self.emit("case 0x\{hex(case.0)}: \{self.c.tail_call(case.1)}")
         }
-        self.emit("default: cpu_unresolved_jump(\{value}); return; // not a code address of the map")
+        self.emit("default: cpu_unresolved_jump(\{value});\{self.c.after_trap()} // not a code address of the map")
         self.indent -= 1
         self.emit("}")
       }
@@ -537,8 +641,10 @@ fn Structurer::range(self : Structurer, s : Int, e : Int, follow : Int, skip_loo
   }
 }
 
-fn function_body(f : @ir.Function, views : Views) -> Array[Line] {
-  let c : CFunc = { f, names: temp_names(f), views }
+fn function_body(f : @ir.Function, views : Views, conv : Convention) -> Array[Line] {
+  let locals = conv.has_locals(f.name)
+  let after = if locals { conv.live_after(f) } else { [] }
+  let c : CFunc = { f, names: temp_names(f, locals~), views, conv, locals, after }
   let pos = f.blocks.map(fn(_) { -1 })
   let layout = []
   // only blocks reachable from the entry are printed
@@ -595,7 +701,40 @@ fn interface_names(mask : Int) -> String {
   if names.is_empty() { "none" } else { names.join(", ") }
 }
 
-fn Emitter::emit_function(self : Emitter, program : @ir.Program, f : @ir.Function, views : Views) -> Unit {
+// The registers and flags a printed body names (outside comments): the
+// locals it declares, except its parameters by value.
+fn named_locals(body : Array[Line]) -> Int {
+  let mut named = 0
+  for line in body {
+    guard line is Text(_, text) else { continue }
+    let code = match text.find("//") {
+      Some(i) => text.view(end_offset=i).to_owned()
+      None => text
+    }
+    for v in @ir.vars_of(local_vars) {
+      if mentions(code, local_name(v)) { named = named | v.bit() }
+    }
+  }
+  named
+}
+
+// The locals a function with registers as locals declares: by type, those
+// written back through a pointer starting from the value it points to.
+fn local_declarations(conv : Convention, f : @ir.Function, named : Int) -> Array[String] {
+  let sig = conv.sig(f.name)
+  let declared = named & sig.value_bits().lnot()
+  let out = []
+  for type_name in ["uint8_t", "bool"] {
+    let plain = @ir.vars_of(declared & sig.params.lnot()).filter(fn(v) { c_type(v) == type_name })
+    if !plain.is_empty() { out.push("\{type_name} \{plain.map(local_name).join(", ")};") }
+  }
+  for v in @ir.vars_of(declared & sig.params) {
+    out.push("\{c_type(v)} \{local_name(v)} = *\{pointer_name(sig, v)};")
+  }
+  out
+}
+
+fn Emitter::emit_function(self : Emitter, program : @ir.Program, f : @ir.Function, views : Views, conv : Convention) -> Unit {
   let info = program.info.unwrap()
   self.indentation = 0
   if f.native {
@@ -605,9 +744,14 @@ fn Emitter::emit_function(self : Emitter, program : @ir.Program, f : @ir.Functio
     return
   }
   for line in f.doc { self.emit("// \{line}") }
+  let locals = conv.has_locals(f.name)
   if f.helper {
     self.emit("// Inline-table dispatch proven by evaluating \{f.name}; its effects run here unchanged.")
-    self.emit("static uint16_t \{f.name}(uint16_t return_address) {")
+    let params = if locals { conv.parameters(f) } else { "uint16_t return_address" }
+    self.emit("static uint16_t \{f.name}(\{params}) {")
+  } else if locals {
+    // the prototype is the interface
+    self.emit(conv.prototype(f) + " {")
   } else {
     let inputs = info.inputs(f.name)
     let outputs = program.outputs(info, f.name)
@@ -616,7 +760,12 @@ fn Emitter::emit_function(self : Emitter, program : @ir.Program, f : @ir.Functio
     }
     self.emit("void \{f.name}(void) {")
   }
-  for line in function_body(f, views) {
+  let body = function_body(f, views, conv)
+  if locals {
+    self.indentation = 1
+    for line in local_declarations(conv, f, named_locals(body)) { self.emit(line) }
+  }
+  for line in body {
     match line {
       Text(indent, text) => {
         self.indentation = indent
@@ -629,7 +778,20 @@ fn Emitter::emit_function(self : Emitter, program : @ir.Program, f : @ir.Functio
   self.emit("}\n")
 }
 
-fn Emitter::emit_program_c(self : Emitter, program : @ir.Program, preamble : Array[String], views : Views) -> Unit {
+// Whether a routine with locals calls one that keeps the machine's
+// registers (through `machine`).
+fn calls_machine(program : @ir.Program, conv : Convention) -> Bool {
+  program.functions.iter().any(fn(f) {
+    if f.native || !conv.has_locals(f.name) { return false }
+    let machine = fn(g : String) { !conv.has_locals(g) }
+    f.blocks.iter().any(fn(block) {
+      block.stmts.iter().any(fn(s) { s.callee().map(machine).unwrap_or(false) }) ||
+      block.term.tail_calls().iter().any(machine)
+    })
+  })
+}
+
+fn Emitter::emit_program_c(self : Emitter, program : @ir.Program, preamble : Array[String], views : Views, conv : Convention) -> Unit {
   self.emit("#include \"code.h\"")
   if !views.list.is_empty() { self.emit("#include \"vars.h\"") }
   self.emit("")
@@ -637,7 +799,19 @@ fn Emitter::emit_program_c(self : Emitter, program : @ir.Program, preamble : Arr
     for line in preamble { self.emit("// \{line}") }
     self.emit("")
   }
-  for f in program.functions { self.emit_function(program, f, views) }
+  if conv.locals {
+    self.emit("// Registers and flags are each routine's own: its parameters, results and")
+    self.emit("// locals. The hand-written routines, the routines they call and the roots")
+    self.emit("// keep the machine's, which routines with locals reach through `machine`.")
+    if calls_machine(program, conv) {
+      self.emit("static const struct {")
+      self.emit("  uint8_t *a, *x, *y;")
+      self.emit("  bool *carry, *zero, *negative, *overflow;")
+      self.emit("} machine = { &a, &x, &y, &carry_flag, &zero_flag, &neg_flag, &overflow_flag };")
+    }
+    self.emit("")
+  }
+  for f in program.functions { self.emit_function(program, f, views, conv) }
   self.emit("void cpu_reset_entry(void) { \{program.reset}(); }")
   self.emit("void cpu_nmi_entry(void) { \{program.nmi}(); }")
   // the runtime of cartridges runs the IRQ handler when the mapper raises
@@ -645,5 +819,46 @@ fn Emitter::emit_program_c(self : Emitter, program : @ir.Program, preamble : Arr
   match program.irq {
     Some(irq) => self.emit("void cpu_irq_entry(void) { \{irq}(); }")
     None => self.emit("void cpu_irq_entry(void) { cpu_unresolved_jump(0xfffe); } // never enabled")
+  }
+}
+
+// With locals: each generated routine as a function of the machine's
+// registers (machine.c), for the routine-level differential test
+// (tests/check_routines.py), which runs routines from machine states. The
+// adapter takes the routine's parameters from the machine's registers, then
+// overwrites those before the call, so that a routine reading them instead
+// of its own fails the test, and writes the results back.
+fn Emitter::emit_machine_adapters(self : Emitter, program : @ir.Program, conv : Convention) -> Unit {
+  self.emit("// Each generated routine with the machine's registers and flags: its")
+  self.emit("// parameters taken from them and its results written back (for")
+  self.emit("// tests/check_routines.py). Not part of the game.")
+  self.emit("#include \"code.h\"")
+  self.emit("")
+  self.emit("// What a routine with locals must not read: the machine's registers")
+  self.emit("// once its parameters are taken from them.")
+  self.emit("static void poison(void) {")
+  self.emit("  a = 0x5a; x = 0xa5; y = 0x3c;")
+  self.emit("  carry_flag = !carry_flag; zero_flag = !zero_flag; neg_flag = !neg_flag; overflow_flag = !overflow_flag;")
+  self.emit("}")
+  self.emit("")
+  for f in program.functions {
+    if f.native || f.helper { continue }
+    let sig = conv.sig(f.name)
+    self.emit("// in: \{interface_names(sig.params)}; out: \{interface_names(sig.outputs)}")
+    if !conv.has_locals(f.name) {
+      self.emit("void machine_\{f.name}(void) { \{f.name}(); }")
+      continue
+    }
+    let copy = fn(v : @ir.Var) { "v_" + local_name(v) }
+    let lines = []
+    for v in @ir.vars_of(sig.params | sig.outputs) { lines.push("\{c_type(v)} \{copy(v)} = \{v.c_name()};") }
+    lines.push("poison();")
+    let args = @ir.vars_of(sig.value_bits()).map(copy) + @ir.vars_of(sig.pointer_bits()).map(fn(v) { "&" + copy(v) })
+    let call = "\{f.name}(\{args.join(", ")});"
+    lines.push(match sig.primary { Some(p) => "\{copy(p)} = \{call}"; None => call })
+    for v in @ir.vars_of(sig.outputs) { lines.push("\{v.c_name()} = \{copy(v)};") }
+    self.emit("void machine_\{f.name}(void) {")
+    for line in lines { self.emit("  " + line) }
+    self.emit("}")
   }
 }

@@ -39,7 +39,7 @@ generated C next to the game.
 - [x] A second game: Metroid (MMC1 banks, waits for the interrupt, return-address tricks)
 - [x] A third game: Super Mario Bros. 3 (MMC3: two bank windows, CHR banks, frames split by the scanline IRQ)
 - [x] Five more: Bomberman, Tetris, Zelda, The Chessmaster and Kirby's Adventure (restarts, code in RAM, coroutines, preemption)
-- [ ] Registers as C locals and parameters
+- [x] Registers as C locals and parameters (SMB)
 - [ ] Manually rewrite portions of the code to higher level C
 
 See [toward a modern C program](docs/modern-runtime.md) for how these steps are
@@ -134,7 +134,11 @@ routines, tables and variables this project's own names (see
 [recompiling from the ROM](docs/modern-runtime.md#recompiling-from-the-rom)).
 The generator recovers reachable instructions and callable regions from the
 vectors, builds an IR, optimises it and emits structured C and, with
-`--wasm`, WebAssembly. The hand-written display routines
+`--wasm`, WebAssembly. For SMB, `--locals` makes registers and flags each
+routine's parameters, results and locals in the C (`uint8_t
+lakitu_chase(uint8_t x)`; see [registers as locals and
+parameters](docs/modern-runtime.md#registers-as-locals-and-parameters)).
+The hand-written display routines
 (`codegen/native/display.c`) use `codegen/native/smb.h`, the map's names as
 a C header (`make header`, no ROM needed). See the
 [analysis and migration notes](docs/recompiler-migration.md) and

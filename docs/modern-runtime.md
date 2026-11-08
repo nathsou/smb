@@ -252,6 +252,90 @@ emulated return-address stack, and the generator's static stack checks reject
 programs that inspect return addresses outside a proven dispatcher.
 NMI delivery restores the status flags in C instead of pushing PC and P.
 
+## Registers as locals and parameters
+
+Without options, routines share the machine's registers and flags as
+globals, as the 6502 does. With `--locals` (SMB's `make codegen` and the
+page), each routine has its own (`src/transpile/locals.mbt`). What it reads
+of its caller's registers and flags are its parameters, what its callers
+read after it returns are its results, and the rest are locals:
+
+```c
+// in: x; out: a                     uint8_t lakitu_chase(uint8_t x) {
+void lakitu_chase(void) {      ->      uint8_t a, y;
+  y = 0;                               bool carry, negative;
+  player_enemy_distance();             y = 0;
+  if (neg_flag) {                      carry = player_enemy_distance(x, &negative);
+                                       if (negative) {
+```
+
+- Results are the interface's outputs: what the routine may change that a
+  caller reads afterwards. The first, in the order A, X, Y, carry, zero,
+  negative, overflow, is returned. The others are written through pointers,
+  `out_y`, or `inout_y` when the routine also reads Y.
+- Parameters are what is live on the routine's entry when its returns read
+  its results. That is what it reads before writing, plus the results it
+  passes through unchanged on some path (a routine that only sometimes sets
+  Y takes Y and returns it). They are a least fixpoint over the program: a
+  call reads its callee's parameters and sets its results.
+- A call assigns only the results live after it, and a tail call whose
+  results are the routine's is `return f(x);`. An assignment of a pure value
+  to a local nothing reads is left out. Some were live while flags were
+  globals, because a routine called later could read them.
+- The interrupt and decimal flags and SP stay global. The stack is memory.
+
+Some routines keep the machine's registers: the hand-written ones
+(`--native`, whose C the WebAssembly runtime shares), the 11 routines
+they call (`clear_memory`, `run_game_mode`, `update_sound`, ...), the roots,
+and routines that wait for an interrupt. They are printed as without
+`--locals`. A call from them to a routine with locals passes the globals
+(`x = move_lakitu(x);`). A call the other way goes through `machine`, the
+machine's registers by pointer (`*machine.y = y; clear_memory(); a =
+*machine.a;`). That happens 3 times in SMB. `tests/check_routines.py` checks
+that the hand-written C only calls routines that keep the machine's
+registers.
+
+The runtime's `indirect_y_addr` and `indirect_x_addr` read the machine's X
+and Y. With locals the pointer is read by `zero_page_pointer` and the index
+added in the generated code. `cpu_unresolved_jump` is declared
+`noreturn`, so a routine that returns a value needs no return after a trap.
+
+In SMB, 248 routines return a value, 53 also write results through pointers,
+and 178 take parameters and return nothing. The C compiles without warnings
+under the Makefile's flags. Coroutines, restarts and preemption keep the
+machine's registers: `--locals` refuses programs that use them. The other
+games are recompiled as before.
+
+Checks:
+
+- The replay matches `warpless.trace` and `warpless.audio` on every frame,
+  and both framebuffer hashes are unchanged.
+- The routine-level differential test runs every routine through its
+  adapter in `machine.c`, which is generated with `--locals`. The adapter
+  takes the routine's parameters from the machine's registers and
+  overwrites them before the call, so a routine that reads them instead of
+  its own fails. It then writes the results back. 0 mismatches over the same
+  530 routines and 156,451 runs as before.
+- The WebAssembly module is byte-identical with and without `--locals`
+  (only the C is printed differently).
+- The NROM-128 fixture runs with `--locals` too (ROM-free, in CI), from its
+  assembly and from its iNES image.
+- Mutations of the generated C:
+  - every sync to `machine` dropped: diverges at frame 0;
+  - every write-back through a pointer dropped: the replay crashes;
+  - one carry write-back inverted: the routine diff reports 3 routines;
+  - the runtime's `indirect_y_addr` printed in routines with locals: the
+    replay crashes.
+
+  Two single-site mutations were not caught. One was equivalent: the
+  routine saves Y in `$01` and reloads it before the write-back. The other
+  drops the sync before `select_vram_list_b` in `queue_mushroom_palette`, on
+  a path that only levels with `area_style == 1` take, and neither the
+  replay nor the random states reach it. The generator makes the same
+  choice at every site, so a mistake in it shows up at sites the replay
+  does reach. A proof per routine would cover the paths the tests miss (see
+  Remaining work).
+
 ## The WebAssembly backend
 
 `src/wasm` emits a WebAssembly module from the same optimised IR
@@ -521,8 +605,17 @@ original renderer are unchanged.
 
 ## Remaining work
 
-- Registers as C locals and parameters: the interfaces give each routine's
-  inputs and outputs, but callers and callees still share global registers.
+- Registers as locals in the other games, and in the routines that keep
+  the machine's registers: the hand-written routines would take and return
+  values too, and their C is shared with the WebAssembly runtime, which
+  calls the game module with the registers in memory.
+- Results a routine leaves as they were: 123 SMB routines return X, 36 of
+  them after reloading it from `slot` (the object slot being processed). A
+  routine proven to give back the X it was given would not need to return
+  it.
+- A proof per routine that the C with locals computes what the reference
+  computes, for every input (as acnl does with an SMT solver), for the paths
+  that neither the replay nor the differential test's states take.
 - Scratch bytes as C locals, parameters and return values: `$00-$07` are
   most of the remaining `ram[...]` accesses.
 - Records: the sprite table and the object slots as structures over the

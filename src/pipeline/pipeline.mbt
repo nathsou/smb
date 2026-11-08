@@ -44,6 +44,7 @@ pub fn from_assembly(text : String) -> @image.Program raise PipelineError {
 pub(all) struct Options {
   native : Array[String] // routines supplied by hand-written C
   reference : Bool // unoptimised IR (the differential test's reference)
+  locals : Bool // registers and flags as C locals and parameters (the C only)
   wasm : Bool
   layout : Map[String, Int] // runtime addresses for the WebAssembly module
   force_dispatch : Bool
@@ -55,6 +56,7 @@ pub fn Options::default() -> Options {
   {
     native: [],
     reference: false,
+    locals: false,
     wasm: false,
     layout: Map([]),
     force_dispatch: false,
@@ -94,7 +96,7 @@ pub fn recompile(
   progress("optimize")
   if options.reference { ir.analyze() |> ignore } else { ir.optimize() }
   progress("c")
-  let c = @transpile.Transpiler::transpile(low, ir, native=options.native) catch {
+  let c = @transpile.Transpiler::transpile(low, ir, native=options.native, locals=options.locals) catch {
     err => raise fail("C", err)
   }
   let polls = polls.map(fn(location) {

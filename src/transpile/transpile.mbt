@@ -243,7 +243,7 @@ fn Emitter::emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
 
 // `uses_ppu_bus`: the program writes PPU registers, which a host supplies
 // through ppu_bus.h (SMB's display code writes its state directly instead).
-fn Emitter::emit_code_h(self: Emitter, program: @ir.Program, uses_ppu_bus~: Bool) -> Unit {
+fn Emitter::emit_code_h(self: Emitter, program: @ir.Program, uses_ppu_bus~: Bool, conv~: Convention) -> Unit {
   let banked = !program.banks.is_empty()
   self.emit("#ifndef SMB_CODE_H")
   self.emit("#define SMB_CODE_H")
@@ -288,7 +288,7 @@ fn Emitter::emit_code_h(self: Emitter, program: @ir.Program, uses_ppu_bus~: Bool
   self.emit("void cpu_nmi_entry(void);")
   self.emit("void cpu_irq_entry(void);")
   for f in program.functions {
-    if !f.helper { self.emit("void \{f.name}(void);") }
+    if !f.helper { self.emit(conv.prototype(f) + ";") }
   }
 
   self.emit("")
@@ -310,18 +310,26 @@ pub(all) struct Transpiler {
   files: Array[File]
 }
 
-pub(all) suberror TranspileError { UnknownNativeRoutine(String) } derive(Debug)
+pub(all) suberror TranspileError {
+  UnknownNativeRoutine(String)
+  LocalsUnsupported(String) // what a program has that --locals does not handle
+} derive(Debug)
 
 // `program` is the IR of `low`; routines it marks native are supplied by
 // hand-written C, and only their prototypes and contracts are generated.
+// With `locals`, registers and flags are each routine's parameters, results
+// and locals (see locals.mbt), and machine.c adapts every routine to the
+// machine's registers for the differential test.
 pub fn Transpiler::transpile(
   low: @lower.AsmLowering,
   program: @ir.Program,
   native~: Array[String] = [],
+  locals~: Bool = false,
 ) -> Transpiler raise TranspileError {
   for name in native {
     if program.function(name) is None { raise UnknownNativeRoutine(name) }
   }
+  let conv = if locals { Convention::locals_of(program) } else { Convention::machine() }
   let constants_h: File = {
     name: "constants.h",
     contents: {
@@ -354,7 +362,7 @@ pub fn Transpiler::transpile(
 
   fn program_c(views : Views) -> String {
     let emitter = Emitter::new()
-    emitter.emit_program_c(program, low.preamble, views)
+    emitter.emit_program_c(program, low.preamble, views, conv)
     emitter.output.to_string()
   }
   // Names of the map become views (vars.h) unless the generated code
@@ -367,7 +375,17 @@ pub fn Transpiler::transpile(
     name: "code.h",
     contents: {
       let emitter = Emitter::new()
-      emitter.emit_code_h(program, uses_ppu_bus=code_c.contents.contains("ppu_bus_"))
+      emitter.emit_code_h(program, uses_ppu_bus=code_c.contents.contains("ppu_bus_"), conv~)
+      emitter.output.to_string()
+    },
+    is_lib: true,
+  }
+
+  let machine_c = {
+    name: "machine.c",
+    contents: {
+      let emitter = Emitter::new()
+      emitter.emit_machine_adapters(program, conv)
       emitter.output.to_string()
     },
     is_lib: true,
@@ -378,6 +396,6 @@ pub fn Transpiler::transpile(
       constants_h,
       data_h, data_c,
       code_h, code_c,
-    ] + (if views.list.is_empty() { [] } else { [vars_h] }),
+    ] + (if views.list.is_empty() { [] } else { [vars_h] }) + (if locals { [machine_c] } else { [] }),
   }
 }

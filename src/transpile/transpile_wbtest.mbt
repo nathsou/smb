@@ -7,10 +7,10 @@ fn transpile_fixture(source: String) -> Transpiler raise {
   transpile_low(low)
 }
 
-fn transpile_low(low: @lower.AsmLowering, native~: Array[String] = [], reference~: Bool = false) -> Transpiler raise {
+fn transpile_low(low: @lower.AsmLowering, native~: Array[String] = [], reference~: Bool = false, locals~: Bool = false) -> Transpiler raise {
   let program = @ir.build(low, native=Set::from_array(native))
   if reference { program.analyze() |> ignore } else { program.optimize() }
-  Transpiler::transpile(low, program, native~)
+  Transpiler::transpile(low, program, native~, locals~)
 }
 
 test "dispatch emission uses the 6502 indirect-jump page wrap" {
@@ -174,4 +174,57 @@ test "constants beside typed variables are written by name" {
   // a mask with most bits set names those it clears
   assert_eq(code.contains("kept = joypad1 & ~BUTTON_A;"), true)
   assert_eq(code.contains("game_mode != GAME_MODE_GAME_OVER"), true)
+}
+
+fn file_of(output: Transpiler, name: String) -> String {
+  for file in output.files {
+    if file.name == name { return file.contents }
+  }
+  ""
+}
+
+test "with --locals, registers read are parameters and registers read after are results" {
+  // Get reads X and produces A; Boot, a root, keeps the machine's registers
+  // and passes them
+  let source = ".org $c000\nBoot:\n ldx #$01\n ldy #$02\n jsr Get\n sta $10\n sty $11\n lda #$00\nIdle:\n jmp Idle\nGet:\n lda $20,x\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let output = transpile_low(lower_fixture(source), locals=true)
+  let code = file_of(output, "code.c")
+  assert_eq(code.contains("uint8_t Get(uint8_t x) {\n  uint8_t a;\n  a = ram[(uint8_t)(0x20 + x)];\n  return a;\n}"), true)
+  assert_eq(code.contains("  a = Get(x);\n"), true)
+  assert_eq(code.contains("void Boot(void) {"), true)
+  assert_eq(file_of(output, "code.h").contains("uint8_t Get(uint8_t x);"), true)
+  // the adapter the differential test runs it through
+  let adapter = file_of(output, "machine.c")
+  assert_eq(adapter.contains("// in: x; out: a\nvoid machine_Get(void) {\n  uint8_t v_a = a;\n  uint8_t v_x = x;\n  poison();\n  v_a = Get(v_x);\n  a = v_a;\n}"), true)
+  // without --locals, no change
+  let plain = transpile_low(lower_fixture(source))
+  assert_eq(code_c(plain).contains("// in: x; out: a\nvoid Get(void) {"), true)
+  assert_eq(file_of(plain, "machine.c"), "")
+}
+
+test "with --locals, a result passed through on some path is also a parameter" {
+  // Maybe writes Y only when $20 is not zero: Y is its result, and its
+  // parameter for the other path
+  let source = ".org $c000\nBoot:\n jsr Outer\n lda #$00\nIdle:\n jmp Idle\nOuter:\n ldy #$05\n jsr Maybe\n sty $11\n rts\nMaybe:\n lda $20\n beq Skip\n ldy #$01\nSkip:\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let code = code_c(transpile_low(lower_fixture(source), locals=true))
+  assert_eq(code.contains("uint8_t Maybe(uint8_t y) {"), true)
+  assert_eq(code.contains("void Outer(void) {\n  uint8_t y;\n  y = 5;\n  y = Maybe(y);\n  ram[0x11] = y;\n  return;\n}"), true)
+}
+
+test "with --locals, the first result is returned and the others written through pointers" {
+  let source = ".org $c000\nBoot:\n jsr Outer\n lda #$00\nIdle:\n jmp Idle\nOuter:\n jsr Pair\n stx $10\n sty $11\n rts\nPair:\n ldx $20\n ldy $21\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let code = code_c(transpile_low(lower_fixture(source), locals=true))
+  assert_eq(code.contains("uint8_t Pair(uint8_t *out_y) {\n  uint8_t x, y;\n  x = ram[0x20];\n  y = ram[0x21];\n  *out_y = y; return x;\n}"), true)
+  assert_eq(code.contains("  x = Pair(&y);\n"), true)
+}
+
+test "with --locals, a call to a hand-written routine goes through the machine's registers" {
+  // Probe is native: it keeps the machine's registers, which Outer sets
+  // and reads around the call
+  let source = ".org $c000\nBoot:\n jsr Outer\n lda #$00\nIdle:\n jmp Idle\nOuter:\n ldx #$03\n jsr Probe\n sta $10\n rts\nProbe:\n lda $20,x\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let output = transpile_low(lower_fixture(source), native=["Probe"], locals=true)
+  let code = code_c(output)
+  assert_eq(code.contains("*machine.x = x; Probe(); a = *machine.a;"), true)
+  assert_eq(code.contains("} machine = { &a, &x, &y, &carry_flag, &zero_flag, &neg_flag, &overflow_flag };"), true)
+  assert_eq(file_of(output, "code.h").contains("void Probe(void);"), true)
 }
