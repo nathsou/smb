@@ -530,6 +530,7 @@ table $85cf background_colors 8
 table $85d7 player_colors 12
 routine $85e3 queue_background_color    ; queue the background color override, if any, and the player's colors
 routine $85f1 queue_player_colors       ; queue the palette of the current player's colors and the background color
+scratch queue_player_colors $00 count ; the colors left to copy
 routine $863f set_vram_list1_length     ; set the length of VRAM list 1
 routine $8643 queue_mushroom_palette    ; in mushroom-style areas, queue their palette
 routine $864c select_vram_list_b        ; select VRAM list A for the next frame and advance the screen task
@@ -572,6 +573,11 @@ routine $8a6b redraw_block_blank        ; queue a blank metatile where a block w
 routine $8a6d queue_block_tiles         ; queue the four tiles of the metatile that replaces block A
 routine $8a8f advance_vram_list         ; set VRAM list 1's length past the metatile just queued
 routine $8a97 queue_metatile            ; queue metatile A at the block buffer position in $02/$06 in VRAM list 1
+scratch queue_metatile $00 saved_x ; X, given back at the end
+scratch queue_metatile $01 list_offset ; the offset in the VRAM list
+scratch queue_metatile $03 nametable ; the nametable of the column
+scratch queue_metatile $04 vram_low ; the VRAM address, low byte
+scratch queue_metatile $05 vram_high ; the VRAM address, high byte
 routine $8acd queue_metatile_tiles      ; write the four tiles and nametable address of a queued metatile
 table $8b08 metatile_sets_low 4
 table $8b0c metatile_sets_high 4
@@ -606,6 +612,8 @@ table $8ef4 counter_positions 12
 table $8f00 counter_offsets 6
 routine $8f06 queue_player_counters     ; queue two decimal digits of the counter in A
 routine $8f11 queue_counter_digits      ; write a score, coin count or time to the VRAM update list
+scratch queue_counter_digits $02 list_position ; where the digits go in the VRAM list
+scratch queue_counter_digits $03 digit_count ; the digits left to write
 routine $8f5f add_digits                ; decimal add with carry across score or time digits
 routine $8f97 update_top_score          ; copy either player's score to the top score when higher
 routine $8f9e check_top_score           ; copy the player's score at X to the top score when higher
@@ -657,8 +665,10 @@ routine $96c5 change_area_attributes    ; set the terrain and scenery, or the ba
 routine $96f2 warp_zone_lock            ; show the warp zone message for the world, remove the piranhas and lock the scroll
 routine $970d lock_scroll               ; toggle the scroll lock
 routine $9716 remove_enemies            ; deactivate the enemies of kind A
+scratch remove_enemies $00 removed_kind ; the enemy kind to remove
 table $9728 frenzy_kinds 3
 routine $972b start_frenzy              ; queue the frenzy of the object kind in $00, unless one of its enemies is out
+scratch start_frenzy $00 object_kind ; the frenzy's object kind
 routine $9740 draw_area_style_object    ; draw a tree ledge, mushroom ledge or cannon, by the area's style
 table $9746 area_style_handlers 6
 routine $974c draw_tree_ledge           ; draw a column of a tree ledge: its left end, middle or right end, and the trunk
@@ -701,6 +711,7 @@ table $99fe small_object_metatiles 3
 routine $9a01 draw_castle_bridge        ; draw a column of the bridge before Bowser
 routine $9a09 draw_axe                  ; draw the axe, and its palette
 routine $9a0e draw_small_object         ; draw the single metatile of a small object at its row
+scratch draw_small_object $00 object_kind ; the small object's kind
 routine $9a19 draw_empty_block          ; draw a used block
 routine $9a20 draw_single_column        ; put metatile A at row X
 table $9a25 solid_block_metatiles 4
@@ -723,12 +734,14 @@ routine $9b14 draw_coin_brick           ; draw a brick with coins, ready to give
 routine $9b19 draw_item_brick           ; draw a brick with the item of the object's kind, by the area's kind
 routine $9b2c draw_block_metatile       ; draw bumpable metatile Y at the object's row
 routine $9b36 get_area_object_kind      ; the kind of the area object being drawn ($00)
+scratch get_area_object_kind $00 object_kind ; the area object's kind
 table $9b3d hole_metatiles 4
 routine $9b41 draw_hole                 ; also sets up whirlpools in water areas
 routine $9b7d fill_column_down          ; fill the column from row X down with metatile A for Y + 1 rows, leaving some metatiles in place
 routine $9bac get_object_length         ; the object's row and height, setting its length on its first column (carry set then)
 routine $9baf get_object_fixed_length   ; set the object's length to Y on its first column (carry set then)
 routine $9bbb get_object_row_size       ; the object's row ($07) and its height from its area data
+scratch get_object_row_size $07 row ; the object's row
 routine $9bcb get_object_x              ; the X position of the current column
 routine $9bd3 get_object_y              ; the Y position of the object's row ($07)
 table $9bdd block_buffer_addresses 4
@@ -882,8 +895,11 @@ routine $b624 update_fireballs_and_bubbles; throw a fireball on B when fiery, up
 table $b687 fireball_speeds 2
 routine $b689 update_fireball           ; move a fireball, bounce it off the floor, and explode it on a wall or enemy
 routine $b6f9 update_bubble             ; move an air bubble up, or let the player breathe out a new one
+scratch update_bubble $07 random_bit ; a random bit for the bubble's timer
 routine $b70b spawn_bubble              ; start an air bubble at the player's mouth
+scratch spawn_bubble $07 random_bit ; a random bit for the bubble's timer
 routine $b732 move_bubble               ; move an air bubble up, removing it at the water's surface
+scratch move_bubble $07 random_bit ; a random bit for the bubble's speed
 table $b74b bubble_forces 2
 table $b74d bubble_intervals 2
 routine $b74f tick_time_limit           ; count the time down, warn when it runs low, and end the player when it runs out
@@ -901,6 +917,7 @@ table $b9ba cannon_masks 2
 routine $b9bc update_cannons            ; fire bullets from the cannons on screen, at random
 table $ba31 bullet_speeds 2
 routine $ba33 update_bullet             ; move a bullet toward the player and remove it off screen
+scratch update_bullet $00 distance ; the horizontal distance to the player
 table $ba89 hammer_slots 9
 table $ba92 hammer_speeds 2
 routine $ba94 spawn_hammer              ; give the hammer bro in slot a hammer, when a free one comes up (carry set then)
@@ -940,6 +957,9 @@ routine $bed4 update_block_metatiles    ; write the metatile of a hit block to t
 routine $bf02 move_enemy_x              ; move the enemy in slot X horizontally
 routine $bf09 move_player_x             ; move the player horizontally, unless on a spring
 routine $bf0f move_object_x             ; add speed (4.4 fixed point) to position and page
+scratch move_object_x $00 pixel_speed ; the whole pixels of the speed
+scratch move_object_x $01 fraction_speed ; the sub-pixel part of the speed
+scratch move_object_x $02 page_carry ; the page step: $ff when moving left
 routine $bf63 move_enemy_down_fast      ; move an enemy down quickly, or a falling platform
 routine $bf6b move_falling_platform     ; move a falling platform down, its speed limited
 routine $bf6d move_vertically           ; move an object down with gravity, its speed limited by Y
@@ -957,6 +977,10 @@ routine $bfb7 move_platform_up          ; move a lift up
 routine $bfb9 move_platform             ; move a lift up or down (A), slower for dropping platforms
 routine $bfd1 move_paratroopa_vertically; move an object vertically by its gravity parameters
 routine $bfd7 apply_gravity             ; vertical speed, sub-pixel force and position with a speed cap
+scratch apply_gravity $00 down_force ; force added each frame while falling
+scratch apply_gravity $01 up_force ; force while moving up
+scratch apply_gravity $02 max_speed ; the downward speed cap
+scratch apply_gravity $07 speed_sign ; the sign of the vertical speed
 routine $c047 update_enemies_and_loops  ; load the next enemies and loop commands from the area's enemy data, then run the object in slot X
 table $c06b loop_worlds 11
 table $c076 loop_pages 11
@@ -1064,6 +1088,7 @@ routine $cb25 move_green_paratroopa     ; fly a green paratroopa back and forth,
 routine $cb45 sway_green_paratroopa     ; sway a flying paratroopa
 routine $cb47 sway_counters             ; oscillating primary/secondary counters for back-and-forth motion
 routine $cb66 sway_offset               ; move the enemy by its sway speed, in the sway's direction
+scratch sway_offset $00 moved ; the step of the sway
 table $cb87 blooper_masks 2
 routine $cb89 move_blooper              ; swim a blooper toward the player in spurts, or let it sink
 routine $cbdf blooper_swim              ; time a blooper's spurts up and its sinking
@@ -1084,6 +1109,7 @@ routine $cedf move_flying_fish          ; fly a cheep cheep in an arc out of the
 table $cf25 lakitu_speed_adjust 3
 routine $cf28 move_lakitu               ; float a lakitu after the player, throwing spinies, or let it leave
 routine $cf6c lakitu_chase              ; a lakitu's speed toward the player, matching the player's scrolling
+scratch lakitu_chase $00 distance ; the horizontal distance to the player
 table $cfdd bridge_tile_columns 15
 routine $cfec collapse_bridge           ; collapse Bowser's bridge one piece at a time, then drop Bowser
 routine $d00f move_dying_bowser         ; let a defeated Bowser fall
@@ -1111,6 +1137,7 @@ routine $d365 draw_star_flag            ; draw the star flag's four sprites
 routine $d39e next_star_flag_task_b     ; advance to the next star flag task
 routine $d3a2 wait_area_end             ; keep the star flag drawn until its timer and the music end
 routine $d3b0 move_piranha              ; raise and lower a piranha plant, staying in its pipe while the player is near
+scratch move_piranha $00 distance ; the horizontal distance to the player
 routine $d410 spin_firebar              ; turn a firebar's angle by its speed, in its direction
 routine $d432 update_balance_platform   ; move a balance lift's two platforms against each other with the player's weight, and drop them past the top
 routine $d541 draw_platform_rope        ; queue the rope tiles above a balance lift's platform
@@ -1119,8 +1146,10 @@ routine $d5d3 move_vertical_platform    ; move a platform up and down between it
 routine $d5fe carry_player_vertically   ; move the player standing on the platform with it
 routine $d607 move_side_platform        ; move a platform side to side, carrying the player
 routine $d614 carry_player_horizontally ; move the player standing on the platform sideways with it
+scratch carry_player_horizontally $00 moved ; the platform's step
 routine $d631 drop_platform             ; drop a platform the player stands on
 routine $d63d right_platform            ; move a platform right while the player stands on it
+scratch right_platform $00 moved ; the platform's step
 routine $d64f move_large_lift           ; move a large lift, carrying the player
 routine $d655 move_small_lift           ; move a small lift, carrying the player
 routine $d65b move_lift                 ; move a lift by its vertical speed
@@ -1188,6 +1217,7 @@ routine $e02f stun_enemy                ; flip an enemy over, bouncing it away f
 routine $e0fe enemy_side_check          ; turn an enemy that walks into a wall
 routine $e124 enemy_bump                ; turn an enemy around, or make a hammer bro jump
 routine $e143 player_enemy_distance     ; the enemy's horizontal distance from the player ($00; negative when left of it)
+scratch player_enemy_distance $00 distance ; the enemy's x minus the player's
 routine $e14f land_enemy                ; stop an enemy on the floor, aligned to its block
 routine $e15b enemy_height_check        ; whether the enemy is low enough to collide with the background (carry set then)
 routine $e163 enemy_jump_check          ; land a jumping enemy, or bounce it again
@@ -1206,9 +1236,15 @@ routine $e273 large_platform_box        ; a large platform's collision box, unle
 routine $e27c enemy_box_core            ; compute and clip the enemy's box
 routine $e289 hide_box                  ; move the enemy's box off screen
 routine $e29c compute_box               ; the box of object X from its screen position and box kind
+scratch compute_box $00 box_slot ; the slot of the box (X)
+scratch compute_box $01 box_x ; the object's screen x
+scratch compute_box $02 box_y ; the object's screen y
 routine $e2de clip_box_to_screen        ; clamp the box at the screen's edges
+scratch clip_box_to_screen $01 middle_page ; the page of the screen's middle
+scratch clip_box_to_screen $02 middle_x ; the x of the screen's middle
 routine $e325 player_collides           ; whether the player's box overlaps box Y (carry set then)
 routine $e327 objects_collide           ; bounding box overlap test, carry set on collision
+scratch objects_collide $07 axes_left ; the axes left to test
 routine $e388 enemy_block_check         ; the metatile at probe Y around the enemy (zero set when none)
 routine $e39c fireball_block_check      ; the metatile under the fireball (zero set when none)
 routine $e3a5 block_check_common        ; the metatile at probe Y around object X (zero set when none)
@@ -1253,6 +1289,12 @@ routine $e87d draw_enemy                ; draw an enemy's sprites by its kind an
 routine $eb64 clip_enemy_sprites        ; hide the rows and columns of the enemy's sprites that are off screen, and remove it below the screen
 routine $ebaa draw_enemy_row            ; draw a row of the enemy's tiles
 routine $ebb2 draw_sprite_row           ; draw a row of two sprites from tiles A and X, mirrored when flipped
+scratch draw_sprite_row $00 first_tile ; the tile of the left sprite
+scratch draw_sprite_row $01 second_tile ; the tile of the right sprite
+scratch draw_sprite_row $02 row_y ; the row's screen y
+scratch draw_sprite_row $03 flip ; the flip bits of the object
+scratch draw_sprite_row $04 attributes ; the sprite attributes
+scratch draw_sprite_row $05 row_x ; the row's screen x
 routine $ebb7 hide_enemy_row            ; hide a row of the enemy's sprites at offset A
 routine $ebc1 hide_enemy_column         ; hide a column of the enemy's sprites
 table $ebcd block_tiles 4

@@ -47,6 +47,9 @@ priv struct CFunc {
   webs : Webs?
   // The map types A, X and Y hold, by block and statement (register_types).
   mut types : Array[Array[Array[String]]]
+  // The scratch bytes' names: in RAM ("" for `ram[k]`), and as locals.
+  scratch_ram : Array[String]
+  scratch_local : Array[String]
   mut block : Int
   mut stmt : Int
 }
@@ -206,7 +209,8 @@ fn CFunc::index_text(self : CFunc, offset : Int, index : Array[@ir.Expr]) -> Str
 }
 
 fn CFunc::access(self : CFunc, space : @ir.Mem, a : @ir.Expr) -> String {
-  if space == Ram && self.local_scratch(a) is Some(k) { return "t\{k}" }
+  if space == Ram && self.local_scratch(a) is Some(k) { return self.scratch_local[k] }
+  if space == Ram && scratch_of(a) is Some(k) && self.scratch_ram[k] != "" { return self.scratch_ram[k] }
   if space == Ram && self.conv.check && a.value() is None && !(a is Binary(Add, Const(0x100), Var(SP))) {
     return self.checked_ram(a)
   }
@@ -447,9 +451,9 @@ fn CFunc::stmt(self : CFunc, s : @ir.Stmt, live~ : Int = local_slots) -> String 
     Store(Ram, a, value) => {
       let write = self.local_scratch_write(a)
       let target = match (write, scratch_of(a)) {
-        (Some(k), _) => "t\{k}"
+        (Some(k), _) => self.scratch_local[k]
         // the byte in RAM, though this statement may read a local of it
-        (None, Some(k)) => "ram[\{k}]"
+        (None, Some(k)) => if self.scratch_ram[k] != "" { self.scratch_ram[k] } else { "ram[\{k}]" }
         _ => self.access(Ram, a)
       }
       let type_name = self.type_of(Load(Ram, a))
@@ -827,7 +831,7 @@ fn Structurer::range(self : Structurer, s : Int, e : Int, follow : Int, skip_loo
   }
 }
 
-fn function_body(f : @ir.Function, views : Views, conv : Convention) -> Array[Line] {
+fn function_body(f : @ir.Function, views : Views, conv : Convention, plan~ : ScratchPlan = ScratchPlan::plain()) -> Array[Line] {
   let locals = conv.has_locals(f.name)
   let after = if locals { conv.live_after(f) } else { [] }
   let c : CFunc = {
@@ -840,6 +844,8 @@ fn function_body(f : @ir.Function, views : Views, conv : Convention) -> Array[Li
     after,
     webs: if locals { conv.webs.get(f.name) } else { None },
     types: [],
+    scratch_ram: plan.ram,
+    scratch_local: plan.locals,
     block: 0,
     stmt: -1,
   }
@@ -907,9 +913,67 @@ fn slot_names(mask : Int) -> String {
   if names.is_empty() { "none" } else { names.join(", ") }
 }
 
+// What a routine calls its scratch bytes (the map's `scratch`): a name is
+// the local's when the routine has no value of the byte in RAM, else the
+// byte's in RAM (`#define NAME ram[K]` around the function).
+priv struct ScratchPlan {
+  ram : Array[String] // "" for ram[k]
+  locals : Array[String] // tK by default
+  defines : Array[(Int, String, String)] // byte, name, description
+}
+
+fn ScratchPlan::plain() -> ScratchPlan {
+  { ram: Array::make(8, ""), locals: Array::makei(8, fn(k) { "t\{k}" }), defines: [] }
+}
+
+fn reads_scratch(e : @ir.Expr, k : Int) -> Bool {
+  match e {
+    Load(Ram, a) => scratch_of(a) == Some(k) || reads_scratch(a, k)
+    Load(_, a) | Unary(_, a) => reads_scratch(a, k)
+    Binary(_, l, r) => reads_scratch(l, k) || reads_scratch(r, k)
+    _ => false
+  }
+}
+
+fn scratch_plan(f : @ir.Function, views : Views, conv : Convention) -> ScratchPlan {
+  let plan = ScratchPlan::plain()
+  guard views.scratch.get(f.name) is Some(names) else { return plan }
+  let webs = if conv.has_locals(f.name) { conv.webs.get(f.name) } else { None }
+  for entry in names {
+    let (k, name, description) = entry
+    let bit = 1 << k
+    // whether a value of the byte is in RAM somewhere in the routine
+    let mut in_ram = false
+    for b, block in f.blocks {
+      for i, s in block.stmts {
+        let reads = s.exprs().iter().any(fn(e) { reads_scratch(e, k) })
+        let writes = s is Store(Ram, a, _) && scratch_of(a) == Some(k)
+        let (uses, defs) = match webs {
+          Some(w) => (w.uses[b][i], w.defs[b][i])
+          None => (0, 0)
+        }
+        if (reads && (uses & bit) == 0) || (writes && (defs & bit) == 0) { in_ram = true }
+      }
+      let term_reads = block.term.exprs().iter().any(fn(e) { reads_scratch(e, k) })
+      let term_local = match webs {
+        Some(w) => (w.terms[b] & bit) != 0
+        None => false
+      }
+      if term_reads && !term_local { in_ram = true }
+    }
+    if in_ram {
+      plan.ram[k] = name
+      plan.defines.push((k, name, description))
+    } else {
+      plan.locals[k] = name
+    }
+  }
+  plan
+}
+
 // The registers and flags a printed body names (outside comments): the
 // locals it declares, except its parameters by value.
-fn named_locals(body : Array[Line]) -> Int {
+fn named_locals(body : Array[Line], plan : ScratchPlan) -> Int {
   let mut named = 0
   for line in body {
     guard line is Text(_, text) else { continue }
@@ -918,7 +982,11 @@ fn named_locals(body : Array[Line]) -> Int {
       None => text
     }
     for s in slots_of(local_slots) {
-      if mentions(code, s.local_name()) { named = named | s.bit() }
+      let name = match s {
+        Scratch(k) => plan.locals[k]
+        _ => s.local_name()
+      }
+      if mentions(code, name) { named = named | s.bit() }
     }
   }
   named
@@ -926,7 +994,13 @@ fn named_locals(body : Array[Line]) -> Int {
 
 // The locals a function with registers as locals declares: by type, those
 // written back through a pointer starting from the value it points to.
-fn local_declarations(conv : Convention, f : @ir.Function, named : Int) -> Array[String] {
+fn local_declarations(conv : Convention, f : @ir.Function, named : Int, plan : ScratchPlan) -> Array[String] {
+  let name_of = fn(s : Slot) {
+    match s {
+      Scratch(k) => plan.locals[k]
+      _ => s.local_name()
+    }
+  }
   let sig = conv.sig(f.name)
   // (scratch bytes are in RAM at the routine's edges; its values in them
   // that never leave it are locals)
@@ -936,7 +1010,7 @@ fn local_declarations(conv : Convention, f : @ir.Function, named : Int) -> Array
   let from_pointer = declared & sig.params & sig.pointer_bits()
   for type_name in ["uint8_t", "bool"] {
     let plain = slots_of(declared & from_pointer.lnot()).filter(fn(s) { s.c_type() == type_name })
-    if !plain.is_empty() { out.push("\{type_name} \{plain.map(fn(s) { s.local_name() }).join(", ")};") }
+    if !plain.is_empty() { out.push("\{type_name} \{plain.map(name_of).join(", ")};") }
   }
   for s in slots_of(from_pointer) {
     out.push("\{s.c_type()} \{s.local_name()} = *\{pointer_name(sig, s)};")
@@ -954,6 +1028,11 @@ fn Emitter::emit_function(self : Emitter, program : @ir.Program, f : @ir.Functio
     return
   }
   for line in f.doc { self.emit("// \{line}") }
+  let plan = scratch_plan(f, views, conv)
+  for d in plan.defines {
+    let about = if d.2 == "" { "" } else { " // " + d.2 }
+    self.emit("#define \{d.1} ram[\{d.0}]\{about}")
+  }
   let locals = conv.has_locals(f.name)
   if f.helper {
     self.emit("// Inline-table dispatch proven by evaluating \{f.name}; its effects run here unchanged.")
@@ -970,10 +1049,10 @@ fn Emitter::emit_function(self : Emitter, program : @ir.Program, f : @ir.Functio
     }
     self.emit("void \{f.name}(void) {")
   }
-  let body = function_body(f, views, conv)
+  let body = function_body(f, views, conv, plan~)
   if locals {
     self.indentation = 1
-    for line in local_declarations(conv, f, named_locals(body)) { self.emit(line) }
+    for line in local_declarations(conv, f, named_locals(body, plan), plan) { self.emit(line) }
   }
   for line in body {
     match line {
@@ -985,7 +1064,9 @@ fn Emitter::emit_function(self : Emitter, program : @ir.Program, f : @ir.Functio
     }
   }
   self.indentation = 0
-  self.emit("}\n")
+  self.emit("}")
+  for d in plan.defines { self.emit("#undef \{d.1}") }
+  self.emit("")
 }
 
 // Whether a routine with locals calls one that keeps the machine's

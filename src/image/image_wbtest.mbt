@@ -208,6 +208,23 @@ test "map types name the values of variables" {
   }
 }
 
+test "map records group arrays and scratch lines name a routine's bytes" {
+  let map = parse_map("var $0010 kind 5\nvar $0020 x 5\nrecord enemy kind x ; an enemy slot\nroutine $8000 reset\nscratch reset $02 speed ; pixels per frame\n")
+  assert_eq(map.records.map(fn(r) { (r.name, r.fields, r.description) }), [("enemy", ["KIND", "X"], "an enemy slot")])
+  assert_eq(map.scratch.map(fn(e) { (e.routine, e.byte, e.name, e.description) }), [("reset", 2, "speed", "pixels per frame")])
+  let rejected = [
+    "var $0010 kind 5\nrecord enemy kind missing\n",
+    "var $0010 kind\nrecord enemy kind\n",
+    "routine $8000 reset\nscratch reset $08 speed\n",
+    "routine $8000 reset\nscratch other $00 speed\n",
+    "routine $8000 reset\nscratch reset $00 a\nscratch reset $00 b\n",
+    "routine $8000 reset\nscratch reset $00 a\nscratch reset $01 a\n",
+  ]
+  for text in rejected {
+    try parse_map(text) catch { _ => () } noraise { _ => fail("accepted: \{text}") }
+  }
+}
+
 test "a loop deciding on memory alone waits for the interrupt" {
   let image = fixture(".org $8000\nBoot:\n lda #$80\n sta $2000\nMain:\n inc $10\n lda #$00\n sta $15\nWait:\n lda $15\n beq Wait\n jmp Main\nNmi:\n inc $15\n rti\n.org $fffa\n.dw Nmi, Boot, Nmi\n")
   let p = discover(image)

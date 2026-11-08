@@ -24,6 +24,7 @@ import argparse
 import pathlib
 import re
 import subprocess
+import sys
 import tempfile
 
 from check_fixtures import WASM_VARIANTS, waits
@@ -47,6 +48,22 @@ CARTRIDGES = {
     "chessmaster": "1700,4300",
     "kirby": "1500,3000",
 }
+
+
+def check_scratch_names():
+    """Every scratch name in the map reaches the code: a name that clashes
+    with an identifier, a view or a record member is left out silently."""
+    code = (ROOT / "codegen/game/code.c").read_text()
+    missing = []
+    for line in (ROOT / "maps/smb.map").read_text().splitlines():
+        fields = line.split(";")[0].split()
+        if len(fields) == 4 and fields[0] == "scratch":
+            routine, byte, name = fields[1], int(fields[2][1:], 16), fields[3]
+            if not re.search(rf"#define {name} ram\[{byte}\]|\buint8_t[^;]*\b{name}\b", code):
+                missing.append(f"{routine} {fields[2]} {name}")
+    if missing:
+        sys.exit("Map scratch names left out of the code: " + ", ".join(missing))
+    print("Every map scratch name reaches the code")
 
 
 def check_cartridge(name, frames):
@@ -115,6 +132,7 @@ if __name__ == "__main__":
         run("./hash", "--debug-chr", "--mask-scratch", "--trace", "tests/golden/warpless.scratch.trace",
             "--audio-trace", "tests/golden/warpless.audio")
         run("./hash")
+        check_scratch_names()
         # Every generated routine against the unoptimised IR.
         run("python3", "tests/check_routines.py")
         run("make", "game-wasm")

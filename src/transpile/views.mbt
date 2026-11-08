@@ -81,10 +81,13 @@ priv struct Views {
   records : Array[Record]
   // the record and field each array of a record is
   fields : Map[String, (Int, String)]
+  // names of the scratch bytes by routine (the map's `scratch`): byte, name,
+  // description
+  scratch : Map[String, Array[(Int, String, String)]]
 }
 
 fn Views::empty() -> Views {
-  { by_symbol: Map([]), list: [], origin: 0x8000, stack: false, types: Map([]), records: [], fields: Map([]) }
+  { by_symbol: Map([]), list: [], origin: 0x8000, stack: false, types: Map([]), records: [], fields: Map([]), scratch: Map([]) }
 }
 
 // Identifiers a view must not shadow besides those of the generated code:
@@ -167,6 +170,20 @@ fn Views::from_map(low : @lower.AsmLowering, reserved : Set[String]) -> Views {
   for v in views.list {
     if views.fields.contains(v.symbol) { views.by_symbol.remove(v.symbol) }
   }
+  // scratch names, unless an identifier, a view, a record or a record's
+  // member already has the name (a #define would rewrite `.member`)
+  let members : Set[String] = Set::new()
+  for r in views.records {
+    members.add(r.name)
+    for m in r.members { members.add(m.0) }
+  }
+  for e in p.map.scratch {
+    if taken(e.name) || names.contains(e.name) || members.contains(e.name) { continue }
+    match views.scratch.get(e.routine) {
+      Some(list) => list.push((e.byte, e.name, e.description))
+      None => views.scratch[e.routine] = [(e.byte, e.name, e.description)]
+    }
+  }
   {
     ..views,
     list: remaining,
@@ -212,7 +229,18 @@ fn Views::record_place(self : Views, address : @ir.Expr) -> (Record, String, Int
   }
   walk(sum)
   guard ok && symbols == 1 && found is Some((r, field)) else { return None }
-  Some((self.records[r], field, offset, index))
+  let record = self.records[r]
+  // In a record whose fields are consecutive bytes (an array of
+  // structures, the OAM's sprites), the byte reached is the field at its
+  // place in the structure: $0203 + 2 is the next sprite's tile.
+  let stride = record.members.length()
+  let dense = record.members.mapi(fn(i, m) { m.1 == record.base + i }).iter().all(fn(b) { b })
+  if dense && stride > 1 {
+    let at = record.members.iter().find_first(fn(m) { m.0 == field }).unwrap().1 - record.base + offset
+    let place = ((at % stride) + stride) % stride
+    return Some((record, record.members[place].0, at - place, index))
+  }
+  Some((record, field, offset, index))
 }
 
 // The type of a record's field.
