@@ -228,6 +228,9 @@ priv struct Signature {
   kept : Int
   // The result returned; the others are written through pointers.
   primary : Slot?
+  // Scratch bytes it reads on entry that it takes by value: a parameter of
+  // its own, which its callers pass (see `promote_scratch`).
+  promoted : Int
 }
 
 // Results written through pointers.
@@ -239,9 +242,10 @@ fn Signature::pointer_bits(self : Signature) -> Int {
   }
 }
 
-// Parameters passed by value: those not written back through a pointer.
+// Parameters passed by value: those not written back through a pointer,
+// and the scratch bytes it takes by value.
 fn Signature::value_bits(self : Signature) -> Int {
-  self.params & self.memory.lnot() & self.pointer_bits().lnot()
+  (self.params & self.memory.lnot() & self.pointer_bits().lnot()) | self.promoted
 }
 
 priv struct Convention {
@@ -264,6 +268,9 @@ priv struct Convention {
   // The names of each routine's parameters and results, by slot bit (see
   // names.mbt); the others are named for their slot (`x`, `carry`).
   param_names : Map[String, Map[Int, String]]
+  // The names of scratch values the map does not name, from the callees
+  // that take them by value (names.mbt), by routine and byte ("": none).
+  scratch_names : Map[String, Array[String]]
 }
 
 // A routine's parameter or result in its prototype.
@@ -282,13 +289,13 @@ fn Convention::pointer_param(self : Convention, f : String, s : Slot) -> String 
 }
 
 fn Convention::machine() -> Convention {
-  { locals: false, check: false, sigs: Map([]), root: 0, webs: Map([]), entered: Map([]), same_x: Map([]), param_names: Map([]) }
+  { locals: false, check: false, sigs: Map([]), root: 0, webs: Map([]), entered: Map([]), same_x: Map([]), param_names: Map([]), scratch_names: Map([]) }
 }
 
 fn Convention::sig(self : Convention, name : String) -> Signature {
   match self.sigs.get(name) {
     Some(s) => s
-    None => { machine: true, memory: local_slots, params: local_slots, outputs: local_slots, kept: 0, primary: None }
+    None => { machine: true, memory: local_slots, params: local_slots, outputs: local_slots, kept: 0, primary: None, promoted: 0 }
   }
 }
 
@@ -511,6 +518,7 @@ fn Convention::locals_of(program : @ir.Program) -> Convention raise TranspileErr
   conv.entered = entered
   conv.same_x = same_x
   let must = scratch_must_writes(program, conv)
+  conv.promote_scratch(program, writes, must)
   for f in program.functions {
     if conv.has_locals(f.name) { conv.webs[f.name] = conv.webs_of(f, writes, must) }
   }
@@ -548,9 +556,9 @@ fn solve(
       let registers = if program.is_root(f.name) { 0 } else { program.outputs(info, f.name) & local_vars }
       let outputs = (registers & kept[f.name].lnot()) | (writes[f.name] & demand[f.name])
       let primary = if f.helper || m { None } else { slots_of(outputs & memory.lnot()).get(0) }
-      sigs[f.name] = { machine: m, memory, params: 0, outputs, kept: kept[f.name], primary }
+      sigs[f.name] = { machine: m, memory, params: 0, outputs, kept: kept[f.name], primary, promoted: 0 }
     }
-    let conv = { locals: true, check: false, sigs, root, webs: Map([]), entered: Map([]), same_x: Map([]), param_names: Map([]) }
+    let conv = { locals: true, check: false, sigs, root, webs: Map([]), entered: Map([]), same_x: Map([]), param_names: Map([]), scratch_names: Map([]) }
     // parameters: a least fixpoint, they only grow; a routine is followed
     // again when one it calls or goes to takes more
     let work = program.functions.map(fn(f) { f.name })
@@ -690,6 +698,7 @@ priv struct Webs {
   terms : Array[Int] // the terminator's reads are of a local
   dead : Array[Array[Int]] // the write is to a local nothing reads
   locals : Int // the bytes with a local
+  entry : Int // the bytes whose value on entry is a local (a parameter)
 }
 
 // A disjoint-set forest over the writes and reads of a scratch byte.
@@ -738,16 +747,20 @@ fn Convention::webs_of(self : Convention, f : @ir.Function, writes : Map[String,
     terms: f.blocks.map(fn(_) { 0 }),
     dead: f.blocks.map(fn(b) { b.stmts.map(fn(_) { 0 }) }),
     locals: 0,
+    entry: 0,
   }
   let preds : Array[Array[Int]] = f.blocks.map(fn(_) { [] })
   for b, block in f.blocks {
     for t in block.term.successors() { preds[t].push(b) }
   }
   let mut locals = 0
+  let mut entry_local = 0
   for k in 0..<scratch_bytes {
     let bit = scratch_bit(k)
     let forest : Forest = { parent: [], memory: [], used: [] }
-    let entry = forest.add(true, false)
+    // (what the routine takes by value is no longer in RAM on entry)
+    let entry = forest.add((own.promoted & bit) == 0, false)
+    let by_value = fn(g : String) { (self.sig(g).promoted & bit) != 0 }
     // the node of each statement's write and read of the byte, -1 for none
     let def_node = f.blocks.map(fn(b) { b.stmts.map(fn(_) { -1 }) })
     let use_node = f.blocks.map(fn(b) { b.stmts.map(fn(_) { -1 }) })
@@ -758,7 +771,8 @@ fn Convention::webs_of(self : Convention, f : @ir.Function, writes : Map[String,
           Call(g) | CallValue(_, g, _) => {
             let sig = self.sig(g)
             let r = (sig.params & bit) != 0
-            (r, r, (writes.get(g).unwrap_or(all_scratch) & bit) != 0, (must.get(g).unwrap_or(0) & bit) != 0, true)
+            // (a byte the callee takes by value is passed, not left in RAM)
+            (r, r && !by_value(g), (writes.get(g).unwrap_or(all_scratch) & bit) != 0, (must.get(g).unwrap_or(0) & bit) != 0, true)
           }
           _ => {
             let own_read = (stmt_uses(s) & bit) != 0
@@ -774,12 +788,13 @@ fn Convention::webs_of(self : Convention, f : @ir.Function, writes : Map[String,
       }
       let t = block.term
       let tail = fn(g : String) { ((self.sig(g).params | own.outputs) & bit) != 0 }
+      let tail_ram = fn(g : String) { (own.outputs & bit) != 0 || ((self.sig(g).params & bit) != 0 && !by_value(g)) }
       let (reads, in_ram) = match t {
         Return | ReturnValue(_) => {
           let r = (own.outputs & bit) != 0
           (r || (term_uses(t) & bit) != 0, r)
         }
-        TailCall(g) => (tail(g), tail(g))
+        TailCall(g) => (tail(g), tail_ram(g))
         Jump(_, cases) => {
           let r = cases.iter().any(fn(c) { tail(c.1) })
           (r || (term_uses(t) & bit) != 0, r)
@@ -835,9 +850,14 @@ fn Convention::webs_of(self : Convention, f : @ir.Function, writes : Map[String,
     for b in 0..<n { flow(b, true) |> ignore }
     // the webs that are locals
     let is_local = fn(node : Int) { node >= 0 && !forest.memory[forest.find(node)] }
+    if is_local(entry) && forest.used[forest.find(entry)] { entry_local = entry_local | (1 << k) }
     for b, block in f.blocks {
       for i, s in block.stmts {
-        if s.callee() is Some(_) { continue }
+        if s.callee() is Some(_) {
+          // (an argument the callee takes by value, from a local)
+          if is_local(use_node[b][i]) { webs.uses[b][i] = webs.uses[b][i] | (1 << k) }
+          continue
+        }
         if is_local(def_node[b][i]) && (stmt_defs(s) & bit) != 0 {
           webs.defs[b][i] = webs.defs[b][i] | (1 << k)
           locals = locals | (1 << k)
@@ -848,7 +868,7 @@ fn Convention::webs_of(self : Convention, f : @ir.Function, writes : Map[String,
       if is_local(term_node[b]) { webs.terms[b] = webs.terms[b] | (1 << k) }
     }
   }
-  { ..webs, locals }
+  { ..webs, locals, entry: entry_local }
 }
 
 // Whether an expression's reads of byte $0k are all its own (a constant
@@ -1508,4 +1528,49 @@ fn kept_results(
     same_x[f.name] = sites
   }
   (facts.kept, facts.equal, same_x)
+}
+
+// Scratch bytes a routine takes by value: those it reads on entry whose
+// value there only its own accesses take part in, and calls that take it
+// by value too (no return its callers read the byte after, no call that
+// reads it in RAM, no index into the scratch bytes, no wait). Its callers
+// then pass it, from a local of theirs or from RAM: `apply_gravity`'s
+// forces and speed cap, which its callers set just before calling it. A
+// greatest fixpoint: a byte one routine no longer takes by value may stay
+// in RAM in the routines that pass it to it. The hand-written routines
+// and those they call, the targets of computed jumps and dispatches, the
+// roots and the dispatchers keep the scratch bytes in RAM.
+fn Convention::promote_scratch(self : Convention, program : @ir.Program, writes : Map[String, Int], must : Map[String, Int]) -> Unit {
+  let excluded = native_callees(program)
+  for f in program.functions {
+    for block in f.blocks {
+      match block.term {
+        Jump(_, cases) | Dispatch(_, _, cases) => for c in cases { excluded.add(c.1) }
+        _ => ()
+      }
+    }
+  }
+  let candidates = []
+  for f in program.functions {
+    if !self.has_locals(f.name) || f.native || f.helper || program.is_root(f.name) || excluded.contains(f.name) { continue }
+    let sig = self.sig(f.name)
+    let bits = sig.params & all_scratch
+    if bits == 0 { continue }
+    self.sigs[f.name] = { ..sig, promoted: bits }
+    candidates.push(f)
+  }
+  let mut changed = true
+  while changed {
+    changed = false
+    for f in candidates {
+      let sig = self.sig(f.name)
+      if sig.promoted == 0 { continue }
+      // (`entry` is by byte, `promoted` by slot bit)
+      let kept = sig.promoted & (self.webs_of(f, writes, must).entry << 10)
+      if kept != sig.promoted {
+        self.sigs[f.name] = { ..sig, promoted: kept }
+        changed = true
+      }
+    }
+  }
 }

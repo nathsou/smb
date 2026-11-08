@@ -108,7 +108,9 @@ fn CFunc::def_reg(self : CFunc, v : @ir.Var) -> String {
 fn CFunc::use_slot(self : CFunc, s : Slot) -> String {
   match s {
     Reg(v) => self.use_reg(v)
-    _ => self.slot(s)
+    // (a scratch byte a callee takes by value: its value here, a local or
+    // in RAM)
+    Scratch(k) => self.access(Ram, Const(k))
   }
 }
 
@@ -1042,6 +1044,20 @@ fn scratch_plan(f : @ir.Function, views : Views, conv : Convention) -> ScratchPl
   plan
 }
 
+// The plan with the names of scratch values the map leaves unnamed, from
+// the callees that take them by value.
+fn scratch_plan_named(f : @ir.Function, views : Views, conv : Convention) -> ScratchPlan {
+  let plan = scratch_plan(f, views, conv)
+  match conv.scratch_names.get(f.name) {
+    Some(derived) =>
+      for k in 0..<scratch_bytes {
+        if derived[k] != "" && plan.locals[k] == "t\{k}" && plan.ram[k] == "" { plan.locals[k] = derived[k] }
+      }
+    None => ()
+  }
+  plan
+}
+
 // The registers and flags a printed body names (outside comments): the
 // locals it declares, except its parameters by value.
 fn named_locals(body : Array[Line], plan : ScratchPlan) -> Int {
@@ -1087,7 +1103,8 @@ fn local_declarations(conv : Convention, f : @ir.Function, regs : RegNames?, ide
     // (scratch bytes are in RAM at the routine's edges; its values in them
     // that never leave it are locals)
     if type_name == "uint8_t" {
-      for s in slots_of(named & all_scratch) {
+      // (but those it takes by value)
+      for s in slots_of(named & all_scratch & sig.promoted.lnot()) {
         match s {
           Scratch(k) => plain.push(plan.locals[k])
           _ => ()
@@ -1112,7 +1129,7 @@ fn Emitter::emit_function(self : Emitter, program : @ir.Program, f : @ir.Functio
     return
   }
   for line in f.doc { self.emit("// \{line}") }
-  let plan = scratch_plan(f, views, conv)
+  let plan = scratch_plan_named(f, views, conv)
   let (body, regs) = function_body(f, views, conv, plan~)
   let text = body.map(fn(line) { match line { Text(_, t) => t; Mark(_) => "" } }).join("\n")
   let idents = identifiers(text)
@@ -1260,7 +1277,7 @@ fn Emitter::emit_machine_adapters(self : Emitter, program : @ir.Program, conv : 
       continue
     }
 
-    let own = local_slots & sig.memory.lnot()
+    let own = (local_slots & sig.memory.lnot()) | sig.promoted
     let copy = fn(s : Slot) { "v_" + s.local_name() }
     let lines = []
     for s in slots_of((sig.params | sig.outputs | sig.kept) & own) { lines.push("\{s.c_type()} \{copy(s)} = \{s.machine_name()};") }
@@ -1268,7 +1285,9 @@ fn Emitter::emit_machine_adapters(self : Emitter, program : @ir.Program, conv : 
     let args = slots_of(sig.value_bits()).map(copy) + slots_of(sig.pointer_bits()).map(fn(s) { "&" + copy(s) })
     let call = "\{f.name}(\{args.join(", ")});"
     lines.push(match sig.primary { Some(p) => "\{copy(p)} = \{call}"; None => call })
-    for s in slots_of((sig.outputs | sig.kept) & own) { lines.push("\{s.machine_name()} = \{copy(s)};") }
+    // (a scratch byte it takes by value is no result: what it leaves in
+    // RAM is)
+    for s in slots_of((sig.outputs | sig.kept) & own & sig.promoted.lnot()) { lines.push("\{s.machine_name()} = \{copy(s)};") }
     self.emit("void machine_\{f.name}(void) {")
     for line in lines { self.emit("  " + line) }
     self.emit("}")

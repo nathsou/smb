@@ -233,13 +233,13 @@ test "with --locals, a hand-written routine has the signature of its original co
 }
 
 test "with --locals, a scratch value that never leaves the routine is a local" {
-  // Temp keeps $00 to itself; Pass leaves $01 for Use, which reads it after
-  // the call: that one stays in RAM
+  // Temp keeps $00 to itself; Pass leaves $01 for Use, which takes it by
+  // value: Pass's local, passed
   let source = ".org $c000\nBoot:\n jsr Temp\n jsr Pass\n lda #$00\nIdle:\n jmp Idle\nTemp:\n lda $20\n sta $00\n lda $21\n clc\n adc $00\n sta $22\n rts\nPass:\n lda #$05\n sta $01\n jsr Use\n rts\nUse:\n lda $01\n sta $23\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
   let code = code_c(transpile_low(lower_fixture(source), locals=true))
   assert_eq(code.contains("void Temp(void) {\n  uint8_t t0;\n  t0 = ram[0x20];\n  ram[0x22] = (uint8_t)(ram[0x21] + t0);"), true)
-  assert_eq(code.contains("ram[1] = 5;\n  Use();"), true)
-  assert_eq(code.contains("ram[0x23] = ram[1];"), true)
+  assert_eq(code.contains("  t1 = 5;\n  Use(t1);"), true)
+  assert_eq(code.contains("void Use(uint8_t t1) {\n  ram[0x23] = t1;"), true)
 }
 
 test "with --locals, a register given back as it was is no result" {
@@ -287,4 +287,19 @@ test "with --locals, the map names a routine's parameters and results, and each 
   // a name a view already has stays the register's
   let clash = transpile_rom(source, map.replace(old="param move a speed", new="param move a heights"), locals=true)
   assert_eq(clash["code.c"].contains("void move(uint8_t a, uint8_t object) {"), true)
+}
+
+test "with --locals, a scratch byte a routine reads on entry and keeps to itself is a parameter" {
+  // use takes $00 by value, and update's 3 is a local named for it; the 0
+  // that keep's callee may read (an index into the scratch bytes) stays in
+  // RAM
+  let source = ".org $c000\nBoot:\n jsr Update\nIdle:\n jmp Idle\nUpdate:\n lda #$03\n sta $00\n jsr Use\n lda #$00\n sta $00\n lda #$04\n sta $01\n jsr Keep\n rts\nUse:\n lda $00\n sta $10\n rts\nKeep:\n jsr Inner\n rts\nInner:\n ldx $20\n lda $00,x\n sta $11\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let map = "routine $c000 boot\nroutine $c006 update\nroutine $c019 use\nroutine $c01e keep\nroutine $c022 inner\nroutine $c029 tick\nvar $0010 count_copy\nvar $0011 picked\nvar $0020 index\nscratch use $00 count ; how many\n"
+  let files = transpile_rom(source, map, locals=true)
+  let code = files["code.c"]
+  assert_eq(code.contains("void update(void) {\n  uint8_t count;\n  count = 3;\n  use(count);\n  ram[0] = 0;\n  ram[1] = 4;\n  keep();"), true)
+  assert_eq(code.contains("void use(uint8_t count) {\n  count_copy = count;"), true)
+  assert_eq(code.contains("void keep(void) {"), true)
+  // the differential test passes it from RAM, and writes no result back
+  assert_eq(files["machine.c"].contains("  uint8_t v_t0 = ram[0];\n  poison();\n  use(v_t0);\n}"), true)
 }

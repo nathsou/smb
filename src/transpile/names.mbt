@@ -73,7 +73,7 @@ fn names_taken(views : Views, f : @ir.Function, conv : Convention) -> Set[String
   for name in views.taken { taken.add(name) }
   for name in local_names { taken.add(name) }
   for name in temp_names(f, locals=true) { taken.add(name) }
-  let plan = scratch_plan(f, views, conv)
+  let plan = scratch_plan_named(f, views, conv)
   for name in plan.ram { if name != "" { taken.add(name) } }
   for name in plan.locals { taken.add(name) }
   taken
@@ -84,8 +84,76 @@ fn Convention::nameable(self : Convention, f : @ir.Function) -> Bool {
   self.has_locals(f.name) && !f.helper
 }
 
+// The names of scratch values the map leaves unnamed: a value a routine
+// passes to callees that take it by value, the name of their parameter,
+// when they agree (`apply_gravity_object` passes its caller's forces on to
+// `apply_gravity`'s `down_force` and `up_force`). Names go up the calls
+// until none changes.
+fn Convention::derive_scratch_names(self : Convention, program : @ir.Program, views : Views) -> Unit {
+  let map_name = fn(g : String, k : Int) -> String {
+    match views.scratch.get(g) {
+      Some(list) =>
+        match list.iter().find_first(fn(e) { e.0 == k }) {
+          Some(e) => e.1
+          None => ""
+        }
+      None => ""
+    }
+  }
+  let scratch_names : Set[String] = Set([])
+  for _, list in views.scratch {
+    for e in list { scratch_names.add(e.1) }
+  }
+  for f in program.functions {
+    if self.webs.contains(f.name) { self.scratch_names[f.name] = Array::make(scratch_bytes, "") }
+  }
+  let name_in = fn(g : String, k : Int) {
+    let given = map_name(g, k)
+    if given != "" { given } else { self.scratch_names.get(g).map(fn(a) { a[k] }).unwrap_or("") }
+  }
+  let mut changed = true
+  let mut rounds = 0
+  while changed && rounds < 32 {
+    changed = false
+    rounds += 1
+    for f in program.functions {
+      guard self.webs.get(f.name) is Some(webs) else { continue }
+      let own : Set[String] = Set([])
+      for k in 0..<scratch_bytes { if map_name(f.name, k) != "" { own.add(map_name(f.name, k)) } }
+      for k in 0..<scratch_bytes {
+        if map_name(f.name, k) != "" { continue }
+        let bit = scratch_bit(k)
+        let names = []
+        for b, block in f.blocks {
+          for i, s in block.stmts {
+            match s {
+              Call(g) if (self.sig(g).promoted & bit) != 0 && (webs.uses[b][i] & (1 << k)) != 0 => names.push(name_in(g, k))
+              _ => ()
+            }
+          }
+          match block.term {
+            TailCall(g) if (self.sig(g).promoted & bit) != 0 && (webs.terms[b] & (1 << k)) != 0 => names.push(name_in(g, k))
+            _ => ()
+          }
+        }
+        let name = if !names.is_empty() && names[0] != "" && names.iter().all(fn(n) { n == names[0] }) { names[0] } else { "" }
+        // (not a name the code has, but the scratch names, nor another of
+        // the routine's bytes')
+        let fits = name != "" && (!views.taken.contains(name) || scratch_names.contains(name)) && !own.contains(name) &&
+          !self.scratch_names[f.name].iter().any(fn(n) { n == name })
+        let next = if fits { name } else { "" }
+        if self.scratch_names[f.name][k] != next && (next != "" || self.scratch_names[f.name][k] == "") {
+          self.scratch_names[f.name][k] = next
+          changed = true
+        }
+      }
+    }
+  }
+}
+
 // The names of each routine's parameters and results (in its prototype).
 fn Convention::name_parameters(self : Convention, program : @ir.Program, views : Views) -> Unit {
+  self.derive_scratch_names(program, views)
   for f in program.functions {
     if !self.nameable(f) { continue }
     let sig = self.sig(f.name)
@@ -102,6 +170,13 @@ fn Convention::name_parameters(self : Convention, program : @ir.Program, views :
           used.add(name)
         }
         _ => ()
+      }
+    }
+    // the scratch bytes it takes by value: its locals' names
+    if sig.promoted != 0 {
+      let plan = scratch_plan_named(f, views, self)
+      for k in 0..<scratch_bytes {
+        if (sig.promoted & scratch_bit(k)) != 0 { names[scratch_bit(k)] = plan.locals[k] }
       }
     }
     self.param_names[f.name] = names
