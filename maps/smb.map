@@ -20,6 +20,9 @@ flags direction right=$01 left=$02
 enum player_state on_ground=0 jumping=1 falling=2 climbing=3 ; jumping also while swimming up
 enum power small=0 big=1 fiery=2
 enum area_kind water=0 ground=1 underground=2 castle=3
+# What an enemy slot holds (enemy_initializers and enemy_runners, by kind).
+# $00 is left unnamed: it is also what a cleared slot holds.
+enum enemy_kind buzzy_beetle=$02 red_koopa=$03 hammer_bro=$05 goomba=$06 blooper=$07 bullet=$08 cheep_cheep_slow=$0a cheep_cheep_fast=$0b podoboo=$0c piranha=$0d bouncing_paratroopa=$0e red_paratroopa=$0f flying_paratroopa=$10 lakitu=$11 spiny=$12 flying_cheep_cheeps=$14 bowser_flame=$15 fireworks=$16 bullets_and_cheep_cheeps=$17 end_frenzy=$18 firebar_slow=$1b firebar_fast=$1c firebar_slow_reverse=$1d firebar_fast_reverse=$1e long_firebar=$1f balance_platform=$24 vertical_platform=$25 lift_up=$26 lift_down=$27 side_platform=$28 drop_platform=$29 right_platform=$2a small_lift_up=$2b small_lift_down=$2c bowser=$2d powerup=$2e vine=$2f flagpole_flag=$30 star_flag=$31 spring=$32 bullet_cannon=$33 warp_zone=$34 retainer=$35
 
 # Hardware registers
 io $2000 ppu_ctrl
@@ -64,7 +67,7 @@ var $000c buttons_horizontal : button
 var $000d buttons_ab_previous : button
 var $000e player_task           ; which player routine runs this frame
 var $000f enemy_active 7
-var $0016 enemy_kind 7
+var $0016 enemy_kind 7 : enemy_kind
 var $001d obj_state 22
 var $001d player_state : player_state
 var $001e enemy_state 6
@@ -264,7 +267,7 @@ var $06ae hammer_slot
 var $06b7 coin_jump_slot
 var $06bc brick_coin_active
 var $06be misc_contact 9
-var $06cb frenzy_enemy
+var $06cb frenzy_enemy : enemy_kind
 var $06cc hard_mode_late
 var $06cd frenzy_queue
 var $06ce fireball_count
@@ -476,58 +479,58 @@ routine $8182 handle_pause              ; start toggles pause while playing
 routine $81c6 shuffle_sprite_slots      ; rotate OAM slots so that dropped sprites flicker instead of vanishing
 routine $8212 run_game_mode             ; dispatch on the game mode (title, playing, victory, game over)
 table $8218 game_mode_tasks 8
-routine $8220 hide_all_sprites
-routine $8223 hide_sprites_but_zero
-routine $8225 hide_sprites_from
-routine $8231 title_mode
+routine $8220 hide_all_sprites          ; move every sprite below the screen
+routine $8223 hide_sprites_but_zero     ; move every sprite but sprite 0 (the status bar split) below the screen
+routine $8225 hide_sprites_from         ; move the sprites from Y's OAM offset to the end below the screen
+routine $8231 title_mode                ; dispatch on the title's task: screen setup, title menu, new game
 table $8237 title_mode_tasks 8
 table $823f world_select_template 6
 routine $8245 title_menu                ; title screen input: start, world select, demo
-routine $830e start_continue
+routine $830e start_continue            ; continue from the world in A, at its first area
 table $831d player_select_icon_data 8
-routine $8325 draw_player_select_icon
+routine $8325 draw_player_select_icon   ; queue the title's mushroom cursor at the selected player count
 table $8340 demo_buttons 21
 table $8355 demo_durations 22
 routine $836b play_demo                 ; feed recorded buttons to the player in attract mode
-routine $838b victory_mode
-routine $83a0 run_victory_task
+routine $838b victory_mode              ; run the victory task, and the remaining objects once the bridge is down
+routine $83a0 run_victory_task          ; dispatch on the victory task: collapse the bridge, walk, messages, next world
 table $83a6 victory_tasks 10
-routine $83b0 start_victory
-routine $83bd victory_walk
-routine $83f6 show_victory_messages
-routine $845d next_game_mode_task
-routine $8461 finish_world
+routine $83b0 start_victory             ; aim the walk at the next page and start the victory music
+routine $83bd victory_walk              ; walk the player right and scroll until the page past the bridge
+routine $83f6 show_victory_messages     ; queue the thank-you messages one by one, then set the end timer
+routine $845d next_game_mode_task       ; advance to the next game mode task
+routine $8461 finish_world              ; when the timer ends, go to the next world, or after world 8 wait for B to replay
 table $849f popup_tiles 24
 table $84b7 popup_score_digits 12
 routine $84c3 update_score_popups       ; floating score numbers after defeating enemies
-routine $8567 run_screen_task
+routine $8567 run_screen_task           ; dispatch on the screen setup task: clear, palettes, status bar, intermission, columns
 table $856d screen_tasks 30
-routine $858b clear_screen_task
-routine $859b intermission_setup
+routine $858b clear_screen_task         ; hide the sprites and clear both screens, then queue the palette list
+routine $859b intermission_setup        ; queue the colors of small Mario on a black background for the intermission
 table $85bb area_palette_lists 4
-routine $85bf queue_area_palette
-routine $85c5 select_vram_list
-routine $85c8 next_screen_task
+routine $85bf queue_area_palette        ; queue the palette list of the area's kind
+routine $85c5 select_vram_list          ; select VRAM list X for the next frame and advance the screen task
+routine $85c8 next_screen_task          ; advance the screen setup task
 table $85cb background_color_lists 4
 table $85cf background_colors 8
 table $85d7 player_colors 12
-routine $85e3 queue_background_color
-routine $85f1 queue_player_colors
-routine $863f set_vram_list1_length
-routine $8643 queue_mushroom_palette
-routine $864c select_vram_list_b
-routine $864f skip_mushroom_palette
-routine $8652 draw_status_bar_top
-routine $865a draw_status_bar_bottom
-routine $8693 show_time_up
-routine $86a8 show_intermission
-routine $86c7 start_intermission
+routine $85e3 queue_background_color    ; queue the background color override, if any, and the player's colors
+routine $85f1 queue_player_colors       ; queue the palette of the current player's colors and the background color
+routine $863f set_vram_list1_length     ; set the length of VRAM list 1
+routine $8643 queue_mushroom_palette    ; in mushroom-style areas, queue their palette
+routine $864c select_vram_list_b        ; select VRAM list A for the next frame and advance the screen task
+routine $864f skip_mushroom_palette     ; advance the screen task
+routine $8652 draw_status_bar_top       ; queue the status bar's labels
+routine $865a draw_status_bar_bottom    ; queue the player's counters and the world-area number
+routine $8693 show_time_up              ; show TIME UP after the time ran out, else skip it
+routine $86a8 show_intermission         ; show the lives screen, or GAME OVER, unless the area skips it
+routine $86c7 start_intermission        ; queue text A, start the screen timer and turn the screen on
 routine $86e6 render_area_columns       ; build the screen column by column while the display is off
-routine $86ff draw_title_screen
-routine $8732 clear_lists_draw_icon
-routine $8745 next_screen_task_b
-routine $8749 draw_top_score
-routine $874e next_game_mode_task_b
+routine $86ff draw_title_screen         ; queue the title screen's layout, stored in CHR ROM (hand-written)
+routine $8732 clear_lists_draw_icon     ; on the title screen, clear the VRAM list and draw the player select cursor
+routine $8745 next_screen_task_b        ; advance the screen setup task
+routine $8749 draw_top_score            ; queue the top score, then advance the game mode task
+routine $874e next_game_mode_task_b     ; advance to the next game mode task
 table $8752 text_status_bar 39
 table $8779 text_world_lives 31
 table $8798 text_time_up_2p 8
@@ -539,23 +542,23 @@ table $87ed text_luigi 5
 table $87f2 text_warp_numbers 12
 table $87fe text_offsets 10
 routine $8808 queue_text                ; copy one of the text lists into the VRAM update list
-routine $889d wait_screen_timer
-routine $88a5 restart_screen_timer
+routine $889d wait_screen_timer         ; when the screen timer ends, hide the sprites and restart it
+routine $88a5 restart_screen_timer      ; restart the screen timer and advance the screen task
 routine $88ae render_column             ; turn one column of metatiles into a VRAM update
-routine $896a render_attributes
-routine $89bd select_vram_list2
+routine $896a render_attributes         ; queue the attribute bytes of the column just rendered in VRAM list 2
+routine $89bd select_vram_list2         ; select VRAM list 2 for the next frame
 table $89c3 cycling_palette_ids 6
 table $89c9 blank_palette 8
 table $89d1 cycling_palettes 16
 routine $89e1 cycle_palette             ; animate the question-block palette every eighth frame
 table $8a39 block_tile_offsets 20
-routine $8a4d erase_coin_or_axe
-routine $8a61 redraw_block
-routine $8a6b redraw_block_blank
-routine $8a6d queue_block_tiles
-routine $8a8f advance_vram_list
-routine $8a97 queue_metatile
-routine $8acd queue_metatile_tiles
+routine $8a4d erase_coin_or_axe         ; queue the metatile that replaces a collected coin or the axe
+routine $8a61 redraw_block              ; queue a hit block's new metatile and count the block down
+routine $8a6b redraw_block_blank        ; queue a blank metatile where a block was
+routine $8a6d queue_block_tiles         ; queue the four tiles of the metatile that replaces block A
+routine $8a8f advance_vram_list         ; set VRAM list 1's length past the metatile just queued
+routine $8a97 queue_metatile            ; queue metatile A at the block buffer position in $02/$06 in VRAM list 1
+routine $8acd queue_metatile_tiles      ; write the four tiles and nametable address of a queued metatile
 table $8b08 metatile_sets_low 4
 table $8b0c metatile_sets_high 4
 table $8b10 metatiles_palette0 156
@@ -578,29 +581,29 @@ table $8dbf text_new_quest 31
 table $8dde text_press_b 17
 table $8def text_select_world 21
 routine $8e04 dispatch                  ; jump through the address table that follows the call, indexed by A
-routine $8e19 clear_screens
-routine $8e2d clear_screen
-routine $8e5c read_joypads
-routine $8e6a read_joypad
-routine $8edd apply_vram_list
-routine $8ee6 set_scroll
-routine $8eed set_ppu_ctrl
+routine $8e19 clear_screens             ; clear both screens (hand-written)
+routine $8e2d clear_screen              ; fill one screen with blank tiles and clear its attributes (hand-written)
+routine $8e5c read_joypads              ; strobe and read both joypads
+routine $8e6a read_joypad               ; read joypad X's eight buttons, ignoring select and start while held
+routine $8edd apply_vram_list           ; apply the VRAM update list that $00-$01 point to (hand-written)
+routine $8ee6 set_scroll                ; set both scroll positions (hand-written)
+routine $8eed set_ppu_ctrl              ; set the display control byte and the game's copy of it (hand-written)
 table $8ef4 counter_positions 12
 table $8f00 counter_offsets 6
-routine $8f06 queue_player_counters
+routine $8f06 queue_player_counters     ; queue two decimal digits of the counter in A
 routine $8f11 queue_counter_digits      ; write a score, coin count or time to the VRAM update list
 routine $8f5f add_digits                ; decimal add with carry across score or time digits
-routine $8f97 update_top_score
-routine $8f9e check_top_score
+routine $8f97 update_top_score          ; copy either player's score to the top score when higher
+routine $8f9e check_top_score           ; copy the player's score at X to the top score when higher
 table $8fbc default_sprite_slots 15
 table $8fcb sprite_zero 4
 routine $8fcf start_game                ; clear game memory and enter the first area
 routine $8fe4 start_area                ; reset area state and position the player at the entrance
-routine $9061 setup_new_game
-routine $9071 setup_area_display
+routine $9061 setup_new_game            ; reset the lives and time for a new game, then set up the area
+routine $9071 setup_area_display        ; reset the area's display state and sprite slots, and start the area music
 routine $90cc clear_memory              ; clear RAM below the offset in Y, sparing the stack in use
 table $90e7 area_music_kinds 6
-routine $90ed queue_area_music
+routine $90ed queue_area_music          ; request the music of the area's kind, entrance or clouds
 table $9116 entrance_x_positions 4
 table $911a entrance_alt_y 2
 table $911c entrance_y_positions 9
@@ -608,20 +611,20 @@ table $9125 entrance_priorities 8
 table $912d time_limits 4
 routine $9131 place_player              ; entrance kind, starting position and time limit
 table $91bd halfway_pages 16
-routine $91cd lose_life
-routine $9218 game_over_mode
+routine $91cd lose_life                 ; count a life lost: game over, or restart at the halfway page and switch players
+routine $9218 game_over_mode            ; dispatch on the game over task
 table $921e game_over_tasks 6
-routine $9224 start_game_over
-routine $9237 game_over_screen
-routine $9248 end_game
-routine $9264 continue_game
-routine $9282 switch_players
-routine $92aa set_unused_flag
-routine $92af do_nothing
-routine $92b0 run_parser_task
-routine $92c8 run_parser_subtask
+routine $9224 start_game_over           ; stop the status bar split and the music, then show GAME OVER
+routine $9237 game_over_screen          ; end the game on start or when the screen timer runs out
+routine $9248 end_game                  ; switch to the other player if they have lives, else back to the title
+routine $9264 continue_game             ; restart the current player small in the area's first page
+routine $9282 switch_players            ; swap the current player's state with the other's, if they have lives (carry clear when switched)
+routine $92aa set_unused_flag           ; set a byte the game never reads
+routine $92af do_nothing                ; return at once
+routine $92b0 run_parser_task           ; run one of the eight steps that build the next column, the attributes after the last
+routine $92c8 run_parser_subtask        ; dispatch on the column step: parse the area data, render the column, advance
 table $92cb parser_tasks 16
-routine $92db advance_column
+routine $92db advance_column            ; advance the parser one column, and to the next page every 16
 table $92f7 background_scene_offsets 3
 table $92fa background_scenes 144
 table $938a background_scene_metatiles 36
@@ -631,95 +634,95 @@ table $93d8 terrain_metatiles 4
 table $93dc terrain_patterns 32
 routine $93fc parse_area_column         ; decode the level layout for one metatile column
 table $9504 block_buffer_limits 4
-routine $9508 process_area_objects
-routine $9589 next_area_object
-routine $9595 decode_area_object
-routine $9645 check_loop_object
+routine $9508 process_area_objects      ; decode the area objects of the three slots for the current column
+routine $9589 next_area_object          ; move past the area object just decoded
+routine $9595 decode_area_object        ; decode the area object in slot X and draw its part of the current column
+routine $9645 check_loop_object         ; nothing: loop commands are handled elsewhere
 table $9667 area_object_handlers 94
-routine $96c5 change_area_attributes
-routine $96f2 warp_zone_lock
-routine $970d lock_scroll
-routine $9716 remove_enemies
+routine $96c5 change_area_attributes    ; set the terrain and scenery, or the background color, from an attribute object
+routine $96f2 warp_zone_lock            ; show the warp zone message for the world, remove the piranhas and lock the scroll
+routine $970d lock_scroll               ; toggle the scroll lock
+routine $9716 remove_enemies            ; deactivate the enemies of kind A
 table $9728 frenzy_kinds 3
-routine $972b start_frenzy
-routine $9740 draw_area_style_object
+routine $972b start_frenzy              ; queue the frenzy of the object kind in $00, unless one of its enemies is out
+routine $9740 draw_area_style_object    ; draw a tree ledge, mushroom ledge or cannon, by the area's style
 table $9746 area_style_handlers 6
-routine $974c draw_tree_ledge
-routine $9778 draw_mushroom_ledge
-routine $97aa draw_stem_full
-routine $97b0 draw_stem_none
+routine $974c draw_tree_ledge           ; draw a column of a tree ledge: its left end, middle or right end, and the trunk
+routine $9778 draw_mushroom_ledge       ; draw a column of a mushroom ledge: its ends, middle and stem
+routine $97aa draw_stem_full            ; fill the column below the row after X with metatile A
+routine $97b0 draw_stem_none            ; fill the column from the object's row with metatile A
 table $97b7 pulley_rope_metatiles 3
-routine $97ba draw_pulley_rope
+routine $97ba draw_pulley_rope          ; draw a column of a pulley's rope: its left end, middle or right end
 table $97cf castle_metatiles 55
-routine $9806 draw_castle
-routine $986f draw_water_pipe
-routine $9882 draw_intro_pipe
+routine $9806 draw_castle               ; draw a column of a castle, and put the star flag on a large one
+routine $986f draw_water_pipe           ; draw a column of a water pipe
+routine $9882 draw_intro_pipe           ; draw a column of the pipe the player enters at the start of an area
 table $989f side_pipe_shafts 4
 table $98a3 side_pipe_tops 4
 table $98a7 side_pipe_bottoms 4
-routine $98ab draw_exit_pipe
-routine $98b3 draw_side_pipe
+routine $98ab draw_exit_pipe            ; draw a column of a pipe entered from the side
+routine $98b3 draw_side_pipe            ; draw a column of a sideways pipe and the vertical pipe it joins (carry set past its end)
 table $98dd vertical_pipe_metatiles 8
 routine $98e5 draw_vertical_pipe        ; may also spawn a piranha plant
-routine $9939 get_pipe_height
-routine $994a find_free_enemy_slot
-routine $9957 draw_water_hole
-routine $9968 draw_question_row_high
-routine $996b draw_question_row_low
-routine $996d draw_question_row
-routine $9979 draw_bridge_high
-routine $997c draw_bridge_middle
-routine $997e draw_bridge_at_row_middle
-routine $997f draw_bridge_low
-routine $9981 draw_bridge_at_row
-routine $9994 draw_flag_balls
-routine $999e draw_flagpole
-routine $99d0 draw_endless_rope
-routine $99d7 draw_balance_rope
-routine $99e9 draw_rope
+routine $9939 get_pipe_height           ; the pipe's height and length from its area object
+routine $994a find_free_enemy_slot      ; the first inactive enemy slot (carry set when none)
+routine $9957 draw_water_hole           ; draw a column of a hole filled with water
+routine $9968 draw_question_row_high    ; draw a column of a high row of question blocks
+routine $996b draw_question_row_low     ; draw a column of a low row of question blocks
+routine $996d draw_question_row         ; draw a question block at row A
+routine $9979 draw_bridge_high          ; draw a column of a high bridge
+routine $997c draw_bridge_middle        ; draw a column of a middle bridge
+routine $997e draw_bridge_at_row_middle ; draw a column of a bridge at row A
+routine $997f draw_bridge_low           ; draw a column of a low bridge
+routine $9981 draw_bridge_at_row        ; draw a column of a bridge at row A: the rail, then the bridge down to the floor
+routine $9994 draw_flag_balls           ; draw the balls on top of the flagpole
+routine $999e draw_flagpole             ; draw the flagpole and place its flag object in enemy slot 5
+routine $99d0 draw_endless_rope         ; draw a rope down the whole column
+routine $99d7 draw_balance_rope         ; draw a column of a balance lift's rope
+routine $99e9 draw_rope                 ; draw rope from row X for Y rows
 table $99ee coin_metatiles 4
-routine $99f2 draw_coin_row
+routine $99f2 draw_coin_row             ; draw a column of a row of coins
 table $99fb small_object_rows 3
 table $99fe small_object_metatiles 3
-routine $9a01 draw_castle_bridge
-routine $9a09 draw_axe
-routine $9a0e draw_small_object
-routine $9a19 draw_empty_block
-routine $9a20 draw_single_column
+routine $9a01 draw_castle_bridge        ; draw a column of the bridge before Bowser
+routine $9a09 draw_axe                  ; draw the axe, and its palette
+routine $9a0e draw_small_object         ; draw the single metatile of a small object at its row
+routine $9a19 draw_empty_block          ; draw a used block
+routine $9a20 draw_single_column        ; put metatile A at row X
 table $9a25 solid_block_metatiles 4
 table $9a29 brick_metatiles 5
-routine $9a2e draw_brick_row
-routine $9a3e draw_solid_row
-routine $9a44 draw_row_of
-routine $9a48 draw_row_height1
-routine $9a50 draw_brick_column
-routine $9a59 draw_solid_column
-routine $9a5f draw_column_of
-routine $9a69 draw_cannon
+routine $9a2e draw_brick_row            ; draw a column of a row of bricks, of the area's kind
+routine $9a3e draw_solid_row            ; draw a column of a row of solid blocks, of the area's kind
+routine $9a44 draw_row_of               ; draw a column of a row of metatile A
+routine $9a48 draw_row_height1          ; put the metatile pushed on the stack at the object's row
+routine $9a50 draw_brick_column         ; draw a column of bricks, of the area's kind
+routine $9a59 draw_solid_column         ; draw a column of solid blocks, of the area's kind
+routine $9a5f draw_column_of            ; draw a column of metatile A, the object's height
+routine $9a69 draw_cannon               ; draw a cannon and record it for the cannons that fire bullets
 table $9aa5 staircase_heights 9
 table $9aae staircase_rows 9
-routine $9ab7 draw_staircase
-routine $9ad3 place_spring
-routine $9b01 draw_hidden_1up
-routine $9b0e draw_question_block
-routine $9b14 draw_coin_brick
-routine $9b19 draw_item_brick
-routine $9b2c draw_block_metatile
-routine $9b36 get_area_object_kind
+routine $9ab7 draw_staircase            ; draw a column of a staircase, one step higher each column
+routine $9ad3 place_spring              ; place a spring in a free enemy slot and draw its base
+routine $9b01 draw_hidden_1up           ; draw the hidden 1-up block, once, where it is enabled
+routine $9b0e draw_question_block       ; draw a question block with the item of the object's kind
+routine $9b14 draw_coin_brick           ; draw a brick with coins, ready to give them
+routine $9b19 draw_item_brick           ; draw a brick with the item of the object's kind, by the area's kind
+routine $9b2c draw_block_metatile       ; draw bumpable metatile Y at the object's row
+routine $9b36 get_area_object_kind      ; the kind of the area object being drawn ($00)
 table $9b3d hole_metatiles 4
 routine $9b41 draw_hole                 ; also sets up whirlpools in water areas
-routine $9b7d fill_column_down
-routine $9bac get_object_length
-routine $9baf get_object_fixed_length
-routine $9bbb get_object_row_size
-routine $9bcb get_object_x
-routine $9bd3 get_object_y
+routine $9b7d fill_column_down          ; fill the column from row X down with metatile A for Y + 1 rows, leaving some metatiles in place
+routine $9bac get_object_length         ; the object's row and height, setting its length on its first column (carry set then)
+routine $9baf get_object_fixed_length   ; set the object's length to Y on its first column (carry set then)
+routine $9bbb get_object_row_size       ; the object's row ($07) and its height from its area data
+routine $9bcb get_object_x              ; the X position of the current column
+routine $9bd3 get_object_y              ; the Y position of the object's row ($07)
 table $9bdd block_buffer_addresses 4
-routine $9be1 get_block_buffer_address
+routine $9be1 get_block_buffer_address  ; the block buffer address of column A ($06-$07)
 table $9bf8 loop_area_offsets 11
-routine $9c03 load_area_pointer
-routine $9c09 get_area_kind
-routine $9c13 find_area_pointer
+routine $9c03 load_area_pointer         ; find the area of the world and area number, and its kind
+routine $9c09 get_area_kind             ; the area's kind, from the area pointer's bits 5-6
+routine $9c13 find_area_pointer         ; the area pointer of the world and area number
 routine $9c22 load_area_data            ; level layout and enemy list pointers, header attributes
 table $9cb4 world_area_offsets 8
 table $9cbc areas_world1 5
@@ -804,50 +807,50 @@ table $ad79 underground_layout_3 141
 table $ae06 water_layout_1 63
 table $ae45 water_layout_2 123
 table $aec0 water_layout_3 28
-routine $aedc playing_mode
+routine $aedc playing_mode              ; dispatch on the playing task: start the area, set up the screen, run a frame
 table $aee2 playing_mode_tasks 8
 routine $aeea run_game_frame            ; one frame of play: player, enemies, objects, scrolling, drawing
-routine $af6f update_scroll_column
-routine $af93 scroll_with_player
-routine $afc4 scroll_screen
-routine $b000 check_player_offscreen
+routine $af6f update_scroll_column      ; build the next column when 32 pixels have scrolled, unless VRAM list 2 is pending
+routine $af93 scroll_with_player        ; scroll the screen with the player past the middle, unless it is locked
+routine $afc4 scroll_screen             ; scroll the screen by Y pixels and keep the player inside it
+routine $b000 check_player_offscreen    ; push the player back inside the screen's edges, stopping it against them
 table $b034 screen_edge_offsets 2
 table $b036 offscreen_joypad_masks 2
-routine $b038 update_screen_edges
-routine $b04a run_player_task
+routine $b038 update_screen_edges       ; the screen's right edge from its left
+routine $b04a run_player_task           ; dispatch on the player's task: entering, pipes, flagpole, growing, dying, control
 table $b04f player_tasks 26
 routine $b069 enter_area                ; walk in, come up a pipe or climb a vine
-routine $b0e6 drive_player
+routine $b0e6 drive_player              ; control the player as if the joypad held A
 routine $b0e9 control_player            ; joypad to movement, collisions, animation
-routine $b1c7 vine_climb_in
-routine $b1dd set_alt_entrance
-routine $b1e5 enter_down_pipe
-routine $b200 move_player_down
-routine $b206 enter_side_pipe_exit
-routine $b20b change_area_after_pipe
-routine $b213 change_area
-routine $b21f walk_into_side_pipe
-routine $b233 grow_or_shrink
-routine $b245 injury_blink
-routine $b255 start_size_change
-routine $b269 player_dying
-routine $b273 player_task_done
-routine $b27d get_fire_flower
-routine $b288 cycle_player_palette
-routine $b29a reset_player_palette
-routine $b2a4 slide_down_flagpole
+routine $b1c7 vine_climb_in             ; climb the player up the vine into the area above, then enter it
+routine $b1dd set_alt_entrance          ; enter the next area by its vine entrance
+routine $b1e5 enter_down_pipe           ; move the player down into a pipe, then enter the area it leads to
+routine $b200 move_player_down          ; move the player down by A pixels
+routine $b206 enter_side_pipe_exit      ; walk the player into a side pipe, then enter the area it leads to
+routine $b20b change_area_after_pipe    ; when the pipe timer ends, enter the area by entrance Y
+routine $b213 change_area               ; turn the screen off and restart the area setup
+routine $b21f walk_into_side_pipe       ; walk the player right into a side pipe until aligned
+routine $b233 grow_or_shrink            ; while the game pauses to change the player's size, start it, then finish
+routine $b245 injury_blink              ; shrink the player after an injury, then let them move while blinking
+routine $b255 start_size_change         ; start growing or shrinking the player
+routine $b269 player_dying              ; let the player fall once the death pause is over
+routine $b273 player_task_done          ; back to normal control, timers running
+routine $b27d get_fire_flower           ; cycle the player's palette while getting a fire flower, then restore it
+routine $b288 cycle_player_palette      ; set the player's palette to A's low two bits
+routine $b29a reset_player_palette      ; set the player's palette back to the first
+routine $b2a4 slide_down_flagpole       ; slide the player down the flagpole with its sound, then walk on
 table $b2c2 hidden_1up_coin_counts 8
-routine $b2ca walk_to_castle
-routine $b315 next_area
-routine $b329 move_player
+routine $b2ca walk_to_castle            ; walk the player to the castle, raise the star flag, then go to the next area (and arm the hidden 1-up)
+routine $b315 next_area                 ; go to the next area of the world
+routine $b329 move_player               ; move the player by its state: on the ground, jumping or swimming, falling, climbing
 table $b351 player_movement_states 8
-routine $b35a move_on_ground
-routine $b36d move_falling
-routine $b376 move_jumping_or_swimming
-routine $b3ac move_in_air
+routine $b35a move_on_ground            ; move the player on the ground, with friction and facing the joypad
+routine $b36d move_falling              ; move the player in the air with falling gravity
+routine $b376 move_jumping_or_swimming  ; move the player up, cutting the jump short when A is released, or swimming
+routine $b3ac move_in_air               ; move the player in the air, with gravity
 table $b3c7 climb_steps_low 4
 table $b3cb climb_steps_high 4
-routine $b3cf move_climbing
+routine $b3cf move_climbing             ; move the player on a vine, and off it to the sides
 table $b424 jump_gravity 7
 table $b42b fall_gravity 7
 table $b432 jump_speeds 7
@@ -859,353 +862,353 @@ table $b44a climb_speeds 3
 table $b44d climb_forces 3
 routine $b450 player_physics            ; jumping, swimming, climbing and walking speeds
 table $b58c player_anim_periods 3
-routine $b58f set_player_anim_speed
-routine $b5cc apply_friction
-routine $b624 update_fireballs_and_bubbles
+routine $b58f set_player_anim_speed     ; the player's walking animation speed and running state from its speed
+routine $b5cc apply_friction            ; accelerate or slow the player horizontally, up to its maximum speed
+routine $b624 update_fireballs_and_bubbles; throw a fireball on B when fiery, update both fireballs and the air bubbles
 table $b687 fireball_speeds 2
-routine $b689 update_fireball
-routine $b6f9 update_bubble
-routine $b70b spawn_bubble
-routine $b732 move_bubble
+routine $b689 update_fireball           ; move a fireball, bounce it off the floor, and explode it on a wall or enemy
+routine $b6f9 update_bubble             ; move an air bubble up, or let the player breathe out a new one
+routine $b70b spawn_bubble              ; start an air bubble at the player's mouth
+routine $b732 move_bubble               ; move an air bubble up, removing it at the water's surface
 table $b74b bubble_forces 2
 table $b74d bubble_intervals 2
-routine $b74f tick_time_limit
-routine $b7a4 warp_zone_trigger
-routine $b7b8 update_whirlpools
+routine $b74f tick_time_limit           ; count the time down, warn when it runs low, and end the player when it runs out
+routine $b7a4 warp_zone_trigger         ; once the player reaches the warp zone's pipes, unlock the scroll and enable the warps
+routine $b7b8 update_whirlpools         ; pull the player toward the whirlpools of water areas
 table $b84b flagpole_score_bounds 5
 table $b850 flagpole_score_digits 5
-routine $b855 update_flagpole
+routine $b855 update_flagpole           ; lower the flag while the player slides down the pole, and award the flag's score
 table $b8b6 spring_offsets 4
-routine $b8ba update_spring
-routine $b91e spawn_vine
+routine $b8ba update_spring             ; compress and release the spring, launching the player higher with A
+routine $b91e spawn_vine                ; start a vine growing from the bumped block
 table $b949 vine_heights 2
-routine $b94b update_vine
+routine $b94b update_vine               ; grow the vine and draw it
 table $b9ba cannon_masks 2
-routine $b9bc update_cannons
+routine $b9bc update_cannons            ; fire bullets from the cannons on screen, at random
 table $ba31 bullet_speeds 2
-routine $ba33 update_bullet
+routine $ba33 update_bullet             ; move a bullet toward the player and remove it off screen
 table $ba89 hammer_slots 9
 table $ba92 hammer_speeds 2
-routine $ba94 spawn_hammer
-routine $bac3 update_hammer
-routine $bb38 spawn_block_coin
-routine $bb51 spawn_jumping_coin
-routine $bb6c launch_coin
-routine $bb84 find_free_misc_slot
-routine $bb96 update_misc_objects
+routine $ba94 spawn_hammer              ; give the hammer bro in slot a hammer, when a free one comes up (carry set then)
+routine $bac3 update_hammer             ; throw a hammer, then let it fly in an arc
+routine $bb38 spawn_block_coin          ; launch a coin out of a bumped block
+routine $bb51 spawn_jumping_coin        ; launch a coin from the spot above a bumped block
+routine $bb6c launch_coin               ; start a coin's jump and count it
+routine $bb84 find_free_misc_slot       ; a free slot for a coin or score (the last when none)
+routine $bb96 update_misc_objects       ; update the hammers and jumping coins, scrolling the rest with the screen
 table $bbf8 coin_digit_offsets 2
 table $bbfa score_digit_offsets 2
 table $bbfc counter_selectors 2
-routine $bbfe give_coin
-routine $bc27 add_score
-routine $bc30 queue_counters_for_player
-routine $bc36 queue_counters
-routine $bc60 spawn_powerup
-routine $bc85 update_powerup
+routine $bbfe give_coin                 ; count a coin, with a 1-up every 100, and its score
+routine $bc27 add_score                 ; add the pending score to the current player's and queue it
+routine $bc30 queue_counters_for_player ; queue the current player's score and coins
+routine $bc36 queue_counters            ; queue the counters chosen by A
+routine $bc60 spawn_powerup             ; bring out the powerup from its block, a mushroom or flower by the player's size
+routine $bc85 update_powerup            ; raise the powerup out of its block, then move it by its kind
 table $bceb block_y_offsets 2
 routine $bced bump_head                 ; the player hit a block from below
-routine $bd84 place_block_object
-routine $bd9b bump_block
+routine $bd84 place_block_object        ; put a block object at the block the player hit
+routine $bd9b bump_block                ; bounce the block the player hit, and give what it holds
 table $bdc0 block_contents_handlers 18
-routine $bdd2 block_gives_mushroom
-routine $bdd5 block_gives_star
-routine $bdd7 block_gives_kind_star
-routine $bdd8 block_gives_1up
-routine $bdda block_gives_kind
-routine $bddf block_gives_vine
+routine $bdd2 block_gives_mushroom      ; give a mushroom or fire flower
+routine $bdd5 block_gives_star          ; give a star
+routine $bdd7 block_gives_kind_star     ; give powerup A
+routine $bdd8 block_gives_1up           ; give a 1-up mushroom
+routine $bdda block_gives_kind          ; place powerup A over the bumped block
+routine $bddf block_gives_vine          ; start a vine from the bumped block
 table $bde8 bumpable_metatiles 14
-routine $bdf6 find_bumped_metatile
-routine $be02 shatter_brick
-routine $be1f collect_coin_above
-routine $be41 spawn_brick_chunks
-routine $be70 update_block_objects
-routine $bed4 update_block_metatiles
-routine $bf02 move_enemy_x
-routine $bf09 move_player_x
+routine $bdf6 find_bumped_metatile      ; the index of metatile A among the bumpable ones (carry set when found)
+routine $be02 shatter_brick             ; break the brick the player hit into four chunks, with its score
+routine $be1f collect_coin_above        ; collect a coin standing on the hit block
+routine $be41 spawn_brick_chunks        ; start the four chunks of a broken brick
+routine $be70 update_block_objects      ; move a bumped block or brick chunks, and replace the block when it lands
+routine $bed4 update_block_metatiles    ; write the metatile of a hit block to the block buffer and redraw it
+routine $bf02 move_enemy_x              ; move the enemy in slot X horizontally
+routine $bf09 move_player_x             ; move the player horizontally, unless on a spring
 routine $bf0f move_object_x             ; add speed (4.4 fixed point) to position and page
-routine $bf63 move_enemy_down_fast
-routine $bf6b move_falling_platform
-routine $bf6d move_vertically
-routine $bf88 move_drop_platform
-routine $bf8c move_enemy_down_slow
-routine $bf8e set_max_speed_mid
-routine $bf92 move_enemy_jumping
-routine $bf94 set_max_speed_high
-routine $bf96 apply_gravity_enemy
+routine $bf63 move_enemy_down_fast      ; move an enemy down quickly, or a falling platform
+routine $bf6b move_falling_platform     ; move a falling platform down, its speed limited
+routine $bf6d move_vertically           ; move an object down with gravity, its speed limited by Y
+routine $bf88 move_drop_platform        ; move a dropping platform down
+routine $bf8c move_enemy_down_slow      ; move an enemy down slowly
+routine $bf8e set_max_speed_mid         ; apply gravity to the enemy with the middle speed limit
+routine $bf92 move_enemy_jumping        ; move a jumping enemy with gravity
+routine $bf94 set_max_speed_high        ; apply gravity to the enemy with the high speed limit
+routine $bf96 apply_gravity_enemy       ; apply gravity to enemy X, force Y and limit A
 table $bf9f block_max_speeds 2
-routine $bfa4 apply_gravity_block
-routine $bfad apply_gravity_object
-routine $bfb4 move_platform_down
-routine $bfb7 move_platform_up
-routine $bfb9 move_platform
-routine $bfd1 move_paratroopa_vertically
+routine $bfa4 apply_gravity_block       ; apply gravity to a bumped block or brick chunk
+routine $bfad apply_gravity_object      ; apply gravity to object X, force in $00 and limit A
+routine $bfb4 move_platform_down        ; move a lift down
+routine $bfb7 move_platform_up          ; move a lift up
+routine $bfb9 move_platform             ; move a lift up or down (A), slower for dropping platforms
+routine $bfd1 move_paratroopa_vertically; move an object vertically by its gravity parameters
 routine $bfd7 apply_gravity             ; vertical speed, sub-pixel force and position with a speed cap
-routine $c047 update_enemies_and_loops
+routine $c047 update_enemies_and_loops  ; load the next enemies and loop commands from the area's enemy data, then run the object in slot X
 table $c06b loop_worlds 11
 table $c076 loop_pages 11
 table $c081 loop_y_positions 11
 routine $c08c load_enemies_and_loops    ; loop commands and spawning enemies from the enemy list
-routine $c226 spawn_enemy
-routine $c26c init_enemy
+routine $c226 spawn_enemy               ; initialize the enemy just loaded into slot X
+routine $c26c init_enemy                ; initialize the enemy in slot X by its kind
 table $c282 enemy_initializers 110
-routine $c2f0 init_nothing
-routine $c2f1 init_goomba
-routine $c2f7 init_podoboo
-routine $c307 init_retainer
+routine $c2f0 init_nothing              ; no initialization
+routine $c2f1 init_goomba               ; initialize a goomba: a walker with a small box
+routine $c2f7 init_podoboo              ; initialize a podoboo below the screen, waiting to jump
+routine $c307 init_retainer             ; place the retainer on the castle's floor
 table $c30c walk_speeds 2
-routine $c30e init_walker
-routine $c319 set_enemy_speed
-routine $c31e init_red_koopa
+routine $c30e init_walker               ; set a walking enemy's speed, faster in hard mode
+routine $c319 set_enemy_speed           ; set the enemy's speed to A and its box to the tall one
+routine $c31e init_red_koopa            ; initialize a red koopa: a walker that turns at ledges
 table $c326 hammer_bro_walk_times 2
-routine $c328 init_hammer_bro
-routine $c33d init_flyer_or_swimmer
-routine $c342 init_blooper
-routine $c346 set_small_box
-routine $c34a init_red_paratroopa
-routine $c35a set_tall_box
-routine $c35c set_box_facing_left
-routine $c363 clear_vertical_motion
-routine $c36b init_bullet
-routine $c375 init_cheep_cheep
-routine $c385 init_lakitu
-routine $c38a setup_lakitu
+routine $c328 init_hammer_bro           ; initialize a hammer bro standing, with its first walk timer
+routine $c33d init_flyer_or_swimmer     ; initialize an enemy at rest, with a tall box
+routine $c342 init_blooper              ; initialize a blooper at rest, with a small box
+routine $c346 set_small_box             ; give the enemy the small box, facing left
+routine $c34a init_red_paratroopa       ; initialize a red paratroopa's flight around its height
+routine $c35a set_tall_box              ; give the enemy the tall box, facing left
+routine $c35c set_box_facing_left       ; set the enemy's box kind to A, facing left, at rest vertically
+routine $c363 clear_vertical_motion     ; stop the enemy's vertical motion
+routine $c36b init_bullet               ; initialize a bullet flying left
+routine $c375 init_cheep_cheep          ; initialize a swimming cheep cheep at a random speed
+routine $c385 init_lakitu               ; initialize a lakitu, unless a frenzy is on
+routine $c38a setup_lakitu              ; set up a lakitu at rest, with its box
 table $c398 lakitu_aim_offsets 12
 routine $c3a4 update_lakitu_spawner     ; bring Lakitu back and throw spinies
 table $c44f firebar_speeds 5
 table $c454 firebar_directions 5
-routine $c459 init_long_firebar
-routine $c45c init_firebar
+routine $c459 init_long_firebar         ; initialize a long firebar, as two firebars
+routine $c45c init_firebar              ; initialize a firebar's speed and direction by its kind, centered on its block
 table $c488 flying_fish_x_offsets 16
 table $c498 flying_fish_speeds 12
 table $c4a4 flying_fish_intervals 4
-routine $c4a8 init_flying_fish
-routine $c549 init_bowser
-routine $c575 copy_enemy
+routine $c4a8 init_flying_fish          ; launch a flying cheep cheep at the player, on its timer
+routine $c549 init_bowser               ; initialize Bowser, his health and timers, and his second slot
+routine $c575 copy_enemy                ; copy the enemy into a free slot, linked to it
 table $c59d flame_heights 4
 table $c5a1 flame_force_offsets 2
-routine $c5a3 init_bowser_flame
-routine $c5d8 place_flame
-routine $c61f finish_flame
+routine $c5a3 init_bowser_flame         ; launch a flame from Bowser, or from the right of the screen
+routine $c5d8 place_flame               ; put a flame at height A, right of the screen
+routine $c61f finish_flame              ; activate a flame with its box
 table $c631 firework_x_offsets 6
 table $c637 firework_y_offsets 6
-routine $c63d init_firework
+routine $c63d init_firework             ; launch a firework around the star flag, on its timer
 table $c68a bit_masks 8
 table $c692 frenzy_y_positions 8
 table $c69a swimming_fish_kinds 2
 routine $c69c spawn_frenzy_enemy        ; bullet bills or cheep cheeps arriving from the side
-routine $c787 init_piranha
-routine $c7a0 init_frenzy
+routine $c787 init_piranha              ; initialize a piranha plant inside its pipe
+routine $c7a0 init_frenzy               ; start a frenzy by the enemy's kind: lakitu's spinies, flying cheep cheeps, flames, fireworks, bullets
 table $c7ab frenzy_initializers 12
-routine $c7b7 init_no_frenzy
-routine $c7b8 end_frenzy
-routine $c7d1 init_bouncing_paratroopa
-routine $c7d9 set_tall_box_b
-routine $c7db set_box_kind
-routine $c7df init_balance_platform
-routine $c803 init_drop_platform
-routine $c80b init_side_platform
-routine $c812 init_vertical_platform
-routine $c828 init_platform
-routine $c82b set_platform_box
-routine $c83f large_lift_up
-routine $c845 large_lift_down
-routine $c848 large_lift_box
-routine $c84b small_lift_up
-routine $c857 small_lift_down
-routine $c860 small_lift_common
+routine $c7b7 init_no_frenzy            ; no frenzy
+routine $c7b8 end_frenzy                ; end the frenzy, and send the lakitu away
+routine $c7d1 init_bouncing_paratroopa  ; initialize a bouncing paratroopa moving left
+routine $c7d9 set_tall_box_b            ; give the enemy the tall box
+routine $c7db set_box_kind              ; set the enemy's box kind to A
+routine $c7df init_balance_platform     ; initialize one platform of a balance lift and pair it with the other
+routine $c803 init_drop_platform        ; initialize a platform that drops when stood on
+routine $c80b init_side_platform        ; initialize a platform moving side to side
+routine $c812 init_vertical_platform    ; initialize a platform moving up and down around its height
+routine $c828 init_platform             ; initialize a platform at rest, with its box
+routine $c82b set_platform_box          ; give the platform its box, shorter in castles and in late hard mode
+routine $c83f large_lift_up             ; initialize a large lift going up
+routine $c845 large_lift_down           ; initialize a large lift going down
+routine $c848 large_lift_box            ; give a large lift its box
+routine $c84b small_lift_up             ; initialize a small lift going up
+routine $c857 small_lift_down           ; initialize a small lift going down
+routine $c860 small_lift_common         ; place a small lift and give it its box
 table $c86b platform_offset_low 3
 table $c86e platform_offset_high 3
-routine $c871 offset_platform
-routine $c881 finish_enemy_init
+routine $c871 offset_platform           ; move the platform by the offset Y
+routine $c881 finish_enemy_init         ; no initialization
 table $c892 enemy_runners 68
-routine $c8d6 run_nothing
-routine $c8d7 run_retainer
-routine $c8e0 run_normal_enemy
-routine $c905 move_enemy
+routine $c8d6 run_nothing               ; nothing to run
+routine $c8d7 run_retainer              ; draw the retainer
+routine $c8e0 run_normal_enemy          ; run an enemy: draw it, collide it with the ground, enemies and the player, move it
+routine $c905 move_enemy                ; move an enemy by its kind
 table $c90a enemy_movers 42
-routine $c934 move_nothing
-routine $c935 run_bowser_flame
-routine $c947 run_firebar
-routine $c94d run_small_platform
-routine $c965 run_large_platform
-routine $c982 move_large_platform
+routine $c934 move_nothing              ; no movement
+routine $c935 run_bowser_flame          ; move a flame and collide it with the player
+routine $c947 run_firebar               ; rotate a firebar and collide it with the player
+routine $c94d run_small_platform        ; run a small lift: collide it with the player, draw it, move it
+routine $c965 run_large_platform        ; run a large platform: collide it with the player, move it, draw it
+routine $c982 move_large_platform       ; move a large platform by its kind
 table $c98a large_platform_movers 14
-routine $c998 erase_enemy
-routine $c9b0 move_podoboo
+routine $c998 erase_enemy               ; clear the enemy's slot
+routine $c9b0 move_podoboo              ; jump a podoboo out of the lava at random intervals
 table $c9ce hammer_throw_masks 2
 table $c9d0 walk_speed_adders 4
 table $c9d4 revived_speeds 4
-routine $c9d8 update_hammer_bro
+routine $c9d8 update_hammer_bro         ; throw hammers, jump between floors and walk back and forth
 table $ca10 hammer_bro_jump_lengths 2
-routine $ca37 hammer_bro_jump
-routine $ca58 hammer_bro_walk
-routine $ca77 move_walker
-routine $cae5 move_defeated_enemy
-routine $caf9 move_hopping_paratroopa
-routine $caff move_red_paratroopa
-routine $cb25 move_green_paratroopa
-routine $cb45 sway_green_paratroopa
+routine $ca37 hammer_bro_jump           ; start a hammer bro's jump up or down a floor
+routine $ca58 hammer_bro_walk           ; walk a hammer bro back and forth, facing the player
+routine $ca77 move_walker               ; walk an enemy, move it as a shell or kicked, revive a shell, remove a squashed goomba
+routine $cae5 move_defeated_enemy       ; let a defeated enemy fall off the screen
+routine $caf9 move_hopping_paratroopa   ; bounce a paratroopa along
+routine $caff move_red_paratroopa       ; fly a red paratroopa up and down
+routine $cb25 move_green_paratroopa     ; fly a green paratroopa back and forth, bobbing
+routine $cb45 sway_green_paratroopa     ; sway a flying paratroopa
 routine $cb47 sway_counters             ; oscillating primary/secondary counters for back-and-forth motion
-routine $cb66 sway_offset
+routine $cb66 sway_offset               ; move the enemy by its sway speed, in the sway's direction
 table $cb87 blooper_masks 2
-routine $cb89 move_blooper
-routine $cbdf blooper_swim
-routine $cc36 move_bullet
+routine $cb89 move_blooper              ; swim a blooper toward the player in spurts, or let it sink
+routine $cbdf blooper_swim              ; time a blooper's spurts up and its sinking
+routine $cc36 move_bullet               ; fly a bullet left, or let it fall once stomped
 table $cc46 swimming_fish_speeds 4
-routine $cc4a move_swimming_fish
+routine $cc4a move_swimming_fish        ; swim a cheep cheep along, drifting up and down
 table $ccc7 firebar_offsets 99
 table $cd2a firebar_mirrors 4
 table $cd2e firebar_table_offsets 12
 table $cd3a firebar_y_positions 2
-routine $cd3c update_firebar
-routine $cdbb draw_firebar_ball
-routine $ce08 firebar_ball_collision
-routine $ce8e firebar_ball_position
+routine $cd3c update_firebar            ; rotate a firebar, draw its balls and collide them with the player
+routine $cdbb draw_firebar_ball         ; place a firebar ball's sprite by its offsets from the center
+routine $ce08 firebar_ball_collision    ; draw a firebar ball and hurt the player it touches
+routine $ce8e firebar_ball_position     ; a firebar ball's offsets from the center at the bar's angle
 table $ced5 random_y_ranges 5
 table $ceda flying_fish_priorities 5
-routine $cedf move_flying_fish
+routine $cedf move_flying_fish          ; fly a cheep cheep in an arc out of the water
 table $cf25 lakitu_speed_adjust 3
-routine $cf28 move_lakitu
-routine $cf6c lakitu_chase
+routine $cf28 move_lakitu               ; float a lakitu after the player, throwing spinies, or let it leave
+routine $cf6c lakitu_chase              ; a lakitu's speed toward the player, matching the player's scrolling
 table $cfdd bridge_tile_columns 15
-routine $cfec collapse_bridge
-routine $d00f move_dying_bowser
+routine $cfec collapse_bridge           ; collapse Bowser's bridge one piece at a time, then drop Bowser
+routine $d00f move_dying_bowser         ; let a defeated Bowser fall
 table $d061 bowser_move_ranges 4
-routine $d065 run_bowser
-routine $d071 kill_all_enemies
-routine $d17b draw_bowser
-routine $d1bc bowser_half
+routine $d065 run_bowser                ; walk, jump, breathe fire and throw hammers as Bowser
+routine $d071 kill_all_enemies          ; clear every enemy slot
+routine $d17b draw_bowser               ; draw both halves of Bowser
+routine $d1bc bowser_half               ; draw one half of Bowser and collide it with the player
 table $d1d1 flame_timers 8
-routine $d1d9 next_flame_timer
-routine $d1eb update_bowser_flame
-routine $d295 run_firework
+routine $d1d9 next_flame_timer          ; the next interval between Bowser's flames
+routine $d1eb update_bowser_flame       ; move a flame left toward its height and draw it
+routine $d295 run_firework              ; burst a firework and award its points
 table $d2cd star_flag_y_offsets 4
 table $d2d1 star_flag_x_offsets 4
 table $d2d5 star_flag_tiles 4
-routine $d2d9 run_star_flag
+routine $d2d9 run_star_flag             ; dispatch on the end of the area: time points, star flag, fireworks
 table $d2e8 star_flag_tasks 10
-routine $d2f2 count_fireworks
-routine $d30e next_star_flag_task
-routine $d311 star_flag_done
-routine $d312 award_time_points
-routine $d336 award_area_points
-routine $d34e raise_star_flag
-routine $d365 draw_star_flag
-routine $d39e next_star_flag_task_b
-routine $d3a2 wait_area_end
-routine $d3b0 move_piranha
-routine $d410 spin_firebar
-routine $d432 update_balance_platform
-routine $d541 draw_platform_rope
-routine $d5b1 stop_balance_platforms
-routine $d5d3 move_vertical_platform
-routine $d5fe carry_player_vertically
-routine $d607 move_side_platform
-routine $d614 carry_player_horizontally
-routine $d631 drop_platform
-routine $d63d right_platform
-routine $d64f move_large_lift
-routine $d655 move_small_lift
-routine $d65b move_lift
-routine $d67a check_enemy_offscreen
-routine $d6d9 fireball_enemy_collision
+routine $d2f2 count_fireworks           ; the fireworks by the time's last digit (1, 3 or 6)
+routine $d30e next_star_flag_task       ; advance to the next star flag task
+routine $d311 star_flag_done            ; nothing left to do
+routine $d312 award_time_points         ; turn the remaining time into points, a digit at a time
+routine $d336 award_area_points         ; add the pending points to the current player's score and queue it
+routine $d34e raise_star_flag           ; raise the star flag on the castle, then launch the fireworks
+routine $d365 draw_star_flag            ; draw the star flag's four sprites
+routine $d39e next_star_flag_task_b     ; advance to the next star flag task
+routine $d3a2 wait_area_end             ; keep the star flag drawn until its timer and the music end
+routine $d3b0 move_piranha              ; raise and lower a piranha plant, staying in its pipe while the player is near
+routine $d410 spin_firebar              ; turn a firebar's angle by its speed, in its direction
+routine $d432 update_balance_platform   ; move a balance lift's two platforms against each other with the player's weight, and drop them past the top
+routine $d541 draw_platform_rope        ; queue the rope tiles above a balance lift's platform
+routine $d5b1 stop_balance_platforms    ; stop both platforms of a balance lift
+routine $d5d3 move_vertical_platform    ; move a platform up and down between its limits, carrying the player
+routine $d5fe carry_player_vertically   ; move the player standing on the platform with it
+routine $d607 move_side_platform        ; move a platform side to side, carrying the player
+routine $d614 carry_player_horizontally ; move the player standing on the platform sideways with it
+routine $d631 drop_platform             ; drop a platform the player stands on
+routine $d63d right_platform            ; move a platform right while the player stands on it
+routine $d64f move_large_lift           ; move a large lift, carrying the player
+routine $d655 move_small_lift           ; move a small lift, carrying the player
+routine $d65b move_lift                 ; move a lift by its vertical speed
+routine $d67a check_enemy_offscreen     ; remove an enemy that left the screen's range
+routine $d6d9 fireball_enemy_collision  ; check a fireball against the enemies, every other frame
 table $d736 bowser_lookalikes 8
-routine $d73e fireball_hit_enemy
-routine $d795 defeat_enemy
-routine $d7bc smack_enemy_score
-routine $d7c4 player_hammer_collision
+routine $d73e fireball_hit_enemy        ; hurt the enemy a fireball hit, or Bowser
+routine $d795 defeat_enemy              ; knock an enemy out, with its score
+routine $d7bc smack_enemy_score         ; show score A over the enemy and play the kick sound
+routine $d7c4 player_hammer_collision   ; hurt the player a hammer hits, unless invincible
 table $d84d leftover_speeds 2
 table $d84f kicked_shell_speeds 2
 table $d851 demoted_koopa_speeds 2
-routine $d853 player_enemy_collision
+routine $d853 player_enemy_collision    ; collide the player with an enemy: stomp, kick a shell, collect a powerup, or get hurt
 table $d892 kicked_shell_points 3
-routine $d92c injure_player
-routine $d931 force_injury
-routine $d948 set_player_routine
-routine $d955 end_injury_check
+routine $d92c injure_player             ; hurt the player, unless already blinking
+routine $d931 force_injury              ; shrink the player, or kill a small one
+routine $d948 set_player_routine        ; set the player's task and state, pausing the timers
+routine $d955 end_injury_check          ; the slot being processed
 table $d965 stomp_points 4
 table $d9d2 revival_rates 2
-routine $da05 face_player
-routine $da11 spawn_floating_score
+routine $da05 face_player               ; turn the enemy toward the player
+routine $da11 spawn_floating_score      ; show score A floating over the enemy
 table $da25 set_bit_masks 7
 table $da2c clear_bit_masks 7
-routine $da33 enemy_enemy_collisions
-routine $dab4 enemy_pair_collision
-routine $db1c turn_enemy_around
-routine $db36 reverse_enemy
-routine $db45 large_platform_collision
-routine $db5f player_on_large_platform
-routine $db78 large_platform_collision_done
-routine $db7b small_platform_collision
-routine $dbbc platform_landing
+routine $da33 enemy_enemy_collisions    ; collide the enemy with the others, turning or knocking them out
+routine $dab4 enemy_pair_collision      ; settle a collision between two enemies: a shell or a kicked enemy knocks the other out, else both turn
+routine $db1c turn_enemy_around         ; turn an enemy around, if its kind turns
+routine $db36 reverse_enemy             ; reverse the enemy's direction and speed
+routine $db45 large_platform_collision  ; check the player against a large platform, or both of a balance lift
+routine $db5f player_on_large_platform  ; land the player on a large platform it touches from above
+routine $db78 large_platform_collision_done; the slot being processed
+routine $db7b small_platform_collision  ; check the player against a small lift's two halves
+routine $dbbc platform_landing          ; land the player on a platform, or stop it against its side or bottom
 table $dc17 small_platform_y_offsets 2
-routine $dc19 place_player_on_small_platform
-routine $dc21 place_player_on_vertical_platform
-routine $dc23 place_player_on_platform_y
-routine $dc41 check_player_vertical
-routine $dc52 enemy_box_offset
-routine $dc54 enemy_box_offset_for
+routine $dc19 place_player_on_small_platform; put the player on top of a small lift
+routine $dc21 place_player_on_vertical_platform; put the player on top of the platform
+routine $dc23 place_player_on_platform_y; put the player on top of a platform at height A
+routine $dc41 check_player_vertical     ; whether the player is too low or off screen to collide (carry set then)
+routine $dc52 enemy_box_offset          ; the box offset of the slot being processed
+routine $dc54 enemy_box_offset_for      ; the box offset of enemy A, and its offscreen bits
 table $dc62 player_bg_top_extents 2
-routine $dc64 player_bg_collision
+routine $dc64 player_bg_collision       ; collide the player with the background: ceilings and bumped blocks, floors and springs, walls, coins, vines, the flagpole and pipes
 table $de03 area_change_timers 2
-routine $de1c erase_metatile
+routine $de1c erase_metatile            ; clear the metatile the player touched (a coin) and redraw it
 table $de25 climb_x_offsets 2
 table $de27 climb_page_offsets 2
 table $de29 flagpole_heights 5
-routine $debd is_hidden_block
-routine $dec4 check_spring_landing
-routine $dedd is_spring_metatile
-routine $dee8 enter_pipe
-routine $df4b block_player_side
+routine $debd is_hidden_block           ; whether metatile A is a hidden block (zero set then)
+routine $dec4 check_spring_landing      ; start the spring's bounce when the player lands on it
+routine $dedd is_spring_metatile        ; whether metatile A is part of a spring (carry set then)
+routine $dee8 enter_pipe                ; enter the pipe under the player when down is held over it, or warp
+routine $df4b block_player_side         ; push the player out of a block at its side and stop it
 table $df8b solid_metatile_limits 4
-routine $df8f is_solid_metatile
+routine $df8f is_solid_metatile         ; whether metatile A is solid (carry set then)
 table $df96 climb_metatile_limits 4
-routine $df9a is_climb_metatile
-routine $dfa1 is_coin_metatile
-routine $dfb0 metatile_group
+routine $df9a is_climb_metatile         ; whether metatile A is climbable (carry set then)
+routine $dfa1 is_coin_metatile          ; whether metatile A is a coin, with its sound (carry set then)
+routine $dfb0 metatile_group            ; metatile A's group, its top two bits
 table $dfb9 enemy_bg_states 6
 table $dfbf enemy_bg_speeds 2
-routine $dfc1 enemy_bg_collision
-routine $e01b check_stun_enemy
-routine $e02f stun_enemy
-routine $e0fe enemy_side_check
-routine $e124 enemy_bump
-routine $e143 player_enemy_distance
-routine $e14f land_enemy
-routine $e15b enemy_height_check
-routine $e163 enemy_jump_check
-routine $e18e kill_enemy_on_block
-routine $e1ae check_under_enemy
-routine $e1b5 is_passable_metatile
-routine $e1c8 fireball_bg_collision
+routine $dfc1 enemy_bg_collision        ; land an enemy on the ground, bump it against walls, and knock it out from a bumped block
+routine $e01b check_stun_enemy          ; stun an enemy hit from below, turning a paratroopa into a koopa
+routine $e02f stun_enemy                ; flip an enemy over, bouncing it away from the player
+routine $e0fe enemy_side_check          ; turn an enemy that walks into a wall
+routine $e124 enemy_bump                ; turn an enemy around, or make a hammer bro jump
+routine $e143 player_enemy_distance     ; the enemy's horizontal distance from the player ($00; negative when left of it)
+routine $e14f land_enemy                ; stop an enemy on the floor, aligned to its block
+routine $e15b enemy_height_check        ; whether the enemy is low enough to collide with the background (carry set then)
+routine $e163 enemy_jump_check          ; land a jumping enemy, or bounce it again
+routine $e18e kill_enemy_on_block       ; knock out an enemy on a bumped block, bouncing it up
+routine $e1ae check_under_enemy         ; the metatile under the enemy (zero set when none)
+routine $e1b5 is_passable_metatile      ; whether metatile A lets objects through: coins and hidden blocks (zero set then)
+routine $e1c8 fireball_bg_collision     ; bounce a fireball off the floor, or explode it against a wall
 table $e1fd box_sizes 48                ; left, top, right and bottom offsets by box kind
-routine $e22d fireball_box
-routine $e236 misc_box
-routine $e23d fireball_box_common
-routine $e243 enemy_box
-routine $e24c small_platform_box
-routine $e252 enemy_box_offscreen_bits
-routine $e273 large_platform_box
-routine $e27c enemy_box_core
-routine $e289 hide_box
-routine $e29c compute_box
-routine $e2de clip_box_to_screen
-routine $e325 player_collides
+routine $e22d fireball_box              ; the fireball's collision box
+routine $e236 misc_box                  ; the collision box of a hammer or coin
+routine $e23d fireball_box_common       ; compute and clip the box of object X with offset Y
+routine $e243 enemy_box                 ; the enemy's collision box, unless off screen
+routine $e24c small_platform_box        ; a small lift's collision box, unless off screen
+routine $e252 enemy_box_offscreen_bits  ; hide the enemy's box when off screen, else compute it
+routine $e273 large_platform_box        ; a large platform's collision box, unless off screen
+routine $e27c enemy_box_core            ; compute and clip the enemy's box
+routine $e289 hide_box                  ; move the enemy's box off screen
+routine $e29c compute_box               ; the box of object X from its screen position and box kind
+routine $e2de clip_box_to_screen        ; clamp the box at the screen's edges
+routine $e325 player_collides           ; whether the player's box overlaps box Y (carry set then)
 routine $e327 objects_collide           ; bounding box overlap test, carry set on collision
-routine $e388 enemy_block_check
-routine $e39c fireball_block_check
-routine $e3a5 block_check_common
+routine $e388 enemy_block_check         ; the metatile at probe Y around the enemy (zero set when none)
+routine $e39c fireball_block_check      ; the metatile under the fireball (zero set when none)
+routine $e3a5 block_check_common        ; the metatile at probe Y around object X (zero set when none)
 table $e3ad block_probe_starts 3
 table $e3b0 block_probe_x 28
 table $e3cc block_probe_y 28
-routine $e3e8 block_probe_feet
-routine $e3e9 block_probe_head
-routine $e3ec block_probe_side
-routine $e3ee block_probe_player
+routine $e3e8 block_probe_feet          ; the metatile at the player's next foot probe
+routine $e3e9 block_probe_head          ; the metatile at the player's head probe Y
+routine $e3ec block_probe_side          ; the metatile at the player's side probe Y
+routine $e3ee block_probe_player        ; the metatile at the player's probe Y
 routine $e3f0 block_probe               ; metatile at an object's probe point
 table $e433 vine_y_offsets 2
-routine $e435 draw_vine
-routine $e4ae stack_six_sprites
+routine $e435 draw_vine                 ; draw a stretch of the vine
+routine $e4ae stack_six_sprites         ; put six sprites one above the other from height A
 table $e4c0 hammer_first_x 4
 table $e4c4 hammer_first_y 4
 table $e4c8 hammer_second_x 4
@@ -1213,110 +1216,110 @@ table $e4cc hammer_second_y 4
 table $e4d0 hammer_first_tiles 4
 table $e4d4 hammer_second_tiles 4
 table $e4d8 hammer_attributes 4
-routine $e4dc draw_hammer
+routine $e4dc draw_hammer               ; draw a hammer, spinning while thrown
 table $e541 flagpole_score_tiles 10
-routine $e54b draw_flagpole_flag
-routine $e5b3 hide_six_sprites
-routine $e5b5 fill_six_sprites
-routine $e5bb fill_four_sprites
-routine $e5be fill_three_sprites
-routine $e5c1 fill_two_sprites
-routine $e5c8 draw_large_platform
+routine $e54b draw_flagpole_flag        ; draw the flag and the score it shows
+routine $e5b3 hide_six_sprites          ; move six sprites below the screen
+routine $e5b5 fill_six_sprites          ; set six sprites' Y to A
+routine $e5bb fill_four_sprites         ; set four sprites' Y to A
+routine $e5be fill_three_sprites        ; set three sprites' Y to A
+routine $e5c1 fill_two_sprites          ; set two sprites' Y to A
+routine $e5c8 draw_large_platform       ; draw a large platform, shorter in castles and in late hard mode
 table $e682 jumping_coin_tiles 4
-routine $e686 draw_coin_or_score
+routine $e686 draw_coin_or_score        ; draw a jumping coin, then the score it leaves
 table $e6be powerup_tiles 16
 table $e6ce powerup_attributes 4
-routine $e6d2 draw_powerup
+routine $e6d2 draw_powerup              ; draw the powerup, its colors cycling for the star and flower
 table $e73e enemy_tiles 258
 table $e840 enemy_tile_offsets 27
 table $e85b enemy_attributes 27
 table $e876 enemy_animation_masks 2
 table $e878 spring_tile_offsets 5
-routine $e87d draw_enemy
-routine $eb64 clip_enemy_sprites
-routine $ebaa draw_enemy_row
-routine $ebb2 draw_sprite_row
-routine $ebb7 hide_enemy_row
-routine $ebc1 hide_enemy_column
+routine $e87d draw_enemy                ; draw an enemy's sprites by its kind and animation frame, flipped when defeated
+routine $eb64 clip_enemy_sprites        ; hide the rows and columns of the enemy's sprites that are off screen, and remove it below the screen
+routine $ebaa draw_enemy_row            ; draw a row of the enemy's tiles
+routine $ebb2 draw_sprite_row           ; draw a row of two sprites from tiles A and X, mirrored when flipped
+routine $ebb7 hide_enemy_row            ; hide a row of the enemy's sprites at offset A
+routine $ebc1 hide_enemy_column         ; hide a column of the enemy's sprites
 table $ebcd block_tiles 4
-routine $ebd1 draw_block
-routine $ec46 check_left_column
-routine $ec4a hide_column
-routine $ec53 draw_brick_chunks
-routine $eced draw_firebar_tile
+routine $ebd1 draw_block                ; draw a bumped block's sprites
+routine $ec46 check_left_column         ; hide the sprite column at Y when the object is off the left edge (bit 3 of A)
+routine $ec4a hide_column               ; hide a column of two sprites at Y
+routine $ec53 draw_brick_chunks         ; draw the four flying chunks of a broken brick
+routine $eced draw_firebar_tile         ; set a firebar ball's tile and flip, spinning with the frame count
 table $ed06 explosion_tiles 3
-routine $ed17 draw_explosion
-routine $ed66 draw_small_platform
-routine $ede1 draw_bubble
+routine $ed17 draw_explosion            ; draw frame A of a fireball's or firework's explosion
+routine $ed66 draw_small_platform       ; draw a small lift's two halves
+routine $ede1 draw_bubble               ; draw an air bubble
 table $ee07 player_tile_offsets 16
 table $ee17 player_tiles 208            ; two tiles per row, top to bottom
 table $eee7 swim_kick_tiles 2
-routine $eee9 draw_player
-routine $ef34 draw_player_action
-routine $ef45 draw_player_with_offset
+routine $eee9 draw_player               ; draw the player by its task, blinking while injured, kicking while swimming
+routine $ef34 draw_player_action        ; draw the player's pose for its current action
+routine $ef45 draw_player_with_offset   ; draw the player at tile offset A, with its throwing pose
 table $ef9e lives_screen_player 6
-routine $efa4 draw_lives_screen_player
-routine $efbe render_player
-routine $efdc draw_player_rows
-routine $efec player_action_offset
-routine $f062 animate_player
-routine $f091 size_offset
+routine $efa4 draw_lives_screen_player  ; draw the player on the lives screen
+routine $efbe render_player             ; place the player's sprites on screen
+routine $efdc draw_player_rows          ; draw the player's rows of tiles
+routine $efec player_action_offset      ; the tile offset of the player's pose: walking, skidding, jumping, swimming, climbing, crouching
+routine $f062 animate_player            ; the tile offset of the player's animation frame
+routine $f091 size_offset               ; the pose offset for the player's size
 table $f09c change_size_frames 20
-routine $f0b0 animate_size_change
-routine $f0d0 animation_offset
-routine $f0e9 fix_player_attributes
-routine $f12a player_screen_position
-routine $f131 bubble_screen_position
-routine $f13b fireball_screen_position
-routine $f142 screen_position_restore
-routine $f148 misc_screen_position
-routine $f152 enemy_screen_position
-routine $f159 block_screen_position
-routine $f165 screen_position_at
+routine $f0b0 animate_size_change       ; the tile offset while the player grows or shrinks
+routine $f0d0 animation_offset          ; the tile offset of frame A of pose Y
+routine $f0e9 fix_player_attributes     ; fix the flip of the player's sprites for some poses
+routine $f12a player_screen_position    ; the player's position relative to the screen
+routine $f131 bubble_screen_position    ; an air bubble's position relative to the screen
+routine $f13b fireball_screen_position  ; a fireball's position relative to the screen
+routine $f142 screen_position_restore   ; object X's position relative to the screen, then the slot processed back in X
+routine $f148 misc_screen_position      ; a hammer's or coin's position relative to the screen
+routine $f152 enemy_screen_position     ; an enemy's position relative to the screen
+routine $f159 block_screen_position     ; a block object's position relative to the screen
+routine $f165 screen_position_at        ; the screen position of object A + X
 routine $f171 screen_position           ; coordinates relative to the left edge of the screen
-routine $f180 player_offscreen_bits
-routine $f187 fireball_offscreen_bits
-routine $f191 bubble_offscreen_bits
-routine $f19b misc_offscreen_bits
+routine $f180 player_offscreen_bits     ; which parts of the player are off screen
+routine $f187 fireball_offscreen_bits   ; which parts of a fireball are off screen
+routine $f191 bubble_offscreen_bits     ; which parts of an air bubble are off screen
+routine $f19b misc_offscreen_bits       ; which parts of a hammer or coin are off screen
 table $f1a5 object_slot_offsets 3
-routine $f1a8 object_slot
-routine $f1af enemy_offscreen_bits
-routine $f1b6 block_offscreen_bits
-routine $f1ba offset_slot
-routine $f1c0 offscreen_bits
-routine $f1d7 offscreen_bits_parts
+routine $f1a8 object_slot               ; the object index of slot X in group Y
+routine $f1af enemy_offscreen_bits      ; which parts of an enemy are off screen
+routine $f1b6 block_offscreen_bits      ; which parts of a block object are off screen
+routine $f1ba offset_slot               ; which parts of object A + X are off screen
+routine $f1c0 offscreen_bits            ; which parts of object X are off screen, horizontally and vertically
+routine $f1d7 offscreen_bits_parts      ; the object's horizontal and vertical offscreen bits combined
 table $f1e3 x_offscreen_bits 16
 table $f1f3 x_edge_defaults 3
-routine $f1f6 compute_x_offscreen_bits
+routine $f1f6 compute_x_offscreen_bits  ; which columns of object X are off the screen's left or right edge
 table $f22b y_offscreen_bits 9
 table $f234 y_edge_defaults 3
 table $f237 high_position_units 2
-routine $f26d edge_distance_bits
+routine $f26d edge_distance_bits        ; the offscreen bits for an object's distance from an edge
 routine $f2d0 update_sound              ; per-frame sound engine entry point
-routine $f381 set_square1_regs
-routine $f388 play_square1
-routine $f38b set_square1_freq
-routine $f38d set_freq
-routine $f39f set_square2_regs
-routine $f3a6 play_square2
-routine $f3a9 set_square2_freq
-routine $f3ad set_triangle_freq
+routine $f381 set_square1_regs          ; set pulse 1's control (X) and sweep (Y)
+routine $f388 play_square1              ; start a note on pulse 1 with control X and sweep Y
+routine $f38b set_square1_freq          ; set pulse 1's period to note A
+routine $f38d set_freq                  ; set a channel's period to note A
+routine $f39f set_square2_regs          ; set pulse 2's control (X) and sweep (Y)
+routine $f3a6 play_square2              ; start a note on pulse 2 with control X and sweep Y
+routine $f3a9 set_square2_freq          ; set pulse 2's period to note A
+routine $f3ad set_triangle_freq         ; set the triangle's period to note A
 table $f3b1 swim_stomp_envelope 14
-routine $f41b square1_sfx
-routine $f4a7 stop_square1_sfx
+routine $f41b square1_sfx               ; start or continue the pulse 1 sound effects: jump, swim, stomp, bump, flagpole, fireball, pipe and injury
+routine $f4a7 stop_square1_sfx          ; end the pulse 1 sound effect
 table $f4d4 extra_life_notes 6
 table $f4da powerup_grab_notes 30
 table $f4f8 powerup_reveal_notes 32
-routine $f571 stop_square2_sfx
-routine $f57c square2_sfx
+routine $f571 stop_square2_sfx          ; end the pulse 2 sound effect and reset the channels
+routine $f57c square2_sfx               ; start or continue the pulse 2 sound effects: coin, powerup, vine, 1-up, timer and Bowser's fall
 table $f62b brick_shatter_notes 16
-routine $f667 noise_sfx
-routine $f691 continue_music
-routine $f694 update_music
-routine $f8c5 alternate_length
-routine $f8cb note_length
-routine $f8d8 load_square_envelope
-routine $f8f4 load_envelope_entry
+routine $f667 noise_sfx                 ; start or continue the noise sound effects: brick shatter and Bowser's flame
+routine $f691 continue_music            ; play the next notes of the music on each channel
+routine $f694 update_music              ; start the requested area or event music, then play its next notes
+routine $f8c5 alternate_length          ; the length of a note from its alternate encoding
+routine $f8cb note_length               ; the length of note A in the current tempo
+routine $f8d8 load_square_envelope      ; the pulse channels' duty and envelope for the music playing
+routine $f8f4 load_envelope_entry       ; step Y of the envelope for the music playing
 table $f90d song_header_offsets 49
 table $f93e hurry_up_header 5
 table $f943 star_header 6
