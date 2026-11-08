@@ -358,7 +358,7 @@ fn CFunc::word_stmt(self : CFunc, folds : Map[Int, WordFold], b : Int, k : Int, 
       self.at(b, k_low)
       let (lt1, lt2) = (self.expr(l1), self.expr(l2))
       self.at(block, stmt)
-      Some("\{self.reg(C)} = WORD(\{self.expr(h1)}, \{lt1}) >= WORD(\{self.expr(h2)}, \{lt2});")
+      Some("\{self.def_reg(C)} = WORD(\{self.expr(h1)}, \{lt1}) >= WORD(\{self.expr(h2)}, \{lt2});")
     }
   }
 }

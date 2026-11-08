@@ -84,10 +84,23 @@ priv struct Views {
   // names of the scratch bytes by routine (the map's `scratch`): byte, name,
   // description
   scratch : Map[String, Array[(Int, String, String)]]
+  // names of the registers' parameters and results by routine (the map's
+  // `param` and `result`): register (in `local_names` order), name,
+  // description
+  params : Map[String, Array[(Int, String, String)]]
+  results : Map[String, Array[(Int, String, String)]]
+  // `param *`: register, name, the RAM byte it equals, description
+  default_params : Array[(Int, String, Int, String)]
+  // what a name the map gives a register must not be: an identifier of the
+  // generated code, a view, a record or its field, a scratch name
+  taken : Set[String]
 }
 
 fn Views::empty() -> Views {
-  { by_symbol: Map([]), list: [], origin: 0x8000, stack: false, types: Map([]), records: [], fields: Map([]), scratch: Map([]) }
+  {
+    by_symbol: Map([]), list: [], origin: 0x8000, stack: false, types: Map([]), records: [], fields: Map([]), scratch: Map([]),
+    params: Map([]), results: Map([]), default_params: [], taken: Set([]),
+  }
 }
 
 // Identifiers a view must not shadow besides those of the generated code:
@@ -184,10 +197,50 @@ fn Views::from_map(low : @lower.AsmLowering, reserved : Set[String]) -> Views {
       None => views.scratch[e.routine] = [(e.byte, e.name, e.description)]
     }
   }
+  // the names of parameters and results
+  let all_taken : Set[String] = Set([])
+  for name in reserved { all_taken.add(name) }
+  for name in c_reserved { all_taken.add(name) }
+  for entry in p.map.entries { all_taken.add(entry.name.to_lower()) }
+  for name in members { all_taken.add(name) }
+  for e in p.map.scratch { all_taken.add(e.name) }
+  all_taken.add("stack")
+  all_taken.add("machine")
+  let register = fn(name : String) {
+    let mut found = 0
+    for i, r in @image.map_registers {
+      if r == name { found = i }
+    }
+    found
+  }
+  let params : Map[String, Array[(Int, String, String)]] = Map([])
+  let results : Map[String, Array[(Int, String, String)]] = Map([])
+  let default_params = []
+  for e in p.map.params {
+    if e.routine == "*" {
+      let address = p.map.entries.iter().find_first(fn(v) { v.name == e.variable.to_upper() }).map(fn(v) { v.address }).unwrap_or(-1)
+      default_params.push((register(e.register), e.name, address, e.description))
+    } else {
+      match params.get(e.routine) {
+        Some(list) => list.push((register(e.register), e.name, e.description))
+        None => params[e.routine] = [(register(e.register), e.name, e.description)]
+      }
+    }
+  }
+  for e in p.map.results {
+    match results.get(e.routine) {
+      Some(list) => list.push((register(e.register), e.name, e.description))
+      None => results[e.routine] = [(register(e.register), e.name, e.description)]
+    }
+  }
   {
     ..views,
     list: remaining,
     stack: !remaining.is_empty() && !taken("stack") && !seen.contains("stack"),
+    params,
+    results,
+    default_params,
+    taken: all_taken,
   }
 }
 

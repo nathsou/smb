@@ -172,6 +172,8 @@ pub(all) struct RomMap {
   threads: Array[Int] // where the program starts coroutines, on stacks of their own (see `thread`)
   records: Array[MapRecord] // arrays indexed alike, as the fields of one record (see `record`)
   scratch: Array[MapScratch] // names of the scratch bytes in routines (see `scratch`)
+  params: Array[MapParam] // names of routines' register parameters (see `param`)
+  results: Array[MapParam] // names of their results (see `result`)
 } derive(Debug)
 
 // record NAME VAR...: arrays of RAM indexed alike (one object slot's
@@ -192,8 +194,25 @@ pub(all) struct MapScratch {
   description: String
 } derive(Debug)
 
+// param ROUTINE REG NAME: what a register or flag (a, x, y, carry, zero,
+// negative, overflow) holds on a routine's entry, the name of its
+// parameter; param * REG NAME VAR: in every routine that each call enters
+// with REG equal to VAR, and wherever REG is loaded from VAR.
+// result ROUTINE REG NAME: what it holds on the routine's return, the name
+// of its result.
+pub(all) struct MapParam {
+  routine: String // "*": every routine entered with the register equal to `variable`
+  register: String
+  name: String
+  variable: String
+  description: String
+} derive(Debug)
+
+// The registers and flags a `param` or `result` line may name.
+pub let map_registers : Array[String] = ["a", "x", "y", "carry", "zero", "negative", "overflow"]
+
 pub fn RomMap::empty() -> RomMap {
-  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, follow: false, preempt: 0, jumps: [], jump_tables: [], inline: [], ram_code: [], copied: [], threads: [], records: [], scratch: [] }
+  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, follow: false, preempt: 0, jumps: [], jump_tables: [], inline: [], ram_code: [], copied: [], threads: [], records: [], scratch: [], params: [], results: [] }
 }
 
 // The name of a switchable bank, the prefix of its entries.
@@ -272,6 +291,8 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
   let threads: Array[Int] = []
   let records: Array[MapRecord] = []
   let scratch: Array[MapScratch] = []
+  let params: Array[MapParam] = []
+  let results: Array[MapParam] = []
   let shadows: Array[(Int, Int)] = []
   let names: Set[String] = Set([])
   fn claim(name: String) raise ImageError {
@@ -318,6 +339,18 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       if fields.length() < 3 { raise InvalidImage("Map record line needs a name and its variables: \{line}") }
       if records.iter().any(fn(r) { r.name == fields[1] }) { raise InvalidImage("Duplicate map record: \{fields[1]}") }
       records.push({ name: fields[1], fields: fields[2:].map(fn(f) { f.to_upper() }), description })
+      continue
+    }
+    // param ROUTINE REG NAME, param * REG NAME VAR, result ROUTINE REG NAME
+    if fields[0] == "param" || fields[0] == "result" {
+      let every = fields[0] == "param" && fields.length() == 5 && fields[1] == "*"
+      if fields.length() != 4 && !every { raise InvalidImage("Map \{fields[0]} line needs a routine, a register and a name: \{line}") }
+      if !map_registers.contains(fields[2]) { raise InvalidImage("Map \{fields[0]} names a register or flag (a, x, y, carry, zero, negative, overflow): \{line}") }
+      let list = if fields[0] == "param" { params } else { results }
+      if list.iter().any(fn(e) { e.routine == fields[1] && e.register == fields[2] }) {
+        raise InvalidImage("Duplicate map \{fields[0]} name: \{line}")
+      }
+      list.push({ routine: fields[1], register: fields[2], name: fields[3], variable: if every { fields[4] } else { "" }, description })
       continue
     }
     // scratch ROUTINE $0K NAME
@@ -552,7 +585,15 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       raise InvalidImage("Scratch name for an unknown routine: \{e.routine}")
     }
   }
-  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), follow, preempt, jumps, jump_tables, inline, ram_code, copied, threads, records, scratch }
+  for e in params + results {
+    if e.routine != "*" && !entries.iter().any(fn(r) { r.kind == Routine && r.name == e.routine }) {
+      raise InvalidImage("Parameter or result name for an unknown routine: \{e.routine}")
+    }
+    if e.variable != "" && !entries.iter().any(fn(r) { r.kind == Var && r.name == e.variable.to_upper() }) {
+      raise InvalidImage("Parameter name for an unknown variable: \{e.variable}")
+    }
+  }
+  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), follow, preempt, jumps, jump_tables, inline, ram_code, copied, threads, records, scratch, params, results }
 }
 
 pub(all) struct Cartridge {

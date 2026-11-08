@@ -49,6 +49,8 @@ pub fn load_dump(Bytes, RomMap) -> Dump raise ImageError
 
 pub fn load_ines(Bytes) -> Cartridge raise ImageError
 
+pub let map_registers : Array[String]
+
 pub fn operand(@parse.SourceAddressingMode) -> @parse.SourceExpr?
 
 pub fn parse_map(String) -> RomMap raise ImageError
@@ -244,6 +246,14 @@ pub(all) enum MapKind {
   Trap
 } derive(Eq, @debug.Debug)
 
+pub(all) struct MapParam {
+  routine : String
+  register : String
+  name : String
+  variable : String
+  description : String
+} derive(@debug.Debug)
+
 pub(all) struct MapRecord {
   name : String
   fields : Array[String]
@@ -303,6 +313,8 @@ pub(all) struct RomMap {
   threads : Array[Int32]
   records : Array[MapRecord]
   scratch : Array[MapScratch]
+  params : Array[MapParam]
+  results : Array[MapParam]
 } derive(@debug.Debug)
 pub fn RomMap::bank_name(Self, Int32) -> String
 pub fn RomMap::empty() -> Self

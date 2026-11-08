@@ -74,6 +74,7 @@ io $4017 apu_frame_counter     ; written: sequencer mode and reset; read: joypad
 
 # Zero page
 var $0008 slot                  ; object slot being processed
+param * x object slot           ; the object slot being processed (X is slot on every call)
 var $0009 frame_count
 var $000a buttons_ab : button   ; A and B, as joypad bits
 var $000b buttons_vertical : button
@@ -981,6 +982,7 @@ scratch apply_gravity $00 down_force ; force added each frame while falling
 scratch apply_gravity $01 up_force ; force while moving up
 scratch apply_gravity $02 max_speed ; the downward speed cap
 scratch apply_gravity $07 speed_sign ; the sign of the vertical speed
+param apply_gravity a can_rise ; nonzero: the up force applies too
 routine $c047 update_enemies_and_loops  ; load the next enemies and loop commands from the area's enemy data, then run the object in slot X
 table $c06b loop_worlds 11
 table $c076 loop_pages 11
@@ -1244,6 +1246,7 @@ scratch clip_box_to_screen $01 middle_page ; the page of the screen's middle
 scratch clip_box_to_screen $02 middle_x ; the x of the screen's middle
 routine $e325 player_collides           ; whether the player's box overlaps box Y (carry set then)
 routine $e327 objects_collide           ; bounding box overlap test, carry set on collision
+result objects_collide carry collided ; the boxes overlap
 scratch objects_collide $07 axes_left ; the axes left to test
 routine $e388 enemy_block_check         ; the metatile at probe Y around the enemy (zero set when none)
 routine $e39c fireball_block_check      ; the metatile under the fireball (zero set when none)

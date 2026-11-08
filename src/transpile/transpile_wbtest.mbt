@@ -117,7 +117,7 @@ test "read-modify-write outside RAM goes through the bus" {
   assert_eq(code.contains("dynamic_ram_write(0x6001, (uint8_t)(read_byte(0x6001) << 1));"), true)
 }
 
-fn transpile_rom(source: String, map_text: String) -> Map[String, String] raise {
+fn transpile_rom(source: String, map_text: String, locals~: Bool = false) -> Map[String, String] raise {
   let items = @parse.Parser::new(@parse.Lexer::new(source).tokenize()).parse()
   let image = @image.assemble(items)
   let map = @image.parse_map(map_text)
@@ -126,7 +126,7 @@ fn transpile_rom(source: String, map_text: String) -> Map[String, String] raise 
   let low = @lower.AsmLowering::new(program.source, program=Some(program))
   low.lower()
   let files : Map[String, String] = Map([])
-  for file in transpile_low(low).files { files[file.name] = file.contents }
+  for file in transpile_low(low, locals~).files { files[file.name] = file.contents }
   files
 }
 
@@ -268,4 +268,23 @@ test "with --locals, a carry chain is 16-bit arithmetic" {
   // without --locals, the chain is as the machine runs it
   let machine = code_c(transpile_low(lower_fixture(source)))
   assert_eq(machine.contains("WORD("), false)
+}
+
+test "with --locals, the map names a routine's parameters and results, and each value a register holds" {
+  // main loads X from slot and passes 5 to move, which stores it and then
+  // reuses A; hit's carry is its result
+  let source = ".org $c000\nBoot:\n jsr Main\nIdle:\n jmp Idle\nMain:\n ldx $20\n lda #$05\n jsr Move\n jsr Hit\n bcc Done\n inc $31\nDone:\n rts\nMove:\n sta $40,x\n lda $48,x\n sta $50,x\n sta $58,x\n rts\nHit:\n lda $60\n cmp $61\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let map = "routine $c000 boot\nroutine $c006 update\nroutine $c015 move\nroutine $c01e hit\nroutine $c023 tick\nvar $0020 slot\nvar $0031 hits\nvar $0040 speeds 8\nvar $0048 heights 8\nvar $0050 depths 8\nvar $0058 widths 8\nvar $0060 wall_x\nvar $0061 player_x\nparam * x object slot ; the object being processed\nparam move a speed ; pixels per frame\nresult hit carry blocked ; the wall is in the way\n"
+  let files = transpile_rom(source, map, locals=true)
+  let code = files["code.c"]
+  // X loaded from slot is `object`; 5 goes to move's `speed`; hit's carry is
+  // `blocked` in its caller too
+  assert_eq(code.contains("void update(void) {\n  uint8_t object, speed;\n  bool blocked;\n  object = slot;\n  speed = 5;\n  move(speed, object);\n  blocked = hit();\n  if (!blocked) {"), true)
+  // the parameter keeps its name, and A's next value is its own variable
+  assert_eq(code.contains("// speed: pixels per frame\nvoid move(uint8_t speed, uint8_t object) {\n  uint8_t a;\n  speeds(object) = speed;\n  a = heights(object);\n  depths(object) = a;\n  widths(object) = a;"), true)
+  assert_eq(code.contains("// blocked: the wall is in the way\nbool hit(void) {\n  bool blocked;\n  blocked = wall_x >= player_x;\n  return blocked;"), true)
+  assert_eq(files["code.h"].contains("void move(uint8_t speed, uint8_t object);"), true)
+  // a name a view already has stays the register's
+  let clash = transpile_rom(source, map.replace(old="param move a speed", new="param move a heights"), locals=true)
+  assert_eq(clash["code.c"].contains("void move(uint8_t a, uint8_t object) {"), true)
 }

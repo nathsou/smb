@@ -52,6 +52,11 @@ priv struct CFunc {
   scratch_local : Array[String]
   // The carry chains printed as 16-bit arithmetic (words.mbt).
   mut words : Map[Int, WordFold]
+  // Each value a register holds, its variable (names.mbt).
+  mut regs : RegNames?
+  // At a terminator, the registers a call there just wrote: read from the
+  // registers' own variables.
+  mut fresh : Int
   mut block : Int
   mut stmt : Int
 }
@@ -80,6 +85,38 @@ fn CFunc::slot(self : CFunc, s : Slot) -> String {
 
 fn CFunc::reg(self : CFunc, v : @ir.Var) -> String {
   self.slot(Reg(v))
+}
+
+// The variable a read of `v` at the statement being printed is of.
+fn CFunc::use_reg(self : CFunc, v : @ir.Var) -> String {
+  match self.regs {
+    Some(_) if self.stmt < 0 && (self.fresh & v.bit()) != 0 => self.reg(v)
+    Some(n) if held_index(v) >= 0 && (self.memory & v.bit()) == 0 => n.uses[self.block][self.stmt + 1][held_index(v)]
+    _ => self.reg(v)
+  }
+}
+
+// The variable the statement's write of `v` is to (a terminator's call:
+// the register's own).
+fn CFunc::def_reg(self : CFunc, v : @ir.Var) -> String {
+  match self.regs {
+    Some(n) if held_index(v) >= 0 && (self.memory & v.bit()) == 0 => n.defs[self.block][self.stmt + 1][held_index(v)]
+    _ => self.reg(v)
+  }
+}
+
+fn CFunc::use_slot(self : CFunc, s : Slot) -> String {
+  match s {
+    Reg(v) => self.use_reg(v)
+    _ => self.slot(s)
+  }
+}
+
+fn CFunc::def_slot(self : CFunc, s : Slot) -> String {
+  match s {
+    Reg(v) => self.def_reg(v)
+    _ => self.slot(s)
+  }
 }
 
 // The scratch byte an address is, when the value read there is a local.
@@ -365,7 +402,7 @@ fn CFunc::expr_prec(self : CFunc, e : @ir.Expr) -> (String, Int) {
   match e {
     Const(v) => (show_number(v), 0)
     Sym(name, _) => (name, 0)
-    Var(v) => (self.reg(v), 0)
+    Var(v) => (self.use_reg(v), 0)
     Temp(t) => (self.names[t], 0)
     Param => ("return_address", 0)
     Runtime(name) => (name, 0)
@@ -420,7 +457,9 @@ fn CFunc::expr_prec(self : CFunc, e : @ir.Expr) -> (String, Int) {
 }
 
 fn CFunc::assign(self : CFunc, v : @ir.Var, e : @ir.Expr) -> String {
-  let name = self.reg(v)
+  let name = self.def_reg(v)
+  // (an update in place only of the same variable)
+  let same = name == self.use_reg(v)
   if v.is_flag() {
     return match e {
       Const(0) => "\{name} = false;"
@@ -429,9 +468,9 @@ fn CFunc::assign(self : CFunc, v : @ir.Var, e : @ir.Expr) -> String {
     }
   }
   match e {
-    Binary(Add, Var(u), Const(1)) if u == v => "\{name}++;"
-    Binary(Sub, Var(u), Const(1)) if u == v => "\{name}--;"
-    Binary(And | Or | Xor as op, Var(u), r) if u == v && self.narrow(r) =>
+    Binary(Add, Var(u), Const(1)) if u == v && same => "\{name}++;"
+    Binary(Sub, Var(u), Const(1)) if u == v && same => "\{name}--;"
+    Binary(And | Or | Xor as op, Var(u), r) if u == v && same && self.narrow(r) =>
       "\{name} \{bin_symbol(op)}= \{self.expr(r)};"
     _ => "\{name} = \{self.byte(e)};"
   }
@@ -500,8 +539,11 @@ fn CFunc::stmt(self : CFunc, s : @ir.Stmt, live~ : Int = local_slots) -> String 
 fn CFunc::arguments(self : CFunc, g : String) -> Array[String] {
   let s = self.conv.sig(g)
   let args = []
-  for slot in slots_of(s.value_bits()) { args.push(self.slot(slot)) }
-  for slot in slots_of(s.pointer_bits()) { args.push("&" + self.slot(slot)) }
+  for slot in slots_of(s.value_bits()) { args.push(self.use_slot(slot)) }
+  // (a result the callee also reads goes back where it came from)
+  for slot in slots_of(s.pointer_bits()) {
+    args.push("&" + (if (s.params & slot.bit()) != 0 { self.use_slot(slot) } else { self.def_slot(slot) }))
+  }
   args
 }
 
@@ -520,17 +562,17 @@ fn CFunc::call(self : CFunc, g : String, live~ : Int = local_slots) -> String {
   let s = self.conv.sig(g)
   let through = self.conv.memory(g) & local_slots & self.memory.lnot()
   let parts = []
-  for slot in slots_of(s.params & through) { parts.push("\{slot.machine_place()} = \{slot.local_name()};") }
+  for slot in slots_of(s.params & through) { parts.push("\{slot.machine_place()} = \{self.use_slot(slot)};") }
   let (call, primary) = self.call_parts(g)
   // (X back as it was, by the analysis: no need to assign it)
   let unchanged = self.locals && self.stmt >= 0 &&
     self.conv.same_x.get(self.f.name).map(fn(set) { set.contains((self.block << 16) | self.stmt) }).unwrap_or(false)
   parts.push(match primary {
     Some(Reg(X)) if unchanged => call + ";"
-    Some(p) if (live & p.bit()) != 0 => "\{self.slot(p)} = \{call};"
+    Some(p) if (live & p.bit()) != 0 => "\{self.def_slot(p)} = \{call};"
     _ => call + ";"
   })
-  for slot in slots_of(s.outputs & through & live) { parts.push("\{slot.local_name()} = \{slot.machine_place()};") }
+  for slot in slots_of(s.outputs & through & live) { parts.push("\{self.def_slot(slot)} = \{slot.machine_place()};") }
   parts.join(" ")
 }
 
@@ -549,15 +591,23 @@ fn CFunc::returns_value(self : CFunc) -> Bool {
 fn CFunc::write_back(self : CFunc) -> String {
   if !self.locals { return "" }
   let s = self.conv.sig(self.f.name)
-  slots_of(s.pointer_bits()).map(fn(slot) { "*\{pointer_name(s, slot)} = \{slot.local_name()}; " }).join("")
+  slots_of(s.pointer_bits()).map(fn(slot) { "*\{self.conv.pointer_param(self.f.name, slot)} = \{self.use_slot(slot)}; " }).join("")
 }
 
 fn CFunc::return_code(self : CFunc) -> String {
   let value = match self.conv.sig(self.f.name).primary {
-    Some(p) if self.locals => " " + p.local_name()
+    Some(p) if self.locals => " " + self.use_slot(p)
     _ => ""
   }
   self.write_back() + "return\{value};"
+}
+
+// What a call at a terminator writes to the registers' own variables: its
+// results, but those it also reads, which go back where they came from.
+fn CFunc::writes_fresh(self : CFunc, g : String) -> Int {
+  let s = self.conv.sig(g)
+  let back = if self.conv.has_locals(g) { s.pointer_bits() & s.params } else { 0 }
+  s.outputs & back.lnot()
 }
 
 // A call of `g` in tail position: its results, then the routine's.
@@ -572,7 +622,12 @@ fn CFunc::tail_call(self : CFunc, g : String) -> String {
       return if primary is Some(_) { "return \{call};" } else { "\{call}; return;" }
     }
   }
-  self.call(g, live=self.conv.sig(self.f.name).outputs) + " " + self.return_code()
+  let call = self.call(g, live=self.conv.sig(self.f.name).outputs)
+  let before = self.fresh
+  self.fresh = before | self.writes_fresh(g)
+  let back = self.return_code()
+  self.fresh = before
+  call + " " + back
 }
 
 // After an unproven transfer, which never returns: `return;` keeps the
@@ -804,9 +859,13 @@ fn Structurer::range(self : Structurer, s : Int, e : Int, follow : Int, skip_loo
       Dispatch(helper, return_address, cases) => {
         self.emit("switch (\{self.c.helper_call(helper, return_address)}) {")
         self.indent += 1
+        // (the cases read what the dispatcher wrote from the registers' own
+        // variables)
+        self.c.fresh = self.c.writes_fresh(helper)
         for case in cases {
           self.emit("case 0x\{hex(case.0)}: \{self.c.tail_call(case.1)}")
         }
+        self.c.fresh = 0
         self.emit("default: cpu_unresolved_jump(cpu_dispatch_target);\{self.c.after_trap()} // index outside the proven table")
         self.indent -= 1
         self.emit("}")
@@ -838,7 +897,7 @@ fn Structurer::range(self : Structurer, s : Int, e : Int, follow : Int, skip_loo
   }
 }
 
-fn function_body(f : @ir.Function, views : Views, conv : Convention, plan~ : ScratchPlan = ScratchPlan::plain()) -> Array[Line] {
+fn function_body(f : @ir.Function, views : Views, conv : Convention, plan~ : ScratchPlan = ScratchPlan::plain()) -> (Array[Line], RegNames?) {
   let locals = conv.has_locals(f.name)
   let after = if locals { conv.live_after(f) } else { [] }
   let c : CFunc = {
@@ -854,11 +913,14 @@ fn function_body(f : @ir.Function, views : Views, conv : Convention, plan~ : Scr
     scratch_ram: plan.ram,
     scratch_local: plan.locals,
     words: Map([]),
+    regs: None,
+    fresh: 0,
     block: 0,
     stmt: -1,
   }
   c.types = c.register_types()
   c.words = c.word_folds()
+  c.regs = c.register_names()
   let pos = f.blocks.map(fn(_) { -1 })
   let layout = []
   // only blocks reachable from the entry are printed
@@ -908,7 +970,7 @@ fn function_body(f : @ir.Function, views : Views, conv : Convention, plan~ : Scr
       text => out.push(text)
     }
   }
-  out
+  (out, c.regs)
 }
 
 fn interface_names(mask : Int) -> String {
@@ -1002,27 +1064,40 @@ fn named_locals(body : Array[Line], plan : ScratchPlan) -> Int {
 }
 
 // The locals a function with registers as locals declares: by type, those
-// written back through a pointer starting from the value it points to.
-fn local_declarations(conv : Convention, f : @ir.Function, named : Int, plan : ScratchPlan) -> Array[String] {
-  let name_of = fn(s : Slot) {
-    match s {
-      Scratch(k) => plan.locals[k]
-      _ => s.local_name()
-    }
-  }
+// the body mentions (`idents`) but parameters, and those written back
+// through a pointer starting from the value it points to.
+fn local_declarations(conv : Convention, f : @ir.Function, regs : RegNames?, idents : Set[String], named : Int, plan : ScratchPlan) -> Array[String] {
   let sig = conv.sig(f.name)
-  // (scratch bytes are in RAM at the routine's edges; its values in them
-  // that never leave it are locals)
-  let declared = (named & sig.value_bits().lnot() & sig.memory.lnot()) | (named & all_scratch)
-  let out = []
-  // (a result written back through a pointer starts from what it points to)
-  let from_pointer = declared & sig.params & sig.pointer_bits()
-  for type_name in ["uint8_t", "bool"] {
-    let plain = slots_of(declared & from_pointer.lnot()).filter(fn(s) { s.c_type() == type_name })
-    if !plain.is_empty() { out.push("\{type_name} \{plain.map(name_of).join(", ")};") }
+  let vars : Array[(String, Int)] = match regs {
+    Some(n) => n.names
+    None => Array::makei(7, fn(r) { (local_names[r], r) })
   }
-  for s in slots_of(from_pointer) {
-    out.push("\{s.c_type()} \{s.local_name()} = *\{pointer_name(sig, s)};")
+  let value_params : Set[String] = Set([])
+  for s in slots_of(sig.value_bits() & register_bits) { value_params.add(conv.slot_name(f.name, s)) }
+  // (a result written back through a pointer starts from what it points to)
+  let from_pointer : Array[(String, Slot)] = slots_of(sig.pointer_bits() & sig.params & register_bits).map(fn(s) { (conv.slot_name(f.name, s), s) })
+  let out = []
+  for type_name in ["uint8_t", "bool"] {
+    let plain = vars
+      .filter(fn(v) {
+        reg_slot(v.1).c_type() == type_name && idents.contains(v.0) && !value_params.contains(v.0) &&
+        !from_pointer.iter().any(fn(p) { p.0 == v.0 })
+      })
+      .map(fn(v) { v.0 })
+    // (scratch bytes are in RAM at the routine's edges; its values in them
+    // that never leave it are locals)
+    if type_name == "uint8_t" {
+      for s in slots_of(named & all_scratch) {
+        match s {
+          Scratch(k) => plain.push(plan.locals[k])
+          _ => ()
+        }
+      }
+    }
+    if !plain.is_empty() { out.push("\{type_name} \{plain.join(", ")};") }
+  }
+  for p in from_pointer {
+    if idents.contains(p.0) { out.push("\{p.1.c_type()} \{p.0} = *\{conv.pointer_param(f.name, p.1)};") }
   }
   out
 }
@@ -1038,6 +1113,21 @@ fn Emitter::emit_function(self : Emitter, program : @ir.Program, f : @ir.Functio
   }
   for line in f.doc { self.emit("// \{line}") }
   let plan = scratch_plan(f, views, conv)
+  let (body, regs) = function_body(f, views, conv, plan~)
+  let text = body.map(fn(line) { match line { Text(_, t) => t; Mark(_) => "" } }).join("\n")
+  let idents = identifiers(text)
+  // what the map says of its parameters and results
+  if conv.has_locals(f.name) {
+    let named = views.params.get(f.name).unwrap_or([]) + views.results.get(f.name).unwrap_or([])
+    let shown : Set[String] = Set([])
+    for p in named {
+      let in_prototype = conv.param_names.get(f.name).unwrap_or(Map([])).values().any(fn(n) { n == p.1 })
+      if p.2 != "" && !shown.contains(p.1) && (in_prototype || idents.contains(p.1)) {
+        shown.add(p.1)
+        self.emit("// \{p.1}: \{p.2}")
+      }
+    }
+  }
   for d in plan.defines {
     let about = if d.2 == "" { "" } else { " // " + d.2 }
     self.emit("#define \{d.1} ram[\{d.0}]\{about}")
@@ -1058,10 +1148,9 @@ fn Emitter::emit_function(self : Emitter, program : @ir.Program, f : @ir.Functio
     }
     self.emit("void \{f.name}(void) {")
   }
-  let body = function_body(f, views, conv, plan~)
   if locals {
     self.indentation = 1
-    for line in local_declarations(conv, f, named_locals(body, plan), plan) { self.emit(line) }
+    for line in local_declarations(conv, f, regs, idents, named_locals(body, plan), plan) { self.emit(line) }
   }
   for line in body {
     match line {
@@ -1266,12 +1355,12 @@ fn native_interface(program : @ir.Program, conv : Convention) -> (String, String
     let sig = conv.sig(f.name)
     let params = []
     for s in slots_of(sig.value_bits()) { params.push("\{s.c_type()} \{copy(s)}") }
-    for s in slots_of(sig.pointer_bits()) { params.push("\{s.c_type()} *\{pointer_name(sig, s)}") }
+    for s in slots_of(sig.pointer_bits()) { params.push("\{s.c_type()} *\{conv.pointer_param(f.name, s)}") }
     let lines = []
     for s in slots_of(sig.value_bits()) { lines.push("\{s.machine_name()} = \{copy(s)};") }
-    for s in slots_of(sig.pointer_bits() & sig.params) { lines.push("\{s.machine_name()} = *\{pointer_name(sig, s)};") }
+    for s in slots_of(sig.pointer_bits() & sig.params) { lines.push("\{s.machine_name()} = *\{conv.pointer_param(f.name, s)};") }
     lines.push("\{f.name}();")
-    for s in slots_of(sig.pointer_bits()) { lines.push("*\{pointer_name(sig, s)} = \{s.machine_name()};") }
+    for s in slots_of(sig.pointer_bits()) { lines.push("*\{conv.pointer_param(f.name, s)} = \{s.machine_name()};") }
     match sig.primary {
       Some(p) => lines.push("return \{p.machine_name()};")
       None => ()

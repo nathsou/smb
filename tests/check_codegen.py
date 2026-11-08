@@ -51,9 +51,13 @@ CARTRIDGES = {
 
 
 def check_scratch_names():
-    """Every scratch name in the map reaches the code: a name that clashes
-    with an identifier, a view or a record member is left out silently."""
+    """Every scratch, parameter and result name in the map reaches the code:
+    a name that clashes with an identifier, a view or a record member is
+    left out silently."""
     code = (ROOT / "codegen/game/code.c").read_text()
+    functions = {}
+    for match in re.finditer(r"^\w[\w *]* (\w+)\(([^)\n]*)\) \{$(.*?)^\}$", code, re.M | re.S):
+        functions[match.group(1)] = match.group(2) + match.group(3)
     missing = []
     for line in (ROOT / "maps/smb.map").read_text().splitlines():
         fields = line.split(";")[0].split()
@@ -61,9 +65,14 @@ def check_scratch_names():
             routine, byte, name = fields[1], int(fields[2][1:], 16), fields[3]
             if not re.search(rf"#define {name} ram\[{byte}\]|\buint8_t[^;]*\b{name}\b", code):
                 missing.append(f"{routine} {fields[2]} {name}")
+        elif len(fields) >= 4 and fields[0] in ("param", "result"):
+            routine, name = fields[1], fields[3]
+            text = code if routine == "*" else functions.get(routine, "")
+            if not re.search(rf"\b{name}\b", text):
+                missing.append(f"{fields[0]} {routine} {fields[2]} {name}")
     if missing:
-        sys.exit("Map scratch names left out of the code: " + ", ".join(missing))
-    print("Every map scratch name reaches the code")
+        sys.exit("Map names left out of the code: " + ", ".join(missing))
+    print("Every map scratch, parameter and result name reaches the code")
 
 
 def check_cartridge(name, frames):

@@ -261,10 +261,28 @@ priv struct Convention {
   // The calls of each routine after which X holds what it held before
   // (block << 16 | statement): its result in X need not be assigned.
   mut same_x : Map[String, Set[Int]]
+  // The names of each routine's parameters and results, by slot bit (see
+  // names.mbt); the others are named for their slot (`x`, `carry`).
+  param_names : Map[String, Map[Int, String]]
+}
+
+// A routine's parameter or result in its prototype.
+fn Convention::slot_name(self : Convention, f : String, s : Slot) -> String {
+  match self.param_names.get(f) {
+    Some(names) => names.get(s.bit()).unwrap_or(s.local_name())
+    None => s.local_name()
+  }
+}
+
+// The pointer a result is written back through: `inout_` when the routine
+// also reads the slot, else `out_`.
+fn Convention::pointer_param(self : Convention, f : String, s : Slot) -> String {
+  let prefix = if (self.sig(f).params & s.bit()) != 0 { "inout_" } else { "out_" }
+  prefix + self.slot_name(f, s)
 }
 
 fn Convention::machine() -> Convention {
-  { locals: false, check: false, sigs: Map([]), root: 0, webs: Map([]), entered: Map([]), same_x: Map([]) }
+  { locals: false, check: false, sigs: Map([]), root: 0, webs: Map([]), entered: Map([]), same_x: Map([]), param_names: Map([]) }
 }
 
 fn Convention::sig(self : Convention, name : String) -> Signature {
@@ -284,11 +302,6 @@ fn Convention::memory(self : Convention, name : String) -> Int {
   if self.has_locals(name) { self.sig(name).memory } else { local_slots }
 }
 
-// The parameter that writes a result back: `out_y`, or `inout_y` when the
-// routine also reads it.
-fn pointer_name(sig : Signature, s : Slot) -> String {
-  if (sig.params & s.bit()) != 0 { "inout_" + s.local_name() } else { "out_" + s.local_name() }
-}
 
 // What is live before a terminator: returns read the routine's results, a
 // tail call its callee's parameters (and the results it leaves to the
@@ -537,7 +550,7 @@ fn solve(
       let primary = if f.helper || m { None } else { slots_of(outputs & memory.lnot()).get(0) }
       sigs[f.name] = { machine: m, memory, params: 0, outputs, kept: kept[f.name], primary }
     }
-    let conv = { locals: true, check: false, sigs, root, webs: Map([]), entered: Map([]), same_x: Map([]) }
+    let conv = { locals: true, check: false, sigs, root, webs: Map([]), entered: Map([]), same_x: Map([]), param_names: Map([]) }
     // parameters: a least fixpoint, they only grow; a routine is followed
     // again when one it calls or goes to takes more
     let work = program.functions.map(fn(f) { f.name })
@@ -595,8 +608,8 @@ fn Convention::parameters(self : Convention, f : @ir.Function) -> String {
   let sig = self.sig(f.name)
   let list = []
   if f.helper { list.push("uint16_t return_address") }
-  for s in slots_of(sig.value_bits()) { list.push("\{s.c_type()} \{s.local_name()}") }
-  for s in slots_of(sig.pointer_bits()) { list.push("\{s.c_type()} *\{pointer_name(sig, s)}") }
+  for s in slots_of(sig.value_bits()) { list.push("\{s.c_type()} \{self.slot_name(f.name, s)}") }
+  for s in slots_of(sig.pointer_bits()) { list.push("\{s.c_type()} *\{self.pointer_param(f.name, s)}") }
   if list.is_empty() { "void" } else { list.join(", ") }
 }
 
