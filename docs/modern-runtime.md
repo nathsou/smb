@@ -613,12 +613,34 @@ bool player_enemy_distance(uint8_t x, bool *out_left_of_player) {
 }
 ```
 
+Names also come from the callees, up the calls until none changes: a
+parameter whose entry value is only passed to callees' named parameters
+(and given back) takes their name; a result that is only callees' named
+results takes theirs, and one reloaded from `slot` is `object`; a tail
+call's result takes the callee's result name (`object = queue_counters(a,
+x); return object;`). A scratch byte the map leaves unnamed that a routine
+passes to a callee taking it by value is named for the callee. A byte
+with values both local and in RAM in a routine names the local, and
+`NAME_ram` the RAM.
+
 The map's description of a named parameter or result goes above the
-function (`// can_rise: nonzero: the up force applies too`). 160 routines
-take `object`; the map names 23 parameters and results of the gravity,
-movement, distance and box routines. A map name that never reaches its
+function (`// can_rise: nonzero: the up force applies too`). SMB's map
+names every routine's parameters and results (308 `param` and 173 `result`
+lines) and its scratch values (196 `scratch` lines): no prototype has a
+register's name left, and no routine body a `tK` or a `ram[k]`. X that a
+routine passes along without reading it as anything, left by the frame
+interrupt or a loop, is `leftover_x`. A map name that never reaches its
 routine fails `tests/check_codegen.py`. Without any of these lines the C is
 the same as before, byte for byte.
+
+`label $ADDR NAME ; description` names a place inside a routine, where the C
+had `loc_ADDR`: all 247 of SMB's are named (`goto next_axis;`,
+`start_bump_sfx:`). Enums from the dispatch tables (`player_task`,
+`screen_task`, `star_flag_task`), the VRAM list selector by the list each
+value draws, and flags for the sprite attribute bits and the sound engine's
+request bits (established by the code that sets each one: `pulse1_sfx`'s
+bump is set by the block, enemy and fireball bumps) name the constants
+beside those variables: `if (player_task != PLAYER_TASK_DYING)`.
 
 Checks: the replays, the checked build and the routine diff as above, with
 0 mismatches. While the naming was written, the routine diff caught a call
@@ -630,7 +652,10 @@ scratch byte by value (a mutation of the condition for parameters) changes
 88 lines of the C and is caught by neither the replay nor the routine diff:
 its wrong parameters are passed what RAM holds anyway, except on paths the
 tests do not reach. The condition is the same reaching-writes rule as the
-scratch locals', but the tests do not guard it well.
+scratch locals', but the tests do not guard it well. Once the map named a Y
+parameter that indexes a pointer, the replay and the routine diff caught
+that the pointer read named the index for its register (`zero_page_pointer(p)
++ y`) and not for its value.
 
 ## The WebAssembly backend
 
@@ -946,14 +971,14 @@ original renderer are unchanged.
   (159 take an `x`): many are entered with X something other than `slot`
   from some call, or through a jump table, which the analysis takes no
   equality from. A context-sensitive analysis (per call) would find more.
-- More names in the map: 23 parameters and results are named, of the few
-  hundred the signatures have.
+- Names for the values that stay in a register's own variable inside a
+  routine (about 4,000 uses of `a`, `x`, `y` and the flags: the accumulator
+  between a load and a store, loop counters) and for the arithmetic
+  temporaries (`sum`, `diff`, `carry_out`). The map would need a line that
+  names a value by the instruction that writes it.
 - A proof per routine that the C with locals computes what the reference
   computes, for every input (as acnl does with an SMT solver), for the paths
   that neither the replay nor the differential test's states take.
-- More scratch names: 416 accesses of `$00-$07` are still `ram[k]` (and 93
-  arguments), most of them values a routine leaves for its caller or
-  callee in RAM.
 - Carry chains of three bytes and more (sub-pixel, pixel and page; the
   score's digits), whose middle sum's carry goes on.
 - The status-bar split is decided after the frame's game logic, as before;
