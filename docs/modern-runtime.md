@@ -421,9 +421,10 @@ The analyses are worklists: the parameters' fixpoint follows a routine again
 only when one it calls takes more, the equalities' flow runs blocks in
 reverse postorder and again only when what comes into them changes, and a
 routine is followed again only when what it is entered with or what a callee
-gives back changes. With `--locals` the recompiler takes about 3.7 s for SMB
-from the command line (`moon run`, 1.9 s without), and the page's recompile
-about 2.3 s (1.1 s without, measured in Node), which the page then caches.
+gives back changes. With `--locals` (and the naming below) the recompiler
+takes about 3.7 s for SMB from the command line (`moon run`, 1.9 s
+without), and the page's recompile about 2.1 s (1 s without, measured in
+Node), which the page then caches.
 
 ### Scratch values
 
@@ -460,18 +461,45 @@ local takes the name; otherwise the routine is printed between `#define NAME
 ram[K] // description` and `#undef NAME`:
 
 ```c
-#define down_force ram[0] // force added each frame while falling
-#define up_force ram[1] // force while moving up
-#define max_speed ram[2] // the downward speed cap
-#define speed_sign ram[7] // the sign of the vertical speed
-void apply_gravity(uint8_t a, uint8_t x) {
+#define pixel_speed ram[0] // the whole pixels of the speed
+#define fraction_speed ram[1] // the sub-pixel part of the speed
+#define page_carry ram[2] // the page step: $ff when moving left
+uint8_t move_object_x(uint8_t x, uint8_t *out_page_step) {
   ...
-  uint16_t sum4 = (uint16_t)(WORD(obj(x).y_speed, obj(x).y_force) + down_force);
+  uint16_t sum = (uint16_t)(obj(x).x_force + fraction_speed);
 ```
 
 SMB's map names 42 bytes over 24 routines (gravity, horizontal movement,
-sprite rows, collision boxes, the VRAM queue, bubbles, platforms): 131
-accesses read by name, and 448 stay `ram[k]`. A name that an identifier, a
+sprite rows, collision boxes, the VRAM queue, bubbles, platforms).
+
+A scratch byte a routine reads on entry is a parameter when only its own
+accesses take part in the value it is entered with, and calls that take
+the byte the same way: no return its callers read the byte after, no call
+that reads it in RAM, no index into the scratch bytes, no wait. Its
+callers then pass it, from a local of theirs or from RAM (`ram[2]`, where
+the byte has to stay there for another reader). This is a greatest fixpoint:
+a byte one routine no longer takes by value may stay in RAM in the
+routines that pass it to it. The hand-written routines and those they
+call, the targets of computed jumps and dispatches, the roots and the
+dispatchers keep the scratch bytes in RAM.
+
+```c
+void apply_gravity(uint8_t can_rise, uint8_t x, uint8_t down_force, uint8_t up_force, uint8_t max_speed);
+
+void apply_gravity_object(uint8_t max_speed, uint8_t x, uint8_t down_force, uint8_t up_force) {
+  uint8_t can_rise;
+  ram[2] = max_speed;
+  can_rise = 0;
+  apply_gravity(can_rise, x, down_force, up_force, ram[2]); return;
+}
+```
+
+The parameter takes the name its local has. A value the map leaves
+unnamed takes the name of the callee's parameter it is passed to, up the
+calls: `apply_gravity_object` passes its caller's `$00` and `$01` on as
+`down_force` and `up_force`. 41 routines take 71 scratch values by value.
+Of the 509 `ram[k]` in the C, 93 are such arguments; 125 accesses read a
+scratch byte by its `#define`d name. A name that an identifier, a
 view, a record or a record's field already has is left out (a `#define`
 would rewrite `.kind`), and `tests/check_codegen.py` fails if a map name
 never reaches the code.
@@ -540,6 +568,69 @@ Checks:
   choice at every site, so a mistake in it shows up at sites the replay
   does reach. A proof per routine would cover the paths the tests miss (see
   Remaining work).
+
+### Each value its own variable
+
+A routine reuses its registers for one value after another: `apply_gravity`
+first holds in A whether the object may rise, then its speed, then the
+speed with the force added. With the registers as locals, a register is one
+C variable, which a parameter's name could not stay on. `src/transpile/names.mbt`
+joins each register's writes with the reads they reach, where the register
+is live (its webs, as for the scratch bytes): a web is one value, and can be
+a variable of its own. A web is named, in this order, for:
+
+1. the routine's parameter, if the routine's entry is one of its writes:
+   the map's `param ROUTINE REG NAME`, or `param * x object slot`, in a
+   routine that every call enters with X equal to `slot` (and a web of X
+   that only loads of `slot` write);
+2. the routine's result, if a return reads it (`result ROUTINE REG NAME`);
+3. the result of the calls that write it, if they agree;
+4. the map parameter of the calls it is passed to, if they agree.
+
+The webs left unnamed share their register's variable, as before, and so do
+those whose name a view, a record, a routine, a temporary, one of the
+routine's scratch names or another register's variable already has. Webs of
+one register may share a variable however they are named: no read takes a
+value from another web. A read prints the web that reaches it, and a write
+the web it starts. At a call, a result written through a pointer the callee
+also reads stays the variable it came from. At a tail call, or the cases of a
+dispatch, what the call writes goes to the registers' own variables, and the
+return reads it there.
+
+```c
+uint8_t move_enemy(uint8_t object) {        void update_balance_platform(uint8_t object) {
+  uint8_t a, x, y;                            ...
+  bool carry;                                 object = enemy_offscreen_bits(x, &y);
+  a = enemy(object).kind;                     ...
+  switch (dispatch(0xc909, a, &y, &carry)) {
+    case 0xca77: move_walker(object); return object;
+
+bool player_enemy_distance(uint8_t x, bool *out_left_of_player) {
+  ...
+  right_of_player = diff2 >= 0;
+  left_of_player = ((uint8_t)diff2 & 0x80) != 0;
+  *out_left_of_player = left_of_player; return right_of_player;
+}
+```
+
+The map's description of a named parameter or result goes above the
+function (`// can_rise: nonzero: the up force applies too`). 160 routines
+take `object`; the map names 23 parameters and results of the gravity,
+movement, distance and box routines. A map name that never reaches its
+routine fails `tests/check_codegen.py`. Without any of these lines the C is
+the same as before, byte for byte.
+
+Checks: the replays, the checked build and the routine diff as above, with
+0 mismatches. While the naming was written, the routine diff caught a call
+after which X stays what it was (`same_x`): the analysis took the call to
+write X, so the value read after it lost its variable
+(`update_balance_platform`, `vram_list1[5 + x]`). The analysis now treats such
+a call as not writing X, as the printer does. Taking every call to read a
+scratch byte by value (a mutation of the condition for parameters) changes
+88 lines of the C and is caught by neither the replay nor the routine diff:
+its wrong parameters are passed what RAM holds anyway, except on paths the
+tests do not reach. The condition is the same reaching-writes rule as the
+scratch locals', but the tests do not guard it well.
 
 ## The WebAssembly backend
 
@@ -851,16 +942,18 @@ original renderer are unchanged.
 
 - Registers as locals in the other games, and in the WebAssembly game
   module (which would let the runtime drop `machine_calls.c`).
-- The routines that still return X: many are entered with X something
-  other than `slot` from some call, and reload it from `slot` anyway; their
-  callers keep it only where X was `slot`. A context-sensitive analysis (per
-  call) would find more.
+- The routines that still return X, and those whose X is not `object`
+  (159 take an `x`): many are entered with X something other than `slot`
+  from some call, or through a jump table, which the analysis takes no
+  equality from. A context-sensitive analysis (per call) would find more.
+- More names in the map: 23 parameters and results are named, of the few
+  hundred the signatures have.
 - A proof per routine that the C with locals computes what the reference
   computes, for every input (as acnl does with an SMT solver), for the paths
   that neither the replay nor the differential test's states take.
-- More scratch names: 448 accesses of `$00-$07` are still `ram[k]`, most of
-  them values a routine leaves for its caller or callee, which a name would
-  have to follow across the call.
+- More scratch names: 416 accesses of `$00-$07` are still `ram[k]` (and 93
+  arguments), most of them values a routine leaves for its caller or
+  callee in RAM.
 - Carry chains of three bytes and more (sub-pixel, pixel and page; the
   score's digits), whose middle sum's carry goes on.
 - The status-bar split is decided after the frame's game logic, as before;

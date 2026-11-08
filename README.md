@@ -41,6 +41,7 @@ generated C next to the game.
 - [x] Five more: Bomberman, Tetris, Zelda, The Chessmaster and Kirby's Adventure (restarts, code in RAM, coroutines, preemption)
 - [x] Registers as C locals and parameters (SMB), the hand-written routines included
 - [x] Records over the object slots and sprites, scratch bytes named per routine, 16-bit carry chains (SMB)
+- [x] Each value a register holds its own variable, named from the map (`apply_gravity(can_rise, x, down_force, up_force, max_speed)`), scratch inputs as parameters (SMB)
 - [ ] Manually rewrite portions of the code to higher level C
 
 See [toward a modern C program](docs/modern-runtime.md) for how these steps are
@@ -139,9 +140,11 @@ vectors, builds an IR, optimises it and emits structured C and, with
 routine's parameters, results and locals in the C (`uint8_t
 lakitu_chase(uint8_t x)`; see [registers as locals and
 parameters](docs/modern-runtime.md#registers-as-locals-and-parameters)).
-The map also groups arrays into records (`enemy(x).kind`) and names the
-scratch bytes per routine, and `--locals` prints 16-bit carry chains as one
-sum (`WORD(obj(x).page, obj(x).x) + ...`). The hand-written display routines
+The map also groups arrays into records (`enemy(x).kind`), names the
+scratch bytes and the parameters and results per routine, and `--locals`
+prints 16-bit carry chains as one sum (`WORD(obj(x).page, obj(x).x) + ...`),
+each value a register holds as a variable of its own, and the scratch bytes
+a routine only reads on entry as parameters. The hand-written display routines
 (`codegen/native/display.c`) use `codegen/native/smb.h`, the map's names as
 a C header (`make header`, no ROM needed), and `codegen/native/routines.h`,
 their signatures with `--locals` (`make native-interface`, from the ROM). See the

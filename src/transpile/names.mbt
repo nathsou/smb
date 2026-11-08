@@ -68,9 +68,9 @@ fn map_result(views : Views, f : String, r : Int) -> (String, String)? {
 }
 
 // The names a register's variable in `f` must not take.
+// (besides those the views hold: see `Views::taken`)
 fn names_taken(views : Views, f : @ir.Function, conv : Convention) -> Set[String] {
   let taken : Set[String] = Set([])
-  for name in views.taken { taken.add(name) }
   for name in local_names { taken.add(name) }
   for name in temp_names(f, locals=true) { taken.add(name) }
   let plan = scratch_plan_named(f, views, conv)
@@ -165,7 +165,7 @@ fn Convention::name_parameters(self : Convention, program : @ir.Program, views :
       let r = held_index(v)
       let named = if (sig.params & s.bit()) != 0 { map_param(views, self, f.name, r) } else { map_result(views, f.name, r) }
       match named {
-        Some((name, _)) if !taken.contains(name) && !used.contains(name) => {
+        Some((name, _)) if !taken.contains(name) && !views.taken.contains(name) && !used.contains(name) => {
           names[s.bit()] = name
           used.add(name)
         }
@@ -461,7 +461,7 @@ fn CFunc::register_names(self : CFunc) -> RegNames? {
       Some(name) =>
         if entry_param[node] {
           name_of[node] = name
-        } else if !taken.contains(name) && owner.get(name).unwrap_or(r) == r {
+        } else if !taken.contains(name) && !self.views.taken.contains(name) && owner.get(name).unwrap_or(r) == r {
           owner[name] = r
           name_of[node] = name
         }
