@@ -271,6 +271,10 @@ priv struct Convention {
   // The names of scratch values the map does not name, from the callees
   // that take them by value (names.mbt), by routine and byte ("": none).
   scratch_names : Map[String, Array[String]]
+  // The names of parameters and results the map leaves unnamed, from the
+  // callees (names.mbt), by routine and register ("": none).
+  derived_params : Map[String, Array[String]]
+  derived_results : Map[String, Array[String]]
 }
 
 // A routine's parameter or result in its prototype.
@@ -289,7 +293,7 @@ fn Convention::pointer_param(self : Convention, f : String, s : Slot) -> String 
 }
 
 fn Convention::machine() -> Convention {
-  { locals: false, check: false, sigs: Map([]), root: 0, webs: Map([]), entered: Map([]), same_x: Map([]), param_names: Map([]), scratch_names: Map([]) }
+  { locals: false, check: false, sigs: Map([]), root: 0, webs: Map([]), entered: Map([]), same_x: Map([]), param_names: Map([]), scratch_names: Map([]), derived_params: Map([]), derived_results: Map([]) }
 }
 
 fn Convention::sig(self : Convention, name : String) -> Signature {
@@ -558,7 +562,7 @@ fn solve(
       let primary = if f.helper || m { None } else { slots_of(outputs & memory.lnot()).get(0) }
       sigs[f.name] = { machine: m, memory, params: 0, outputs, kept: kept[f.name], primary, promoted: 0 }
     }
-    let conv = { locals: true, check: false, sigs, root, webs: Map([]), entered: Map([]), same_x: Map([]), param_names: Map([]), scratch_names: Map([]) }
+    let conv = { locals: true, check: false, sigs, root, webs: Map([]), entered: Map([]), same_x: Map([]), param_names: Map([]), scratch_names: Map([]), derived_params: Map([]), derived_results: Map([]) }
     // parameters: a least fixpoint, they only grow; a routine is followed
     // again when one it calls or goes to takes more
     let work = program.functions.map(fn(f) { f.name })

@@ -34,6 +34,21 @@ priv struct RegNames {
   defs : Array[Array[Array[String]]]
   // Every variable, with its register (by `local_names` index).
   names : Array[(String, Int)]
+  summary : WebSummary
+}
+
+// What a routine does with its parameters and gives back as its results,
+// for names from its callees (`derive_names`), by register: what each
+// parameter's entry value is passed to (callee, register) and whether
+// anything else reads it but a return; the callees whose results its
+// returns give back, and whether anything else is.
+priv struct WebSummary {
+  entry_passes : Array[Array[(String, Int)]]
+  entry_plain : Array[Bool]
+  result_calls : Array[Array[String]]
+  result_other : Array[Bool]
+  // the result is (also) reloaded from a `param *` byte (X from `slot`)
+  result_loaded : Array[Bool]
 }
 
 fn reg_slot(r : Int) -> Slot {
@@ -52,6 +67,10 @@ fn map_param(views : Views, conv : Convention, f : String, r : Int, explicit~ : 
       }
     None => ()
   }
+  match conv.derived_params.get(f) {
+    Some(names) if names[r] != "" => return Some((names[r], ""))
+    _ => ()
+  }
   if explicit { return None }
   let entered = conv.entered.get(f).unwrap_or([])
   for d in views.default_params {
@@ -60,10 +79,18 @@ fn map_param(views : Views, conv : Convention, f : String, r : Int, explicit~ : 
   None
 }
 
-fn map_result(views : Views, f : String, r : Int) -> (String, String)? {
+fn map_result(views : Views, conv : Convention, f : String, r : Int) -> (String, String)? {
   match views.results.get(f) {
-    Some(list) => list.iter().find_first(fn(p) { p.0 == r }).map(fn(p) { (p.1, p.2) })
-    None => None
+    Some(list) =>
+      match list.iter().find_first(fn(p) { p.0 == r }) {
+        Some(p) => return Some((p.1, p.2))
+        None => ()
+      }
+    None => ()
+  }
+  match conv.derived_results.get(f) {
+    Some(names) if names[r] != "" => Some((names[r], ""))
+    _ => None
   }
 }
 
@@ -151,9 +178,66 @@ fn Convention::derive_scratch_names(self : Convention, program : @ir.Program, vi
   }
 }
 
+// Names from the callees: a parameter whose entry value is only passed to
+// callees' named parameters (and given back) takes their name, and a result
+// that is only callees' named results takes theirs, up the calls until none
+// changes (`move_enemy_x` gives back `move_object_x`'s `pixels_moved`).
+fn Convention::derive_names(self : Convention, program : @ir.Program, views : Views) -> Unit {
+  let summaries : Map[String, WebSummary] = Map([])
+  for f in program.functions {
+    if !self.nameable(f) { continue }
+    let plan = scratch_plan_named(f, views, self)
+    match new_cfunc(f, views, self, plan).register_names() {
+      Some(n) => summaries[f.name] = n.summary
+      None => ()
+    }
+    self.derived_params[f.name] = Array::make(7, "")
+    self.derived_results[f.name] = Array::make(7, "")
+  }
+  let agreed = fn(list : Array[String]) -> String {
+    if list.is_empty() || list[0] == "" { return "" }
+    if list.iter().all(fn(x) { x == list[0] }) { list[0] } else { "" }
+  }
+  let mut changed = true
+  let mut rounds = 0
+  while changed && rounds < 32 {
+    changed = false
+    rounds += 1
+    for name, summary in summaries {
+      let sig = self.sig(name)
+      for r in 0..<7 {
+        let bit = held_vars[r].bit()
+        if (sig.params & bit) != 0 && map_param(views, self, name, r, explicit=true) is None && !summary.entry_plain[r] {
+          let derived = agreed(summary.entry_passes[r].map(fn(p) { match map_param(views, self, p.0, p.1, explicit=true) { Some((n, _)) => n; None => "" } }))
+          if derived != "" && self.derived_params[name][r] == "" {
+            self.derived_params[name][r] = derived
+            changed = true
+          }
+        }
+        if (sig.outputs & bit) != 0 && !summary.result_other[r] && map_result(views, self, name, r) is None {
+          let names = summary.result_calls[r].map(fn(g) { match map_result(views, self, g, r) { Some((n, _)) => n; None => "" } })
+          // (a result reloaded from `slot` is `object`)
+          if summary.result_loaded[r] {
+            match views.default_params.iter().find_first(fn(d) { d.0 == r }) {
+              Some(d) => names.push(d.1)
+              None => names.push("")
+            }
+          }
+          let derived = agreed(names)
+          if derived != "" {
+            self.derived_results[name][r] = derived
+            changed = true
+          }
+        }
+      }
+    }
+  }
+}
+
 // The names of each routine's parameters and results (in its prototype).
 fn Convention::name_parameters(self : Convention, program : @ir.Program, views : Views) -> Unit {
   self.derive_scratch_names(program, views)
+  self.derive_names(program, views)
   for f in program.functions {
     if !self.nameable(f) { continue }
     let sig = self.sig(f.name)
@@ -163,7 +247,7 @@ fn Convention::name_parameters(self : Convention, program : @ir.Program, views :
     for s in slots_of((sig.value_bits() | sig.pointer_bits()) & register_bits) {
       guard s is Reg(v) else { continue }
       let r = held_index(v)
-      let named = if (sig.params & s.bit()) != 0 { map_param(views, self, f.name, r) } else { map_result(views, f.name, r) }
+      let named = if (sig.params & s.bit()) != 0 { map_param(views, self, f.name, r) } else { map_result(views, self, f.name, r) }
       match named {
         Some((name, _)) if !taken.contains(name) && !views.taken.contains(name) && !used.contains(name) => {
           names[s.bit()] = name
@@ -379,7 +463,7 @@ fn CFunc::register_names(self : CFunc) -> RegNames? {
         let root = web.find(d)
         match s {
           Call(g) | CallValue(_, g, _) =>
-            results[root].push(match map_result(self.views, g, r) { Some((name, _)) => name; None => "" })
+            results[root].push(match map_result(self.views, conv, g, r) { Some((name, _)) => name; None => "" })
           Assign(_, Load(Ram, a)) if default_var(r) is Some(dv) && a.value() == Some(dv.2) => loads[root] += 1
           _ => others[root] += 1
         }
@@ -429,6 +513,66 @@ fn CFunc::register_names(self : CFunc) -> RegNames? {
     if list.is_empty() || list[0] == "" { return None }
     if list.iter().all(fn(x) { x == list[0] }) { Some(list[0]) } else { None }
   }
+  // what the routine does with its parameters and gives back
+  let passes : Array[Array[(String, Int)]] = Array::makei(n, fn(_) { [] })
+  let plain = Array::make(n, false)
+  let def_calls : Array[Array[String]] = Array::makei(n, fn(_) { [] })
+  let tail_results : Array[Array[String]] = Array::makei(7, fn(_) { [] })
+  for b, block in f.blocks {
+    for k, s in block.stmts {
+      for r in 0..<7 {
+        let u = use_node[b][k][r]
+        if u >= 0 {
+          match s.callee() {
+            Some(g) => passes[web.find(u)].push((g, r))
+            None => plain[web.find(u)] = true
+          }
+        }
+        let d = def_node[b][k][r]
+        if d >= 0 && s.callee() is Some(g) { def_calls[web.find(d)].push(g) }
+      }
+    }
+    let t = block.term
+    let read_plain = match t {
+      Branch(_, _, _) | Switch(_, _, _) | ReturnValue(_) | Jump(_, _) => term_uses(t)
+      Dispatch(h, _, _) => conv.sig(h).params
+      _ => 0
+    }
+    let pass = fn(g : String, wrote : Int) {
+      for r in 0..<7 {
+        let node = term_node[b][r]
+        if node >= 0 && (conv.sig(g).params & wrote.lnot() & held_vars[r].bit()) != 0 { passes[web.find(node)].push((g, r)) }
+        if (own.outputs & conv.sig(g).outputs & wrote.lnot() & held_vars[r].bit()) != 0 { tail_results[r].push(g) }
+      }
+    }
+    match t {
+      TailCall(g) => pass(g, 0)
+      Jump(_, cases) => for c in cases { pass(c.1, 0) }
+      Dispatch(h, _, cases) => for c in cases { pass(c.1, conv.dispatch_writes(h)) }
+      _ => ()
+    }
+    for r in 0..<7 {
+      let node = term_node[b][r]
+      if node >= 0 && (read_plain & held_vars[r].bit()) != 0 { plain[web.find(node)] = true }
+    }
+  }
+  let result_calls : Array[Array[String]] = Array::makei(7, fn(r) { tail_results[r].copy() })
+  let result_other = Array::make(7, false)
+  let result_loaded = Array::make(7, false)
+  for node in 0..<n {
+    if web.find(node) != node || !returned[node] { continue }
+    let r = web.reg[node]
+    if node < 7 || others[node] > 0 { result_other[r] = true }
+    if loads[node] > 0 { result_loaded[r] = true }
+    for g in def_calls[node] { result_calls[r].push(g) }
+  }
+  let summary : WebSummary = {
+    entry_passes: Array::makei(7, fn(r) { passes[web.find(r)] }),
+    entry_plain: Array::makei(7, fn(r) { plain[web.find(r)] }),
+    result_calls,
+    result_other,
+    result_loaded,
+  }
   // the names, unless taken or another register's
   let taken = names_taken(self.views, f, conv)
   let owner : Map[String, Int] = Map([])
@@ -450,7 +594,7 @@ fn CFunc::register_names(self : CFunc) -> RegNames? {
       conv.param_names.get(f.name).unwrap_or(Map([])).get(slot.bit())
     } else if loads[node] > 0 && others[node] == 0 && results[node].is_empty() && default_var(r) is Some(dv) {
       Some(dv.1)
-    } else if returned[node] && map_result(self.views, f.name, r) is Some((name, _)) {
+    } else if returned[node] && map_result(self.views, conv, f.name, r) is Some((name, _)) {
       Some(name)
     } else if agreed(results[node]) is Some(name) {
       Some(name)
@@ -485,11 +629,32 @@ fn CFunc::register_names(self : CFunc) -> RegNames? {
   let uses_out = f.blocks.mapi(fn(b, block) {
     [Array::makei(7, fn(r) { name(term_node[b][r], r) })] + block.stmts.mapi(fn(k, _) { Array::makei(7, fn(r) { name(use_node[b][k][r], r) }) })
   })
-  let defs_out = f.blocks.mapi(fn(b, block) {
-    [Array::makei(7, fn(r) { local_names[r] })] + block.stmts.mapi(fn(k, _) { Array::makei(7, fn(r) { name(def_node[b][k][r], r) }) })
+  // what a tail call writes: the callee's result names (the return reads
+  // them there)
+  let term_defs = f.blocks.map(fn(block) {
+    let out = Array::makei(7, fn(r) { local_names[r] })
+    if block.term is TailCall(g) {
+      for r in 0..<7 {
+        if (conv.sig(g).outputs & held_vars[r].bit()) == 0 { continue }
+        match map_result(self.views, conv, g, r) {
+          Some((given, _)) if !taken.contains(given) && !self.views.taken.contains(given) && owner.get(given).unwrap_or(r) == r => {
+            owner[given] = r
+            out[r] = given
+          }
+          _ => ()
+        }
+      }
+    }
+    out
   })
+  let defs_out = f.blocks.mapi(fn(b, block) {
+    [term_defs[b]] + block.stmts.mapi(fn(k, _) { Array::makei(7, fn(r) { name(def_node[b][k][r], r) }) })
+  })
+  for b, _ in f.blocks {
+    for r in 0..<7 { note(term_defs[b][r], r) }
+  }
   for node in 0..<n {
     if web.find(node) == node && name_of[node] != "" { note(name_of[node], web.reg[node]) }
   }
-  Some({ uses: uses_out, defs: defs_out, names: all })
+  Some({ uses: uses_out, defs: defs_out, names: all, summary })
 }

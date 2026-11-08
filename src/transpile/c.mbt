@@ -90,7 +90,7 @@ fn CFunc::reg(self : CFunc, v : @ir.Var) -> String {
 // The variable a read of `v` at the statement being printed is of.
 fn CFunc::use_reg(self : CFunc, v : @ir.Var) -> String {
   match self.regs {
-    Some(_) if self.stmt < 0 && (self.fresh & v.bit()) != 0 => self.reg(v)
+    Some(n) if self.stmt < 0 && (self.fresh & v.bit()) != 0 && held_index(v) >= 0 => n.defs[self.block][0][held_index(v)]
     Some(n) if held_index(v) >= 0 && (self.memory & v.bit()) == 0 => n.uses[self.block][self.stmt + 1][held_index(v)]
     _ => self.reg(v)
   }
@@ -899,10 +899,11 @@ fn Structurer::range(self : Structurer, s : Int, e : Int, follow : Int, skip_loo
   }
 }
 
-fn function_body(f : @ir.Function, views : Views, conv : Convention, plan~ : ScratchPlan = ScratchPlan::plain()) -> (Array[Line], RegNames?) {
+// The printer of a function, before its analyses.
+fn new_cfunc(f : @ir.Function, views : Views, conv : Convention, plan : ScratchPlan) -> CFunc {
   let locals = conv.has_locals(f.name)
   let after = if locals { conv.live_after(f) } else { [] }
-  let c : CFunc = {
+  {
     f,
     names: temp_names(f, locals~),
     views,
@@ -920,6 +921,10 @@ fn function_body(f : @ir.Function, views : Views, conv : Convention, plan~ : Scr
     block: 0,
     stmt: -1,
   }
+}
+
+fn function_body(f : @ir.Function, views : Views, conv : Convention, plan~ : ScratchPlan = ScratchPlan::plain()) -> (Array[Line], RegNames?) {
+  let c = new_cfunc(f, views, conv, plan)
   c.types = c.register_types()
   c.words = c.word_folds()
   c.regs = c.register_names()
