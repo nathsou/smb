@@ -194,14 +194,14 @@ fn CFunc::indirect(self : CFunc, e : @ir.Expr) -> String? {
     Binary(Add, base, Var(Y)) =>
       match pointer(base) {
         Some(p) if !in_memory(p) => None
-        Some(p) if p.is_atom() && self.locals => Some("(uint16_t)(zero_page_pointer(\{self.expr(p)}) + y)")
+        Some(p) if p.is_atom() && self.locals => Some("(uint16_t)(zero_page_pointer(\{self.expr(p)}) + \{self.use_reg(Y)})")
         Some(p) if p.is_atom() => Some("indirect_y_addr(\{self.expr(p)})")
         _ => None
       }
     _ =>
       match pointer(e) {
         Some(Unary(Byte, Binary(Add, p, Var(X)))) if p.is_atom() && self.locals =>
-          Some("zero_page_pointer((uint8_t)(\{self.paren(p, 4)} + x))")
+          Some("zero_page_pointer((uint8_t)(\{self.paren(p, 4)} + \{self.use_reg(X)}))")
         Some(Unary(Byte, Binary(Add, p, Var(X)))) if p.is_atom() => Some("indirect_x_addr(\{self.expr(p)})")
         _ => None
       }
@@ -1039,7 +1039,17 @@ fn scratch_plan(f : @ir.Function, views : Views, conv : Convention) -> ScratchPl
       }
       if term_reads && !term_local { in_ram = true }
     }
-    if in_ram {
+    // (a byte with values both local and in RAM: the local takes the name,
+    // RAM `NAME_ram`)
+    let local = match webs {
+      Some(w) => (w.locals & bit) != 0 || (conv.sig(f.name).promoted & scratch_bit(k)) != 0
+      None => false
+    }
+    if in_ram && local {
+      plan.locals[k] = name
+      plan.ram[k] = name + "_ram"
+      plan.defines.push((k, name + "_ram", description + " (in RAM)"))
+    } else if in_ram {
       plan.ram[k] = name
       plan.defines.push((k, name, description))
     } else {

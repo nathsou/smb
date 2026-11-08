@@ -58,6 +58,9 @@ def check_scratch_names():
     functions = {}
     for match in re.finditer(r"^\w[\w *]* (\w+)\(([^)\n]*)\) \{$(.*?)^\}$", code, re.M | re.S):
         functions[match.group(1)] = match.group(2) + match.group(3)
+    # (the hand-written routines: their prototypes)
+    for match in re.finditer(r"^\w[\w *]* (\w+)\(([^)\n]*)\);$", (ROOT / "codegen/game/code.h").read_text(), re.M):
+        functions.setdefault(match.group(1), match.group(2))
     missing = []
     for line in (ROOT / "maps/smb.map").read_text().splitlines():
         fields = line.split(";")[0].split()

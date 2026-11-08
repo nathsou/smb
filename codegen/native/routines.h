@@ -36,14 +36,14 @@ uint8_t clear_screens(void); // returns y
 // generated
 void handle_pause(void);
 uint8_t shuffle_sprite_slots(void); // returns x
-void run_game_mode(uint8_t x);
+void run_game_mode(uint8_t leftover_x);
 uint8_t hide_all_sprites(void); // returns y
 void hide_sprites_but_zero(void);
-void select_vram_list_b(uint8_t a);
+void select_vram_list_b(uint8_t vram_list);
 void next_game_mode_task_b(void);
 void read_joypads(void);
 void update_top_score(void);
 void clear_memory(void); // with the machine's registers
-void update_sound(uint8_t x);
+void update_sound(uint8_t leftover_x);
 
 #endif
