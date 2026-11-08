@@ -58,16 +58,33 @@ priv struct View {
   description : String
 }
 
+// A record (the map's `record`): arrays of RAM indexed alike as the fields
+// of one structure laid over RAM, `enemy(x).kind` for `enemy_kind(x)`.
+// Each member sits at its array's address, relative to the first, so
+// `enemy(i)` is the structure at that address plus i: the bytes stay where
+// they are. Unlike the arrays' views, an index does not wrap within page
+// zero or RAM; the program's indices stay within their arrays
+// (--check-scratch checks it).
+priv struct Record {
+  name : String
+  base : Int // the lowest field's address
+  members : Array[(String, Int, String)] // field, address, the array's type
+  description : String
+}
+
 priv struct Views {
   by_symbol : Map[String, View]
   list : Array[View]
   origin : Int // of the PRG image
   stack : Bool // `stack` names page one
   types : Map[String, @image.MapType]
+  records : Array[Record]
+  // the record and field each array of a record is
+  fields : Map[String, (Int, String)]
 }
 
 fn Views::empty() -> Views {
-  { by_symbol: Map([]), list: [], origin: 0x8000, stack: false, types: Map([]) }
+  { by_symbol: Map([]), list: [], origin: 0x8000, stack: false, types: Map([]), records: [], fields: Map([]) }
 }
 
 // Identifiers a view must not shadow besides those of the generated code:
@@ -117,7 +134,93 @@ fn Views::from_map(low : @lower.AsmLowering, reserved : Set[String]) -> Views {
     views.by_symbol[entry.name] = view
     views.list.push(view)
   }
-  { ..views, stack: !views.list.is_empty() && !taken("stack") && !seen.contains("stack") }
+  // records of arrays of RAM, each field named without the record's prefix
+  for r in p.map.records {
+    if taken(r.name) || seen.contains(r.name) { continue }
+    let members = []
+    for symbol in r.fields {
+      guard p.map.entries.iter().find_first(fn(e) { e.name == symbol }) is Some(e) else { continue }
+      let lower = symbol.to_lower()
+      let field = if lower.has_prefix(r.name + "_") { lower.view(start_offset=r.name.length() + 1).to_owned() } else { lower }
+      members.push((field, e.address, e.type_name, symbol))
+    }
+    members.sort_by(fn(a, b) { a.1.compare(b.1) })
+    let base = members[0].1
+    let index = views.records.length()
+    for m in members { views.fields[m.3] = (index, m.0) }
+    views.records.push({ name: r.name, base, members: members.map(fn(m) { (m.0, m.1, m.2) }), description: r.description })
+    seen.add(r.name)
+  }
+  // a record's arrays are read and written as its fields, not by their own
+  // views; a field named like a remaining view keeps its array's name
+  let remaining = views.list.filter(fn(v) { !views.fields.contains(v.symbol) })
+  let names : Set[String] = Set(remaining.map(fn(v) { v.name }))
+  for i, r in views.records {
+    let members = r.members.map(fn(m) {
+      let symbol = views.fields.iter().find_first(fn(e) { e.1.0 == i && e.1.1 == m.0 }).map(fn(e) { e.0 }).unwrap()
+      let field = if names.contains(m.0) || c_reserved.contains(m.0) { symbol.to_lower() } else { m.0 }
+      views.fields[symbol] = (i, field)
+      (field, m.1, m.2)
+    })
+    views.records[i] = { ..r, members }
+  }
+  for v in views.list {
+    if views.fields.contains(v.symbol) { views.by_symbol.remove(v.symbol) }
+  }
+  {
+    ..views,
+    list: remaining,
+    stack: !remaining.is_empty() && !taken("stack") && !seen.contains("stack"),
+  }
+}
+
+// An address as a field of a record: the record, the field, and the
+// index (a constant offset and other terms), wrapping or not.
+fn Views::record_place(self : Views, address : @ir.Expr) -> (Record, String, Int, Array[@ir.Expr])? {
+  if self.records.is_empty() { return None }
+  let sum = match address {
+    Unary(Byte, inner) => inner
+    Binary(And, inner, Const(0x7ff)) => inner
+    _ => address
+  }
+  let mut found : (Int, String)? = None
+  let mut offset = 0
+  let mut symbols = 0
+  let index = []
+  let mut ok = true
+  fn walk(e : @ir.Expr) -> Unit {
+    match e {
+      Binary(Add, l, r) => {
+        walk(l)
+        walk(r)
+      }
+      Binary(Sub, l, Const(v)) => {
+        walk(l)
+        offset -= v
+      }
+      Const(v) => offset += v
+      Sym(name, v) => {
+        symbols += 1
+        match self.fields.get(name) {
+          Some(f) if found is None => found = Some(f)
+          _ => offset += v
+        }
+      }
+      Binary(Sub, _, _) => ok = false
+      _ => index.push(e)
+    }
+  }
+  walk(sum)
+  guard ok && symbols == 1 && found is Some((r, field)) else { return None }
+  Some((self.records[r], field, offset, index))
+}
+
+// The type of a record's field.
+fn Record::type_of(self : Record, field : String) -> String {
+  match self.members.iter().find_first(fn(m) { m.0 == field }) {
+    Some(m) => m.2
+    None => ""
+  }
 }
 
 // Identifiers of C text, outside comments.
@@ -240,6 +343,24 @@ fn Views::header(self : Views) -> String {
   out.write_string("// Included by code.c only, after every other header.\n\n")
   for t in self.types.values() { out.write_string(type_definition(t) + "\n") }
   if self.stack { out.write_string("#define stack (&ram[0x100]) // the 6502 stack, page one\n") }
+  for r in self.records {
+    let about = if r.description == "" { "" } else { ": " + r.description }
+    out.write_string("\n// \{r.name}\{about}. Its fields are arrays of RAM indexed alike, laid\n")
+    out.write_string("// out at their addresses: \{r.name}(i) is the structure at $\{r.base.to_string(radix=16)} + i.\n")
+    out.write_string("struct \{r.name}_record {\n")
+    let mut at = r.base
+    let mut gap = 0
+    for m in r.members {
+      if m.1 > at {
+        out.write_string("  uint8_t gap\{gap}[\{m.1 - at}];\n")
+        gap += 1
+      }
+      out.write_string("  uint8_t \{m.0}; // $\{m.1.to_string(radix=16).pad_start(4, '0')}\n")
+      at = m.1 + 1
+    }
+    out.write_string("};\n")
+    out.write_string("#define \{r.name}(i) (*(struct \{r.name}_record *)&ram[0x\{r.base.to_string(radix=16)} + (i)])\n")
+  }
   for v in self.list {
     let comment = if v.description == "" { "" } else { " // " + v.description }
     let text = match v.kind {

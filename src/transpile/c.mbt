@@ -191,10 +191,27 @@ fn CFunc::checked_ram(self : CFunc, a : @ir.Expr) -> String {
   "ram[\{self.guarded(index)}]"
 }
 
+// An index into an array or a record: its terms and constant offset.
+fn CFunc::index_text(self : CFunc, offset : Int, index : Array[@ir.Expr]) -> String {
+  let terms = index.map(fn(e) { self.paren(e, 4) }).join(" + ")
+  if index.is_empty() {
+    show_number(offset)
+  } else if offset > 0 {
+    "\{show_number(offset)} + \{terms}"
+  } else if offset < 0 {
+    "\{terms} - \{show_number(-offset)}"
+  } else {
+    terms
+  }
+}
+
 fn CFunc::access(self : CFunc, space : @ir.Mem, a : @ir.Expr) -> String {
   if space == Ram && self.local_scratch(a) is Some(k) { return "t\{k}" }
   if space == Ram && self.conv.check && a.value() is None && !(a is Binary(Add, Const(0x100), Var(SP))) {
     return self.checked_ram(a)
+  }
+  if space == Ram && self.views.record_place(a) is Some((r, field, offset, index)) {
+    return "\{r.name}(\{self.index_text(offset, index)}).\{field}"
   }
   match self.views.place(a) {
     Some({ view, offset, index }) if view.kind.names(space) => {
@@ -244,9 +261,10 @@ fn CFunc::type_with(self : CFunc, e : @ir.Expr, env : Array[String]) -> String {
     Var(X) => env[1]
     Var(Y) => env[2]
     Load(Ram, a) =>
-      match self.views.place(a) {
-        Some({ view, .. }) => view.type_name
-        None => ""
+      match (self.views.record_place(a), self.views.place(a)) {
+        (Some((r, field, _, _)), _) => r.type_of(field)
+        (_, Some({ view, .. })) => view.type_name
+        _ => ""
       }
     Binary(And | Or | Xor, l, r) => {
       let t = self.type_with(l, env)

@@ -244,6 +244,19 @@ pub(all) enum MapKind {
   Trap
 } derive(Eq, @debug.Debug)
 
+pub(all) struct MapRecord {
+  name : String
+  fields : Array[String]
+  description : String
+} derive(@debug.Debug)
+
+pub(all) struct MapScratch {
+  routine : String
+  byte : Int32
+  name : String
+  description : String
+} derive(@debug.Debug)
+
 pub(all) struct MapType {
   name : String
   flags : Bool
@@ -288,6 +301,8 @@ pub(all) struct RomMap {
   ram_code : Array[(Int32, Array[Int32])]
   copied : Array[(Int32, Int32, Int32, Int32)]
   threads : Array[Int32]
+  records : Array[MapRecord]
+  scratch : Array[MapScratch]
 } derive(@debug.Debug)
 pub fn RomMap::bank_name(Self, Int32) -> String
 pub fn RomMap::empty() -> Self

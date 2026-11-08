@@ -55,6 +55,7 @@ enum {
 
 // enemy_kind values
 enum {
+  ENEMY_KIND_RED_KOOPA_OFF_LEDGES = 1,
   ENEMY_KIND_BUZZY_BEETLE = 2,
   ENEMY_KIND_RED_KOOPA = 3,
   ENEMY_KIND_HAMMER_BRO = 5,

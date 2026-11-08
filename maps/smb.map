@@ -20,6 +20,18 @@ flags direction right=$01 left=$02
 enum player_state on_ground=0 jumping=1 falling=2 climbing=3 ; jumping also while swimming up
 enum power small=0 big=1 fiery=2
 enum area_kind water=0 ground=1 underground=2 castle=3
+
+# Records: arrays of RAM indexed alike, as one structure's fields in the C
+# (enemy(x).kind for enemy_kind(x)). The bytes stay where they are.
+record enemy enemy_active enemy_kind enemy_state enemy_dir enemy_x_speed enemy_page enemy_x enemy_y_speed enemy_y_page enemy_y enemy_sprite_attr enemy_x_force enemy_y_fraction enemy_y_force enemy_collision enemy_box_kind enemy_sprite_slot enemy_frame_timer enemy_interval_timer ; an enemy slot (0-4, 5 for powerups and the flag)
+record obj obj_state obj_dir obj_x_speed obj_page obj_x obj_y_speed obj_y_page obj_y obj_screen_x obj_screen_y obj_sprite_attr obj_offscreen obj_x_force obj_y_fraction obj_y_force obj_collision obj_box_kind ; an object slot: the player, enemies, fireballs, blocks, misc objects and bubbles in turn
+record fireball fireball_state fireball_bouncing fireball_x_speed fireball_page fireball_x fireball_y_speed fireball_y_page fireball_y fireball_box_kind fireball_sprite_slot ; a fireball slot
+record block block_state block_x_speed block_page block_x block_y_speed block_y_page block_y block_screen_x block_screen_y block_offscreen block_origin_y block_buffer_low block_metatile block_page2 block_replace block_origin_x block_y_force block_sprite_slot ; a bumped block slot (brick chunks use two more)
+record misc misc_state misc_x_speed misc_page misc_x misc_y_speed misc_y_page misc_y misc_box_kind misc_contact misc_sprite_slot ; a slot for hammers and jumping coins
+record bubble bubble_page bubble_x bubble_y_page bubble_y bubble_y_fraction bubble_sprite_slot ; an air bubble slot
+record popup popup_kind popup_x popup_y popup_timer ; a floating score
+record cannon cannon_page cannon_x cannon_y cannon_timer ; a cannon that fires bullets
+record sprite sprite_y sprite_tile sprite_attr sprite_x ; a sprite of the OAM copy, by its byte offset (4 per sprite)
 # What an enemy slot holds (enemy_initializers and enemy_runners, by kind).
 # $00 is left unnamed: it is the koopa a green paratroopa becomes when
 # stomped (check_stun_enemy), but also what a cleared slot holds. $01 is the

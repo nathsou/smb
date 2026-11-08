@@ -170,10 +170,30 @@ pub(all) struct RomMap {
   ram_code: Array[(Int, Array[Int])] // code the program writes to RAM: address and bytes
   copied: Array[(Int, Int, Int, Int)] // code it copies from ROM to RAM: address, bank (-1: fixed), ROM address, bytes
   threads: Array[Int] // where the program starts coroutines, on stacks of their own (see `thread`)
+  records: Array[MapRecord] // arrays indexed alike, as the fields of one record (see `record`)
+  scratch: Array[MapScratch] // names of the scratch bytes in routines (see `scratch`)
+} derive(Debug)
+
+// record NAME VAR...: arrays of RAM indexed alike (one object slot's
+// fields), as one structure; a field is named by its variable without the
+// record's name as a prefix (enemy_x is enemy's x).
+pub(all) struct MapRecord {
+  name: String
+  fields: Array[String] // the variables' address constants
+  description: String
+} derive(Debug)
+
+// scratch ROUTINE $0K NAME: what a scratch byte ($00-$07) holds in a
+// routine, the name it is printed by there.
+pub(all) struct MapScratch {
+  routine: String
+  byte: Int
+  name: String
+  description: String
 } derive(Debug)
 
 pub fn RomMap::empty() -> RomMap {
-  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, follow: false, preempt: 0, jumps: [], jump_tables: [], inline: [], ram_code: [], copied: [], threads: [] }
+  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, follow: false, preempt: 0, jumps: [], jump_tables: [], inline: [], ram_code: [], copied: [], threads: [], records: [], scratch: [] }
 }
 
 // The name of a switchable bank, the prefix of its entries.
@@ -250,6 +270,8 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
   let ram_code: Array[(Int, Array[Int])] = []
   let copied: Array[(Int, Int, Int, Int)] = []
   let threads: Array[Int] = []
+  let records: Array[MapRecord] = []
+  let scratch: Array[MapScratch] = []
   let shadows: Array[(Int, Int)] = []
   let names: Set[String] = Set([])
   fn claim(name: String) raise ImageError {
@@ -289,6 +311,24 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
         members.push((constant, value))
       }
       types.push({ name, flags: fields[0] == "flags", members, description })
+      continue
+    }
+    // record NAME VAR...
+    if fields[0] == "record" {
+      if fields.length() < 3 { raise InvalidImage("Map record line needs a name and its variables: \{line}") }
+      if records.iter().any(fn(r) { r.name == fields[1] }) { raise InvalidImage("Duplicate map record: \{fields[1]}") }
+      records.push({ name: fields[1], fields: fields[2:].map(fn(f) { f.to_upper() }), description })
+      continue
+    }
+    // scratch ROUTINE $0K NAME
+    if fields[0] == "scratch" {
+      if fields.length() != 4 { raise InvalidImage("Map scratch line needs a routine, a byte and a name: \{line}") }
+      let byte = parse_number(fields[2])
+      if byte < 0 || byte > 7 { raise InvalidImage("Scratch bytes are $00-$07: \{line}") }
+      if scratch.iter().any(fn(e) { e.routine == fields[1] && (e.byte == byte || e.name == fields[3]) }) {
+        raise InvalidImage("Duplicate map scratch name: \{line}")
+      }
+      scratch.push({ routine: fields[1], byte, name: fields[3], description })
       continue
     }
     // jump [BANK:]$SITE [BANK:]$TARGET: a computed jump can go there too
@@ -499,7 +539,20 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       raise InvalidImage("Unknown map type: \{entry.type_name}")
     }
   }
-  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), follow, preempt, jumps, jump_tables, inline, ram_code, copied, threads }
+  for r in records {
+    for f in r.fields {
+      guard entries.iter().find_first(fn(e) { e.name == f }) is Some(e) else {
+        raise InvalidImage("Record \{r.name} has an unknown variable: \{f.to_lower()}")
+      }
+      if e.kind != Var || e.length == 0 { raise InvalidImage("Record fields are arrays of RAM: \{f.to_lower()}") }
+    }
+  }
+  for e in scratch {
+    if !entries.iter().any(fn(r) { r.kind == Routine && r.name == e.routine }) {
+      raise InvalidImage("Scratch name for an unknown routine: \{e.routine}")
+    }
+  }
+  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), follow, preempt, jumps, jump_tables, inline, ram_code, copied, threads, records, scratch }
 }
 
 pub(all) struct Cartridge {
