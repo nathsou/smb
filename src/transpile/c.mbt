@@ -50,6 +50,8 @@ priv struct CFunc {
   // The scratch bytes' names: in RAM ("" for `ram[k]`), and as locals.
   scratch_ram : Array[String]
   scratch_local : Array[String]
+  // The carry chains printed as 16-bit arithmetic (words.mbt).
+  mut words : Map[Int, WordFold]
   mut block : Int
   mut stmt : Int
 }
@@ -670,6 +672,11 @@ fn Structurer::stmts(self : Structurer, b : Int) -> Unit {
       (Some(webs), Store(Ram, _, value)) if webs.dead[b][k] != 0 && value.is_pure() => continue
       _ => ()
     }
+    match self.c.word_stmt(self.c.words, b, k, s, live) {
+      Some("") => continue
+      Some(text) => { self.emit(text); continue }
+      None => ()
+    }
     self.emit(self.c.stmt(s, live~))
   }
   self.c.at(b, -1)
@@ -846,10 +853,12 @@ fn function_body(f : @ir.Function, views : Views, conv : Convention, plan~ : Scr
     types: [],
     scratch_ram: plan.ram,
     scratch_local: plan.locals,
+    words: Map([]),
     block: 0,
     stmt: -1,
   }
   c.types = c.register_types()
+  c.words = c.word_folds()
   let pos = f.blocks.map(fn(_) { -1 })
   let layout = []
   // only blocks reachable from the entry are printed

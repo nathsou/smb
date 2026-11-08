@@ -252,3 +252,17 @@ test "with --locals, a register given back as it was is no result" {
   assert_eq(adapters.contains("void enter_Walk(void) {"), true)
   assert_eq(adapters.contains("// in: x; out: x\nvoid machine_Walk(void) {"), true)
 }
+
+test "with --locals, a carry chain is 16-bit arithmetic" {
+  // Add: $20/$21 += $22/$23; Sub: $24/$25 -= $26/$27; Cmp: $28/$29 >= $2a/$2b;
+  // Keep: the carry out of the high byte is used, so the chain stays
+  let source = ".org $c000\nBoot:\n jsr Add\n jsr Sub\n jsr Cmp\n jsr Keep\n lda #$00\nIdle:\n jmp Idle\nAdd:\n lda $20\n clc\n adc $22\n sta $20\n lda $21\n adc $23\n sta $21\n rts\nSub:\n lda $24\n sec\n sbc $26\n sta $24\n lda $25\n sbc $27\n sta $25\n rts\nCmp:\n lda $28\n cmp $2a\n lda $29\n sbc $2b\n bcc Less\n inc $2c\nLess:\n rts\nKeep:\n lda $20\n clc\n adc $22\n sta $20\n lda $21\n adc $23\n sta $21\n bcc Done\n inc $2d\nDone:\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let code = code_c(transpile_low(lower_fixture(source), locals=true))
+  assert_eq(code.contains("  uint16_t sum = (uint16_t)(WORD(ram[0x21], ram[0x20]) + WORD(ram[0x23], ram[0x22]));\n  ram[0x20] = (uint8_t)sum;\n  ram[0x21] = (uint8_t)(sum >> 8);\n"), true)
+  assert_eq(code.contains("  uint16_t diff = (uint16_t)(WORD(ram[0x25], ram[0x24]) - WORD(ram[0x27], ram[0x26]));\n  ram[0x24] = (uint8_t)diff;\n  ram[0x25] = (uint8_t)(diff >> 8);\n"), true)
+  assert_eq(code.contains("  carry = WORD(ram[0x29], ram[0x28]) >= WORD(ram[0x2b], ram[0x2a]);\n"), true)
+  assert_eq(code.contains("  uint16_t sum2 = (uint16_t)(ram[0x21] + ram[0x23] + (sum >= 0x100));\n  ram[0x21] = (uint8_t)sum2;\n  if (sum2 < 0x100) {"), true)
+  // without --locals, the chain is as the machine runs it
+  let machine = code_c(transpile_low(lower_fixture(source)))
+  assert_eq(machine.contains("WORD("), false)
+}

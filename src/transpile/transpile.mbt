@@ -103,6 +103,7 @@ fn Emitter::emit_constants_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("")
   self.emit("#define HIGH_BYTE(x) (((x) >> 8) & 0xff)")
   self.emit("#define LOW_BYTE(x) ((x) & 0xff)")
+  self.emit("#define WORD(hi, lo) ((hi) << 8 | (lo)) // two bytes as a 16-bit value")
   self.emit("")
 
   // in source order, with the comment that follows each definition

@@ -172,7 +172,7 @@ fn Views::from_map(low : @lower.AsmLowering, reserved : Set[String]) -> Views {
   }
   // scratch names, unless an identifier, a view, a record or a record's
   // member already has the name (a #define would rewrite `.member`)
-  let members : Set[String] = Set::new()
+  let members : Set[String] = Set([])
   for r in views.records {
     members.add(r.name)
     for m in r.members { members.add(m.0) }
