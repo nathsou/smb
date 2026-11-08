@@ -245,7 +245,22 @@ if (area_kind == 0)                        ->  if (area_kind == AREA_KIND_WATER)
 ```
 
 The types are anonymous C enums in `vars.h` and in `codegen/native/smb.h`,
-and the variables stay bytes.
+and the variables stay bytes. A register loaded from a typed variable holds
+its type until written (a forward pass per function), so constants beside it
+are named too:
+
+```c
+a = enemy_kind(x);
+if (a != ENEMY_KIND_SPINY) {
+  if (a != ENEMY_KIND_PIRANHA) {
+```
+
+SMB's `enemy_kind` names the kinds the code establishes: the routines that
+`enemy_initializers`, `enemy_runners` and the large platforms' dispatch give
+each kind, and the code that sets or tests one (`draw_vertical_pipe` sets the
+piranha, `draw_flagpole` the flag, `fireball_hit_enemy` spares the buzzy
+beetle). Every routine of `maps/smb.map` has a one-line description, the
+comment above its function.
 
 JSRs are plain C calls: SMB's replay was identical with and without the
 emulated return-address stack, and the generator's static stack checks reject
@@ -713,8 +728,9 @@ original renderer are unchanged.
 - A proof per routine that the C with locals computes what the reference
   computes, for every input (as acnl does with an SMT solver), for the paths
   that neither the replay nor the differential test's states take.
-- Scratch bytes as C locals, parameters and return values: `$00-$07` are
-  most of the remaining `ram[...]` accesses.
+- Scratch bytes by name: most values in `$00-$07` cross a routine's edge,
+  so they stay `ram[k]`. The map could name them per routine (the distance
+  `player_enemy_distance` leaves in `$00`), as views of the same bytes.
 - Records: the sprite table and the object slots as structures over the
   same bytes (`sprite_x[4 + y]` is the X of the sprite after `y / 4`).
 - The status-bar split is decided after the frame's game logic, as before;
