@@ -498,7 +498,11 @@ fn CFunc::call(self : CFunc, g : String, live~ : Int = local_slots) -> String {
   let parts = []
   for slot in slots_of(s.params & through) { parts.push("\{slot.machine_place()} = \{slot.local_name()};") }
   let (call, primary) = self.call_parts(g)
+  // (X back as it was, by the analysis: no need to assign it)
+  let unchanged = self.locals && self.stmt >= 0 &&
+    self.conv.same_x.get(self.f.name).map(fn(set) { set.contains((self.block << 16) | self.stmt) }).unwrap_or(false)
   parts.push(match primary {
+    Some(Reg(X)) if unchanged => call + ";"
     Some(p) if (live & p.bit()) != 0 => "\{self.slot(p)} = \{call};"
     _ => call + ";"
   })

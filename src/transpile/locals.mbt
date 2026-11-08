@@ -251,10 +251,13 @@ priv struct Convention {
   // What each routine is entered with equal, by every call (register slot,
   // RAM address), which what it gives back as it was may rest on.
   mut entered : Map[String, Array[(Int, Int)]]
+  // The calls of each routine after which X holds what it held before
+  // (block << 16 | statement): its result in X need not be assigned.
+  mut same_x : Map[String, Set[Int]]
 }
 
 fn Convention::machine() -> Convention {
-  { locals: false, check: false, sigs: Map([]), root: 0, webs: Map([]), entered: Map([]) }
+  { locals: false, check: false, sigs: Map([]), root: 0, webs: Map([]), entered: Map([]), same_x: Map([]) }
 }
 
 fn Convention::sig(self : Convention, name : String) -> Signature {
@@ -474,9 +477,10 @@ fn Convention::locals_of(program : @ir.Program) -> Convention raise TranspileErr
     (conv, root)
   }
   let (first, root) = resolve(kept, root)
-  let (found, entered) = kept_results(program, first, writes)
+  let (found, entered, same_x) = kept_results(program, first, writes)
   let (conv, _) = resolve(found, root)
   conv.entered = entered
+  conv.same_x = same_x
   let must = scratch_must_writes(program, conv)
   for f in program.functions {
     if conv.has_locals(f.name) { conv.webs[f.name] = conv.webs_of(f, writes, must) }
@@ -506,7 +510,7 @@ fn solve(
       let primary = if f.helper || m { None } else { slots_of(outputs & memory.lnot()).get(0) }
       sigs[f.name] = { machine: m, memory, params: 0, outputs, kept: kept[f.name], primary }
     }
-    let conv = { locals: true, check: false, sigs, root, webs: Map([]), entered: Map([]) }
+    let conv = { locals: true, check: false, sigs, root, webs: Map([]), entered: Map([]), same_x: Map([]) }
     // parameters: a least fixpoint, they only grow
     let mut changed = true
     while changed {
@@ -1158,7 +1162,7 @@ fn kept_results(
   program : @ir.Program,
   conv : Convention,
   writes : Map[String, Int],
-) -> (Map[String, Int], Map[String, Array[(Int, Int)]]) {
+) -> (Map[String, Int], Map[String, Array[(Int, Int)]], Map[String, Set[Int]]) {
   // the RAM bytes code with locals loads into index registers (`slot`)
   let tracked : Set[Int] = Set([])
   for f in program.functions {
@@ -1367,5 +1371,41 @@ fn kept_results(
     }
     if grew { for c in callers.get(name).unwrap_or([]) { push(c) } }
   }
-  (facts.kept, facts.equal)
+  // The calls after which X holds what it held before: it was equal to a
+  // location the call leaves alone, and still is (by block << 16 | stmt).
+  let same_x : Map[String, Set[Int]] = Map([])
+  for f in program.functions {
+    if !conv.has_locals(f.name) { continue }
+    let (starts, _) = facts.flow(f)
+    let sites : Set[Int] = Set([])
+    for b, block in f.blocks {
+      guard starts[b] is Some(start) else { continue }
+      let mut h = start.copy()
+      for i, s in block.stmts {
+        let before = h.copy()
+        h = facts.step(h, s)
+        guard s is Call(g) else { continue }
+        let touched = facts.changes.get(g)
+        let r = before.rep(1)
+        let kept = before.class.iter().any(fn(e) {
+          let (loc, cls) = e
+          if loc == 1 || cls != r { return false }
+          let untouched = if loc >= byte_base && loc < stack_base {
+            match touched {
+              Some(set) => !set.contains(loc - byte_base)
+              None => false
+            }
+          } else {
+            // registers, flags and scratch bytes the call changes are
+            // separated by it; stack slots and constants stay
+            true
+          }
+          untouched && h.same(1, loc)
+        })
+        if kept { sites.add((b << 16) | i) }
+      }
+    }
+    same_x[f.name] = sites
+  }
+  (facts.kept, facts.equal, same_x)
 }

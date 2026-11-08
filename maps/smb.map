@@ -21,8 +21,10 @@ enum player_state on_ground=0 jumping=1 falling=2 climbing=3 ; jumping also whil
 enum power small=0 big=1 fiery=2
 enum area_kind water=0 ground=1 underground=2 castle=3
 # What an enemy slot holds (enemy_initializers and enemy_runners, by kind).
-# $00 is left unnamed: it is also what a cleared slot holds.
-enum enemy_kind buzzy_beetle=$02 red_koopa=$03 hammer_bro=$05 goomba=$06 blooper=$07 bullet=$08 cheep_cheep_slow=$0a cheep_cheep_fast=$0b podoboo=$0c piranha=$0d bouncing_paratroopa=$0e red_paratroopa=$0f flying_paratroopa=$10 lakitu=$11 spiny=$12 flying_cheep_cheeps=$14 bowser_flame=$15 fireworks=$16 bullets_and_cheep_cheeps=$17 end_frenzy=$18 firebar_slow=$1b firebar_fast=$1c firebar_slow_reverse=$1d firebar_fast_reverse=$1e long_firebar=$1f balance_platform=$24 vertical_platform=$25 lift_up=$26 lift_down=$27 side_platform=$28 drop_platform=$29 right_platform=$2a small_lift_up=$2b small_lift_down=$2c bowser=$2d powerup=$2e vine=$2f flagpole_flag=$30 star_flag=$31 spring=$32 bullet_cannon=$33 warp_zone=$34 retainer=$35
+# $00 is left unnamed: it is the koopa a green paratroopa becomes when
+# stomped (check_stun_enemy), but also what a cleared slot holds. $01 is the
+# koopa a red paratroopa becomes, which walks off ledges ($03 turns at them).
+enum enemy_kind red_koopa_off_ledges=$01 buzzy_beetle=$02 red_koopa=$03 hammer_bro=$05 goomba=$06 blooper=$07 bullet=$08 cheep_cheep_slow=$0a cheep_cheep_fast=$0b podoboo=$0c piranha=$0d bouncing_paratroopa=$0e red_paratroopa=$0f flying_paratroopa=$10 lakitu=$11 spiny=$12 flying_cheep_cheeps=$14 bowser_flame=$15 fireworks=$16 bullets_and_cheep_cheeps=$17 end_frenzy=$18 firebar_slow=$1b firebar_fast=$1c firebar_slow_reverse=$1d firebar_fast_reverse=$1e long_firebar=$1f balance_platform=$24 vertical_platform=$25 lift_up=$26 lift_down=$27 side_platform=$28 drop_platform=$29 right_platform=$2a small_lift_up=$2b small_lift_down=$2c bowser=$2d powerup=$2e vine=$2f flagpole_flag=$30 star_flag=$31 spring=$32 bullet_cannon=$33 warp_zone=$34 retainer=$35
 
 # Hardware registers
 io $2000 ppu_ctrl
