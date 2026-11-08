@@ -1185,3 +1185,101 @@ fn Emitter::emit_machine_adapters(self : Emitter, program : @ir.Program, conv : 
     self.emit("}")
   }
 }
+
+// The hand-written routines the game calls and the generated routines they
+// call (their original code's callees), with the signatures --locals gives
+// them: routines.h for the hand-written C, and machine_calls.c, the
+// adapters for a game that keeps the machine's registers (built without
+// --locals, and the split WebAssembly build's).
+fn native_interface(program : @ir.Program, conv : Convention) -> (String, String) {
+  let natives = program.functions.filter(fn(f) { f.native })
+  let called : Set[String] = Set([])
+  for f in program.functions {
+    if f.native { continue }
+    for g in callees_of(f) { called.add(g) }
+  }
+  let provided = natives.filter(fn(f) { program.is_root(f.name) || called.contains(f.name) })
+  let wanted = native_callees(program)
+  let callees = program.functions.filter(fn(f) { !f.native && wanted.contains(f.name) })
+  let result = fn(f : @ir.Function) {
+    match conv.sig(f.name).primary {
+      Some(p) if conv.has_locals(f.name) => " // returns \{p.local_name()}"
+      _ => if conv.has_locals(f.name) { "" } else { " // with the machine's registers" }
+    }
+  }
+  let renamed = (provided + callees).filter(fn(f) { conv.has_locals(f.name) })
+  let h = StringBuilder()
+  h.write_string("// The hand-written routines the game calls (routines.txt) and the generated\n")
+  h.write_string("// routines they call, with the signatures --locals gives them. Generated\n")
+  h.write_string("// with the game (`make native-interface`), do not edit.\n")
+  h.write_string("//\n")
+  h.write_string("// With MACHINE_CALLS (a game built without --locals, and the split\n")
+  h.write_string("// WebAssembly build's), they are named for the adapters in machine_calls.c,\n")
+  h.write_string("// which pass their values through the machine's registers.\n\n")
+  h.write_string("#ifndef SMB_ROUTINES_H\n#define SMB_ROUTINES_H\n\n#include <stdbool.h>\n#include <stdint.h>\n\n")
+  h.write_string("#ifdef MACHINE_CALLS\n")
+  for f in renamed { h.write_string("#define \{f.name} locals_\{f.name}\n") }
+  h.write_string("#endif\n\n// hand-written\n")
+  for f in provided { h.write_string("\{conv.prototype(f)};\{result(f)}\n") }
+  h.write_string("\n// generated\n")
+  for f in callees { h.write_string("\{conv.prototype(f)};\{result(f)}\n") }
+  h.write_string("\n#endif\n")
+
+  let c = StringBuilder()
+  c.write_string("// Adapters between the hand-written routines, which have locals, and a game\n")
+  c.write_string("// that keeps the machine's registers (built without --locals, and the split\n")
+  c.write_string("// WebAssembly build's). Generated with the game (`make native-interface`),\n")
+  c.write_string("// do not edit; built with MACHINE_CALLS.\n\n")
+  c.write_string("#include \"../lib/cpu.h\"\n\n")
+  let locals_prototype = fn(f : @ir.Function) {
+    let p = conv.prototype(f)
+    match p.find(" \{f.name}(") {
+      Some(i) => p.view(end_offset=i).to_owned() + " locals_" + p.view(start_offset=i + 1).to_owned()
+      None => p
+    }
+  }
+  c.write_string("// the game's, with the machine's registers\n")
+  for f in callees { c.write_string("void \{f.name}(void);\n") }
+  c.write_string("\n// the hand-written ones, with locals\n")
+  for f in provided {
+    if conv.has_locals(f.name) { c.write_string("\{locals_prototype(f)};\n") }
+  }
+  let copy = fn(s : Slot) { "v_" + s.local_name() }
+  c.write_string("\n// a hand-written routine as the game calls it\n")
+  for f in provided {
+    if !conv.has_locals(f.name) { continue }
+    let sig = conv.sig(f.name)
+    let own = local_slots & sig.memory.lnot()
+    let lines = []
+    for s in slots_of(sig.pointer_bits()) { lines.push("\{s.c_type()} \{copy(s)} = \{s.machine_name()};") }
+    let args = slots_of(sig.value_bits()).map(fn(s) { s.machine_name() }) + slots_of(sig.pointer_bits()).map(fn(s) { "&" + copy(s) })
+    let call = "locals_\{f.name}(\{args.join(", ")});"
+    lines.push(match sig.primary { Some(p) => "\{p.machine_name()} = \{call}"; None => call })
+    for s in slots_of(sig.pointer_bits() & own) { lines.push("\{s.machine_name()} = \{copy(s)};") }
+    c.write_string("void \{f.name}(void) {\n")
+    for line in lines { c.write_string("  " + line + "\n") }
+    c.write_string("}\n")
+  }
+  c.write_string("\n// a generated routine as the hand-written ones call it\n")
+  for f in callees {
+    if !conv.has_locals(f.name) { continue }
+    let sig = conv.sig(f.name)
+    let params = []
+    for s in slots_of(sig.value_bits()) { params.push("\{s.c_type()} \{copy(s)}") }
+    for s in slots_of(sig.pointer_bits()) { params.push("\{s.c_type()} *\{pointer_name(sig, s)}") }
+    let lines = []
+    for s in slots_of(sig.value_bits()) { lines.push("\{s.machine_name()} = \{copy(s)};") }
+    for s in slots_of(sig.pointer_bits() & sig.params) { lines.push("\{s.machine_name()} = *\{pointer_name(sig, s)};") }
+    lines.push("\{f.name}();")
+    for s in slots_of(sig.pointer_bits()) { lines.push("*\{pointer_name(sig, s)} = \{s.machine_name()};") }
+    match sig.primary {
+      Some(p) => lines.push("return \{p.machine_name()};")
+      None => ()
+    }
+    let list = if params.is_empty() { "void" } else { params.join(", ") }
+    c.write_string("\{conv.return_type(f)} locals_\{f.name}(\{list}) {\n")
+    for line in lines { c.write_string("  " + line + "\n") }
+    c.write_string("}\n")
+  }
+  (h.to_string(), c.to_string())
+}

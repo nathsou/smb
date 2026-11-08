@@ -218,15 +218,18 @@ test "with --locals, the first result is returned and the others written through
   assert_eq(code.contains("  x = Pair(&y);\n"), true)
 }
 
-test "with --locals, a call to a hand-written routine goes through the machine's registers" {
-  // Probe is native: it keeps the machine's registers, which Outer sets
-  // and reads around the call
-  let source = ".org $c000\nBoot:\n jsr Outer\n lda #$00\nIdle:\n jmp Idle\nOuter:\n ldx #$03\n jsr Probe\n sta $10\n rts\nProbe:\n lda $20,x\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+test "with --locals, a hand-written routine has the signature of its original code" {
+  // Probe is native: it takes X and returns A, as its original code does;
+  // routines.h declares it for the hand-written C, and machine_calls.c
+  // gives it to a game that keeps the machine's registers
+  let source = ".org $c000\nBoot:\n jsr Outer\n lda #$00\nIdle:\n jmp Idle\nOuter:\n ldx $30\n jsr Probe\n sta $10\n rts\nProbe:\n lda $20,x\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
   let output = transpile_low(lower_fixture(source), native=["Probe"], locals=true)
-  let code = code_c(output)
-  assert_eq(code.contains("*machine.x = x; Probe(); a = *machine.a;"), true)
-  assert_eq(code.contains("} machine = { &a, &x, &y, &carry_flag, &zero_flag, &neg_flag, &overflow_flag };"), true)
-  assert_eq(file_of(output, "code.h").contains("void Probe(void);"), true)
+  assert_eq(code_c(output).contains("  x = ram[0x30];\n  a = Probe(x);\n  ram[0x10] = a;\n"), true)
+  assert_eq(file_of(output, "code.h").contains("uint8_t Probe(uint8_t x);"), true)
+  let routines = file_of(output, "routines.h")
+  assert_eq(routines.contains("#ifdef MACHINE_CALLS\n#define Probe locals_Probe\n#endif"), true)
+  assert_eq(routines.contains("uint8_t Probe(uint8_t x); // returns a"), true)
+  assert_eq(file_of(output, "machine_calls.c").contains("void Probe(void) {\n  a = locals_Probe(x);\n}"), true)
 }
 
 test "with --locals, a scratch value that never leaves the routine is a local" {

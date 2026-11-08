@@ -1,6 +1,7 @@
 # Routines implemented by hand in codegen/native/*.c rather than generated
 # (passed to the generator with --native). Each must keep the contract
-# printed in place of its body in codegen/lib/code.c.
+# printed in place of its body in the generated code.c, with the signature
+# codegen/native/routines.h gives it (`make native-interface`).
 
 # Display: these talked to the PPU registers. The C versions write the Video
 # state directly (codegen/lib/video.h).

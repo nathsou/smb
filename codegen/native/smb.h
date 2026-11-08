@@ -516,67 +516,23 @@ enum {
 #define WORLD_SELECT_UNLOCKED 0x7fc
 #define CONTINUE_WORLD 0x7fd
 #define WARM_BOOT_MARKER 0x7ff
-void reset(void); // power-on and reset: clear memory, set up the display, then idle
 #define VRAM_LISTS_LOW 0x805a
 #define VRAM_LISTS_HIGH 0x806d
 #define VRAM_LIST_RESET_OFFSETS 0x8080
-void frame_interrupt(void); // once per frame: present the display updates, then run the game
-void handle_pause(void); // start toggles pause while playing
-void shuffle_sprite_slots(void); // rotate OAM slots so that dropped sprites flicker instead of vanishing
-void run_game_mode(void); // dispatch on the game mode (title, playing, victory, game over)
 #define GAME_MODE_TASKS 0x8218
-void hide_all_sprites(void); // move every sprite below the screen
-void hide_sprites_but_zero(void); // move every sprite but sprite 0 (the status bar split) below the screen
-void hide_sprites_from(void); // move the sprites from Y's OAM offset to the end below the screen
-void title_mode(void); // dispatch on the title's task: screen setup, title menu, new game
 #define TITLE_MODE_TASKS 0x8237
 #define WORLD_SELECT_TEMPLATE 0x823f
-void title_menu(void); // title screen input: start, world select, demo
-void start_continue(void); // continue from the world in A, at its first area
 #define PLAYER_SELECT_ICON_DATA 0x831d
-void draw_player_select_icon(void); // queue the title's mushroom cursor at the selected player count
 #define DEMO_BUTTONS 0x8340
 #define DEMO_DURATIONS 0x8355
-void play_demo(void); // feed recorded buttons to the player in attract mode
-void victory_mode(void); // run the victory task, and the remaining objects once the bridge is down
-void run_victory_task(void); // dispatch on the victory task: collapse the bridge, walk, messages, next world
 #define VICTORY_TASKS 0x83a6
-void start_victory(void); // aim the walk at the next page and start the victory music
-void victory_walk(void); // walk the player right and scroll until the page past the bridge
-void show_victory_messages(void); // queue the thank-you messages one by one, then set the end timer
-void next_game_mode_task(void); // advance to the next game mode task
-void finish_world(void); // when the timer ends, go to the next world, or after world 8 wait for B to replay
 #define POPUP_TILES 0x849f
 #define POPUP_SCORE_DIGITS 0x84b7
-void update_score_popups(void); // floating score numbers after defeating enemies
-void run_screen_task(void); // dispatch on the screen setup task: clear, palettes, status bar, intermission, columns
 #define SCREEN_TASKS 0x856d
-void clear_screen_task(void); // hide the sprites and clear both screens, then queue the palette list
-void intermission_setup(void); // queue the colors of small Mario on a black background for the intermission
 #define AREA_PALETTE_LISTS 0x85bb
-void queue_area_palette(void); // queue the palette list of the area's kind
-void select_vram_list(void); // select VRAM list X for the next frame and advance the screen task
-void next_screen_task(void); // advance the screen setup task
 #define BACKGROUND_COLOR_LISTS 0x85cb
 #define BACKGROUND_COLORS 0x85cf
 #define PLAYER_COLORS 0x85d7
-void queue_background_color(void); // queue the background color override, if any, and the player's colors
-void queue_player_colors(void); // queue the palette of the current player's colors and the background color
-void set_vram_list1_length(void); // set the length of VRAM list 1
-void queue_mushroom_palette(void); // in mushroom-style areas, queue their palette
-void select_vram_list_b(void); // select VRAM list A for the next frame and advance the screen task
-void skip_mushroom_palette(void); // advance the screen task
-void draw_status_bar_top(void); // queue the status bar's labels
-void draw_status_bar_bottom(void); // queue the player's counters and the world-area number
-void show_time_up(void); // show TIME UP after the time ran out, else skip it
-void show_intermission(void); // show the lives screen, or GAME OVER, unless the area skips it
-void start_intermission(void); // queue text A, start the screen timer and turn the screen on
-void render_area_columns(void); // build the screen column by column while the display is off
-void draw_title_screen(void); // queue the title screen's layout, stored in CHR ROM (hand-written)
-void clear_lists_draw_icon(void); // on the title screen, clear the VRAM list and draw the player select cursor
-void next_screen_task_b(void); // advance the screen setup task
-void draw_top_score(void); // queue the top score, then advance the game mode task
-void next_game_mode_task_b(void); // advance to the next game mode task
 #define TEXT_STATUS_BAR 0x8752
 #define TEXT_WORLD_LIVES 0x8779
 #define TEXT_TIME_UP_2P 0x8798
@@ -587,24 +543,10 @@ void next_game_mode_task_b(void); // advance to the next game mode task
 #define TEXT_LUIGI 0x87ed
 #define TEXT_WARP_NUMBERS 0x87f2
 #define TEXT_OFFSETS 0x87fe
-void queue_text(void); // copy one of the text lists into the VRAM update list
-void wait_screen_timer(void); // when the screen timer ends, hide the sprites and restart it
-void restart_screen_timer(void); // restart the screen timer and advance the screen task
-void render_column(void); // turn one column of metatiles into a VRAM update
-void render_attributes(void); // queue the attribute bytes of the column just rendered in VRAM list 2
-void select_vram_list2(void); // select VRAM list 2 for the next frame
 #define CYCLING_PALETTE_IDS 0x89c3
 #define BLANK_PALETTE 0x89c9
 #define CYCLING_PALETTES 0x89d1
-void cycle_palette(void); // animate the question-block palette every eighth frame
 #define BLOCK_TILE_OFFSETS 0x8a39
-void erase_coin_or_axe(void); // queue the metatile that replaces a collected coin or the axe
-void redraw_block(void); // queue a hit block's new metatile and count the block down
-void redraw_block_blank(void); // queue a blank metatile where a block was
-void queue_block_tiles(void); // queue the four tiles of the metatile that replaces block A
-void advance_vram_list(void); // set VRAM list 1's length past the metatile just queued
-void queue_metatile(void); // queue metatile A at the block buffer position in $02/$06 in VRAM list 1
-void queue_metatile_tiles(void); // write the four tiles and nametable address of a queued metatile
 #define METATILE_SETS_LOW 0x8b08
 #define METATILE_SETS_HIGH 0x8b0c
 #define METATILES_PALETTE0 0x8b10
@@ -626,51 +568,19 @@ void queue_metatile_tiles(void); // write the four tiles and nametable address o
 #define TEXT_NEW_QUEST 0x8dbf
 #define TEXT_PRESS_B 0x8dde
 #define TEXT_SELECT_WORLD 0x8def
-void dispatch(void); // jump through the address table that follows the call, indexed by A
-void clear_screens(void); // clear both screens (hand-written)
-void clear_screen(void); // fill one screen with blank tiles and clear its attributes (hand-written)
-void read_joypads(void); // strobe and read both joypads
-void read_joypad(void); // read joypad X's eight buttons, ignoring select and start while held
-void apply_vram_list(void); // apply the VRAM update list that $00-$01 point to (hand-written)
-void set_scroll(void); // set both scroll positions (hand-written)
-void set_ppu_ctrl(void); // set the display control byte and the game's copy of it (hand-written)
 #define COUNTER_POSITIONS 0x8ef4
 #define COUNTER_OFFSETS 0x8f00
-void queue_player_counters(void); // queue two decimal digits of the counter in A
-void queue_counter_digits(void); // write a score, coin count or time to the VRAM update list
-void add_digits(void); // decimal add with carry across score or time digits
-void update_top_score(void); // copy either player's score to the top score when higher
-void check_top_score(void); // copy the player's score at X to the top score when higher
 #define DEFAULT_SPRITE_SLOTS 0x8fbc
 #define SPRITE_ZERO 0x8fcb
-void start_game(void); // clear game memory and enter the first area
-void start_area(void); // reset area state and position the player at the entrance
-void setup_new_game(void); // reset the lives and time for a new game, then set up the area
-void setup_area_display(void); // reset the area's display state and sprite slots, and start the area music
-void clear_memory(void); // clear RAM below the offset in Y, sparing the stack in use
 #define AREA_MUSIC_KINDS 0x90e7
-void queue_area_music(void); // request the music of the area's kind, entrance or clouds
 #define ENTRANCE_X_POSITIONS 0x9116
 #define ENTRANCE_ALT_Y 0x911a
 #define ENTRANCE_Y_POSITIONS 0x911c
 #define ENTRANCE_PRIORITIES 0x9125
 #define TIME_LIMITS 0x912d
-void place_player(void); // entrance kind, starting position and time limit
 #define HALFWAY_PAGES 0x91bd
-void lose_life(void); // count a life lost: game over, or restart at the halfway page and switch players
-void game_over_mode(void); // dispatch on the game over task
 #define GAME_OVER_TASKS 0x921e
-void start_game_over(void); // stop the status bar split and the music, then show GAME OVER
-void game_over_screen(void); // end the game on start or when the screen timer runs out
-void end_game(void); // switch to the other player if they have lives, else back to the title
-void continue_game(void); // restart the current player small in the area's first page
-void switch_players(void); // swap the current player's state with the other's, if they have lives (carry clear when switched)
-void set_unused_flag(void); // set a byte the game never reads
-void do_nothing(void); // return at once
-void run_parser_task(void); // run one of the eight steps that build the next column, the attributes after the last
-void run_parser_subtask(void); // dispatch on the column step: parse the area data, render the column, advance
 #define PARSER_TASKS 0x92cb
-void advance_column(void); // advance the parser one column, and to the next page every 16
 #define BACKGROUND_SCENE_OFFSETS 0x92f7
 #define BACKGROUND_SCENES 0x92fa
 #define BACKGROUND_SCENE_METATILES 0x938a
@@ -678,98 +588,26 @@ void advance_column(void); // advance the parser one column, and to the next pag
 #define FOREGROUND_SCENES 0x93b1
 #define TERRAIN_METATILES 0x93d8
 #define TERRAIN_PATTERNS 0x93dc
-void parse_area_column(void); // decode the level layout for one metatile column
 #define BLOCK_BUFFER_LIMITS 0x9504
-void process_area_objects(void); // decode the area objects of the three slots for the current column
-void next_area_object(void); // move past the area object just decoded
-void decode_area_object(void); // decode the area object in slot X and draw its part of the current column
-void check_loop_object(void); // nothing: loop commands are handled elsewhere
 #define AREA_OBJECT_HANDLERS 0x9667
-void change_area_attributes(void); // set the terrain and scenery, or the background color, from an attribute object
-void warp_zone_lock(void); // show the warp zone message for the world, remove the piranhas and lock the scroll
-void lock_scroll(void); // toggle the scroll lock
-void remove_enemies(void); // deactivate the enemies of kind A
 #define FRENZY_KINDS 0x9728
-void start_frenzy(void); // queue the frenzy of the object kind in $00, unless one of its enemies is out
-void draw_area_style_object(void); // draw a tree ledge, mushroom ledge or cannon, by the area's style
 #define AREA_STYLE_HANDLERS 0x9746
-void draw_tree_ledge(void); // draw a column of a tree ledge: its left end, middle or right end, and the trunk
-void draw_mushroom_ledge(void); // draw a column of a mushroom ledge: its ends, middle and stem
-void draw_stem_full(void); // fill the column below the row after X with metatile A
-void draw_stem_none(void); // fill the column from the object's row with metatile A
 #define PULLEY_ROPE_METATILES 0x97b7
-void draw_pulley_rope(void); // draw a column of a pulley's rope: its left end, middle or right end
 #define CASTLE_METATILES 0x97cf
-void draw_castle(void); // draw a column of a castle, and put the star flag on a large one
-void draw_water_pipe(void); // draw a column of a water pipe
-void draw_intro_pipe(void); // draw a column of the pipe the player enters at the start of an area
 #define SIDE_PIPE_SHAFTS 0x989f
 #define SIDE_PIPE_TOPS 0x98a3
 #define SIDE_PIPE_BOTTOMS 0x98a7
-void draw_exit_pipe(void); // draw a column of a pipe entered from the side
-void draw_side_pipe(void); // draw a column of a sideways pipe and the vertical pipe it joins (carry set past its end)
 #define VERTICAL_PIPE_METATILES 0x98dd
-void draw_vertical_pipe(void); // may also spawn a piranha plant
-void get_pipe_height(void); // the pipe's height and length from its area object
-void find_free_enemy_slot(void); // the first inactive enemy slot (carry set when none)
-void draw_water_hole(void); // draw a column of a hole filled with water
-void draw_question_row_high(void); // draw a column of a high row of question blocks
-void draw_question_row_low(void); // draw a column of a low row of question blocks
-void draw_question_row(void); // draw a question block at row A
-void draw_bridge_high(void); // draw a column of a high bridge
-void draw_bridge_middle(void); // draw a column of a middle bridge
-void draw_bridge_at_row_middle(void); // draw a column of a bridge at row A
-void draw_bridge_low(void); // draw a column of a low bridge
-void draw_bridge_at_row(void); // draw a column of a bridge at row A: the rail, then the bridge down to the floor
-void draw_flag_balls(void); // draw the balls on top of the flagpole
-void draw_flagpole(void); // draw the flagpole and place its flag object in enemy slot 5
-void draw_endless_rope(void); // draw a rope down the whole column
-void draw_balance_rope(void); // draw a column of a balance lift's rope
-void draw_rope(void); // draw rope from row X for Y rows
 #define COIN_METATILES 0x99ee
-void draw_coin_row(void); // draw a column of a row of coins
 #define SMALL_OBJECT_ROWS 0x99fb
 #define SMALL_OBJECT_METATILES 0x99fe
-void draw_castle_bridge(void); // draw a column of the bridge before Bowser
-void draw_axe(void); // draw the axe, and its palette
-void draw_small_object(void); // draw the single metatile of a small object at its row
-void draw_empty_block(void); // draw a used block
-void draw_single_column(void); // put metatile A at row X
 #define SOLID_BLOCK_METATILES 0x9a25
 #define BRICK_METATILES 0x9a29
-void draw_brick_row(void); // draw a column of a row of bricks, of the area's kind
-void draw_solid_row(void); // draw a column of a row of solid blocks, of the area's kind
-void draw_row_of(void); // draw a column of a row of metatile A
-void draw_row_height1(void); // put the metatile pushed on the stack at the object's row
-void draw_brick_column(void); // draw a column of bricks, of the area's kind
-void draw_solid_column(void); // draw a column of solid blocks, of the area's kind
-void draw_column_of(void); // draw a column of metatile A, the object's height
-void draw_cannon(void); // draw a cannon and record it for the cannons that fire bullets
 #define STAIRCASE_HEIGHTS 0x9aa5
 #define STAIRCASE_ROWS 0x9aae
-void draw_staircase(void); // draw a column of a staircase, one step higher each column
-void place_spring(void); // place a spring in a free enemy slot and draw its base
-void draw_hidden_1up(void); // draw the hidden 1-up block, once, where it is enabled
-void draw_question_block(void); // draw a question block with the item of the object's kind
-void draw_coin_brick(void); // draw a brick with coins, ready to give them
-void draw_item_brick(void); // draw a brick with the item of the object's kind, by the area's kind
-void draw_block_metatile(void); // draw bumpable metatile Y at the object's row
-void get_area_object_kind(void); // the kind of the area object being drawn ($00)
 #define HOLE_METATILES 0x9b3d
-void draw_hole(void); // also sets up whirlpools in water areas
-void fill_column_down(void); // fill the column from row X down with metatile A for Y + 1 rows, leaving some metatiles in place
-void get_object_length(void); // the object's row and height, setting its length on its first column (carry set then)
-void get_object_fixed_length(void); // set the object's length to Y on its first column (carry set then)
-void get_object_row_size(void); // the object's row ($07) and its height from its area data
-void get_object_x(void); // the X position of the current column
-void get_object_y(void); // the Y position of the object's row ($07)
 #define BLOCK_BUFFER_ADDRESSES 0x9bdd
-void get_block_buffer_address(void); // the block buffer address of column A ($06-$07)
 #define LOOP_AREA_OFFSETS 0x9bf8
-void load_area_pointer(void); // find the area of the world and area number, and its kind
-void get_area_kind(void); // the area's kind, from the area pointer's bits 5-6
-void find_area_pointer(void); // the area pointer of the world and area number
-void load_area_data(void); // level layout and enemy list pointers, header attributes
 #define WORLD_AREA_OFFSETS 0x9cb4
 #define AREAS_WORLD1 0x9cbc
 #define AREAS_WORLD2 0x9cc1
@@ -853,50 +691,14 @@ void load_area_data(void); // level layout and enemy list pointers, header attri
 #define WATER_LAYOUT_1 0xae06
 #define WATER_LAYOUT_2 0xae45
 #define WATER_LAYOUT_3 0xaec0
-void playing_mode(void); // dispatch on the playing task: start the area, set up the screen, run a frame
 #define PLAYING_MODE_TASKS 0xaee2
-void run_game_frame(void); // one frame of play: player, enemies, objects, scrolling, drawing
-void update_scroll_column(void); // build the next column when 32 pixels have scrolled, unless VRAM list 2 is pending
-void scroll_with_player(void); // scroll the screen with the player past the middle, unless it is locked
-void scroll_screen(void); // scroll the screen by Y pixels and keep the player inside it
-void check_player_offscreen(void); // push the player back inside the screen's edges, stopping it against them
 #define SCREEN_EDGE_OFFSETS 0xb034
 #define OFFSCREEN_JOYPAD_MASKS 0xb036
-void update_screen_edges(void); // the screen's right edge from its left
-void run_player_task(void); // dispatch on the player's task: entering, pipes, flagpole, growing, dying, control
 #define PLAYER_TASKS 0xb04f
-void enter_area(void); // walk in, come up a pipe or climb a vine
-void drive_player(void); // control the player as if the joypad held A
-void control_player(void); // joypad to movement, collisions, animation
-void vine_climb_in(void); // climb the player up the vine into the area above, then enter it
-void set_alt_entrance(void); // enter the next area by its vine entrance
-void enter_down_pipe(void); // move the player down into a pipe, then enter the area it leads to
-void move_player_down(void); // move the player down by A pixels
-void enter_side_pipe_exit(void); // walk the player into a side pipe, then enter the area it leads to
-void change_area_after_pipe(void); // when the pipe timer ends, enter the area by entrance Y
-void change_area(void); // turn the screen off and restart the area setup
-void walk_into_side_pipe(void); // walk the player right into a side pipe until aligned
-void grow_or_shrink(void); // while the game pauses to change the player's size, start it, then finish
-void injury_blink(void); // shrink the player after an injury, then let them move while blinking
-void start_size_change(void); // start growing or shrinking the player
-void player_dying(void); // let the player fall once the death pause is over
-void player_task_done(void); // back to normal control, timers running
-void get_fire_flower(void); // cycle the player's palette while getting a fire flower, then restore it
-void cycle_player_palette(void); // set the player's palette to A's low two bits
-void reset_player_palette(void); // set the player's palette back to the first
-void slide_down_flagpole(void); // slide the player down the flagpole with its sound, then walk on
 #define HIDDEN_1UP_COIN_COUNTS 0xb2c2
-void walk_to_castle(void); // walk the player to the castle, raise the star flag, then go to the next area (and arm the hidden 1-up)
-void next_area(void); // go to the next area of the world
-void move_player(void); // move the player by its state: on the ground, jumping or swimming, falling, climbing
 #define PLAYER_MOVEMENT_STATES 0xb351
-void move_on_ground(void); // move the player on the ground, with friction and facing the joypad
-void move_falling(void); // move the player in the air with falling gravity
-void move_jumping_or_swimming(void); // move the player up, cutting the jump short when A is released, or swimming
-void move_in_air(void); // move the player in the air, with gravity
 #define CLIMB_STEPS_LOW 0xb3c7
 #define CLIMB_STEPS_HIGH 0xb3cb
-void move_climbing(void); // move the player on a vine, and off it to the sides
 #define JUMP_GRAVITY 0xb424
 #define FALL_GRAVITY 0xb42b
 #define JUMP_SPEEDS 0xb432
@@ -906,355 +708,94 @@ void move_climbing(void); // move the player on a vine, and off it to the sides
 #define FRICTION_AMOUNTS 0xb447
 #define CLIMB_SPEEDS 0xb44a
 #define CLIMB_FORCES 0xb44d
-void player_physics(void); // jumping, swimming, climbing and walking speeds
 #define PLAYER_ANIM_PERIODS 0xb58c
-void set_player_anim_speed(void); // the player's walking animation speed and running state from its speed
-void apply_friction(void); // accelerate or slow the player horizontally, up to its maximum speed
-void update_fireballs_and_bubbles(void); // throw a fireball on B when fiery, update both fireballs and the air bubbles
 #define FIREBALL_SPEEDS 0xb687
-void update_fireball(void); // move a fireball, bounce it off the floor, and explode it on a wall or enemy
-void update_bubble(void); // move an air bubble up, or let the player breathe out a new one
-void spawn_bubble(void); // start an air bubble at the player's mouth
-void move_bubble(void); // move an air bubble up, removing it at the water's surface
 #define BUBBLE_FORCES 0xb74b
 #define BUBBLE_INTERVALS 0xb74d
-void tick_time_limit(void); // count the time down, warn when it runs low, and end the player when it runs out
-void warp_zone_trigger(void); // once the player reaches the warp zone's pipes, unlock the scroll and enable the warps
-void update_whirlpools(void); // pull the player toward the whirlpools of water areas
 #define FLAGPOLE_SCORE_BOUNDS 0xb84b
 #define FLAGPOLE_SCORE_DIGITS 0xb850
-void update_flagpole(void); // lower the flag while the player slides down the pole, and award the flag's score
 #define SPRING_OFFSETS 0xb8b6
-void update_spring(void); // compress and release the spring, launching the player higher with A
-void spawn_vine(void); // start a vine growing from the bumped block
 #define VINE_HEIGHTS 0xb949
-void update_vine(void); // grow the vine and draw it
 #define CANNON_MASKS 0xb9ba
-void update_cannons(void); // fire bullets from the cannons on screen, at random
 #define BULLET_SPEEDS 0xba31
-void update_bullet(void); // move a bullet toward the player and remove it off screen
 #define HAMMER_SLOTS 0xba89
 #define HAMMER_SPEEDS 0xba92
-void spawn_hammer(void); // give the hammer bro in slot a hammer, when a free one comes up (carry set then)
-void update_hammer(void); // throw a hammer, then let it fly in an arc
-void spawn_block_coin(void); // launch a coin out of a bumped block
-void spawn_jumping_coin(void); // launch a coin from the spot above a bumped block
-void launch_coin(void); // start a coin's jump and count it
-void find_free_misc_slot(void); // a free slot for a coin or score (the last when none)
-void update_misc_objects(void); // update the hammers and jumping coins, scrolling the rest with the screen
 #define COIN_DIGIT_OFFSETS 0xbbf8
 #define SCORE_DIGIT_OFFSETS 0xbbfa
 #define COUNTER_SELECTORS 0xbbfc
-void give_coin(void); // count a coin, with a 1-up every 100, and its score
-void add_score(void); // add the pending score to the current player's and queue it
-void queue_counters_for_player(void); // queue the current player's score and coins
-void queue_counters(void); // queue the counters chosen by A
-void spawn_powerup(void); // bring out the powerup from its block, a mushroom or flower by the player's size
-void update_powerup(void); // raise the powerup out of its block, then move it by its kind
 #define BLOCK_Y_OFFSETS 0xbceb
-void bump_head(void); // the player hit a block from below
-void place_block_object(void); // put a block object at the block the player hit
-void bump_block(void); // bounce the block the player hit, and give what it holds
 #define BLOCK_CONTENTS_HANDLERS 0xbdc0
-void block_gives_mushroom(void); // give a mushroom or fire flower
-void block_gives_star(void); // give a star
-void block_gives_kind_star(void); // give powerup A
-void block_gives_1up(void); // give a 1-up mushroom
-void block_gives_kind(void); // place powerup A over the bumped block
-void block_gives_vine(void); // start a vine from the bumped block
 #define BUMPABLE_METATILES 0xbde8
-void find_bumped_metatile(void); // the index of metatile A among the bumpable ones (carry set when found)
-void shatter_brick(void); // break the brick the player hit into four chunks, with its score
-void collect_coin_above(void); // collect a coin standing on the hit block
-void spawn_brick_chunks(void); // start the four chunks of a broken brick
-void update_block_objects(void); // move a bumped block or brick chunks, and replace the block when it lands
-void update_block_metatiles(void); // write the metatile of a hit block to the block buffer and redraw it
-void move_enemy_x(void); // move the enemy in slot X horizontally
-void move_player_x(void); // move the player horizontally, unless on a spring
-void move_object_x(void); // add speed (4.4 fixed point) to position and page
-void move_enemy_down_fast(void); // move an enemy down quickly, or a falling platform
-void move_falling_platform(void); // move a falling platform down, its speed limited
-void move_vertically(void); // move an object down with gravity, its speed limited by Y
-void move_drop_platform(void); // move a dropping platform down
-void move_enemy_down_slow(void); // move an enemy down slowly
-void set_max_speed_mid(void); // apply gravity to the enemy with the middle speed limit
-void move_enemy_jumping(void); // move a jumping enemy with gravity
-void set_max_speed_high(void); // apply gravity to the enemy with the high speed limit
-void apply_gravity_enemy(void); // apply gravity to enemy X, force Y and limit A
 #define BLOCK_MAX_SPEEDS 0xbf9f
-void apply_gravity_block(void); // apply gravity to a bumped block or brick chunk
-void apply_gravity_object(void); // apply gravity to object X, force in $00 and limit A
-void move_platform_down(void); // move a lift down
-void move_platform_up(void); // move a lift up
-void move_platform(void); // move a lift up or down (A), slower for dropping platforms
-void move_paratroopa_vertically(void); // move an object vertically by its gravity parameters
-void apply_gravity(void); // vertical speed, sub-pixel force and position with a speed cap
-void update_enemies_and_loops(void); // load the next enemies and loop commands from the area's enemy data, then run the object in slot X
 #define LOOP_WORLDS 0xc06b
 #define LOOP_PAGES 0xc076
 #define LOOP_Y_POSITIONS 0xc081
-void load_enemies_and_loops(void); // loop commands and spawning enemies from the enemy list
-void spawn_enemy(void); // initialize the enemy just loaded into slot X
-void init_enemy(void); // initialize the enemy in slot X by its kind
 #define ENEMY_INITIALIZERS 0xc282
-void init_nothing(void); // no initialization
-void init_goomba(void); // initialize a goomba: a walker with a small box
-void init_podoboo(void); // initialize a podoboo below the screen, waiting to jump
-void init_retainer(void); // place the retainer on the castle's floor
 #define WALK_SPEEDS 0xc30c
-void init_walker(void); // set a walking enemy's speed, faster in hard mode
-void set_enemy_speed(void); // set the enemy's speed to A and its box to the tall one
-void init_red_koopa(void); // initialize a red koopa: a walker that turns at ledges
 #define HAMMER_BRO_WALK_TIMES 0xc326
-void init_hammer_bro(void); // initialize a hammer bro standing, with its first walk timer
-void init_flyer_or_swimmer(void); // initialize an enemy at rest, with a tall box
-void init_blooper(void); // initialize a blooper at rest, with a small box
-void set_small_box(void); // give the enemy the small box, facing left
-void init_red_paratroopa(void); // initialize a red paratroopa's flight around its height
-void set_tall_box(void); // give the enemy the tall box, facing left
-void set_box_facing_left(void); // set the enemy's box kind to A, facing left, at rest vertically
-void clear_vertical_motion(void); // stop the enemy's vertical motion
-void init_bullet(void); // initialize a bullet flying left
-void init_cheep_cheep(void); // initialize a swimming cheep cheep at a random speed
-void init_lakitu(void); // initialize a lakitu, unless a frenzy is on
-void setup_lakitu(void); // set up a lakitu at rest, with its box
 #define LAKITU_AIM_OFFSETS 0xc398
-void update_lakitu_spawner(void); // bring Lakitu back and throw spinies
 #define FIREBAR_SPEEDS 0xc44f
 #define FIREBAR_DIRECTIONS 0xc454
-void init_long_firebar(void); // initialize a long firebar, as two firebars
-void init_firebar(void); // initialize a firebar's speed and direction by its kind, centered on its block
 #define FLYING_FISH_X_OFFSETS 0xc488
 #define FLYING_FISH_SPEEDS 0xc498
 #define FLYING_FISH_INTERVALS 0xc4a4
-void init_flying_fish(void); // launch a flying cheep cheep at the player, on its timer
-void init_bowser(void); // initialize Bowser, his health and timers, and his second slot
-void copy_enemy(void); // copy the enemy into a free slot, linked to it
 #define FLAME_HEIGHTS 0xc59d
 #define FLAME_FORCE_OFFSETS 0xc5a1
-void init_bowser_flame(void); // launch a flame from Bowser, or from the right of the screen
-void place_flame(void); // put a flame at height A, right of the screen
-void finish_flame(void); // activate a flame with its box
 #define FIREWORK_X_OFFSETS 0xc631
 #define FIREWORK_Y_OFFSETS 0xc637
-void init_firework(void); // launch a firework around the star flag, on its timer
 #define BIT_MASKS 0xc68a
 #define FRENZY_Y_POSITIONS 0xc692
 #define SWIMMING_FISH_KINDS 0xc69a
-void spawn_frenzy_enemy(void); // bullet bills or cheep cheeps arriving from the side
-void init_piranha(void); // initialize a piranha plant inside its pipe
-void init_frenzy(void); // start a frenzy by the enemy's kind: lakitu's spinies, flying cheep cheeps, flames, fireworks, bullets
 #define FRENZY_INITIALIZERS 0xc7ab
-void init_no_frenzy(void); // no frenzy
-void end_frenzy(void); // end the frenzy, and send the lakitu away
-void init_bouncing_paratroopa(void); // initialize a bouncing paratroopa moving left
-void set_tall_box_b(void); // give the enemy the tall box
-void set_box_kind(void); // set the enemy's box kind to A
-void init_balance_platform(void); // initialize one platform of a balance lift and pair it with the other
-void init_drop_platform(void); // initialize a platform that drops when stood on
-void init_side_platform(void); // initialize a platform moving side to side
-void init_vertical_platform(void); // initialize a platform moving up and down around its height
-void init_platform(void); // initialize a platform at rest, with its box
-void set_platform_box(void); // give the platform its box, shorter in castles and in late hard mode
-void large_lift_up(void); // initialize a large lift going up
-void large_lift_down(void); // initialize a large lift going down
-void large_lift_box(void); // give a large lift its box
-void small_lift_up(void); // initialize a small lift going up
-void small_lift_down(void); // initialize a small lift going down
-void small_lift_common(void); // place a small lift and give it its box
 #define PLATFORM_OFFSET_LOW 0xc86b
 #define PLATFORM_OFFSET_HIGH 0xc86e
-void offset_platform(void); // move the platform by the offset Y
-void finish_enemy_init(void); // no initialization
 #define ENEMY_RUNNERS 0xc892
-void run_nothing(void); // nothing to run
-void run_retainer(void); // draw the retainer
-void run_normal_enemy(void); // run an enemy: draw it, collide it with the ground, enemies and the player, move it
-void move_enemy(void); // move an enemy by its kind
 #define ENEMY_MOVERS 0xc90a
-void move_nothing(void); // no movement
-void run_bowser_flame(void); // move a flame and collide it with the player
-void run_firebar(void); // rotate a firebar and collide it with the player
-void run_small_platform(void); // run a small lift: collide it with the player, draw it, move it
-void run_large_platform(void); // run a large platform: collide it with the player, move it, draw it
-void move_large_platform(void); // move a large platform by its kind
 #define LARGE_PLATFORM_MOVERS 0xc98a
-void erase_enemy(void); // clear the enemy's slot
-void move_podoboo(void); // jump a podoboo out of the lava at random intervals
 #define HAMMER_THROW_MASKS 0xc9ce
 #define WALK_SPEED_ADDERS 0xc9d0
 #define REVIVED_SPEEDS 0xc9d4
-void update_hammer_bro(void); // throw hammers, jump between floors and walk back and forth
 #define HAMMER_BRO_JUMP_LENGTHS 0xca10
-void hammer_bro_jump(void); // start a hammer bro's jump up or down a floor
-void hammer_bro_walk(void); // walk a hammer bro back and forth, facing the player
-void move_walker(void); // walk an enemy, move it as a shell or kicked, revive a shell, remove a squashed goomba
-void move_defeated_enemy(void); // let a defeated enemy fall off the screen
-void move_hopping_paratroopa(void); // bounce a paratroopa along
-void move_red_paratroopa(void); // fly a red paratroopa up and down
-void move_green_paratroopa(void); // fly a green paratroopa back and forth, bobbing
-void sway_green_paratroopa(void); // sway a flying paratroopa
-void sway_counters(void); // oscillating primary/secondary counters for back-and-forth motion
-void sway_offset(void); // move the enemy by its sway speed, in the sway's direction
 #define BLOOPER_MASKS 0xcb87
-void move_blooper(void); // swim a blooper toward the player in spurts, or let it sink
-void blooper_swim(void); // time a blooper's spurts up and its sinking
-void move_bullet(void); // fly a bullet left, or let it fall once stomped
 #define SWIMMING_FISH_SPEEDS 0xcc46
-void move_swimming_fish(void); // swim a cheep cheep along, drifting up and down
 #define FIREBAR_OFFSETS 0xccc7
 #define FIREBAR_MIRRORS 0xcd2a
 #define FIREBAR_TABLE_OFFSETS 0xcd2e
 #define FIREBAR_Y_POSITIONS 0xcd3a
-void update_firebar(void); // rotate a firebar, draw its balls and collide them with the player
-void draw_firebar_ball(void); // place a firebar ball's sprite by its offsets from the center
-void firebar_ball_collision(void); // draw a firebar ball and hurt the player it touches
-void firebar_ball_position(void); // a firebar ball's offsets from the center at the bar's angle
 #define RANDOM_Y_RANGES 0xced5
 #define FLYING_FISH_PRIORITIES 0xceda
-void move_flying_fish(void); // fly a cheep cheep in an arc out of the water
 #define LAKITU_SPEED_ADJUST 0xcf25
-void move_lakitu(void); // float a lakitu after the player, throwing spinies, or let it leave
-void lakitu_chase(void); // a lakitu's speed toward the player, matching the player's scrolling
 #define BRIDGE_TILE_COLUMNS 0xcfdd
-void collapse_bridge(void); // collapse Bowser's bridge one piece at a time, then drop Bowser
-void move_dying_bowser(void); // let a defeated Bowser fall
 #define BOWSER_MOVE_RANGES 0xd061
-void run_bowser(void); // walk, jump, breathe fire and throw hammers as Bowser
-void kill_all_enemies(void); // clear every enemy slot
-void draw_bowser(void); // draw both halves of Bowser
-void bowser_half(void); // draw one half of Bowser and collide it with the player
 #define FLAME_TIMERS 0xd1d1
-void next_flame_timer(void); // the next interval between Bowser's flames
-void update_bowser_flame(void); // move a flame left toward its height and draw it
-void run_firework(void); // burst a firework and award its points
 #define STAR_FLAG_Y_OFFSETS 0xd2cd
 #define STAR_FLAG_X_OFFSETS 0xd2d1
 #define STAR_FLAG_TILES 0xd2d5
-void run_star_flag(void); // dispatch on the end of the area: time points, star flag, fireworks
 #define STAR_FLAG_TASKS 0xd2e8
-void count_fireworks(void); // the fireworks by the time's last digit (1, 3 or 6)
-void next_star_flag_task(void); // advance to the next star flag task
-void star_flag_done(void); // nothing left to do
-void award_time_points(void); // turn the remaining time into points, a digit at a time
-void award_area_points(void); // add the pending points to the current player's score and queue it
-void raise_star_flag(void); // raise the star flag on the castle, then launch the fireworks
-void draw_star_flag(void); // draw the star flag's four sprites
-void next_star_flag_task_b(void); // advance to the next star flag task
-void wait_area_end(void); // keep the star flag drawn until its timer and the music end
-void move_piranha(void); // raise and lower a piranha plant, staying in its pipe while the player is near
-void spin_firebar(void); // turn a firebar's angle by its speed, in its direction
-void update_balance_platform(void); // move a balance lift's two platforms against each other with the player's weight, and drop them past the top
-void draw_platform_rope(void); // queue the rope tiles above a balance lift's platform
-void stop_balance_platforms(void); // stop both platforms of a balance lift
-void move_vertical_platform(void); // move a platform up and down between its limits, carrying the player
-void carry_player_vertically(void); // move the player standing on the platform with it
-void move_side_platform(void); // move a platform side to side, carrying the player
-void carry_player_horizontally(void); // move the player standing on the platform sideways with it
-void drop_platform(void); // drop a platform the player stands on
-void right_platform(void); // move a platform right while the player stands on it
-void move_large_lift(void); // move a large lift, carrying the player
-void move_small_lift(void); // move a small lift, carrying the player
-void move_lift(void); // move a lift by its vertical speed
-void check_enemy_offscreen(void); // remove an enemy that left the screen's range
-void fireball_enemy_collision(void); // check a fireball against the enemies, every other frame
 #define BOWSER_LOOKALIKES 0xd736
-void fireball_hit_enemy(void); // hurt the enemy a fireball hit, or Bowser
-void defeat_enemy(void); // knock an enemy out, with its score
-void smack_enemy_score(void); // show score A over the enemy and play the kick sound
-void player_hammer_collision(void); // hurt the player a hammer hits, unless invincible
 #define LEFTOVER_SPEEDS 0xd84d
 #define KICKED_SHELL_SPEEDS 0xd84f
 #define DEMOTED_KOOPA_SPEEDS 0xd851
-void player_enemy_collision(void); // collide the player with an enemy: stomp, kick a shell, collect a powerup, or get hurt
 #define KICKED_SHELL_POINTS 0xd892
-void injure_player(void); // hurt the player, unless already blinking
-void force_injury(void); // shrink the player, or kill a small one
-void set_player_routine(void); // set the player's task and state, pausing the timers
-void end_injury_check(void); // the slot being processed
 #define STOMP_POINTS 0xd965
 #define REVIVAL_RATES 0xd9d2
-void face_player(void); // turn the enemy toward the player
-void spawn_floating_score(void); // show score A floating over the enemy
 #define SET_BIT_MASKS 0xda25
 #define CLEAR_BIT_MASKS 0xda2c
-void enemy_enemy_collisions(void); // collide the enemy with the others, turning or knocking them out
-void enemy_pair_collision(void); // settle a collision between two enemies: a shell or a kicked enemy knocks the other out, else both turn
-void turn_enemy_around(void); // turn an enemy around, if its kind turns
-void reverse_enemy(void); // reverse the enemy's direction and speed
-void large_platform_collision(void); // check the player against a large platform, or both of a balance lift
-void player_on_large_platform(void); // land the player on a large platform it touches from above
-void large_platform_collision_done(void); // the slot being processed
-void small_platform_collision(void); // check the player against a small lift's two halves
-void platform_landing(void); // land the player on a platform, or stop it against its side or bottom
 #define SMALL_PLATFORM_Y_OFFSETS 0xdc17
-void place_player_on_small_platform(void); // put the player on top of a small lift
-void place_player_on_vertical_platform(void); // put the player on top of the platform
-void place_player_on_platform_y(void); // put the player on top of a platform at height A
-void check_player_vertical(void); // whether the player is too low or off screen to collide (carry set then)
-void enemy_box_offset(void); // the box offset of the slot being processed
-void enemy_box_offset_for(void); // the box offset of enemy A, and its offscreen bits
 #define PLAYER_BG_TOP_EXTENTS 0xdc62
-void player_bg_collision(void); // collide the player with the background: ceilings and bumped blocks, floors and springs, walls, coins, vines, the flagpole and pipes
 #define AREA_CHANGE_TIMERS 0xde03
-void erase_metatile(void); // clear the metatile the player touched (a coin) and redraw it
 #define CLIMB_X_OFFSETS 0xde25
 #define CLIMB_PAGE_OFFSETS 0xde27
 #define FLAGPOLE_HEIGHTS 0xde29
-void is_hidden_block(void); // whether metatile A is a hidden block (zero set then)
-void check_spring_landing(void); // start the spring's bounce when the player lands on it
-void is_spring_metatile(void); // whether metatile A is part of a spring (carry set then)
-void enter_pipe(void); // enter the pipe under the player when down is held over it, or warp
-void block_player_side(void); // push the player out of a block at its side and stop it
 #define SOLID_METATILE_LIMITS 0xdf8b
-void is_solid_metatile(void); // whether metatile A is solid (carry set then)
 #define CLIMB_METATILE_LIMITS 0xdf96
-void is_climb_metatile(void); // whether metatile A is climbable (carry set then)
-void is_coin_metatile(void); // whether metatile A is a coin, with its sound (carry set then)
-void metatile_group(void); // metatile A's group, its top two bits
 #define ENEMY_BG_STATES 0xdfb9
 #define ENEMY_BG_SPEEDS 0xdfbf
-void enemy_bg_collision(void); // land an enemy on the ground, bump it against walls, and knock it out from a bumped block
-void check_stun_enemy(void); // stun an enemy hit from below, turning a paratroopa into a koopa
-void stun_enemy(void); // flip an enemy over, bouncing it away from the player
-void enemy_side_check(void); // turn an enemy that walks into a wall
-void enemy_bump(void); // turn an enemy around, or make a hammer bro jump
-void player_enemy_distance(void); // the enemy's horizontal distance from the player ($00; negative when left of it)
-void land_enemy(void); // stop an enemy on the floor, aligned to its block
-void enemy_height_check(void); // whether the enemy is low enough to collide with the background (carry set then)
-void enemy_jump_check(void); // land a jumping enemy, or bounce it again
-void kill_enemy_on_block(void); // knock out an enemy on a bumped block, bouncing it up
-void check_under_enemy(void); // the metatile under the enemy (zero set when none)
-void is_passable_metatile(void); // whether metatile A lets objects through: coins and hidden blocks (zero set then)
-void fireball_bg_collision(void); // bounce a fireball off the floor, or explode it against a wall
 #define BOX_SIZES 0xe1fd // left, top, right and bottom offsets by box kind
-void fireball_box(void); // the fireball's collision box
-void misc_box(void); // the collision box of a hammer or coin
-void fireball_box_common(void); // compute and clip the box of object X with offset Y
-void enemy_box(void); // the enemy's collision box, unless off screen
-void small_platform_box(void); // a small lift's collision box, unless off screen
-void enemy_box_offscreen_bits(void); // hide the enemy's box when off screen, else compute it
-void large_platform_box(void); // a large platform's collision box, unless off screen
-void enemy_box_core(void); // compute and clip the enemy's box
-void hide_box(void); // move the enemy's box off screen
-void compute_box(void); // the box of object X from its screen position and box kind
-void clip_box_to_screen(void); // clamp the box at the screen's edges
-void player_collides(void); // whether the player's box overlaps box Y (carry set then)
-void objects_collide(void); // bounding box overlap test, carry set on collision
-void enemy_block_check(void); // the metatile at probe Y around the enemy (zero set when none)
-void fireball_block_check(void); // the metatile under the fireball (zero set when none)
-void block_check_common(void); // the metatile at probe Y around object X (zero set when none)
 #define BLOCK_PROBE_STARTS 0xe3ad
 #define BLOCK_PROBE_X 0xe3b0
 #define BLOCK_PROBE_Y 0xe3cc
-void block_probe_feet(void); // the metatile at the player's next foot probe
-void block_probe_head(void); // the metatile at the player's head probe Y
-void block_probe_side(void); // the metatile at the player's side probe Y
-void block_probe_player(void); // the metatile at the player's probe Y
-void block_probe(void); // metatile at an object's probe point
 #define VINE_Y_OFFSETS 0xe433
-void draw_vine(void); // draw a stretch of the vine
-void stack_six_sprites(void); // put six sprites one above the other from height A
 #define HAMMER_FIRST_X 0xe4c0
 #define HAMMER_FIRST_Y 0xe4c4
 #define HAMMER_SECOND_X 0xe4c8
@@ -1262,110 +803,33 @@ void stack_six_sprites(void); // put six sprites one above the other from height
 #define HAMMER_FIRST_TILES 0xe4d0
 #define HAMMER_SECOND_TILES 0xe4d4
 #define HAMMER_ATTRIBUTES 0xe4d8
-void draw_hammer(void); // draw a hammer, spinning while thrown
 #define FLAGPOLE_SCORE_TILES 0xe541
-void draw_flagpole_flag(void); // draw the flag and the score it shows
-void hide_six_sprites(void); // move six sprites below the screen
-void fill_six_sprites(void); // set six sprites' Y to A
-void fill_four_sprites(void); // set four sprites' Y to A
-void fill_three_sprites(void); // set three sprites' Y to A
-void fill_two_sprites(void); // set two sprites' Y to A
-void draw_large_platform(void); // draw a large platform, shorter in castles and in late hard mode
 #define JUMPING_COIN_TILES 0xe682
-void draw_coin_or_score(void); // draw a jumping coin, then the score it leaves
 #define POWERUP_TILES 0xe6be
 #define POWERUP_ATTRIBUTES 0xe6ce
-void draw_powerup(void); // draw the powerup, its colors cycling for the star and flower
 #define ENEMY_TILES 0xe73e
 #define ENEMY_TILE_OFFSETS 0xe840
 #define ENEMY_ATTRIBUTES 0xe85b
 #define ENEMY_ANIMATION_MASKS 0xe876
 #define SPRING_TILE_OFFSETS 0xe878
-void draw_enemy(void); // draw an enemy's sprites by its kind and animation frame, flipped when defeated
-void clip_enemy_sprites(void); // hide the rows and columns of the enemy's sprites that are off screen, and remove it below the screen
-void draw_enemy_row(void); // draw a row of the enemy's tiles
-void draw_sprite_row(void); // draw a row of two sprites from tiles A and X, mirrored when flipped
-void hide_enemy_row(void); // hide a row of the enemy's sprites at offset A
-void hide_enemy_column(void); // hide a column of the enemy's sprites
 #define BLOCK_TILES 0xebcd
-void draw_block(void); // draw a bumped block's sprites
-void check_left_column(void); // hide the sprite column at Y when the object is off the left edge (bit 3 of A)
-void hide_column(void); // hide a column of two sprites at Y
-void draw_brick_chunks(void); // draw the four flying chunks of a broken brick
-void draw_firebar_tile(void); // set a firebar ball's tile and flip, spinning with the frame count
 #define EXPLOSION_TILES 0xed06
-void draw_explosion(void); // draw frame A of a fireball's or firework's explosion
-void draw_small_platform(void); // draw a small lift's two halves
-void draw_bubble(void); // draw an air bubble
 #define PLAYER_TILE_OFFSETS 0xee07
 #define PLAYER_TILES 0xee17 // two tiles per row, top to bottom
 #define SWIM_KICK_TILES 0xeee7
-void draw_player(void); // draw the player by its task, blinking while injured, kicking while swimming
-void draw_player_action(void); // draw the player's pose for its current action
-void draw_player_with_offset(void); // draw the player at tile offset A, with its throwing pose
 #define LIVES_SCREEN_PLAYER 0xef9e
-void draw_lives_screen_player(void); // draw the player on the lives screen
-void render_player(void); // place the player's sprites on screen
-void draw_player_rows(void); // draw the player's rows of tiles
-void player_action_offset(void); // the tile offset of the player's pose: walking, skidding, jumping, swimming, climbing, crouching
-void animate_player(void); // the tile offset of the player's animation frame
-void size_offset(void); // the pose offset for the player's size
 #define CHANGE_SIZE_FRAMES 0xf09c
-void animate_size_change(void); // the tile offset while the player grows or shrinks
-void animation_offset(void); // the tile offset of frame A of pose Y
-void fix_player_attributes(void); // fix the flip of the player's sprites for some poses
-void player_screen_position(void); // the player's position relative to the screen
-void bubble_screen_position(void); // an air bubble's position relative to the screen
-void fireball_screen_position(void); // a fireball's position relative to the screen
-void screen_position_restore(void); // object X's position relative to the screen, then the slot processed back in X
-void misc_screen_position(void); // a hammer's or coin's position relative to the screen
-void enemy_screen_position(void); // an enemy's position relative to the screen
-void block_screen_position(void); // a block object's position relative to the screen
-void screen_position_at(void); // the screen position of object A + X
-void screen_position(void); // coordinates relative to the left edge of the screen
-void player_offscreen_bits(void); // which parts of the player are off screen
-void fireball_offscreen_bits(void); // which parts of a fireball are off screen
-void bubble_offscreen_bits(void); // which parts of an air bubble are off screen
-void misc_offscreen_bits(void); // which parts of a hammer or coin are off screen
 #define OBJECT_SLOT_OFFSETS 0xf1a5
-void object_slot(void); // the object index of slot X in group Y
-void enemy_offscreen_bits(void); // which parts of an enemy are off screen
-void block_offscreen_bits(void); // which parts of a block object are off screen
-void offset_slot(void); // which parts of object A + X are off screen
-void offscreen_bits(void); // which parts of object X are off screen, horizontally and vertically
-void offscreen_bits_parts(void); // the object's horizontal and vertical offscreen bits combined
 #define X_OFFSCREEN_BITS 0xf1e3
 #define X_EDGE_DEFAULTS 0xf1f3
-void compute_x_offscreen_bits(void); // which columns of object X are off the screen's left or right edge
 #define Y_OFFSCREEN_BITS 0xf22b
 #define Y_EDGE_DEFAULTS 0xf234
 #define HIGH_POSITION_UNITS 0xf237
-void edge_distance_bits(void); // the offscreen bits for an object's distance from an edge
-void update_sound(void); // per-frame sound engine entry point
-void set_square1_regs(void); // set pulse 1's control (X) and sweep (Y)
-void play_square1(void); // start a note on pulse 1 with control X and sweep Y
-void set_square1_freq(void); // set pulse 1's period to note A
-void set_freq(void); // set a channel's period to note A
-void set_square2_regs(void); // set pulse 2's control (X) and sweep (Y)
-void play_square2(void); // start a note on pulse 2 with control X and sweep Y
-void set_square2_freq(void); // set pulse 2's period to note A
-void set_triangle_freq(void); // set the triangle's period to note A
 #define SWIM_STOMP_ENVELOPE 0xf3b1
-void square1_sfx(void); // start or continue the pulse 1 sound effects: jump, swim, stomp, bump, flagpole, fireball, pipe and injury
-void stop_square1_sfx(void); // end the pulse 1 sound effect
 #define EXTRA_LIFE_NOTES 0xf4d4
 #define POWERUP_GRAB_NOTES 0xf4da
 #define POWERUP_REVEAL_NOTES 0xf4f8
-void stop_square2_sfx(void); // end the pulse 2 sound effect and reset the channels
-void square2_sfx(void); // start or continue the pulse 2 sound effects: coin, powerup, vine, 1-up, timer and Bowser's fall
 #define BRICK_SHATTER_NOTES 0xf62b
-void noise_sfx(void); // start or continue the noise sound effects: brick shatter and Bowser's flame
-void continue_music(void); // play the next notes of the music on each channel
-void update_music(void); // start the requested area or event music, then play its next notes
-void alternate_length(void); // the length of a note from its alternate encoding
-void note_length(void); // the length of note A in the current tempo
-void load_square_envelope(void); // the pulse channels' duty and envelope for the music playing
-void load_envelope_entry(void); // step Y of the envelope for the music playing
 #define SONG_HEADER_OFFSETS 0xf90d
 #define HURRY_UP_HEADER 0xf93e
 #define STAR_HEADER 0xf943

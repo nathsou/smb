@@ -7,11 +7,14 @@
 // waits disappear because a frame is rendered from the finished state.
 //
 // RAM side effects (pointers left in $00/$01, mirrors of the display bytes,
-// buffer resets) are kept exactly, and each routine leaves the registers its
-// callers read as printed in the generated code.c. The replay in codegen/hash.c
-// checks this frame by frame against tests/golden/warpless.trace.
+// buffer resets) are kept exactly. Each routine takes and returns the
+// registers its original code does, as routines.h declares it with the
+// routines it calls; reset and frame_interrupt, which the runtime enters,
+// keep the machine's registers. The replay in codegen/hash.c checks this
+// frame by frame against tests/golden/warpless.trace.
 
 #include "smb.h"
+#include "routines.h"
 #include "../lib/cpu.h"
 #include "../lib/sound.h"
 #include "../lib/video.h"
@@ -84,8 +87,6 @@ static void apply_list(void) {
     }
 
     write_scroll(0);
-    a = 0;
-    y = 0;
 }
 
 // clear_screen: fill one screen with blank tiles and clear its attributes.
@@ -104,14 +105,13 @@ static void blank_screen(uint16_t base) {
 }
 
 // Clear both screens, with sprites in pattern table $0000 and the background
-// in $1000.
-void clear_screens(void) {
+// in $1000. Gives back Y = 0, where the clearing loop left it.
+uint8_t clear_screens(void) {
     uint8_t ctrl = (ram[PPU_CTRL_COPY] | VIDEO_CTRL_BACKGROUND_BANK) & 0xf0;
     write_control(ctrl);
     blank_screen(0x2400);
     blank_screen(0x2000);
-    a = 0;
-    y = 0;
+    return 0;
 }
 
 // The title screen is a VRAM update list stored in CHR ROM. Copy it to the
@@ -127,10 +127,8 @@ void draw_title_screen(void) {
     }
     ram[0] = 0; // the copy loop leaves its pointer at $0400
     ram[1] = 4;
-    y = TITLE_SCREEN_DATA_SIZE & 0xff;
 
-    a = 5; // draw the buffer at $0300 next frame, then the next screen task
-    select_vram_list_b();
+    select_vram_list_b(5); // draw the buffer at $0300 next frame, then the next screen task
 }
 
 static bool top_score_digits_valid(void) {
@@ -162,8 +160,8 @@ void reset(void) {
     apu_write(APU_STATUS, 0x0f); // enable all channels except DMC
     video.mask = VIDEO_MASK_BACKGROUND_LEFT | VIDEO_MASK_SPRITES_LEFT;
 
-    hide_all_sprites();
-    clear_screens();
+    y = hide_all_sprites();
+    y = clear_screens();
     ram[SCREEN_OFF]++;
     write_control(ram[PPU_CTRL_COPY] | VIDEO_CTRL_NMI);
 
@@ -218,13 +216,13 @@ void frame_interrupt(void) {
     apply_list();
 
     // Reset the buffer just drawn ($0341 when the control selected it).
-    uint8_t offset = rom((uint16_t)(VRAM_LIST_RESET_OFFSETS + (buffer == 6 ? 1 : 0)));
-    ram[VRAM_LIST1_LENGTH + offset] = 0;
-    ram[VRAM_LIST1 + offset] = 0;
+    x = rom((uint16_t)(VRAM_LIST_RESET_OFFSETS + (buffer == 6 ? 1 : 0)));
+    ram[VRAM_LIST1_LENGTH + x] = 0;
+    ram[VRAM_LIST1 + x] = 0;
     ram[VRAM_LIST_SELECT] = 0;
     video.mask = ram[PPU_MASK_COPY];
 
-    update_sound();
+    update_sound(x);
     read_joypads();
     handle_pause();
     update_top_score();
@@ -234,12 +232,13 @@ void frame_interrupt(void) {
         ram[FRAME_COUNT]++;
     }
     advance_random();
+    x = 7; // where the original's loop over the random bytes leaves it
 
     // The status bar is split off at the sprite 0 hit; sprites are shuffled
     // while waiting for it.
     if (ram[STATUS_BAR_SPLIT] && !game_paused()) {
         hide_sprites_but_zero();
-        shuffle_sprite_slots();
+        x = shuffle_sprite_slots();
     }
 
     video.scroll_x = ram[SCROLL_X];
@@ -248,7 +247,7 @@ void frame_interrupt(void) {
     video.ctrl = ctrl;
 
     if (!game_paused()) {
-        run_game_mode();
+        run_game_mode(x);
     }
 
     video.ctrl = ctrl | VIDEO_CTRL_NMI;

@@ -424,11 +424,19 @@ pub fn Transpiler::transpile(
     is_lib: true,
   }
 
+  // the hand-written routines' interface (committed in codegen/native)
+  let interface = if locals && program.functions.iter().any(fn(f) { f.native }) {
+    let (routines_h, machine_calls_c) = native_interface(program, conv)
+    [{ name: "routines.h", contents: routines_h, is_lib: true }, { name: "machine_calls.c", contents: machine_calls_c, is_lib: true }]
+  } else {
+    []
+  }
+
   {
     files: [
       constants_h,
       data_h, data_c,
       code_h, code_c,
-    ] + (if views.list.is_empty() { [] } else { [vars_h] }) + (if locals { [machine_c] } else { [] }),
+    ] + (if views.list.is_empty() { [] } else { [vars_h] }) + (if locals { [machine_c] } else { [] }) + interface,
   }
 }

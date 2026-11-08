@@ -433,8 +433,9 @@ function showWarning(text) {
     warning.hidden = !text;
 }
 
-// Generated files in reading order, then the hand-written display code.
-const FILE_ORDER = ['code.c', 'code.h', 'vars.h', 'constants.h', 'data.h', 'data.c'];
+// Generated files in reading order, then the hand-written display code
+// (after routines.h, the prototypes it is written against).
+const FILE_ORDER = ['code.c', 'code.h', 'vars.h', 'constants.h', 'data.h', 'data.c', 'routines.h'];
 const DEBUG_TILES_KEY = 'debug_tiles';
 const THEME_KEY = 'theme';
 

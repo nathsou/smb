@@ -70,6 +70,12 @@ NATIVE_ROUTINES = --native codegen/native/routines.txt
 CODEGEN_OPTIONS = --locals
 GAME_FLAGS =
 GAME_SOURCES = codegen/native/display.c
+# Without --locals the game keeps the machine's registers: the hand-written
+# routines, which have locals, reach it through adapters.
+ifeq ($(findstring --locals,$(CODEGEN_OPTIONS)),)
+GAME_FLAGS = -DMACHINE_CALLS
+GAME_SOURCES += codegen/native/machine_calls.c
+endif
 endif
 
 # the generated program (make codegen) and the runtime it includes
@@ -100,7 +106,7 @@ SOURCES += codegen/lib/state.c
 SOURCES += codegen/lib/debug_chr.c
 MAIN = codegen/main.c
 
-.PHONY: codegen header clean gpu-check runtime-wasm runtime-cartridge-wasm apu-wasm game-wasm web replay interpreter
+.PHONY: codegen header native-interface clean gpu-check runtime-wasm runtime-cartridge-wasm apu-wasm game-wasm web replay interpreter
 
 # The game is recompiled from your ROM into codegen/game, or codegen/GAME
 # with GAME=metroid, smb3, ... (not in the repository). The poll points of a
@@ -111,6 +117,12 @@ codegen:
 # The map's names for the hand-written code (committed; no ROM needed).
 header:
 	moon run src/main -- --map maps/smb.map --header codegen/native/smb.h
+
+# The hand-written routines' prototypes and their adapters to a game that
+# keeps the machine's registers, from the generated game (committed: the
+# split WebAssembly build's runtime is built without it).
+native-interface: codegen
+	cp $(GAME_DIR)/routines.h $(GAME_DIR)/machine_calls.c codegen/native/
 
 build: clean
 	$(CC) $(CFLAGS) -o $(GAME) ${MAIN} codegen/gpu.c $(SOURCES) codegen/lib/common.c $(GC_FLAGS) $(RAYLIB_FLAGS) $(OBJECTS)
@@ -132,15 +144,16 @@ gpu-check: clean
 	$(CC) $(CFLAGS) -o gpu_check codegen/gpu_check.c codegen/gpu.c $(SOURCES) codegen/lib/rec.c codegen/lib/common.c $(GC_FLAGS) $(RAYLIB_FLAGS) $(OBJECTS)
 
 wasm: clean
-	$(CC) -O3 -ffunction-sections -fdata-sections --target=wasm32 -nostdlib -Wl,--gc-sections -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined $(EXTRA_CFLAGS) -Icodegen/game -Icodegen/lib -o web/smb.wasm $(SOURCES)
+	$(CC) -O3 -ffunction-sections -fdata-sections --target=wasm32 -nostdlib -Wl,--gc-sections -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined $(GAME_FLAGS) $(EXTRA_CFLAGS) -Icodegen/game -Icodegen/lib -o web/smb.wasm $(SOURCES)
 
 # The split WebAssembly build: the C runtime as one module (no game code,
 # no ROM data), and the game module recompiled from the ROM, linked at load
 # time by web/link.js. Check it with `node tests/web/replay_split.mjs`.
-RUNTIME_SOURCES = codegen/lib/cpu.c codegen/lib/video.c codegen/lib/render.c codegen/lib/apu.c codegen/lib/apu_buffers.c codegen/lib/sound.c codegen/lib/state.c codegen/lib/debug_chr.c codegen/lib/prg.c codegen/native/display.c
+RUNTIME_SOURCES = codegen/lib/cpu.c codegen/lib/video.c codegen/lib/render.c codegen/lib/apu.c codegen/lib/apu_buffers.c codegen/lib/sound.c codegen/lib/state.c codegen/lib/debug_chr.c codegen/lib/prg.c codegen/native/display.c codegen/native/machine_calls.c
 
+# (the game module keeps the machine's registers: MACHINE_CALLS)
 runtime-wasm:
-	$(CC) -O3 -ffunction-sections -fdata-sections --target=wasm32 -nostdlib -Wl,--gc-sections -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined $(EXTRA_CFLAGS) -o web/runtime.wasm $(RUNTIME_SOURCES)
+	$(CC) -O3 -ffunction-sections -fdata-sections --target=wasm32 -nostdlib -DMACHINE_CALLS -Wl,--gc-sections -Wl,--import-memory -Wl,--export-all -Wl,--no-entry -Wl,--allow-undefined $(EXTRA_CFLAGS) -o web/runtime.wasm $(RUNTIME_SOURCES)
 
 # The runtime for cartridges that drive the PPU registers and switch banks
 # (Metroid, SMB3): no native routines, the register interface and the

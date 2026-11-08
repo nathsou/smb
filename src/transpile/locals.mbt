@@ -28,12 +28,19 @@
 // locals `t0` to `t7` (see `webs_of`), so `ram[0]` in the C is a value that
 // crosses a routine's edge and `t0` one that does not.
 //
-// Some routines keep the machine's state: the hand-written routines
-// (`--native`, which share their C with the WebAssembly build), the routines
-// they call, the roots, and routines that wait for an interrupt. They are
-// printed as without `--locals`. A call from a routine with locals to one of
-// them passes registers through the machine's (`*machine.y = y;`); a call
-// from one of them to a routine with locals passes the globals.
+// Some routines keep the machine's state: the roots, routines that wait for
+// an interrupt, and routines the hand-written code calls that store through
+// a pointer (`clear_memory`). They are printed as without `--locals`. A call from a
+// routine with locals to one of them passes registers through the machine's
+// (`*machine.y = y;`); a call from one of them to a routine with locals
+// passes the globals.
+//
+// The hand-written routines (`--native`) have locals like the others, with
+// the signatures their original code gives them (codegen/native/routines.h
+// lists them, and those of the routines they call). What their original
+// code does is not taken for what the C does: they may write any scratch
+// byte and must write none, give nothing back as it was, may change any
+// tracked byte, and the routines they call are entered with no equality.
 //
 // In routines with locals, accesses through pointers and indexed accesses
 // from other bases are taken to stay out of the scratch bytes (SMB's
@@ -381,8 +388,8 @@ fn Convention::live_after(self : Convention, f : @ir.Function) -> Array[Array[In
   })
 }
 
-// The routines a hand-written routine's original code calls: they keep the
-// machine's registers, which the hand-written C reads and writes.
+// The routines a hand-written routine's original code calls (the C calls
+// them with the signatures that code gives them).
 fn native_callees(program : @ir.Program) -> Set[String] {
   let out : Set[String] = Set([])
   for f in program.functions {
@@ -396,6 +403,14 @@ fn native_callees(program : @ir.Program) -> Set[String] {
     }
   }
   out
+}
+
+// A store through a pointer, which may reach any byte: a routine the
+// hand-written code calls that makes one keeps the machine's state
+// (`clear_memory`, which clears RAM, the scratch bytes and the stack page
+// included, through one).
+fn stores_through_pointer(f : @ir.Function) -> Bool {
+  f.blocks.iter().any(fn(block) { block.stmts.iter().any(fn(s) { s is Store(Bus, a, _) && a.value() is None }) })
 }
 
 fn waits(f : @ir.Function) -> Bool {
@@ -424,7 +439,7 @@ fn scratch_writes(program : @ir.Program, machine : Map[String, Bool]) -> Map[Str
     for block in f.blocks {
       for s in block.stmts { w = w | stmt_writes(s, broad=machine[f.name]) }
     }
-    writes[f.name] = w & all_scratch
+    writes[f.name] = if f.native { all_scratch } else { w & all_scratch }
   }
   let mut changed = true
   while changed {
@@ -451,8 +466,8 @@ fn Convention::locals_of(program : @ir.Program) -> Convention raise TranspileErr
   let callees = native_callees(program)
   let machine : Map[String, Bool] = Map([])
   for f in program.functions {
-    let m = f.native || program.is_root(f.name) || callees.contains(f.name) || waits(f)
-    if f.helper && m { raise LocalsUnsupported("a dispatcher called by hand-written code: \{f.name}") }
+    let m = program.is_root(f.name) || waits(f) || (callees.contains(f.name) && stores_through_pointer(f))
+    if f.helper && (m || callees.contains(f.name)) { raise LocalsUnsupported("a dispatcher called by hand-written code: \{f.name}") }
     machine[f.name] = m
   }
   let writes = scratch_writes(program, machine)
@@ -589,14 +604,14 @@ fn Convention::prototype(self : Convention, f : @ir.Function) -> String {
 // code they replace.
 fn scratch_must_writes(program : @ir.Program, conv : Convention) -> Map[String, Int] {
   let must : Map[String, Int] = Map(program.functions.map(fn(f) {
-    (f.name, if conv.has_locals(f.name) { all_scratch } else { 0 })
+    (f.name, if conv.has_locals(f.name) && !f.native { all_scratch } else { 0 })
   }))
   let get = fn(g : String) { must.get(g).unwrap_or(0) }
   let mut changed = true
   while changed {
     changed = false
     for f in program.functions {
-      if !conv.has_locals(f.name) { continue }
+      if !conv.has_locals(f.name) || f.native { continue }
       let preds : Array[Array[Int]] = f.blocks.map(fn(_) { [] })
       for b, block in f.blocks {
         for t in block.term.successors() { preds[t].push(b) }
@@ -1166,7 +1181,7 @@ fn kept_results(
   // the RAM bytes code with locals loads into index registers (`slot`)
   let tracked : Set[Int] = Set([])
   for f in program.functions {
-    if !conv.has_locals(f.name) { continue }
+    if !conv.has_locals(f.name) || f.native { continue }
     for block in f.blocks {
       for s in block.stmts {
         match s {
@@ -1183,6 +1198,7 @@ fn kept_results(
   // the tracked bytes each routine may write, with its callees'
   let changes : Map[String, Set[Int]] = Map([])
   for f in program.functions {
+    if f.native { continue }
     let set : Set[Int] = Set([])
     for block in f.blocks {
       for s in block.stmts {
@@ -1197,7 +1213,7 @@ fn kept_results(
   while grew {
     grew = false
     for f in program.functions {
-      let set = changes[f.name]
+      guard changes.get(f.name) is Some(set) else { continue }
       let before = set.length()
       for g in callees_of(f) {
         match changes.get(g) {
@@ -1211,13 +1227,13 @@ fn kept_results(
   // routines entered only from routines with locals, through known calls
   let entered_otherwise : Set[String] = Set([])
   for f in program.functions {
-    if !conv.has_locals(f.name) || f.helper {
+    if !conv.has_locals(f.name) || f.helper || f.native {
       for g in callees_of(f) { entered_otherwise.add(g) }
       entered_otherwise.add(f.name)
     }
   }
   let candidates = fn(f : @ir.Function) {
-    if conv.has_locals(f.name) && !f.helper { conv.sig(f.name).outputs & local_vars } else { 0 }
+    if conv.has_locals(f.name) && !f.helper && !f.native { conv.sig(f.name).outputs & local_vars } else { 0 }
   }
   let exit_candidates = fn() -> Array[(Int, Int)] {
     let out = []
@@ -1242,7 +1258,7 @@ fn kept_results(
     kept: Map(program.functions.map(fn(f) { (f.name, candidates(f)) })),
     equal: Map(program.functions.map(fn(f) { (f.name, equal_candidates(f)) })),
     exits: Map(program.functions.map(fn(f) {
-      (f.name, if conv.has_locals(f.name) && !f.helper { exit_candidates() } else { [] })
+      (f.name, if conv.has_locals(f.name) && !f.helper && !f.native { exit_candidates() } else { [] })
     })),
   }
   // A worklist: a routine is followed again when what it is entered with
@@ -1263,10 +1279,10 @@ fn kept_results(
   }
   // what holds at the calls each routine makes, by callee
   let sites : Map[String, Map[String, Array[(Int, Int)]]] = Map([])
-  let queue : Array[String] = program.functions.filter(fn(f) { conv.has_locals(f.name) }).map(fn(f) { f.name })
+  let queue : Array[String] = program.functions.filter(fn(f) { conv.has_locals(f.name) && !f.native }).map(fn(f) { f.name })
   let queued : Set[String] = Set::from_array(queue)
   let push = fn(g : String) {
-    if !queued.contains(g) && conv.has_locals(g) {
+    if !queued.contains(g) && conv.has_locals(g) && !program.functions[program.by_name[g]].native {
       queued.add(g)
       queue.push(g)
     }
@@ -1375,7 +1391,7 @@ fn kept_results(
   // location the call leaves alone, and still is (by block << 16 | stmt).
   let same_x : Map[String, Set[Int]] = Map([])
   for f in program.functions {
-    if !conv.has_locals(f.name) { continue }
+    if !conv.has_locals(f.name) || f.native { continue }
     let (starts, _) = facts.flow(f)
     let sites : Set[Int] = Set([])
     for b, block in f.blocks {

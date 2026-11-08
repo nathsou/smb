@@ -145,10 +145,11 @@ fn hex(v : Int) -> String {
   "0x" + v.to_string(radix=16)
 }
 
-// A C header with the map's names alone (no ROM needed): its types,
-// addresses of variables, registers and tables, and prototypes of the
-// routines, for the
-// hand-written code that works alongside the generated program.
+// A C header with the map's names alone (no ROM needed): its types and the
+// addresses of variables, registers and tables, for the hand-written code
+// that works alongside the generated program. (The routines' prototypes
+// depend on the ROM's code: the transpiler writes those the hand-written
+// code needs, routines.h.)
 pub fn map_header(map_text : String, source~ : String) -> String raise PipelineError {
   let map = @image.parse_map(map_text) catch { err => raise fail("Map", err) }
   let out = StringBuilder()
@@ -161,7 +162,7 @@ pub fn map_header(map_text : String, source~ : String) -> String raise PipelineE
     seen.add(entry.name)
     let comment = if entry.description == "" { "" } else { " // " + entry.description }
     match entry.kind {
-      Routine => out.write_string("void \{entry.name}(void);\{comment}\n")
+      Routine => ()
       _ => out.write_string("#define \{entry.name} \{hex(entry.address)}\{comment}\n")
     }
   }

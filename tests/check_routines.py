@@ -45,23 +45,23 @@ def routines(code, prefix=""):
     return found
 
 
-def check_native_calls():
-    """With registers as locals, the hand-written routines (codegen/native),
-    which share their C with the WebAssembly build, may only call routines
-    that keep the machine's registers: `void name(void)` in code.h."""
-    header = (GAME / "code.h").read_text()
-    routines_part = header[header.index("void cpu_irq_entry(void);"):]
-    with_locals = {name for name, params in re.findall(r"^\w+ (\w+)\((.*)\);$", routines_part, re.M)
-                   if params != "void" or not re.search(rf"^void {name}\(void\);$", routines_part, re.M)}
-    for source in sorted((ROOT / "codegen/native").glob("*.c")):
-        called = set(re.findall(r"\b(\w+)\s*\(", source.read_text()))
-        wrong = sorted(called & with_locals)
-        if wrong:
-            sys.exit(f"{source.relative_to(ROOT)} calls routines with locals: {', '.join(wrong)}")
+def check_native_interface():
+    """The hand-written routines (codegen/native) call and are called with the
+    signatures --locals gives them: routines.h, committed with the adapters
+    for a game that keeps the machine's registers (machine_calls.c), is the
+    one generated with the game, and agrees with code.h."""
+    for name in ["routines.h", "machine_calls.c"]:
+        if (ROOT / "codegen/native" / name).read_text() != (GAME / name).read_text():
+            sys.exit(f"codegen/native/{name} is not the generated one: run make native-interface")
+    with tempfile.TemporaryDirectory(prefix="smb-interface-") as tmp:
+        both = pathlib.Path(tmp) / "both.c"
+        both.write_text('#include "code.h"\n#include "routines.h"\n')
+        run("cc", "-std=gnu99", "-fsyntax-only", "-I", str(GAME), "-I", str(ROOT / "codegen/lib"),
+            "-I", str(ROOT / "codegen/native"), str(both))
 
 
 def main():
-    check_native_calls()
+    check_native_interface()
     with tempfile.TemporaryDirectory(prefix="smb-routines-") as tmp:
         tmp = pathlib.Path(tmp)
         # with locals, the program under test is generated again with its
