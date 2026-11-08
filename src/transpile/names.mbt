@@ -147,6 +147,8 @@ fn Convention::derive_scratch_names(self : Convention, program : @ir.Program, vi
       guard self.webs.get(f.name) is Some(webs) else { continue }
       let own : Set[String] = Set([])
       for k in 0..<scratch_bytes { if map_name(f.name, k) != "" { own.add(map_name(f.name, k)) } }
+      // (nor the routine's own parameters' and results' names)
+      for e in views.params.get(f.name).unwrap_or([]) + views.results.get(f.name).unwrap_or([]) { own.add(e.1) }
       for k in 0..<scratch_bytes {
         if map_name(f.name, k) != "" { continue }
         let bit = scratch_bit(k)
@@ -154,12 +156,12 @@ fn Convention::derive_scratch_names(self : Convention, program : @ir.Program, vi
         for b, block in f.blocks {
           for i, s in block.stmts {
             match s {
-              Call(g) if (self.sig(g).promoted & bit) != 0 && (webs.uses[b][i] & (1 << k)) != 0 => names.push(name_in(g, k))
+              Call(g) if (self.sig(g).promoted & bit) != 0 => names.push(name_in(g, k))
               _ => ()
             }
           }
           match block.term {
-            TailCall(g) if (self.sig(g).promoted & bit) != 0 && (webs.terms[b] & (1 << k)) != 0 => names.push(name_in(g, k))
+            TailCall(g) if (self.sig(g).promoted & bit) != 0 => names.push(name_in(g, k))
             _ => ()
           }
         }

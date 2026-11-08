@@ -297,7 +297,9 @@ test "with --locals, a scratch byte a routine reads on entry and keeps to itself
   let map = "routine $c000 boot\nroutine $c006 update\nroutine $c019 use\nroutine $c01e keep\nroutine $c022 inner\nroutine $c029 tick\nvar $0010 count_copy\nvar $0011 picked\nvar $0020 index\nscratch use $00 count ; how many\n"
   let files = transpile_rom(source, map, locals=true)
   let code = files["code.c"]
-  assert_eq(code.contains("void update(void) {\n  uint8_t count;\n  count = 3;\n  use(count);\n  ram[0] = 0;\n  ram[1] = 4;\n  keep();"), true)
+  assert_eq(code.contains("void update(void) {\n  uint8_t count;\n  count = 3;\n  use(count);\n  count_ram = 0;\n  ram[1] = 4;\n  keep();"), true)
+  // (the byte, named for the callee it is passed to; RAM's value of it too)
+  assert_eq(code.contains("#define count_ram ram[0] // named for the callee it is passed to (in RAM)"), true)
   assert_eq(code.contains("void use(uint8_t count) {\n  count_copy = count;"), true)
   assert_eq(code.contains("void keep(void) {"), true)
   // the differential test passes it from RAM, and writes no result back

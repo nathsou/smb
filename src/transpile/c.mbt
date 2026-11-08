@@ -1015,7 +1015,17 @@ fn reads_scratch(e : @ir.Expr, k : Int) -> Bool {
 
 fn scratch_plan(f : @ir.Function, views : Views, conv : Convention) -> ScratchPlan {
   let plan = ScratchPlan::plain()
-  guard views.scratch.get(f.name) is Some(names) else { return plan }
+  // the map's names, and those of the bytes it leaves unnamed that the
+  // routine passes to callees taking them by value
+  let names = views.scratch.get(f.name).unwrap_or([]).copy()
+  match conv.scratch_names.get(f.name) {
+    Some(derived) =>
+      for k in 0..<scratch_bytes {
+        if derived[k] != "" && !names.iter().any(fn(e) { e.0 == k }) { names.push((k, derived[k], "named for the callee it is passed to")) }
+      }
+    None => ()
+  }
+  if names.is_empty() { return plan }
   let webs = if conv.has_locals(f.name) { conv.webs.get(f.name) } else { None }
   for entry in names {
     let (k, name, description) = entry
@@ -1024,7 +1034,12 @@ fn scratch_plan(f : @ir.Function, views : Views, conv : Convention) -> ScratchPl
     let mut in_ram = false
     for b, block in f.blocks {
       for i, s in block.stmts {
-        let reads = s.exprs().iter().any(fn(e) { reads_scratch(e, k) })
+        // (an argument of a callee that takes the byte by value too)
+        let passed = match s.callee() {
+          Some(g) => (conv.sig(g).promoted & scratch_bit(k)) != 0
+          None => false
+        }
+        let reads = passed || s.exprs().iter().any(fn(e) { reads_scratch(e, k) })
         let writes = s is Store(Ram, a, _) && scratch_of(a) == Some(k)
         let (uses, defs) = match webs {
           Some(w) => (w.uses[b][i], w.defs[b][i])
@@ -1032,7 +1047,11 @@ fn scratch_plan(f : @ir.Function, views : Views, conv : Convention) -> ScratchPl
         }
         if (reads && (uses & bit) == 0) || (writes && (defs & bit) == 0) { in_ram = true }
       }
-      let term_reads = block.term.exprs().iter().any(fn(e) { reads_scratch(e, k) })
+      let term_passed = match block.term {
+        TailCall(g) => (conv.sig(g).promoted & scratch_bit(k)) != 0
+        _ => false
+      }
+      let term_reads = term_passed || block.term.exprs().iter().any(fn(e) { reads_scratch(e, k) })
       let term_local = match webs {
         Some(w) => (w.terms[b] & bit) != 0
         None => false
@@ -1062,15 +1081,7 @@ fn scratch_plan(f : @ir.Function, views : Views, conv : Convention) -> ScratchPl
 // The plan with the names of scratch values the map leaves unnamed, from
 // the callees that take them by value.
 fn scratch_plan_named(f : @ir.Function, views : Views, conv : Convention) -> ScratchPlan {
-  let plan = scratch_plan(f, views, conv)
-  match conv.scratch_names.get(f.name) {
-    Some(derived) =>
-      for k in 0..<scratch_bytes {
-        if derived[k] != "" && plan.locals[k] == "t\{k}" && plan.ram[k] == "" { plan.locals[k] = derived[k] }
-      }
-    None => ()
-  }
-  plan
+  scratch_plan(f, views, conv)
 }
 
 // The registers and flags a printed body names (outside comments): the

@@ -66,7 +66,8 @@ def check_scratch_names():
         fields = line.split(";")[0].split()
         if len(fields) == 4 and fields[0] == "scratch":
             routine, byte, name = fields[1], int(fields[2][1:], 16), fields[3]
-            if not re.search(rf"#define {name} ram\[{byte}\]|\buint8_t[^;]*\b{name}\b", code):
+            # (in the routine: its body or parameters, by the name or NAME_ram)
+            if not re.search(rf"\b{name}(_ram)?\b", functions.get(routine, "")):
                 missing.append(f"{routine} {fields[2]} {name}")
         elif len(fields) == 3 and fields[0] == "label":
             if not re.search(rf"^\s*{fields[2]}:", code, re.M):
