@@ -60,7 +60,8 @@ The names and descriptions are this project's own; the repository holds no
 game code or data, and the generated C goes to `codegen/game/` (`make
 codegen` with your ROM). The hand-written routines include
 `codegen/native/smb.h`, the map's names as a header generated from the map
-alone (`make header`). Code generated from the ROM and from the disassembly
+alone (`make header`), and `codegen/native/routines.h`, the signatures they
+have and call with, generated with the game (`make native-interface`). Code generated from the ROM and from the disassembly
 (before it was removed) were checked identical in behaviour (per-frame
 trace, ROM framebuffer hash and the routine-level differential test pairing
 routines by address). `tests/nrom128.map` names the independent NROM fixture,
@@ -232,6 +233,36 @@ The compiled code behaves identically (per-frame traces, routine diff) and
 runs at the same speed. Assembly input has no map, and its C keeps
 addresses.
 
+Arrays indexed alike are the fields of a record (the map's `record` lines):
+a structure laid out over the same bytes, with each field at its array's
+address and gaps between them, so `enemy(x)` is the structure at `$0f + x`:
+
+```c
+struct enemy_record {
+  uint8_t active; // $000f
+  uint8_t gap0[6];
+  uint8_t kind; // $0016
+  ...
+};
+#define enemy(i) (*(struct enemy_record *)&ram[0xf + (i)])
+
+enemy_kind(x) = 0xd;    ->  enemy(x).kind = ENEMY_KIND_PIRANHA;
+sprite_tile[4 + y] = a; ->  sprite(4 + y).tile = a;
+```
+
+SMB's records are the object slots (`obj`, which runs over the player,
+the enemies, the fireballs, the blocks, the misc objects and the bubbles in
+turn, and `enemy`, `fireball`, `block`, `misc`, `bubble`), the floating
+scores (`popup`), the cannons and the OAM copy's sprites (`sprite`, four
+bytes each, indexed by byte offset). In a record whose fields are
+consecutive bytes, as the sprites', a byte reached past a field is the field
+of a later element: `$0203 + 2` is the next sprite's tile, `sprite(4 +
+y).tile`. The arrays of a record lose their own views. The index stays
+within the record (it does not wrap around page zero or RAM), which
+`--check-scratch` checks with the other indexed accesses (see Scratch
+values). The generated C reads 1,146 fields this way, 689 of them the
+enemies'.
+
 A constant beside a typed variable is written as the type's value: one it
 is compared with, stored to it, or used to mask or combine it (also when
 the variable is combined with others of its type first). Bits are the names
@@ -261,6 +292,31 @@ each kind, and the code that sets or tests one (`draw_vertical_pipe` sets the
 piranha, `draw_flagpole` the flag, `fireball_hit_enemy` spares the buzzy
 beetle). Every routine of `maps/smb.map` has a one-line description, the
 comment above its function.
+
+With `--locals`, a 16-bit addition or subtraction, done a byte at a time
+with the carry going from the low byte into the high one, is one sum
+(`src/transpile/words.mbt`). The low sum takes the high bytes as `WORD(hi,
+lo)`, and the high byte is the sum's:
+
+```c
+uint16_t sum2 = (uint16_t)(obj(x).x + pixel_speed + carry);
+obj(x).x = (uint8_t)sum2;
+a = (uint8_t)(obj(x).page + page_carry + (sum2 >= 0x100));
+                 ->
+uint16_t sum2 = (uint16_t)(WORD(obj(x).page, obj(x).x) + WORD(page_carry, pixel_speed) + carry);
+obj(x).x = (uint8_t)sum2;
+a = (uint8_t)(sum2 >> 8);
+```
+
+This is exact when the low sum carries (or borrows) at most once, so the
+carry test is the sum's bit 8; when the sum is otherwise used only for its
+low byte; and when nothing between the two statements writes what the high
+bytes read, as they are now read first. A comparison of the low bytes
+followed by a subtraction of the high ones that keeps only the carry is a
+16-bit comparison, `carry = WORD(obj(x).page, obj(x).x) >= WORD(middle_page,
+middle_x);`. SMB has 49 such sums and 2 comparisons. A chain whose high
+byte's carry goes on (three-byte positions, the score's digits) stays as it
+is.
 
 JSRs are plain C calls: SMB's replay was identical with and without the
 emulated return-address stack, and the generator's static stack checks reject
@@ -299,24 +355,26 @@ void lakitu_chase(void) {      ->      uint8_t a, y;
   globals, because a routine called later could read them.
 - The interrupt and decimal flags and SP stay global. The stack is memory.
 
-Some routines keep the machine's registers: the hand-written ones
-(`--native`, whose C the WebAssembly runtime shares), the 11 routines
-they call (`clear_memory`, `run_game_mode`, `update_sound`, ...), the roots,
-and routines that wait for an interrupt. They are printed as without
-`--locals`. A call from them to a routine with locals passes the globals
-(`x = move_lakitu(x);`). A call the other way goes through `machine`, the
+Some routines keep the machine's registers: the roots (`reset` and
+`frame_interrupt`, which the runtime enters), routines that wait for an
+interrupt, and `clear_memory`, which clears RAM through a pointer, scratch
+bytes and stack page included (a routine the hand-written code calls that
+stores through a pointer). They are printed as without `--locals`. A call
+from them to a routine with locals passes the globals (`x =
+move_lakitu(x);`). A call the other way goes through `machine`, the
 machine's registers by pointer (`*machine.y = y; clear_memory(); a =
-*machine.a;`). That happens 3 times in SMB. `tests/check_routines.py` checks
-that the hand-written C only calls routines that keep the machine's
-registers.
+*machine.a;`), twice in SMB.
+
+The hand-written routines have locals too, with the signatures their
+original code gives them; see Hand-written routines.
 
 The runtime's `indirect_y_addr` and `indirect_x_addr` read the machine's X
 and Y. With locals the pointer is read by `zero_page_pointer` and the index
 added in the generated code. `cpu_unresolved_jump` is declared
 `noreturn`, so a routine that returns a value needs no return after a trap.
 
-In SMB, 207 routines return a value, 40 also write results through pointers,
-and 218 take parameters and return nothing. The C compiles without warnings
+In SMB, 211 routines return a value, 40 also write results through pointers,
+and 223 take parameters and return nothing. The C compiles without warnings
 under the Makefile's flags. Coroutines, restarts and preemption keep the
 machine's registers: `--locals` refuses programs that use them. The other
 games are recompiled as before.
@@ -352,12 +410,20 @@ RAM bytes change only by their own stores, by indexed stores that may reach
 them without wrapping around page zero or RAM (an index from a scratch byte
 stays within them), by pointer stores above the stack page (anywhere in the
 routines that keep the machine's state: `clear_memory` clears all of RAM),
-and by calls that do one of these. In SMB, 40 routines that returned a value
-no longer do (207 against 247), and 112 routines return X (123 before).
-A worklist follows a routine again only when what it is entered with or what
-a callee gives back changes. With `--locals` the recompiler takes about 7 s
-for SMB from the command line (2.6 s without), and the page's recompile
-about 4 s (1.6 s without), which the page then caches.
+and by calls that do one of these. A hand-written routine's original code is
+not taken for what its C does: it may change any of them and gives nothing
+back as it was, and the routines it calls are entered with no equality. In
+SMB, 41 routines that would return a value without this analysis no longer
+do (211 against 252), and 125 return X, as a result or through `out_x` (174
+without).
+
+The analyses are worklists: the parameters' fixpoint follows a routine again
+only when one it calls takes more, the equalities' flow runs blocks in
+reverse postorder and again only when what comes into them changes, and a
+routine is followed again only when what it is entered with or what a callee
+gives back changes. With `--locals` the recompiler takes about 3.7 s for SMB
+from the command line (`moon run`, 1.9 s without), and the page's recompile
+about 2.3 s (1.1 s without, measured in Node), which the page then caches.
 
 ### Scratch values
 
@@ -386,8 +452,29 @@ greatest fixpoint over the program) ends the web that came before. An index
 into the scratch bytes (`ram[1 + y]`) also keeps the web in RAM. What callers
 read of a scratch byte after a call, and what interrupt handlers read on
 entry, are found as for registers, over the calls. In SMB, 18 routines have
-scratch locals (101 uses). Most scratch values cross a call: 495 accesses
-stay `ram[k]` (566 before). Naming those per routine is a job for the map.
+scratch locals (100 uses). Most scratch values cross a call, and stay in RAM.
+
+The map names what a scratch byte holds in a routine (`scratch ROUTINE $0K
+NAME ; description`). Where the byte is a local throughout the routine, the
+local takes the name; otherwise the routine is printed between `#define NAME
+ram[K] // description` and `#undef NAME`:
+
+```c
+#define down_force ram[0] // force added each frame while falling
+#define up_force ram[1] // force while moving up
+#define max_speed ram[2] // the downward speed cap
+#define speed_sign ram[7] // the sign of the vertical speed
+void apply_gravity(uint8_t a, uint8_t x) {
+  ...
+  uint16_t sum4 = (uint16_t)(WORD(obj(x).y_speed, obj(x).y_force) + down_force);
+```
+
+SMB's map names 42 bytes over 24 routines (gravity, horizontal movement,
+sprite rows, collision boxes, the VRAM queue, bubbles, platforms): 131
+accesses read by name, and 448 stay `ram[k]`. A name that an identifier, a
+view, a record or a record's field already has is left out (a `#define`
+would rewrite `.kind`), and `tests/check_codegen.py` fails if a map name
+never reaches the code.
 
 In routines with locals, accesses through pointers and indexed accesses
 from other bases are taken to stay out of the scratch bytes. SMB's pointers
@@ -426,6 +513,10 @@ Checks:
   game's object and sprite indices are, and left out if they fail again: the
   game's indices never go there, and the program relies on that. 0
   mismatches over the same 530 routines, 155,519 runs; 1,020 are left out.
+- The build without `--locals`, which reaches the hand-written routines
+  through `machine_calls.c`, still matches `warpless.trace`, and so does the
+  split WebAssembly build, whose runtime has the adapters, on all 7,987
+  frames.
 - The WebAssembly module is byte-identical with and without `--locals`
   (only the C is printed differently).
 - The NROM-128 fixture runs with `--locals` too (ROM-free, in CI), from its
@@ -437,7 +528,9 @@ Checks:
   - the runtime's `indirect_y_addr` printed in routines with locals: the
     replay crashes;
   - every read of a scratch local made from RAM instead: diverges at frame
-    7.
+    7;
+  - the 16-bit comparisons printed with `>` for `>=`: diverges at frame
+    282, and the high bytes taken as `sum >> 7`: the game hangs.
 
   Two single-site mutations were not caught. One was equivalent: the
   routine saves Y in `$01` and reloads it before the write-back. The other
@@ -463,7 +556,9 @@ time in one memory:
   yield, traps, and the native routines);
 - the runtime imports the game routines it calls (the entry points and the
   routines the natives call); these are JavaScript trampolines to the game
-  module, instantiated after it;
+  module, instantiated after it. The game module keeps the machine's
+  registers, so the runtime is built with `machine_calls.c` (see
+  Hand-written routines);
 - the loader copies the ROM's PRG banks into the runtime's buffer.
 
 Constant parts of addresses go into the memory instructions' offsets, so
@@ -588,6 +683,42 @@ of the body, the contract the replacement must keep:
 // It must produce: y.
 ```
 
+With `--locals`, they take and return values like the other routines, with
+the signatures their original code gives them. `codegen/native/routines.h`
+declares them for the hand-written C, with the generated routines it calls:
+
+```c
+uint8_t clear_screens(void); // returns y
+void select_vram_list_b(uint8_t a);
+void run_game_mode(uint8_t x);
+```
+
+so `display.c` reads `y = clear_screens();` and `select_vram_list_b(5);`.
+`make native-interface` writes `routines.h` from the generated game, and
+`tests/check_routines.py` checks that it is the one generated and agrees
+with `code.h`. `frame_interrupt` passes `run_game_mode` and `update_sound`
+the X their original code passes them (7, where the loop over the random
+bytes leaves it, or the sprite shuffler's).
+
+A game that keeps the machine's registers (built without `--locals`, and the
+WebAssembly game module) calls them through `codegen/native/machine_calls.c`,
+generated alongside: built with `MACHINE_CALLS`, `routines.h` names the
+hand-written C's routines `locals_*`, and the adapters pass their values
+through the registers, both ways:
+
+```c
+void clear_screens(void) {
+  y = locals_clear_screens();
+}
+void locals_select_vram_list_b(uint8_t v_a) {
+  a = v_a;
+  select_vram_list_b();
+}
+```
+
+`codegen/native/smb.h`, which comes from the map alone, no longer declares
+the routines.
+
 ## Display without a PPU register model
 
 The routines that drove the PPU registers (`reset`,
@@ -597,7 +728,8 @@ The routines that drove the PPU registers (`reset`,
 auto-incrementing VRAM address, a buffered data port and vblank / sprite 0
 polling loops, they update a `Video` struct (`codegen/lib/video.h`):
 nametables, palette, sprites, control, mask, scroll and the status-bar split.
-They keep the original RAM side effects and the registers their callers read.
+They keep the original RAM side effects, and take and return the registers
+their original code does.
 
 The old PPU module is split in three:
 
@@ -717,10 +849,8 @@ original renderer are unchanged.
 
 ## Remaining work
 
-- Registers as locals in the other games, and in the routines that keep
-  the machine's registers: the hand-written routines would take and return
-  values too, and their C is shared with the WebAssembly runtime, which
-  calls the game module with the registers in memory.
+- Registers as locals in the other games, and in the WebAssembly game
+  module (which would let the runtime drop `machine_calls.c`).
 - The routines that still return X: many are entered with X something
   other than `slot` from some call, and reload it from `slot` anyway; their
   callers keep it only where X was `slot`. A context-sensitive analysis (per
@@ -728,10 +858,10 @@ original renderer are unchanged.
 - A proof per routine that the C with locals computes what the reference
   computes, for every input (as acnl does with an SMT solver), for the paths
   that neither the replay nor the differential test's states take.
-- Scratch bytes by name: most values in `$00-$07` cross a routine's edge,
-  so they stay `ram[k]`. The map could name them per routine (the distance
-  `player_enemy_distance` leaves in `$00`), as views of the same bytes.
-- Records: the sprite table and the object slots as structures over the
-  same bytes (`sprite_x[4 + y]` is the X of the sprite after `y / 4`).
+- More scratch names: 448 accesses of `$00-$07` are still `ram[k]`, most of
+  them values a routine leaves for its caller or callee, which a name would
+  have to follow across the call.
+- Carry chains of three bytes and more (sub-pixel, pixel and page; the
+  score's digits), whose middle sum's carry goes on.
 - The status-bar split is decided after the frame's game logic, as before;
   hardware decides it at the sprite 0 hit, earlier in the frame.
