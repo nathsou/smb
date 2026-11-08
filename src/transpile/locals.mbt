@@ -294,28 +294,29 @@ fn pointer_name(sig : Signature, s : Slot) -> String {
 // tail call its callee's parameters (and the results it leaves to the
 // routine).
 fn Convention::term_live(self : Convention, f : @ir.Function, term : @ir.Term, live : Array[Int]) -> Int {
-  let root = self.root
-  let own = self.sig(f.name)
+  // (what the terminator reads, and the routine's own results, only where
+  // they count)
+  let reads = fn() { term_uses(term, broad=!self.has_locals(f.name)) }
+  let outputs = fn() { self.sig(f.name).outputs }
   let tail = fn(g : String) {
     let s = self.sig(g)
-    s.params | (own.outputs & s.outputs.lnot())
+    s.params | (outputs() & s.outputs.lnot())
   }
-  let reads = term_uses(term, broad=!self.has_locals(f.name))
   match term {
     Goto(t) => live[t]
-    Branch(_, t, e) => reads | live[t] | live[e]
-    Switch(_, _, _) => term.successors().fold(init=reads, fn(acc, t) { acc | live[t] })
-    Return => own.outputs
-    ReturnValue(_) => own.outputs | reads
+    Branch(_, t, e) => reads() | live[t] | live[e]
+    Switch(_, _, _) => term.successors().fold(init=reads(), fn(acc, t) { acc | live[t] })
+    Return => outputs()
+    ReturnValue(_) => outputs() | reads()
     TailCall(g) => tail(g)
-    Jump(_, cases) => cases.fold(init=reads, fn(acc, c) { acc | tail(c.1) })
+    Jump(_, cases) => cases.fold(init=reads(), fn(acc, c) { acc | tail(c.1) })
     Dispatch(h, _, cases) => {
       let helper = self.sig(h)
       let after = cases.fold(init=0, fn(acc, c) { acc | tail(c.1) })
       helper.params | (after & helper.outputs.lnot())
     }
-    Suspend(t) => root | live[t]
-    Yield(_) => root
+    Suspend(t) => self.root | live[t]
+    Yield(_) => self.root
     Trap(_) => 0
   }
 }
@@ -515,6 +516,17 @@ fn solve(
   kept : Map[String, Int],
 ) -> Convention {
   let demand : Map[String, Int] = Map(program.functions.map(fn(f) { (f.name, 0) }))
+  // what reads each routine's parameters: its callers, and the routines
+  // that tail call or jump to it
+  let readers : Map[String, Array[String]] = Map([])
+  for f in program.functions {
+    for g in callees_of(f) {
+      match readers.get(g) {
+        Some(list) => if !list.contains(f.name) { list.push(f.name) }
+        None => readers[g] = [f.name]
+      }
+    }
+  }
   for ;; {
     let sigs : Map[String, Signature] = Map([])
     for f in program.functions {
@@ -526,16 +538,19 @@ fn solve(
       sigs[f.name] = { machine: m, memory, params: 0, outputs, kept: kept[f.name], primary }
     }
     let conv = { locals: true, check: false, sigs, root, webs: Map([]), entered: Map([]), same_x: Map([]) }
-    // parameters: a least fixpoint, they only grow
-    let mut changed = true
-    while changed {
-      changed = false
-      for f in program.functions {
-        let entry = block_live(f, conv)[f.entry]
-        let old = sigs[f.name]
-        if (old.params | entry) != old.params {
-          sigs[f.name] = { ..old, params: old.params | entry }
-          changed = true
+    // parameters: a least fixpoint, they only grow; a routine is followed
+    // again when one it calls or goes to takes more
+    let work = program.functions.map(fn(f) { f.name })
+    let queued : Set[String] = Set::from_array(work)
+    while work.pop() is Some(name) {
+      queued.remove(name)
+      let f = program.functions[program.by_name[name]]
+      let entry = block_live(f, conv)[f.entry]
+      let old = sigs[name]
+      if (old.params | entry) != old.params {
+        sigs[name] = { ..old, params: old.params | entry }
+        for r in readers.get(name).unwrap_or([]) {
+          if !queued.contains(r) { queued.add(r); work.push(r) }
         }
       }
     }
@@ -899,7 +914,9 @@ fn Held::entry() -> Held {
 }
 
 fn Held::copy(self : Held) -> Held {
-  { class: Map::from_iter(self.class.iter()), sp: self.sp }
+  let class : Map[Int, Int] = Map([], capacity=self.class.length())
+  for k, r in self.class { class[k] = r }
+  { class, sp: self.sp }
 }
 
 fn Held::rep(self : Held, loc : Int) -> Int {
@@ -915,7 +932,10 @@ fn Held::separate(self : Held, loc : Int) -> Unit {
   guard self.class.get(loc) is Some(r) else { return }
   self.class.remove(loc)
   if r != loc { return }
-  let members = self.class.iter().filter(fn(e) { e.1 == loc }).map(fn(e) { e.0 }).collect()
+  let members = []
+  for k, r in self.class {
+    if r == loc { members.push(k) }
+  }
   if members.length() == 1 {
     self.class.remove(members[0])
   } else if !members.is_empty() {
@@ -942,14 +962,29 @@ fn Held::union(self : Held, a : Int, b : Int) -> Unit {
   let ra = self.rep(a)
   let rb = self.rep(b)
   if ra == rb { return }
-  if !self.class.contains(a) { self.class[a] = ra }
-  let members = self.class.iter().filter(fn(e) { e.1 == rb }).map(fn(e) { e.0 }).collect()
+  // (a location alone is not in the map, and no member names it)
+  if !self.class.contains(b) {
+    if !self.class.contains(a) { self.class[a] = a }
+    self.class[b] = ra
+    return
+  }
+  if !self.class.contains(a) {
+    self.class[a] = rb
+    return
+  }
+  let members = []
+  for k, r in self.class {
+    if r == rb { members.push(k) }
+  }
   for m in members { self.class[m] = ra }
   self.class[b] = ra
 }
 
 fn Held::forget(self : Held, keep : (Int) -> Bool) -> Unit {
-  let gone = self.class.keys().filter(fn(l) { !keep(l) }).collect()
+  let gone = []
+  for l, _ in self.class {
+    if !keep(l) { gone.push(l) }
+  }
   for l in gone { self.separate(l) }
 }
 
@@ -1124,10 +1159,17 @@ fn Facts::flow(self : Facts, f : @ir.Function) -> (Array[Held?], Array[Held?]) {
   for pair in self.equal.get(f.name).unwrap_or([]) { entry.union(pair.0, byte_base + pair.1) }
   let starts : Array[Held?] = f.blocks.map(fn(_) { None })
   let ends : Array[Held?] = f.blocks.map(fn(_) { None })
+  // in reverse postorder from the entry, a block again only when what one
+  // before it ends with changed
+  let order = reverse_postorder(f)
+  let dirty = f.blocks.map(fn(_) { true })
   let mut moving = true
   while moving {
     moving = false
-    for b, block in f.blocks {
+    for b in order {
+      if !dirty[b] { continue }
+      dirty[b] = false
+      let block = f.blocks[b]
       let joined = preds[b].fold(init=None, fn(acc : Held?, p) {
         match (acc, ends[p]) {
           (None, e) => e
@@ -1153,11 +1195,40 @@ fn Facts::flow(self : Facts, f : @ir.Function) -> (Array[Held?], Array[Held?]) {
       }
       if !same {
         ends[b] = Some(h)
-        moving = true
+        for t in block.term.successors() {
+          dirty[t] = true
+          moving = true
+        }
       }
     }
   }
   (starts, ends)
+}
+
+// The blocks reached from the entry, each before those it leads to (but
+// along back edges).
+fn reverse_postorder(f : @ir.Function) -> Array[Int] {
+  let seen = f.blocks.map(fn(_) { false })
+  let post = []
+  // an explicit stack: (block, next successor to visit)
+  let stack : Array[(Int, Int)] = [(f.entry, 0)]
+  seen[f.entry] = true
+  while stack.length() > 0 {
+    let (b, i) = stack[stack.length() - 1]
+    let succ = f.blocks[b].term.successors()
+    if i < succ.length() {
+      stack[stack.length() - 1] = (b, i + 1)
+      let t = succ[i]
+      if !seen[t] {
+        seen[t] = true
+        stack.push((t, 0))
+      }
+    } else {
+      post.push(b)
+      ignore(stack.pop())
+    }
+  }
+  post.rev()
 }
 
 // What a register slot holds at a tail call of `g`, kept: the entry value.
