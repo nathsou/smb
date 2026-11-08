@@ -25,6 +25,11 @@ flags pulse2_sfx coin=$01 grow_powerup=$02 grow_vine=$04 blast=$08 timer_tick=$1
 flags noise_sfx brick_shatter=$01 bowser_flame=$02 ; the noise channel's sound effects
 flags event_music death=$01 game_over=$02 victory=$04 castle_clear=$08 level_clear=$20 hurry_up=$40 silence=$80 ; event music
 flags area_music water=$01 ground=$02 underground=$04 castle=$08 cloud=$10 pipe_intro=$20 star=$40 silence=$80 ; area music
+enum player_task place=0 vine_climb_in=1 side_pipe_exit=2 down_pipe=3 flagpole=4 walk_to_castle=5 lose_life=6 enter_area=7 control=8 grow_or_shrink=9 injury_blink=10 dying=11 fire_flower=12 ; the player's routine (player_tasks)
+enum screen_task clear_screen=0 intermission_setup=1 status_bar_top=2 status_bar_bottom=3 time_up=4 wait=5 intermission=6 wait_again=7 render_columns=8 area_palette=9 background_color=10 mushroom_palette=11 title_screen=12 clear_lists=13 top_score=14 ; the screen setup's step (screen_tasks)
+enum star_flag_task done=0 count_fireworks=1 time_points=2 raise_flag=3 wait_end=4 ; the end of the area's step (star_flag_tasks)
+flags sprite_attribute behind=$20 flip_x=$40 flip_y=$80 ; a sprite's attribute bits (the low two: its palette)
+enum vram_list list1=0 water_palettes=1 ground_palettes=2 underground_palettes=3 castle_palettes=4 title_buffer=5 list2=6 list2_again=7 bowser_palette=8 day_snow_palette=9 night_snow_palette=10 mushroom_palette=11 thanks_mario=12 thanks_luigi=13 other_castle=14 quest_over=15 new_quest=16 press_b=17 select_world=18 ; the VRAM update list to draw (vram_lists_low/high)
 
 # Records: arrays of RAM indexed alike, as one structure's fields in the C
 # (enemy(x).kind for enemy_kind(x)). The bytes stay where they are.
@@ -85,7 +90,7 @@ var $000a buttons_ab : button   ; A and B, as joypad bits
 var $000b buttons_vertical : button
 var $000c buttons_horizontal : button
 var $000d buttons_ab_previous : button
-var $000e player_task           ; which player routine runs this frame
+var $000e player_task : player_task ; which player routine runs this frame
 var $000f enemy_active 7
 var $0016 enemy_kind 7 : enemy_kind
 var $001d obj_state 22
@@ -175,7 +180,7 @@ var $0134 score_add 6           ; digits added to a score
 # Sprites and VRAM update lists
 var $0200 sprite_y 256
 var $0201 sprite_tile 255
-var $0202 sprite_attr 254
+var $0202 sprite_attr 254 : sprite_attribute
 var $0203 sprite_x 253
 var $0300 vram_list1_length
 var $0301 vram_list1 63
@@ -215,9 +220,9 @@ var $03ba fireball_screen_y
 var $03bb bubble_screen_y
 var $03bc block_screen_y 2
 var $03be misc_screen_y
-var $03c4 obj_sprite_attr 7
-var $03c4 player_sprite_attr
-var $03c5 enemy_sprite_attr 6
+var $03c4 obj_sprite_attr 7 : sprite_attribute
+var $03c4 player_sprite_attr : sprite_attribute
+var $03c5 enemy_sprite_attr 6 : sprite_attribute
 var $03d0 obj_offscreen 8
 var $03d0 player_offscreen
 var $03d1 enemy_offscreen
@@ -371,7 +376,7 @@ var $0736 ledge_half_length
 var $0739 enemy_data_pos
 var $073a enemy_obj_page
 var $073b enemy_obj_page_set
-var $073c screen_task
+var $073c screen_task : screen_task
 var $073d scrolled_32
 var $073f scroll_x
 var $0740 scroll_y
@@ -380,7 +385,7 @@ var $0742 background_scenery
 var $0743 cloud_override
 var $0744 background_color
 var $0745 loop_command
-var $0746 star_flag_task
+var $0746 star_flag_task : star_flag_task
 var $0747 timers_paused
 var $0748 coins_for_1ups
 var $0749 message_step2
@@ -419,7 +424,7 @@ var $076a hard_mode
 var $076b world_select
 var $0770 game_mode : game_mode ; what the main loop runs
 var $0772 game_mode_task
-var $0773 vram_list_select
+var $0773 vram_list_select : vram_list
 var $0774 screen_off
 var $0775 scroll_amount
 var $0776 pause_state
