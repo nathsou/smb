@@ -84,6 +84,7 @@ def main():
         # through their adapters, and the entry points as generated
         code = (game / "code.c").read_text()
         adapters = game / "machine.c"
+        adapter_text = adapters.read_text() if adapters.exists() else ""
         if adapters.exists():
             current = [(f"machine_{name}", name, outputs)
                        for name, outputs in routines(adapters.read_text(), "machine_")]
@@ -97,9 +98,12 @@ def main():
                               for f in ("a", "x", "y", "carry", "zero", "negative", "overflow"))
             # with locals, the scratch bytes it gives back (t0 to t7); else all
             scratch = sum(1 << k for k in range(8) if f"t{k}" in outputs) if adapters.exists() else 0xff
-            entries.append(f'    {{"{name}", {symbol}, ref_{name}, {flags}, {scratch:#04x}}},\n')
+            enter = f"enter_{name}" if f"void enter_{name}(void)" in adapter_text else "NULL"
+            entries.append(f'    {{"{name}", {symbol}, ref_{name}, {flags}, {scratch:#04x}, {enter}}},\n')
         declarations = "".join(f"void ref_{name}(void);\n" for name, _ in routines(reference))
         declarations += "".join(f"void {symbol}(void);\n" for symbol, name, _ in current if symbol != name)
+        declarations += "".join(f"void enter_{name}(void);\n" for _, name, _ in current
+                                if f"void enter_{name}(void)" in adapter_text)
         (tmp / "routines.h").write_text(
             declarations + "static const Routine ROUTINES[] = {\n" + "".join(entries) + "};\n"
             f"#define ROUTINE_COUNT {len(entries)}\n")

@@ -29,9 +29,9 @@
 //                      and what RAM keeps of them between frames is dead
 //                      (compare with tests/golden/warpless.scratch.trace,
 //                      recorded without --locals)
-//   --check-scratch    fail if a computed access reached a scratch byte
-//                      that is a local where it was made (a program
-//                      generated with --check-scratch)
+//   --check-scratch    fail if a computed access did not keep to what
+//                      --locals takes of it (a program generated with
+//                      --check-scratch: see guard_failed in its code.h)
 
 #define ROM_PATH "smb.nes"
 #define REC_FILE "rec/warpless.rec"
@@ -56,7 +56,7 @@
 static bool mask_scratch;
 
 // Set by the program generated with --check-scratch (see its code.h).
-extern bool scratch_reached __attribute__((weak));
+extern bool guard_failed __attribute__((weak));
 
 static NESInputRecording recording;
 
@@ -254,14 +254,14 @@ int main(int argc, char **argv) {
     }
 
     if (flag(argc, argv, "--check-scratch")) {
-        if (&scratch_reached == NULL) {
+        if (&guard_failed == NULL) {
             printf("The program was not generated with --check-scratch\n");
             ok = false;
-        } else if (scratch_reached) {
-            printf("A computed access reached a scratch byte that is a local\n");
+        } else if (guard_failed) {
+            printf("A computed access did not keep to what --locals takes of it\n");
             ok = false;
         } else {
-            printf("No computed access reached a scratch byte that is a local\n");
+            printf("Every computed access kept to what --locals takes of it\n");
         }
     }
 

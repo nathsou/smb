@@ -177,10 +177,22 @@ fn CFunc::guarded(self : CFunc, address : String) -> String {
   if self.conv.check && mask != 0 { "scratch_guard(\{address}, 0x\{hex(mask)})" } else { address }
 }
 
+// A computed RAM address with what --locals takes of it checked
+// (`--check-scratch`).
+fn CFunc::checked_ram(self : CFunc, a : @ir.Expr) -> String {
+  let index = match a {
+    Unary(Byte, inner) => "page_guard(\{self.expr(inner)})"
+    Binary(And, inner, Const(0x7ff)) => "ram_end_guard(\{self.expr(inner)})"
+    _ if constant_part(a) >= 0 && constant_part(a) < scratch_bytes => "scratch_index_guard(\{self.expr(a)})"
+    _ => self.expr(a)
+  }
+  "ram[\{self.guarded(index)}]"
+}
+
 fn CFunc::access(self : CFunc, space : @ir.Mem, a : @ir.Expr) -> String {
   if space == Ram && self.local_scratch(a) is Some(k) { return "t\{k}" }
-  if space == Ram && self.conv.check && self.local_scratch_mask() != 0 && a.value() is None {
-    return "ram[\{self.guarded(self.expr(a))}]"
+  if space == Ram && self.conv.check && a.value() is None && !(a is Binary(Add, Const(0x100), Var(SP))) {
+    return self.checked_ram(a)
   }
   match self.views.place(a) {
     Some({ view, offset, index }) if view.kind.names(space) => {
@@ -369,7 +381,14 @@ fn CFunc::stmt(self : CFunc, s : @ir.Stmt, live~ : Int = local_slots) -> String 
       }
     }
     Store(Wram, a, value) => "\{self.access(Wram, a)} = \{self.byte(value)};"
-    Store(_, a, value) => "dynamic_ram_write(\{self.guarded(self.word(a))}, \{self.byte(value)});"
+    Store(_, a, value) => {
+      let address = if self.conv.check && self.locals && a.value() is None {
+        "pointer_guard(\{self.word(a)})"
+      } else {
+        self.guarded(self.word(a))
+      }
+      "dynamic_ram_write(\{address}, \{self.byte(value)});"
+    }
     Effect("write_joypads", args) => {
       let v = self.byte(args[0])
       "write_joypad1(\{v}); write_joypad2(\{v});"
@@ -903,7 +922,7 @@ fn Emitter::emit_program_c(self : Emitter, program : @ir.Program, preamble : Arr
     self.emit("// routine's own: its parameters, results and locals. The hand-written")
     self.emit("// routines, the routines they call and the roots keep the machine's, which")
     self.emit("// routines with locals reach through `machine` and `ram`.")
-    if conv.check { self.emit("bool scratch_reached; // see scratch_guard (code.h)") }
+    if conv.check { self.emit("bool guard_failed; // see code.h") }
     if calls_machine(program, conv) {
       self.emit("static const struct {")
       self.emit("  uint8_t *a, *x, *y;")
@@ -946,20 +965,39 @@ fn Emitter::emit_machine_adapters(self : Emitter, program : @ir.Program, conv : 
   for f in program.functions {
     if f.native || f.helper { continue }
     let sig = conv.sig(f.name)
-    self.emit("// in: \{slot_names(sig.params)}; out: \{slot_names(sig.outputs)}")
+    // what every call enters it with equal, which the test's states take on
+    let entry = conv.entered.get(f.name).unwrap_or([])
+    if !entry.is_empty() {
+      // (registers equal to one byte are equal too)
+      let first : Map[Int, Int] = Map([])
+      let parts = []
+      for p in entry {
+        match first.get(p.1) {
+          Some(r) => parts.push("\{held_vars[p.0].c_name()} = \{held_vars[r].c_name()};")
+          None => {
+            first[p.1] = p.0
+            parts.push("ram[0x\{hex(p.1)}] = \{held_vars[p.0].c_name()};")
+          }
+        }
+      }
+      self.emit("void enter_\{f.name}(void) { \{parts.join(" ")} }")
+    }
+    // (what it gives back as it was is checked like a result)
+    self.emit("// in: \{slot_names(sig.params)}; out: \{slot_names(sig.outputs | sig.kept)}")
     if !conv.has_locals(f.name) {
       self.emit("void machine_\{f.name}(void) { \{f.name}(); }")
       continue
     }
+
     let own = local_slots & sig.memory.lnot()
     let copy = fn(s : Slot) { "v_" + s.local_name() }
     let lines = []
-    for s in slots_of((sig.params | sig.outputs) & own) { lines.push("\{s.c_type()} \{copy(s)} = \{s.machine_name()};") }
+    for s in slots_of((sig.params | sig.outputs | sig.kept) & own) { lines.push("\{s.c_type()} \{copy(s)} = \{s.machine_name()};") }
     lines.push("poison();")
     let args = slots_of(sig.value_bits()).map(copy) + slots_of(sig.pointer_bits()).map(fn(s) { "&" + copy(s) })
     let call = "\{f.name}(\{args.join(", ")});"
     lines.push(match sig.primary { Some(p) => "\{copy(p)} = \{call}"; None => call })
-    for s in slots_of(sig.outputs & own) { lines.push("\{s.machine_name()} = \{copy(s)};") }
+    for s in slots_of((sig.outputs | sig.kept) & own) { lines.push("\{s.machine_name()} = \{copy(s)};") }
     self.emit("void machine_\{f.name}(void) {")
     for line in lines { self.emit("  " + line) }
     self.emit("}")

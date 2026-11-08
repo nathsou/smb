@@ -216,6 +216,9 @@ priv struct Signature {
   params : Int
   // What its callers read after it returns.
   outputs : Int
+  // Registers and flags its callers read after it returns that it gives
+  // back as they were: no results.
+  kept : Int
   // The result returned; the others are written through pointers.
   primary : Slot?
 }
@@ -245,16 +248,19 @@ priv struct Convention {
   root : Int
   // The scratch values of each routine with locals that are locals.
   webs : Map[String, Webs]
+  // What each routine is entered with equal, by every call (register slot,
+  // RAM address), which what it gives back as it was may rest on.
+  mut entered : Map[String, Array[(Int, Int)]]
 }
 
 fn Convention::machine() -> Convention {
-  { locals: false, check: false, sigs: Map([]), root: 0, webs: Map([]) }
+  { locals: false, check: false, sigs: Map([]), root: 0, webs: Map([]), entered: Map([]) }
 }
 
 fn Convention::sig(self : Convention, name : String) -> Signature {
   match self.sigs.get(name) {
     Some(s) => s
-    None => { machine: true, memory: local_slots, params: local_slots, outputs: local_slots, primary: None }
+    None => { machine: true, memory: local_slots, params: local_slots, outputs: local_slots, kept: 0, primary: None }
   }
 }
 
@@ -450,15 +456,27 @@ fn Convention::locals_of(program : @ir.Program) -> Convention raise TranspileErr
   // What waiting for an interrupt reads: the roots' demand, and the scratch
   // bytes the interrupt handlers read on entry (from every byte down).
   let handlers = [program.nmi] + (match program.irq { Some(irq) => [irq]; None => [] })
-  let mut root = (info.root_demand & local_vars) | all_scratch
-  let mut conv = solve(program, info, machine, writes, root)
-  for ;; {
-    let read = handlers.fold(init=0, fn(acc, h) { acc | conv.sig(h).params }) & all_scratch
-    let next = (info.root_demand & local_vars) | read
-    if next == root { break }
-    root = next
-    conv = solve(program, info, machine, writes, root)
+  let root = (info.root_demand & local_vars) | all_scratch
+  // results given back as they were: once is enough, since the registers'
+  // results come from the interfaces, and calls already count those kept
+  // as unchanged
+  let kept : Map[String, Int] = Map(program.functions.map(fn(f) { (f.name, 0) }))
+  let resolve = fn(kept : Map[String, Int], start : Int) -> (Convention, Int) {
+    let mut root = start
+    let mut conv = solve(program, info, machine, writes, root, kept)
+    for ;; {
+      let read = handlers.fold(init=0, fn(acc, h) { acc | conv.sig(h).params }) & all_scratch
+      let next = (info.root_demand & local_vars) | read
+      if next == root { break }
+      root = next
+      conv = solve(program, info, machine, writes, root, kept)
+    }
+    (conv, root)
   }
+  let (first, root) = resolve(kept, root)
+  let (found, entered) = kept_results(program, first, writes)
+  let (conv, _) = resolve(found, root)
+  conv.entered = entered
   let must = scratch_must_writes(program, conv)
   for f in program.functions {
     if conv.has_locals(f.name) { conv.webs[f.name] = conv.webs_of(f, writes, must) }
@@ -475,6 +493,7 @@ fn solve(
   machine : Map[String, Bool],
   writes : Map[String, Int],
   root : Int,
+  kept : Map[String, Int],
 ) -> Convention {
   let demand : Map[String, Int] = Map(program.functions.map(fn(f) { (f.name, 0) }))
   for ;; {
@@ -483,11 +502,11 @@ fn solve(
       let m = machine[f.name]
       let memory = if m { local_slots } else { all_scratch }
       let registers = if program.is_root(f.name) { 0 } else { program.outputs(info, f.name) & local_vars }
-      let outputs = registers | (writes[f.name] & demand[f.name])
+      let outputs = (registers & kept[f.name].lnot()) | (writes[f.name] & demand[f.name])
       let primary = if f.helper || m { None } else { slots_of(outputs & memory.lnot()).get(0) }
-      sigs[f.name] = { machine: m, memory, params: 0, outputs, primary }
+      sigs[f.name] = { machine: m, memory, params: 0, outputs, kept: kept[f.name], primary }
     }
-    let conv = { locals: true, check: false, sigs, root, webs: Map([]) }
+    let conv = { locals: true, check: false, sigs, root, webs: Map([]), entered: Map([]) }
     // parameters: a least fixpoint, they only grow
     let mut changed = true
     while changed {
@@ -795,4 +814,558 @@ fn reads_own(e : @ir.Expr, k : Int) -> Bool {
     Binary(_, l, r) => reads_own(l, k) && reads_own(r, k)
     _ => true
   }
+}
+
+// Results a routine gives back as they were on its entry: the registers
+// and flags that every return holds the entry value of. They are no results
+// (the caller keeps its own), though the routine may change them on the way
+// (X used to walk an array, then reloaded from `slot`).
+//
+// A forward analysis tracks which entry value each register, flag, scratch
+// byte, pushed stack slot and RAM byte that the code loads into X or Y
+// holds: a copy keeps it, a call keeps those the callee gives back as they
+// were or does not change, a push and a pull move it (calls leave the
+// caller's pushed slots alone). A routine may also be known, from all of its
+// call sites, to be entered with a register equal to a RAM byte (X to
+// `slot`). Both are greatest fixpoints over the program.
+//
+// RAM bytes are taken to change only by their own stores, indexed stores
+// that may reach them without wrapping around page zero or RAM (an index
+// from a scratch byte stays within them), pointer stores into them above
+// the stack page (anywhere in routines that keep the machine's state), and
+// calls that may do one of these. `--check-scratch` builds check each of
+// these in the generated routines (see `guard_failed` in code.h).
+// Locations whose equalities are followed: registers and flags (their
+// slot, 0-6), their entry values (0x100 + slot), scratch bytes (0x200 + k),
+// tracked RAM bytes (0x1000 + address), pushed stack slots (0x10000 +
+// offset from the entry SP, which may be negative) and constants (0x100000
+// + value). The facts are a partition: locations in one class are equal.
+let entry_base : Int = 0x100
+
+let scratch_base : Int = 0x200
+
+let byte_base : Int = 0x1000
+
+let stack_base : Int = 0x10000
+
+let constant_base : Int = 0x100000
+
+priv struct Held {
+  class : Map[Int, Int] // location -> its class (a member); absent: alone
+  sp : Int? // the offset of SP from its entry value, when known
+}
+
+let held_vars : Array[@ir.Var] = [A, X, Y, C, Z, N, V]
+
+fn held_index(v : @ir.Var) -> Int {
+  match v {
+    A => 0
+    X => 1
+    Y => 2
+    C => 3
+    Z => 4
+    N => 5
+    V => 6
+    _ => -1
+  }
+}
+
+fn Held::entry() -> Held {
+  let class : Map[Int, Int] = Map([])
+  for i in 0..<7 {
+    class[i] = i
+    class[entry_base + i] = i
+  }
+  { class, sp: Some(0) }
+}
+
+fn Held::copy(self : Held) -> Held {
+  { class: Map::from_iter(self.class.iter()), sp: self.sp }
+}
+
+fn Held::rep(self : Held, loc : Int) -> Int {
+  self.class.get(loc).unwrap_or(loc)
+}
+
+fn Held::same(self : Held, a : Int, b : Int) -> Bool {
+  a == b || self.rep(a) == self.rep(b)
+}
+
+// `loc` on its own: its class, if it named it, is renamed for another member.
+fn Held::separate(self : Held, loc : Int) -> Unit {
+  guard self.class.get(loc) is Some(r) else { return }
+  self.class.remove(loc)
+  if r != loc { return }
+  let members = self.class.iter().filter(fn(e) { e.1 == loc }).map(fn(e) { e.0 }).collect()
+  if members.length() == 1 {
+    self.class.remove(members[0])
+  } else if !members.is_empty() {
+    let next = members[0]
+    for m in members { self.class[m] = next }
+  }
+}
+
+// `loc` now equal to `other` (and nothing else).
+fn Held::assign(self : Held, loc : Int, other : Int?) -> Unit {
+  self.separate(loc)
+  match other {
+    Some(o) if o != loc => {
+      let r = self.rep(o)
+      if !self.class.contains(o) { self.class[o] = o }
+      self.class[loc] = r
+    }
+    _ => ()
+  }
+}
+
+// `a` and `b` and their classes equal.
+fn Held::union(self : Held, a : Int, b : Int) -> Unit {
+  let ra = self.rep(a)
+  let rb = self.rep(b)
+  if ra == rb { return }
+  if !self.class.contains(a) { self.class[a] = ra }
+  let members = self.class.iter().filter(fn(e) { e.1 == rb }).map(fn(e) { e.0 }).collect()
+  for m in members { self.class[m] = ra }
+  self.class[b] = ra
+}
+
+fn Held::forget(self : Held, keep : (Int) -> Bool) -> Unit {
+  let gone = self.class.keys().filter(fn(l) { !keep(l) }).collect()
+  for l in gone { self.separate(l) }
+}
+
+// Locations equal in both.
+fn Held::meet(self : Held, other : Held) -> Held {
+  let groups : Map[(Int, Int), Array[Int]] = Map([])
+  let keys : Set[Int] = Set([])
+  for k, _ in self.class { keys.add(k) }
+  for k, _ in other.class { keys.add(k) }
+  for k in keys {
+    let key = (self.rep(k), other.rep(k))
+    match groups.get(key) {
+      Some(list) => list.push(k)
+      None => groups[key] = [k]
+    }
+  }
+  let class : Map[Int, Int] = Map([])
+  for _, members in groups {
+    if members.length() < 2 { continue }
+    let r = members.fold(init=members[0], fn(m, x) { if x < m { x } else { m } })
+    for m in members { class[m] = r }
+  }
+  { class, sp: if self.sp == other.sp { self.sp } else { None } }
+}
+
+fn Held::canonical(self : Held) -> Map[Int, Int] {
+  let least : Map[Int, Int] = Map([])
+  for k, r in self.class {
+    match least.get(r) {
+      Some(m) if m <= k => ()
+      _ => least[r] = k
+    }
+  }
+  Map::from_iter(self.class.iter().map(fn(e) { (e.0, least[e.1]) }))
+}
+
+fn Held::equals(self : Held, other : Held) -> Bool {
+  if self.sp != other.sp { return false }
+  let a = self.canonical()
+  let b = other.canonical()
+  a.length() == b.length() && a.iter().all(fn(e) { b.get(e.0) == Some(e.1) })
+}
+
+// The stack slot an address is, as a location.
+fn Held::slot_of(self : Held, a : @ir.Expr) -> Int? {
+  match (a, self.sp) {
+    (Binary(Add, Const(0x100), Var(SP)), Some(d)) => Some(stack_base + d)
+    _ => None
+  }
+}
+
+// The location an expression is, when it is one.
+fn Held::location(self : Held, e : @ir.Expr, tracked : Set[Int]) -> Int? {
+  match e {
+    Const(c) | Sym(_, c) if c >= 0 && c < 256 => Some(constant_base + c)
+    Var(v) if held_index(v) >= 0 => Some(held_index(v))
+    Load(Ram, a) =>
+      match (scratch_of(a), a.value(), self.slot_of(a)) {
+        (Some(k), _, _) => Some(scratch_base + k)
+        (_, Some(addr), _) if tracked.contains(addr) => Some(byte_base + addr)
+        (_, _, Some(slot)) => Some(slot)
+        _ => None
+      }
+    _ => None
+  }
+}
+
+// The tracked RAM bytes a store may write: its own, those an index may
+// reach without wrapping around page zero, those a pointer may reach above
+// the stack page.
+fn store_reach(space : @ir.Mem, a : @ir.Expr, tracked : Set[Int], broad~ : Bool = false) -> Array[Int] {
+  match a.value() {
+    Some(addr) => if space == Ram && tracked.contains(addr) { [addr] } else { [] }
+    None => {
+      let (lo, hi) = match (space, a) {
+        (Ram, Unary(Byte, inner)) => (constant_part(inner), 0xff)
+        (Ram, Binary(And, inner, Const(0x7ff))) => (constant_part(inner), 0x7ff)
+        // an index from a scratch byte stays within them
+        (Ram, _) if constant_part(a) >= 0 && constant_part(a) < scratch_bytes => (1, 0)
+        (Ram, _) => {
+          let r = a.range([])
+          (r.lo, r.hi)
+        }
+        // (in routines that keep the machine's state, anywhere: clear_memory)
+        (Bus, _) => if broad { (0, 0x7ff) } else { (0x200, 0x7ff) }
+        _ => (1, 0)
+      }
+      tracked.iter().filter(fn(t) { t >= lo && t <= hi }).collect()
+    }
+  }
+}
+
+priv struct Facts {
+  conv : Convention
+  writes : Map[String, Int] // scratch bytes each routine may write
+  tracked : Set[Int] // the RAM bytes followed
+  changes : Map[String, Set[Int]] // the tracked bytes each routine may write
+  kept : Map[String, Int] // what each routine gives back as it was
+  equal : Map[String, Array[(Int, Int)]] // (register slot, address): equal on entry
+  exits : Map[String, Array[(Int, Int)]] // (register slot, address): equal on every return
+}
+
+// The facts after `s`: `h` itself, updated (copy it to keep it).
+fn Facts::step(self : Facts, h : Held, s : @ir.Stmt) -> Held {
+  let out = h
+  let is_stack = fn(l : Int) { l >= stack_base && l < constant_base }
+  match s {
+    Assign(SP, Binary(Add | Sub as op, Var(SP), Const(c))) =>
+      { ..out, sp: h.sp.map(fn(d) { if op == Add { d + c } else { d - c } }) }
+    Assign(SP, _) => {
+      out.forget(fn(l) { !is_stack(l) })
+      { ..out, sp: None }
+    }
+    Assign(v, e) => {
+      if held_index(v) >= 0 { out.assign(held_index(v), h.location(e, self.tracked)) }
+      out
+    }
+    Store(space, a, value) => {
+      let v = h.location(value, self.tracked)
+      match (space, scratch_of(a), h.slot_of(a)) {
+        (Ram, Some(k), _) => out.assign(scratch_base + k, v)
+        (Ram, _, Some(slot)) => out.assign(slot, v)
+        _ => {
+          let reached = store_reach(space, a, self.tracked)
+          match a.value() {
+            Some(addr) if reached.length() == 1 => out.assign(byte_base + addr, v)
+            _ => for t in reached { out.separate(byte_base + t) }
+          }
+          // an index that may reach the stack page
+          if space == Ram && a.value() is None {
+            let r = a.range([])
+            if !(r.lo >= 0x200 || r.hi < 0x100) { out.forget(fn(l) { !is_stack(l) }) }
+          }
+        }
+      }
+      out
+    }
+    Call(g) | CallValue(_, g, _) => {
+      let sig = self.conv.sig(g)
+      let same = self.kept.get(g).unwrap_or(0)
+      for v in held_vars {
+        if (sig.outputs & v.bit()) != 0 && (same & v.bit()) == 0 { out.separate(held_index(v)) }
+      }
+      let w = self.writes.get(g).unwrap_or(all_scratch)
+      for k in 0..<scratch_bytes {
+        if (w & scratch_bit(k)) != 0 { out.separate(scratch_base + k) }
+      }
+      match self.changes.get(g) {
+        Some(set) => for t in set { out.separate(byte_base + t) }
+        None => for t in self.tracked { out.separate(byte_base + t) }
+      }
+      // what the callee leaves equal on return (X reloaded from `slot`)
+      for pair in self.exits.get(g).unwrap_or([]) { out.union(pair.0, byte_base + pair.1) }
+      // the callee uses the stack below the caller's pushes
+      match h.sp {
+        Some(d) if !(s is CallValue(_, _, _)) => out.forget(fn(l) { !is_stack(l) || l - stack_base > d })
+        _ => out.forget(fn(l) { !is_stack(l) })
+      }
+      out
+    }
+    _ => out
+  }
+}
+
+// The facts at the end of each block of `f`, None where not reached.
+fn Facts::flow(self : Facts, f : @ir.Function) -> (Array[Held?], Array[Held?]) {
+  let preds : Array[Array[Int]] = f.blocks.map(fn(_) { [] })
+  for b, block in f.blocks {
+    for t in block.term.successors() { preds[t].push(b) }
+  }
+  let entry = Held::entry()
+  for pair in self.equal.get(f.name).unwrap_or([]) { entry.union(pair.0, byte_base + pair.1) }
+  let starts : Array[Held?] = f.blocks.map(fn(_) { None })
+  let ends : Array[Held?] = f.blocks.map(fn(_) { None })
+  let mut moving = true
+  while moving {
+    moving = false
+    for b, block in f.blocks {
+      let joined = preds[b].fold(init=None, fn(acc : Held?, p) {
+        match (acc, ends[p]) {
+          (None, e) => e
+          (Some(a), Some(e)) => Some(a.meet(e))
+          (a, None) => a
+        }
+      })
+      let start = if b == f.entry {
+        match joined {
+          Some(j) => Some(j.meet(entry))
+          None => Some(entry)
+        }
+      } else {
+        joined
+      }
+      guard start is Some(facts) else { continue }
+      starts[b] = Some(facts)
+      let mut h = facts.copy()
+      for s in block.stmts { h = self.step(h, s) }
+      let same = match ends[b] {
+        Some(e) => e.equals(h)
+        None => false
+      }
+      if !same {
+        ends[b] = Some(h)
+        moving = true
+      }
+    }
+  }
+  (starts, ends)
+}
+
+// What a register slot holds at a tail call of `g`, kept: the entry value.
+fn Facts::gives(self : Facts, h : Held, g : String) -> Int {
+  let s = self.conv.sig(g)
+  let same = self.kept.get(g).unwrap_or(0)
+  let mut bits = 0
+  for v in held_vars {
+    let untouched = (s.outputs & v.bit()) == 0 || (same & v.bit()) != 0
+    if untouched && h.same(held_index(v), entry_base + held_index(v)) { bits = bits | v.bit() }
+  }
+  bits
+}
+
+// The results each routine with locals gives back as they were.
+fn kept_results(
+  program : @ir.Program,
+  conv : Convention,
+  writes : Map[String, Int],
+) -> (Map[String, Int], Map[String, Array[(Int, Int)]]) {
+  // the RAM bytes code with locals loads into index registers (`slot`)
+  let tracked : Set[Int] = Set([])
+  for f in program.functions {
+    if !conv.has_locals(f.name) { continue }
+    for block in f.blocks {
+      for s in block.stmts {
+        match s {
+          Assign(X | Y, Load(Ram, address)) =>
+            match address.value() {
+              Some(a) if a >= scratch_bytes && a < 0x800 => tracked.add(a)
+              _ => ()
+            }
+          _ => ()
+        }
+      }
+    }
+  }
+  // the tracked bytes each routine may write, with its callees'
+  let changes : Map[String, Set[Int]] = Map([])
+  for f in program.functions {
+    let set : Set[Int] = Set([])
+    for block in f.blocks {
+      for s in block.stmts {
+        if s is Store(space, a, _) {
+          for t in store_reach(space, a, tracked, broad=!conv.has_locals(f.name)) { set.add(t) }
+        }
+      }
+    }
+    changes[f.name] = set
+  }
+  let mut grew = true
+  while grew {
+    grew = false
+    for f in program.functions {
+      let set = changes[f.name]
+      let before = set.length()
+      for g in callees_of(f) {
+        match changes.get(g) {
+          Some(other) => for t in other { set.add(t) }
+          None => for t in tracked { set.add(t) }
+        }
+      }
+      if set.length() != before { grew = true }
+    }
+  }
+  // routines entered only from routines with locals, through known calls
+  let entered_otherwise : Set[String] = Set([])
+  for f in program.functions {
+    if !conv.has_locals(f.name) || f.helper {
+      for g in callees_of(f) { entered_otherwise.add(g) }
+      entered_otherwise.add(f.name)
+    }
+  }
+  let candidates = fn(f : @ir.Function) {
+    if conv.has_locals(f.name) && !f.helper { conv.sig(f.name).outputs & local_vars } else { 0 }
+  }
+  let exit_candidates = fn() -> Array[(Int, Int)] {
+    let out = []
+    for r in [1, 2] {
+      for a in tracked { out.push((r, a)) }
+    }
+    out
+  }
+  let equal_candidates = fn(f : @ir.Function) -> Array[(Int, Int)] {
+    if entered_otherwise.contains(f.name) || !conv.has_locals(f.name) { return [] }
+    let out = []
+    for r in [1, 2] {
+      for a in tracked { out.push((r, a)) }
+    }
+    out
+  }
+  let facts : Facts = {
+    conv,
+    writes,
+    tracked,
+    changes,
+    kept: Map(program.functions.map(fn(f) { (f.name, candidates(f)) })),
+    equal: Map(program.functions.map(fn(f) { (f.name, equal_candidates(f)) })),
+    exits: Map(program.functions.map(fn(f) {
+      (f.name, if conv.has_locals(f.name) && !f.helper { exit_candidates() } else { [] })
+    })),
+  }
+  // A worklist: a routine is followed again when what it is entered with
+  // or what a routine it calls gives back changes; each only narrows.
+  let callers : Map[String, Array[String]] = Map([])
+  for f in program.functions {
+    if !conv.has_locals(f.name) { continue }
+    for g in callees_of(f) {
+      match callers.get(g) {
+        Some(list) => if !list.contains(f.name) { list.push(f.name) }
+        None => callers[g] = [f.name]
+      }
+    }
+  }
+  // a routine no call with locals reaches keeps no assumption
+  for f in program.functions {
+    if callers.get(f.name) is None { facts.equal[f.name] = [] }
+  }
+  // what holds at the calls each routine makes, by callee
+  let sites : Map[String, Map[String, Array[(Int, Int)]]] = Map([])
+  let queue : Array[String] = program.functions.filter(fn(f) { conv.has_locals(f.name) }).map(fn(f) { f.name })
+  let queued : Set[String] = Set::from_array(queue)
+  let push = fn(g : String) {
+    if !queued.contains(g) && conv.has_locals(g) {
+      queued.add(g)
+      queue.push(g)
+    }
+  }
+  let mut next = 0
+  while next < queue.length() {
+    let name = queue[next]
+    next += 1
+    queued.remove(name)
+    let f = program.functions[program.by_name[name]]
+    let (starts, ends) = facts.flow(f)
+    let mine : Map[String, Array[(Int, Int)]] = Map([])
+    let narrow = fn(g : String, h : Held) {
+      let current = mine.get(g).unwrap_or(facts.equal.get(g).unwrap_or([]))
+      mine[g] = current.filter(fn(p) { h.same(p.0, byte_base + p.1) })
+    }
+    for b, block in f.blocks {
+      guard starts[b] is Some(start) else { continue }
+      let mut h = start.copy()
+      for s in block.stmts {
+        if s.callee() is Some(g) { narrow(g, h) }
+        h = facts.step(h, s)
+      }
+      match block.term {
+        // the cases run after the dispatcher
+        Dispatch(helper, _, cases) => {
+          narrow(helper, h)
+          let after = facts.step(h.copy(), Call(helper))
+          for c in cases { narrow(c.1, after) }
+        }
+        t => for g in t.tail_calls() { narrow(g, h) }
+      }
+    }
+    sites[name] = mine
+    // what its callees are entered with
+    for g, _ in mine {
+      let old = facts.equal.get(g).unwrap_or([])
+      if old.is_empty() { continue }
+      let mut now = old
+      for c in callers.get(g).unwrap_or([]) {
+        match sites.get(c) {
+          Some(at) => now = now.filter(fn(p) { at.get(g).unwrap_or(now).contains(p) })
+          None => ()
+        }
+      }
+      if now.length() != old.length() {
+        facts.equal[g] = now
+        push(g)
+      }
+    }
+    let mut grew = false
+    // what every return leaves equal
+    let old_exits = facts.exits[name]
+    if !old_exits.is_empty() {
+      let mut now = old_exits
+      for b, block in f.blocks {
+        guard ends[b] is Some(h) else { continue }
+        let at = match block.term {
+          Return | ReturnValue(_) => Some(h)
+          TailCall(g) => Some(facts.step(h.copy(), Call(g)))
+          _ => None
+        }
+        match at {
+          Some(e) => now = now.filter(fn(p) { e.same(p.0, byte_base + p.1) })
+          None =>
+            // a jump or dispatch to other routines: none assumed
+            if block.term is (Jump(_, _) | Dispatch(_, _, _)) { now = [] }
+        }
+      }
+      if now.length() != old_exits.length() {
+        facts.exits[name] = now
+        grew = true
+      }
+    }
+    // what every return gives back as it was
+    let old = facts.kept[name]
+    if old != 0 {
+      let mut keeps = old
+      for b, block in f.blocks {
+        guard ends[b] is Some(h) else { continue }
+        match block.term {
+          Return | ReturnValue(_) => {
+            let mut bits = 0
+            for v in held_vars {
+              if h.same(held_index(v), entry_base + held_index(v)) { bits = bits | v.bit() }
+            }
+            keeps = keeps & bits
+          }
+          TailCall(g) => keeps = keeps & facts.gives(h, g)
+          Jump(_, cases) => for c in cases { keeps = keeps & facts.gives(h, c.1) }
+          Dispatch(helper, _, cases) => {
+            let after = facts.step(h.copy(), Call(helper))
+            for c in cases { keeps = keeps & facts.gives(after, c.1) }
+          }
+          _ => ()
+        }
+      }
+      if keeps != old {
+        facts.kept[name] = keeps
+        grew = true
+      }
+    }
+    if grew { for c in callers.get(name).unwrap_or([]) { push(c) } }
+  }
+  (facts.kept, facts.equal)
 }

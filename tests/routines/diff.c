@@ -31,16 +31,21 @@ typedef struct {
     bool a, x, y; // registers callers read afterwards
     bool carry, zero, negative, overflow; // flags callers read afterwards
     uint8_t scratch; // scratch bytes $00-$07 callers read afterwards, by bit
+    // With locals: makes a state one every call enters the routine with
+    // (its registers equal to the RAM bytes they are equal to there, X to
+    // `slot`), which what it gives back as it was may rest on; or NULL.
+    void (*enter)(void);
 } Routine;
 
 #include "routines.h" // generated: const Routine ROUTINES[]; ROUTINE_COUNT
 
-// With --check-scratch (registers and scratch bytes as locals): set when a
-// computed access reached a scratch byte that is a local where it was made.
-// The random registers lead indices where the game's never go; such runs
-// are left out, since the program relies on its indices staying in their
+// With --check-scratch: set when a computed access did not keep to what
+// --locals takes of it (an index wrapped around page zero, a pointer store
+// went below $0200, an access reached a scratch byte that is a local). The
+// random registers lead indices where the game's never go; such runs are
+// left out, since the program relies on its indices staying in their
 // arrays (the replay checks that they do).
-extern bool scratch_reached __attribute__((weak));
+extern bool guard_failed __attribute__((weak));
 
 extern bool controller1_strobe;
 extern uint8_t controller1_btn_index;
@@ -179,12 +184,27 @@ int main(void) {
                 }
 
                 Machine ref, cur;
-                restore(&start);
-                run(routine->reference, &ref);
-                restore(&start);
-                if (&scratch_reached) scratch_reached = false;
-                run(routine->current, &cur);
-                if (&scratch_reached && scratch_reached) {
+                // a run whose indices go where the game's never do is tried
+                // again with small ones (the game's object and sprite indices)
+                bool inside = false;
+                for (int attempt = 0; attempt < 2 && !inside; attempt++) {
+                    if (attempt == 1) {
+                        start.x &= 0x1f;
+                        start.y &= 0x1f;
+                    }
+                    if (routine->enter) {
+                        restore(&start);
+                        routine->enter();
+                        save(&start);
+                    }
+                    restore(&start);
+                    run(routine->reference, &ref);
+                    restore(&start);
+                    if (&guard_failed) guard_failed = false;
+                    run(routine->current, &cur);
+                    inside = !(&guard_failed && guard_failed);
+                }
+                if (!inside) {
                     outside++;
                     continue;
                 }
@@ -220,8 +240,8 @@ int main(void) {
 
     printf("Routines: %d, returned normally in some state: %d, runs completed: %d, mismatches: %d\n",
         ROUTINE_COUNT, exercised, completed, failures);
-    if (&scratch_reached) {
-        printf("Runs left out, an index reaching a scratch byte that is a local: %d\n", outside);
+    if (&guard_failed) {
+        printf("Runs left out, an access outside what --locals takes of it: %d\n", outside);
     }
     return failures == 0 ? 0 : 1;
 }

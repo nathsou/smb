@@ -300,11 +300,49 @@ and Y. With locals the pointer is read by `zero_page_pointer` and the index
 added in the generated code. `cpu_unresolved_jump` is declared
 `noreturn`, so a routine that returns a value needs no return after a trap.
 
-In SMB, 248 routines return a value, 53 also write results through pointers,
-and 178 take parameters and return nothing. The C compiles without warnings
+In SMB, 207 routines return a value, 40 also write results through pointers,
+and 218 take parameters and return nothing. The C compiles without warnings
 under the Makefile's flags. Coroutines, restarts and preemption keep the
 machine's registers: `--locals` refuses programs that use them. The other
 games are recompiled as before.
+
+### Results given back as they were
+
+Callers read X after most of SMB's object routines, which walk other arrays
+with it and reload it from `slot` (the object slot being processed) before
+returning. X is then no result: the routine gives it back as it was, and
+the caller keeps its own.
+
+```c
+uint8_t move_enemy_x(uint8_t *inout_x, uint8_t *out_y) {      // before
+uint8_t move_enemy_x(uint8_t x, uint8_t *out_y) {             // after
+  ...
+  x = slot;
+```
+
+A forward analysis tracks which locations are equal, as a partition:
+registers and flags, their entry values, scratch bytes, pushed stack slots,
+constants and the RAM bytes that code with locals loads into X or Y. A copy
+joins the copied location's class, a push and a pull move a value through
+the stack, and a call separates what the callee may change. Three facts
+come out of it, each a greatest fixpoint over the program:
+
+- what a routine is entered with equal, at every call (X and `slot`);
+- what it leaves equal at every return (X reloaded from `slot`), which a
+  call then joins in the caller;
+- what it gives back as it was: a register every return holds the entry
+  value of, which comes off its results.
+
+RAM bytes change only by their own stores, by indexed stores that may reach
+them without wrapping around page zero or RAM (an index from a scratch byte
+stays within them), by pointer stores above the stack page (anywhere in the
+routines that keep the machine's state: `clear_memory` clears all of RAM),
+and by calls that do one of these. In SMB, 40 routines that returned a value
+no longer do (207 against 247), and 112 routines return X (123 before).
+A worklist follows a routine again only when what it is entered with or what
+a callee gives back changes. With `--locals` the recompiler takes about 7 s
+for SMB from the command line (2.6 s without), and the page's recompile
+about 4 s (1.6 s without), which the page then caches.
 
 ### Scratch values
 
@@ -354,19 +392,25 @@ Checks:
 
 - The replay matches `warpless.scratch.trace` and `warpless.audio` on every
   frame, and both framebuffer hashes are unchanged.
-- `--check-scratch` generates the C with every computed access of a routine
-  with scratch locals checked (`scratch_guard`): one that reaches a scratch
-  byte that is a local there sets a flag, and `./hash --check-scratch` fails
-  on it. None does over the replay.
+- `--check-scratch` generates the C with what the analyses take of computed
+  addresses checked: an access that reaches a scratch byte that is a local
+  where it is made (`scratch_guard`), an index in page zero or RAM that wraps
+  (`page_guard`, `ram_end_guard`), an index from a scratch byte that leaves
+  them (`scratch_index_guard`), a pointer store in a routine with locals
+  below $0200 (`pointer_guard`). One that fails sets `guard_failed`, and
+  `./hash --check-scratch` fails on it. None does over the replay.
 - The routine-level differential test runs every routine through its
   adapter in `machine.c`, which is generated with `--locals`. The adapter
   takes the routine's parameters from the machine's registers and
   overwrites them before the call, so a routine that reads them instead of
-  its own fails. It then writes the results back. Scratch bytes are compared
-  where they are results, as registers are. Runs where a random index
-  reaches a scratch byte that is a local (the guard says so) are left out:
-  the game's indices never do, and the program relies on that. 0 mismatches
-  over the same 530 routines; 60 of 156,451 runs are left out.
+  its own fails. It then writes the results back, and the registers it
+  gives back as they were, so those are compared too. Scratch bytes are
+  compared where they are results, as registers are. A state first takes on
+  what every call enters the routine with (`enter_NAME`: `slot` set to X). A
+  run where the guards fail is tried again with X and Y below $20, as the
+  game's object and sprite indices are, and left out if they fail again: the
+  game's indices never go there, and the program relies on that. 0
+  mismatches over the same 530 routines, 155,519 runs; 1,020 are left out.
 - The WebAssembly module is byte-identical with and without `--locals`
   (only the C is printed differently).
 - The NROM-128 fixture runs with `--locals` too (ROM-free, in CI), from its
@@ -662,10 +706,10 @@ original renderer are unchanged.
   the machine's registers: the hand-written routines would take and return
   values too, and their C is shared with the WebAssembly runtime, which
   calls the game module with the registers in memory.
-- Results a routine leaves as they were: 123 SMB routines return X, 36 of
-  them after reloading it from `slot` (the object slot being processed). A
-  routine proven to give back the X it was given would not need to return
-  it.
+- The routines that still return X: many are entered with X something
+  other than `slot` from some call, and reload it from `slot` anyway; their
+  callers keep it only where X was `slot`. A context-sensitive analysis (per
+  call) would find more.
 - A proof per routine that the C with locals computes what the reference
   computes, for every input (as acnl does with an SMT solver), for the paths
   that neither the replay nor the differential test's states take.

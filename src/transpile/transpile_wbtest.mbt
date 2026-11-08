@@ -238,3 +238,17 @@ test "with --locals, a scratch value that never leaves the routine is a local" {
   assert_eq(code.contains("ram[1] = 5;\n  Use();"), true)
   assert_eq(code.contains("ram[0x23] = ram[1];"), true)
 }
+
+test "with --locals, a register given back as it was is no result" {
+  // Walk moves X on, then reloads it from $10, which its only caller set
+  // to X: X comes back as it went in, and Outer keeps its own
+  let source = ".org $c000\nBoot:\n jsr Outer\n lda #$00\nIdle:\n jmp Idle\nOuter:\n ldx $30\n stx $10\n jsr Walk\n stx $20\n rts\nWalk:\n inx\n stx $21\n ldx $10\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let output = transpile_low(lower_fixture(source), locals=true)
+  let code = code_c(output)
+  assert_eq(code.contains("void Walk(uint8_t x) {\n  ram[0x21] = (uint8_t)(x + 1);\n  return;\n}"), true)
+  assert_eq(code.contains("  Walk(x);\n  ram[0x20] = x;\n"), true)
+  // the differential test enters it as every call does, and checks X
+  let adapters = file_of(output, "machine.c")
+  assert_eq(adapters.contains("void enter_Walk(void) {"), true)
+  assert_eq(adapters.contains("// in: x; out: x\nvoid machine_Walk(void) {"), true)
+}
