@@ -956,27 +956,39 @@ routine $be41 spawn_brick_chunks        ; start the four chunks of a broken bric
 routine $be70 update_block_objects      ; move a bumped block or brick chunks, and replace the block when it lands
 routine $bed4 update_block_metatiles    ; write the metatile of a hit block to the block buffer and redraw it
 routine $bf02 move_enemy_x              ; move the enemy in slot X horizontally
+result move_enemy_x a pixels_moved ; the whole pixels moved, with the sub-pixel carry
+result move_enemy_x y page_step ; $ff when moving left, else 0
 routine $bf09 move_player_x             ; move the player horizontally, unless on a spring
 routine $bf0f move_object_x             ; add speed (4.4 fixed point) to position and page
+result move_object_x a pixels_moved ; the whole pixels moved, with the sub-pixel carry
+result move_object_x y page_step ; $ff when moving left, else 0
 scratch move_object_x $00 pixel_speed ; the whole pixels of the speed
 scratch move_object_x $01 fraction_speed ; the sub-pixel part of the speed
 scratch move_object_x $02 page_carry ; the page step: $ff when moving left
 routine $bf63 move_enemy_down_fast      ; move an enemy down quickly, or a falling platform
 routine $bf6b move_falling_platform     ; move a falling platform down, its speed limited
-routine $bf6d move_vertically           ; move an object down with gravity, its speed limited by Y
+routine $bf6d move_vertically           ; move an object down with gravity, the force in Y
+param move_vertically y down_force ; force added each frame while falling
 routine $bf88 move_drop_platform        ; move a dropping platform down
 routine $bf8c move_enemy_down_slow      ; move an enemy down slowly
 routine $bf8e set_max_speed_mid         ; apply gravity to the enemy with the middle speed limit
+param set_max_speed_mid y down_force ; force added each frame while falling
 routine $bf92 move_enemy_jumping        ; move a jumping enemy with gravity
 routine $bf94 set_max_speed_high        ; apply gravity to the enemy with the high speed limit
+param set_max_speed_high y down_force ; force added each frame while falling
 routine $bf96 apply_gravity_enemy       ; apply gravity to enemy X, force Y and limit A
+param apply_gravity_enemy a max_speed ; the downward speed cap
+param apply_gravity_enemy y down_force ; force added each frame while falling
 table $bf9f block_max_speeds 2
 routine $bfa4 apply_gravity_block       ; apply gravity to a bumped block or brick chunk
 routine $bfad apply_gravity_object      ; apply gravity to object X, force in $00 and limit A
+param apply_gravity_object a max_speed ; the downward speed cap
 routine $bfb4 move_platform_down        ; move a lift down
 routine $bfb7 move_platform_up          ; move a lift up
 routine $bfb9 move_platform             ; move a lift up or down (A), slower for dropping platforms
+param move_platform a can_rise ; nonzero: the lift rises
 routine $bfd1 move_paratroopa_vertically; move an object vertically by its gravity parameters
+param move_paratroopa_vertically a can_rise ; nonzero: the up force applies too
 routine $bfd7 apply_gravity             ; vertical speed, sub-pixel force and position with a speed cap
 scratch apply_gravity $00 down_force ; force added each frame while falling
 scratch apply_gravity $01 up_force ; force while moving up
@@ -1219,6 +1231,8 @@ routine $e02f stun_enemy                ; flip an enemy over, bouncing it away f
 routine $e0fe enemy_side_check          ; turn an enemy that walks into a wall
 routine $e124 enemy_bump                ; turn an enemy around, or make a hammer bro jump
 routine $e143 player_enemy_distance     ; the enemy's horizontal distance from the player ($00; negative when left of it)
+result player_enemy_distance carry right_of_player ; the enemy is at or right of the player
+result player_enemy_distance negative left_of_player ; the enemy is left of the player
 scratch player_enemy_distance $00 distance ; the enemy's x minus the player's
 routine $e14f land_enemy                ; stop an enemy on the floor, aligned to its block
 routine $e15b enemy_height_check        ; whether the enemy is low enough to collide with the background (carry set then)
@@ -1238,14 +1252,18 @@ routine $e273 large_platform_box        ; a large platform's collision box, unle
 routine $e27c enemy_box_core            ; compute and clip the enemy's box
 routine $e289 hide_box                  ; move the enemy's box off screen
 routine $e29c compute_box               ; the box of object X from its screen position and box kind
+result compute_box y box_offset ; the box's offset in boxes
 scratch compute_box $00 box_slot ; the slot of the box (X)
 scratch compute_box $01 box_x ; the object's screen x
 scratch compute_box $02 box_y ; the object's screen y
 routine $e2de clip_box_to_screen        ; clamp the box at the screen's edges
+param clip_box_to_screen y box_offset ; the box's offset in boxes
 scratch clip_box_to_screen $01 middle_page ; the page of the screen's middle
 scratch clip_box_to_screen $02 middle_x ; the x of the screen's middle
 routine $e325 player_collides           ; whether the player's box overlaps box Y (carry set then)
 routine $e327 objects_collide           ; bounding box overlap test, carry set on collision
+param objects_collide x first_box ; one box's offset in boxes
+param objects_collide y second_box ; the other's
 result objects_collide carry collided ; the boxes overlap
 scratch objects_collide $07 axes_left ; the axes left to test
 routine $e388 enemy_block_check         ; the metatile at probe Y around the enemy (zero set when none)
@@ -1291,7 +1309,9 @@ table $e878 spring_tile_offsets 5
 routine $e87d draw_enemy                ; draw an enemy's sprites by its kind and animation frame, flipped when defeated
 routine $eb64 clip_enemy_sprites        ; hide the rows and columns of the enemy's sprites that are off screen, and remove it below the screen
 routine $ebaa draw_enemy_row            ; draw a row of the enemy's tiles
-routine $ebb2 draw_sprite_row           ; draw a row of two sprites from tiles A and X, mirrored when flipped
+routine $ebb2 draw_sprite_row           ; draw a row of two sprites from tiles $00 and A at OAM offset Y, mirrored when flipped
+param draw_sprite_row y oam_offset ; the first sprite's offset in the OAM copy
+result draw_sprite_row y oam_offset ; the offset after the row
 scratch draw_sprite_row $00 first_tile ; the tile of the left sprite
 scratch draw_sprite_row $01 second_tile ; the tile of the right sprite
 scratch draw_sprite_row $02 row_y ; the row's screen y

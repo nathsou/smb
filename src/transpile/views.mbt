@@ -92,7 +92,7 @@ priv struct Views {
   // `param *`: register, name, the RAM byte it equals, description
   default_params : Array[(Int, String, Int, String)]
   // what a name the map gives a register must not be: an identifier of the
-  // generated code, a view, a record or its field, a scratch name
+  // generated code, a view, a record or its field
   taken : Set[String]
 }
 
@@ -203,7 +203,7 @@ fn Views::from_map(low : @lower.AsmLowering, reserved : Set[String]) -> Views {
   for name in c_reserved { all_taken.add(name) }
   for entry in p.map.entries { all_taken.add(entry.name.to_lower()) }
   for name in members { all_taken.add(name) }
-  for e in p.map.scratch { all_taken.add(e.name) }
+  // (scratch names are taken in their own routines only: see names_taken)
   all_taken.add("stack")
   all_taken.add("machine")
   let register = fn(name : String) {
