@@ -4,8 +4,10 @@
 Without a ROM (as in CI): the analysis tests, the independent fixtures
 through the C and WebAssembly backends, the map header, and the runtime
 module. With --rom (smb.nes in the root): recompile the game, replay the
-recording natively against tests/golden/warpless.trace (debug and ROM
-tiles) and tests/golden/warpless.audio (APU writes and samples, also
+recording natively against tests/golden/warpless.trace (without --locals;
+with them, against warpless.scratch.trace, without the scratch bytes, and
+with every computed access checked against them; debug and ROM tiles) and
+tests/golden/warpless.audio (APU writes and samples, also
 through the page's AudioWorklet), the routine-level differential test, and the replay of the split
 WebAssembly build. With --metroid (metroid.nes in the root): recompile
 Metroid, check the reference interpreter (tests/interpreter.c) against
@@ -92,9 +94,25 @@ if __name__ == "__main__":
         "tests/audio_queue.c", "codegen/lib/apu.c")
     run("./audio_queue")
     if args.rom:
+        with tempfile.TemporaryDirectory(prefix="smb-machine-") as directory:
+            # Without --locals: the original oracle (all of RAM), and the
+            # same frames without the scratch bytes $00-$07.
+            run("make", "codegen", "hash", f"GAME_DIR={directory}/game", "CODEGEN_OPTIONS=")
+            run("./hash", "--debug-chr", "--trace", "tests/golden/warpless.trace")
+            run("./hash", "--debug-chr", "--mask-scratch", "--trace", "tests/golden/warpless.scratch.trace")
+            # With --locals and every computed access checked: none reaches
+            # a scratch byte that is a local where it is made.
+            run("moon", "run", "src/main", "--", "--rom", "smb.nes", "--map", "maps/smb.map",
+                "--native", "codegen/native/routines.txt", "--locals", "--check-scratch",
+                "--output", f"{directory}/checked")
+            run("make", "hash", f"GAME_DIR={directory}/checked")
+            run("./hash", "--debug-chr", "--mask-scratch", "--check-scratch",
+                "--trace", "tests/golden/warpless.scratch.trace")
+        # The game as make codegen generates it (with --locals): what RAM
+        # keeps of the scratch bytes between frames is dead.
         run("make", "codegen")
         run("make", "hash")
-        run("./hash", "--debug-chr", "--trace", "tests/golden/warpless.trace",
+        run("./hash", "--debug-chr", "--mask-scratch", "--trace", "tests/golden/warpless.scratch.trace",
             "--audio-trace", "tests/golden/warpless.audio")
         run("./hash")
         # Every generated routine against the unoptimised IR.

@@ -64,6 +64,14 @@ def main():
     check_native_calls()
     with tempfile.TemporaryDirectory(prefix="smb-routines-") as tmp:
         tmp = pathlib.Path(tmp)
+        # with locals, the program under test is generated again with its
+        # computed accesses checked (--check-scratch), as make codegen's
+        game = GAME
+        if (GAME / "machine.c").exists():
+            game = tmp / "game"
+            run("moon", "run", "src/main", "--", "--rom", "smb.nes", "--map", "maps/smb.map",
+                "--native", "codegen/native/routines.txt", "--locals", "--check-scratch",
+                "--output", str(game))
         run("moon", "run", "src/main", "--", "--rom", "smb.nes", "--map", "maps/smb.map",
             "--native", "codegen/native/routines.txt", "--reference", "--output", str(tmp / "ref"))
         reference = (tmp / "ref/code.c").read_text()
@@ -74,8 +82,8 @@ def main():
 
         # (symbol, routine, outputs): with registers as locals, the routines
         # through their adapters, and the entry points as generated
-        code = (GAME / "code.c").read_text()
-        adapters = GAME / "machine.c"
+        code = (game / "code.c").read_text()
+        adapters = game / "machine.c"
         if adapters.exists():
             current = [(f"machine_{name}", name, outputs)
                        for name, outputs in routines(adapters.read_text(), "machine_")]
@@ -87,21 +95,23 @@ def main():
         for symbol, name, outputs in current:
             flags = ", ".join("true" if f in outputs else "false"
                               for f in ("a", "x", "y", "carry", "zero", "negative", "overflow"))
-            entries.append(f'    {{"{name}", {symbol}, ref_{name}, {flags}}},\n')
+            # with locals, the scratch bytes it gives back (t0 to t7); else all
+            scratch = sum(1 << k for k in range(8) if f"t{k}" in outputs) if adapters.exists() else 0xff
+            entries.append(f'    {{"{name}", {symbol}, ref_{name}, {flags}, {scratch:#04x}}},\n')
         declarations = "".join(f"void ref_{name}(void);\n" for name, _ in routines(reference))
         declarations += "".join(f"void {symbol}(void);\n" for symbol, name, _ in current if symbol != name)
         (tmp / "routines.h").write_text(
             declarations + "static const Routine ROUTINES[] = {\n" + "".join(entries) + "};\n"
             f"#define ROUTINE_COUNT {len(entries)}\n")
 
-        flags = ["-std=gnu99", "-O2", "-I", str(ROOT / "codegen"), "-I", str(tmp), "-I", str(GAME), "-I", str(LIB)]
+        flags = ["-std=gnu99", "-O2", "-I", str(ROOT / "codegen"), "-I", str(tmp), "-I", str(game), "-I", str(LIB)]
         objects = []
         # reference code: its own generated headers, routines renamed
         ref_object = tmp / "ref_code.o"
         run("cc", *flags, "-I", str(tmp / "ref"), "-I", str(LIB), "-include", str(tmp / "rename.h"),
             "-c", str(tmp / "ref/code.c"), "-o", str(ref_object))
         objects.append(str(ref_object))
-        sources = [GAME / "code.c", GAME / "data.c", ROOT / "codegen/native/display.c",
+        sources = [game / "code.c", game / "data.c", ROOT / "codegen/native/display.c",
                    ROOT / "tests/routines/diff.c"] + [LIB / f"{n}.c" for n in RUNTIME]
         if adapters.exists():
             sources.append(adapters)

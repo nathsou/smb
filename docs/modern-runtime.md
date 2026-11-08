@@ -263,9 +263,9 @@ read after it returns are its results, and the rest are locals:
 ```c
 // in: x; out: a                     uint8_t lakitu_chase(uint8_t x) {
 void lakitu_chase(void) {      ->      uint8_t a, y;
-  y = 0;                               bool carry, negative;
+  y = 0;                               bool negative;
   player_enemy_distance();             y = 0;
-  if (neg_flag) {                      carry = player_enemy_distance(x, &negative);
+  if (neg_flag) {                      player_enemy_distance(x, &negative);
                                        if (negative) {
 ```
 
@@ -306,16 +306,67 @@ under the Makefile's flags. Coroutines, restarts and preemption keep the
 machine's registers: `--locals` refuses programs that use them. The other
 games are recompiled as before.
 
+### Scratch values
+
+The scratch bytes `$00-$07` stay in RAM between routines, which is how SMB
+uses them: it leaves values there for the routine it calls next, or for its
+caller. Within a routine, a value in one of them that never leaves it is a
+local, `t0` to `t7`:
+
+```c
+uint8_t render_column(void) {
+  uint8_t a, x, y, t0, t3;
+  ...
+    t3 = ram[3] >> 1;     // values of $03 only this routine reads
+    t3 = t3 >> 1;
+    t3 = t3 >> 1;
+    ram[3] = t3 >> 1;     // one that reaches its return, in RAM
+```
+
+So `ram[0]` in the C is a value that crosses a routine's edge, and `t0` one
+that does not. For each scratch byte, the writes of a routine are joined
+with the reads they reach (its webs). A web that only the routine's own
+accesses of the byte take part in is a local. A web stays in RAM when it is
+reached from the routine's entry, read at a return the caller reads it
+after, or read or written by a call. A call that must write the byte (a
+greatest fixpoint over the program) ends the web that came before. An index
+into the scratch bytes (`ram[1 + y]`) also keeps the web in RAM. What callers
+read of a scratch byte after a call, and what interrupt handlers read on
+entry, are found as for registers, over the calls. In SMB, 18 routines have
+scratch locals (101 uses). Most scratch values cross a call: 495 accesses
+stay `ram[k]` (566 before). Naming those per routine is a job for the map.
+
+In routines with locals, accesses through pointers and indexed accesses
+from other bases are taken to stay out of the scratch bytes. SMB's pointers
+lead to ROM, the block buffers and the VRAM lists, and its indices stay
+within their arrays. The routines that keep the machine's state are taken
+to read and write any scratch byte through a computed address, unless the
+address's bounds rule it out (the stack). `clear_memory` clears them
+through a pointer.
+
+What RAM keeps of the scratch bytes between frames is then dead, and
+differs from before. `./hash --mask-scratch` leaves `$00-$07` out of the
+state hash. `tests/golden/warpless.scratch.trace` holds those hashes,
+recorded from the build without `--locals`, which still matches
+`warpless.trace`; `tests/check_codegen.py --rom` checks both.
+
 Checks:
 
-- The replay matches `warpless.trace` and `warpless.audio` on every frame,
-  and both framebuffer hashes are unchanged.
+- The replay matches `warpless.scratch.trace` and `warpless.audio` on every
+  frame, and both framebuffer hashes are unchanged.
+- `--check-scratch` generates the C with every computed access of a routine
+  with scratch locals checked (`scratch_guard`): one that reaches a scratch
+  byte that is a local there sets a flag, and `./hash --check-scratch` fails
+  on it. None does over the replay.
 - The routine-level differential test runs every routine through its
   adapter in `machine.c`, which is generated with `--locals`. The adapter
   takes the routine's parameters from the machine's registers and
   overwrites them before the call, so a routine that reads them instead of
-  its own fails. It then writes the results back. 0 mismatches over the same
-  530 routines and 156,451 runs as before.
+  its own fails. It then writes the results back. Scratch bytes are compared
+  where they are results, as registers are. Runs where a random index
+  reaches a scratch byte that is a local (the guard says so) are left out:
+  the game's indices never do, and the program relies on that. 0 mismatches
+  over the same 530 routines; 60 of 156,451 runs are left out.
 - The WebAssembly module is byte-identical with and without `--locals`
   (only the C is printed differently).
 - The NROM-128 fixture runs with `--locals` too (ROM-free, in CI), from its
@@ -325,7 +376,9 @@ Checks:
   - every write-back through a pointer dropped: the replay crashes;
   - one carry write-back inverted: the routine diff reports 3 routines;
   - the runtime's `indirect_y_addr` printed in routines with locals: the
-    replay crashes.
+    replay crashes;
+  - every read of a scratch local made from RAM instead: diverges at frame
+    7.
 
   Two single-site mutations were not caught. One was equivalent: the
   routine saves Y in `$01` and reloads it before the write-back. The other

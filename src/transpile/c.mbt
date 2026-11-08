@@ -35,15 +35,24 @@ priv struct CFunc {
   names : Array[String]
   views : Views
   conv : Convention
-  // Registers and flags are this function's locals (see locals.mbt), not
-  // the machine's globals.
+  // The function has locals (see locals.mbt): its own registers, flags and
+  // scratch bytes, except those in `memory`, which it keeps in the
+  // machine's state.
   locals : Bool
+  memory : Int
   // With locals, what is live after each statement of each block.
   after : Array[Array[Int]]
+  // With locals, its scratch values that are locals, and the statement
+  // being printed (-1: the block's terminator), for which they say.
+  webs : Webs?
+  mut block : Int
+  mut stmt : Int
 }
 
-// The registers and flags as locals, which temporaries must not shadow.
-let local_names : Array[String] = ["a", "x", "y", "carry", "zero", "negative", "overflow"]
+// The slots as locals, which temporaries must not shadow.
+let local_names : Array[String] = [
+  "a", "x", "y", "carry", "zero", "negative", "overflow", "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7",
+]
 
 fn temp_names(f : @ir.Function, locals~ : Bool = false) -> Array[String] {
   let seen : Map[String, Int] = Map([])
@@ -56,8 +65,32 @@ fn temp_names(f : @ir.Function, locals~ : Bool = false) -> Array[String] {
   })
 }
 
+// A slot as this function names it: its local, or its place in the
+// machine's state.
+fn CFunc::slot(self : CFunc, s : Slot) -> String {
+  if (self.memory & s.bit()) != 0 { s.machine_name() } else { s.local_name() }
+}
+
 fn CFunc::reg(self : CFunc, v : @ir.Var) -> String {
-  if self.locals { local_name(v) } else { v.c_name() }
+  self.slot(Reg(v))
+}
+
+// The scratch byte an address is, when the value read there is a local.
+fn CFunc::local_scratch(self : CFunc, a : @ir.Expr) -> Int? {
+  guard self.webs is Some(webs) && scratch_of(a) is Some(k) else { return None }
+  let bits = if self.stmt < 0 { webs.terms[self.block] } else { webs.uses[self.block][self.stmt] }
+  if (bits & (1 << k)) != 0 { Some(k) } else { None }
+}
+
+// The same for the value the statement writes.
+fn CFunc::local_scratch_write(self : CFunc, a : @ir.Expr) -> Int? {
+  guard self.webs is Some(webs) && scratch_of(a) is Some(k) && self.stmt >= 0 else { return None }
+  if (webs.defs[self.block][self.stmt] & (1 << k)) != 0 { Some(k) } else { None }
+}
+
+fn CFunc::at(self : CFunc, block : Int, stmt : Int) -> Unit {
+  self.block = block
+  self.stmt = stmt
 }
 
 // `(uint8_t)` is needed unless the value is evidently a byte (clang's
@@ -104,9 +137,17 @@ fn CFunc::indirect(self : CFunc, e : @ir.Expr) -> String? {
   }
   // (the runtime's helpers read the machine's X and Y; with locals, the
   // pointer is read and the index added here)
+  // (and a pointer in scratch bytes that are locals is printed as such)
+  let in_memory = fn(p : @ir.Expr) {
+    match p.value() {
+      Some(v) => self.local_scratch(Const(v)) is None && self.local_scratch(Const(v + 1)) is None
+      None => true
+    }
+  }
   match e {
     Binary(Add, base, Var(Y)) =>
       match pointer(base) {
+        Some(p) if !in_memory(p) => None
         Some(p) if p.is_atom() && self.locals => Some("(uint16_t)(zero_page_pointer(\{self.expr(p)}) + y)")
         Some(p) if p.is_atom() => Some("indirect_y_addr(\{self.expr(p)})")
         _ => None
@@ -122,7 +163,25 @@ fn CFunc::indirect(self : CFunc, e : @ir.Expr) -> String? {
 }
 
 // A memory access by the name of what it reads or writes, or by address.
+// The scratch bytes this function has as locals, by bit.
+fn CFunc::local_scratch_mask(self : CFunc) -> Int {
+  match self.webs {
+    Some(webs) => webs.locals
+    None => 0
+  }
+}
+
+// A computed address, checked against those with `--check-scratch`.
+fn CFunc::guarded(self : CFunc, address : String) -> String {
+  let mask = self.local_scratch_mask()
+  if self.conv.check && mask != 0 { "scratch_guard(\{address}, 0x\{hex(mask)})" } else { address }
+}
+
 fn CFunc::access(self : CFunc, space : @ir.Mem, a : @ir.Expr) -> String {
+  if space == Ram && self.local_scratch(a) is Some(k) { return "t\{k}" }
+  if space == Ram && self.conv.check && self.local_scratch_mask() != 0 && a.value() is None {
+    return "ram[\{self.guarded(self.expr(a))}]"
+  }
   match self.views.place(a) {
     Some({ view, offset, index }) if view.kind.names(space) => {
       if view.kind == Scalar || view.kind == WramScalar { return view.name }
@@ -206,7 +265,7 @@ fn CFunc::expr_prec(self : CFunc, e : @ir.Expr) -> (String, Int) {
     Temp(t) => (self.names[t], 0)
     Param => ("return_address", 0)
     Runtime(name) => (name, 0)
-    Load(Bus, a) => ("read_byte(\{self.word(a)})", 0)
+    Load(Bus, a) => ("read_byte(\{self.guarded(self.word(a))})", 0)
     Load(space, a) => (self.access(space, a), 0)
     Unary(Not, a) => ("!" + self.paren(a, 2), 2)
     Unary(Byte, a) => ("(uint8_t)" + self.paren(a, 0), 2)
@@ -275,7 +334,7 @@ fn CFunc::assign(self : CFunc, v : @ir.Var, e : @ir.Expr) -> String {
 }
 
 // `live`: the registers and flags live after the statement.
-fn CFunc::stmt(self : CFunc, s : @ir.Stmt, live~ : Int = local_vars) -> String {
+fn CFunc::stmt(self : CFunc, s : @ir.Stmt, live~ : Int = local_slots) -> String {
   match s {
     Assign(v, e) => self.assign(v, e)
     Let(t, e) => {
@@ -288,12 +347,21 @@ fn CFunc::stmt(self : CFunc, s : @ir.Stmt, live~ : Int = local_vars) -> String {
       }
     }
     Store(Ram, a, value) => {
-      let target = self.access(Ram, a)
+      let write = self.local_scratch_write(a)
+      let target = match (write, scratch_of(a)) {
+        (Some(k), _) => "t\{k}"
+        // the byte in RAM, though this statement may read a local of it
+        (None, Some(k)) => "ram[\{k}]"
+        _ => self.access(Ram, a)
+      }
       let type_name = self.type_of(Load(Ram, a))
+      // (a scratch byte read in RAM and written to a local, or the other
+      // way, is no update in place)
+      let same = scratch_of(a) is None || write == self.local_scratch(a)
       match value {
-        Binary(Add, Load(Ram, b), Const(1)) if b == a => "\{target}++;"
-        Binary(Sub, Load(Ram, b), Const(1)) if b == a => "\{target}--;"
-        Binary(And | Or | Xor as op, Load(Ram, b), r) if b == a && self.narrow(r) => {
+        Binary(Add, Load(Ram, b), Const(1)) if b == a && same => "\{target}++;"
+        Binary(Sub, Load(Ram, b), Const(1)) if b == a && same => "\{target}--;"
+        Binary(And | Or | Xor as op, Load(Ram, b), r) if b == a && same && self.narrow(r) => {
           let operand = self.typed(r, type_name, mask=op == And).unwrap_or(self.expr(r))
           "\{target} \{bin_symbol(op)}= \{operand};"
         }
@@ -301,7 +369,7 @@ fn CFunc::stmt(self : CFunc, s : @ir.Stmt, live~ : Int = local_vars) -> String {
       }
     }
     Store(Wram, a, value) => "\{self.access(Wram, a)} = \{self.byte(value)};"
-    Store(_, a, value) => "dynamic_ram_write(\{self.word(a)}, \{self.byte(value)});"
+    Store(_, a, value) => "dynamic_ram_write(\{self.guarded(self.word(a))}, \{self.byte(value)});"
     Effect("write_joypads", args) => {
       let v = self.byte(args[0])
       "write_joypad1(\{v}); write_joypad2(\{v});"
@@ -321,34 +389,33 @@ fn CFunc::stmt(self : CFunc, s : @ir.Stmt, live~ : Int = local_vars) -> String {
 fn CFunc::arguments(self : CFunc, g : String) -> Array[String] {
   let s = self.conv.sig(g)
   let args = []
-  for v in @ir.vars_of(s.value_bits()) { args.push(self.reg(v)) }
-  for v in @ir.vars_of(s.pointer_bits()) { args.push("&" + self.reg(v)) }
+  for slot in slots_of(s.value_bits()) { args.push(self.slot(slot)) }
+  for slot in slots_of(s.pointer_bits()) { args.push("&" + self.slot(slot)) }
   args
 }
 
 // A call of `g` and the result it returns, if any.
-fn CFunc::call_parts(self : CFunc, g : String) -> (String, @ir.Var?) {
+fn CFunc::call_parts(self : CFunc, g : String) -> (String, Slot?) {
+  if !self.conv.has_locals(g) { return ("\{g}()", None) }
   ("\{g}(\{self.arguments(g).join(", ")})", self.conv.sig(g).primary)
 }
 
 // A call as statements, its results assigned: with locals, those `live`
-// afterwards (the machine's registers take every result).
-fn CFunc::call(self : CFunc, g : String, live~ : Int = local_vars) -> String {
-  let live = if self.locals { live } else { local_vars }
-  if self.conv.has_locals(g) {
-    let (call, primary) = self.call_parts(g)
-    return match primary {
-      Some(p) if (live & p.bit()) != 0 => "\{self.reg(p)} = \{call};"
-      _ => call + ";"
-    }
-  }
-  if !self.locals { return "\{g}();" }
-  // to a routine that keeps the machine's registers, through them
+// afterwards (the machine's state takes every result). The slots the
+// callee keeps in the machine's state and this function has as locals go
+// through the machine's state.
+fn CFunc::call(self : CFunc, g : String, live~ : Int = local_slots) -> String {
+  let live = if self.locals { live } else { local_slots }
   let s = self.conv.sig(g)
+  let through = self.conv.memory(g) & local_slots & self.memory.lnot()
   let parts = []
-  for v in @ir.vars_of(s.params) { parts.push("*machine.\{local_name(v)} = \{local_name(v)};") }
-  parts.push("\{g}();")
-  for v in @ir.vars_of(s.outputs & live) { parts.push("\{local_name(v)} = *machine.\{local_name(v)};") }
+  for slot in slots_of(s.params & through) { parts.push("\{slot.machine_place()} = \{slot.local_name()};") }
+  let (call, primary) = self.call_parts(g)
+  parts.push(match primary {
+    Some(p) if (live & p.bit()) != 0 => "\{self.slot(p)} = \{call};"
+    _ => call + ";"
+  })
+  for slot in slots_of(s.outputs & through & live) { parts.push("\{slot.local_name()} = \{slot.machine_place()};") }
   parts.join(" ")
 }
 
@@ -367,12 +434,12 @@ fn CFunc::returns_value(self : CFunc) -> Bool {
 fn CFunc::write_back(self : CFunc) -> String {
   if !self.locals { return "" }
   let s = self.conv.sig(self.f.name)
-  @ir.vars_of(s.pointer_bits()).map(fn(v) { "*\{pointer_name(s, v)} = \{local_name(v)}; " }).join("")
+  slots_of(s.pointer_bits()).map(fn(slot) { "*\{pointer_name(s, slot)} = \{slot.local_name()}; " }).join("")
 }
 
 fn CFunc::return_code(self : CFunc) -> String {
   let value = match self.conv.sig(self.f.name).primary {
-    Some(p) if self.locals => " " + local_name(p)
+    Some(p) if self.locals => " " + p.local_name()
     _ => ""
   }
   self.write_back() + "return\{value};"
@@ -384,7 +451,8 @@ fn CFunc::tail_call(self : CFunc, g : String) -> String {
     let own = self.conv.sig(self.f.name)
     let s = self.conv.sig(g)
     // the callee's results are the routine's
-    if own.outputs == s.outputs && own.pointer_bits() == 0 && s.pointer_bits() == 0 {
+    let kept = (own.outputs | s.outputs) & (own.memory | s.memory)
+    if own.outputs == s.outputs && kept == 0 && own.pointer_bits() == 0 && s.pointer_bits() == 0 {
       let (call, primary) = self.call_parts(g)
       return if primary is Some(_) { "return \{call};" } else { "\{call}; return;" }
     }
@@ -441,6 +509,7 @@ fn Structurer::emit(self : Structurer, text : String) -> Unit {
 // A transfer to block `b` from where it is not the next block.
 fn Structurer::jump(self : Structurer, b : Int) -> String {
   if self.is_exit(b) {
+    self.c.at(b, -1)
     self.c.exit_code(self.c.f.blocks[b].term).unwrap()
   } else {
     self.used.add(b)
@@ -478,11 +547,19 @@ fn Structurer::cond(self : Structurer, e : @ir.Expr) -> String {
 }
 
 fn Structurer::stmts(self : Structurer, b : Int) -> Unit {
+  self.c.at(b, -1)
   for k, s in self.c.f.blocks[b].stmts {
-    let live = if self.c.locals { self.c.after[b][k] } else { local_vars }
-    if self.c.locals && dead(s, live) { continue }
+    self.c.at(b, k)
+    let live = if self.c.locals { self.c.after[b][k] } else { local_slots }
+    if self.c.locals && dead(s, live, self.c.memory) { continue }
+    // a write to a scratch local that nothing reads
+    match (self.c.webs, s) {
+      (Some(webs), Store(Ram, _, value)) if webs.dead[b][k] != 0 && value.is_pure() => continue
+      _ => ()
+    }
     self.emit(self.c.stmt(s, live~))
   }
+  self.c.at(b, -1)
 }
 
 // The latest conditional back edge to the block at position i that closes
@@ -644,7 +721,18 @@ fn Structurer::range(self : Structurer, s : Int, e : Int, follow : Int, skip_loo
 fn function_body(f : @ir.Function, views : Views, conv : Convention) -> Array[Line] {
   let locals = conv.has_locals(f.name)
   let after = if locals { conv.live_after(f) } else { [] }
-  let c : CFunc = { f, names: temp_names(f, locals~), views, conv, locals, after }
+  let c : CFunc = {
+    f,
+    names: temp_names(f, locals~),
+    views,
+    conv,
+    locals,
+    memory: conv.memory(f.name),
+    after,
+    webs: if locals { conv.webs.get(f.name) } else { None },
+    block: 0,
+    stmt: -1,
+  }
   let pos = f.blocks.map(fn(_) { -1 })
   let layout = []
   // only blocks reachable from the entry are printed
@@ -670,6 +758,7 @@ fn function_body(f : @ir.Function, views : Views, conv : Convention) -> Array[Li
   }
   let st : Structurer = { c, layout, pos, edges, lines: [], used: Set([]), indent: 1 }
   if pos[f.entry] < 0 {
+    c.at(f.entry, -1)
     st.emit(c.exit_code(f.blocks[f.entry].term).unwrap())
   } else {
     if f.entry != layout[0] { st.emit(st.jump(f.entry)) }
@@ -701,6 +790,12 @@ fn interface_names(mask : Int) -> String {
   if names.is_empty() { "none" } else { names.join(", ") }
 }
 
+// The same with the scratch bytes, `t0` to `t7`.
+fn slot_names(mask : Int) -> String {
+  let names = slots_of(mask).map(fn(s) { s.local_name() })
+  if names.is_empty() { "none" } else { names.join(", ") }
+}
+
 // The registers and flags a printed body names (outside comments): the
 // locals it declares, except its parameters by value.
 fn named_locals(body : Array[Line]) -> Int {
@@ -711,8 +806,8 @@ fn named_locals(body : Array[Line]) -> Int {
       Some(i) => text.view(end_offset=i).to_owned()
       None => text
     }
-    for v in @ir.vars_of(local_vars) {
-      if mentions(code, local_name(v)) { named = named | v.bit() }
+    for s in slots_of(local_slots) {
+      if mentions(code, s.local_name()) { named = named | s.bit() }
     }
   }
   named
@@ -722,14 +817,18 @@ fn named_locals(body : Array[Line]) -> Int {
 // written back through a pointer starting from the value it points to.
 fn local_declarations(conv : Convention, f : @ir.Function, named : Int) -> Array[String] {
   let sig = conv.sig(f.name)
-  let declared = named & sig.value_bits().lnot()
+  // (scratch bytes are in RAM at the routine's edges; its values in them
+  // that never leave it are locals)
+  let declared = (named & sig.value_bits().lnot() & sig.memory.lnot()) | (named & all_scratch)
   let out = []
+  // (a result written back through a pointer starts from what it points to)
+  let from_pointer = declared & sig.params & sig.pointer_bits()
   for type_name in ["uint8_t", "bool"] {
-    let plain = @ir.vars_of(declared & sig.params.lnot()).filter(fn(v) { c_type(v) == type_name })
-    if !plain.is_empty() { out.push("\{type_name} \{plain.map(local_name).join(", ")};") }
+    let plain = slots_of(declared & from_pointer.lnot()).filter(fn(s) { s.c_type() == type_name })
+    if !plain.is_empty() { out.push("\{type_name} \{plain.map(fn(s) { s.local_name() }).join(", ")};") }
   }
-  for v in @ir.vars_of(declared & sig.params) {
-    out.push("\{c_type(v)} \{local_name(v)} = *\{pointer_name(sig, v)};")
+  for s in slots_of(from_pointer) {
+    out.push("\{s.c_type()} \{s.local_name()} = *\{pointer_name(sig, s)};")
   }
   out
 }
@@ -800,9 +899,11 @@ fn Emitter::emit_program_c(self : Emitter, program : @ir.Program, preamble : Arr
     self.emit("")
   }
   if conv.locals {
-    self.emit("// Registers and flags are each routine's own: its parameters, results and")
-    self.emit("// locals. The hand-written routines, the routines they call and the roots")
-    self.emit("// keep the machine's, which routines with locals reach through `machine`.")
+    self.emit("// Registers, flags and the scratch bytes $00-$07 (t0 to t7) are each")
+    self.emit("// routine's own: its parameters, results and locals. The hand-written")
+    self.emit("// routines, the routines they call and the roots keep the machine's, which")
+    self.emit("// routines with locals reach through `machine` and `ram`.")
+    if conv.check { self.emit("bool scratch_reached; // see scratch_guard (code.h)") }
     if calls_machine(program, conv) {
       self.emit("static const struct {")
       self.emit("  uint8_t *a, *x, *y;")
@@ -829,13 +930,14 @@ fn Emitter::emit_program_c(self : Emitter, program : @ir.Program, preamble : Arr
 // overwrites those before the call, so that a routine reading them instead
 // of its own fails the test, and writes the results back.
 fn Emitter::emit_machine_adapters(self : Emitter, program : @ir.Program, conv : Convention) -> Unit {
-  self.emit("// Each generated routine with the machine's registers and flags: its")
-  self.emit("// parameters taken from them and its results written back (for")
-  self.emit("// tests/check_routines.py). Not part of the game.")
+  self.emit("// Each generated routine with the machine's registers, flags and scratch")
+  self.emit("// bytes: its parameters taken from them and its results written back")
+  self.emit("// (for tests/check_routines.py). Not part of the game.")
   self.emit("#include \"code.h\"")
   self.emit("")
-  self.emit("// What a routine with locals must not read: the machine's registers")
-  self.emit("// once its parameters are taken from them.")
+  self.emit("// What a routine with locals must not read: the machine's registers once")
+  self.emit("// its parameters are taken from them. (The scratch bytes stay: the test's")
+  self.emit("// random indices reach them, as the game's never do.)")
   self.emit("static void poison(void) {")
   self.emit("  a = 0x5a; x = 0xa5; y = 0x3c;")
   self.emit("  carry_flag = !carry_flag; zero_flag = !zero_flag; neg_flag = !neg_flag; overflow_flag = !overflow_flag;")
@@ -844,19 +946,20 @@ fn Emitter::emit_machine_adapters(self : Emitter, program : @ir.Program, conv : 
   for f in program.functions {
     if f.native || f.helper { continue }
     let sig = conv.sig(f.name)
-    self.emit("// in: \{interface_names(sig.params)}; out: \{interface_names(sig.outputs)}")
+    self.emit("// in: \{slot_names(sig.params)}; out: \{slot_names(sig.outputs)}")
     if !conv.has_locals(f.name) {
       self.emit("void machine_\{f.name}(void) { \{f.name}(); }")
       continue
     }
-    let copy = fn(v : @ir.Var) { "v_" + local_name(v) }
+    let own = local_slots & sig.memory.lnot()
+    let copy = fn(s : Slot) { "v_" + s.local_name() }
     let lines = []
-    for v in @ir.vars_of(sig.params | sig.outputs) { lines.push("\{c_type(v)} \{copy(v)} = \{v.c_name()};") }
+    for s in slots_of((sig.params | sig.outputs) & own) { lines.push("\{s.c_type()} \{copy(s)} = \{s.machine_name()};") }
     lines.push("poison();")
-    let args = @ir.vars_of(sig.value_bits()).map(copy) + @ir.vars_of(sig.pointer_bits()).map(fn(v) { "&" + copy(v) })
+    let args = slots_of(sig.value_bits()).map(copy) + slots_of(sig.pointer_bits()).map(fn(s) { "&" + copy(s) })
     let call = "\{f.name}(\{args.join(", ")});"
     lines.push(match sig.primary { Some(p) => "\{copy(p)} = \{call}"; None => call })
-    for v in @ir.vars_of(sig.outputs) { lines.push("\{v.c_name()} = \{copy(v)};") }
+    for s in slots_of(sig.outputs & own) { lines.push("\{s.machine_name()} = \{copy(s)};") }
     self.emit("void machine_\{f.name}(void) {")
     for line in lines { self.emit("  " + line) }
     self.emit("}")

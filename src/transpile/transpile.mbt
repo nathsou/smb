@@ -257,6 +257,17 @@ fn Emitter::emit_code_h(self: Emitter, program: @ir.Program, uses_ppu_bus~: Bool
   // cartridge runtime's mapper.c)
   if !banked { self.emit("void mapper_write(uint16_t addr, uint8_t value);") }
   self.emit("")
+  if conv.check {
+    self.emit("// --check-scratch: a computed access, in a routine whose scratch bytes")
+    self.emit("// are locals, that reaches one of them (`locals`, by bit) sets")
+    self.emit("// scratch_reached: the program relied on that byte being RAM.")
+    self.emit("extern bool scratch_reached;")
+    self.emit("static inline uint16_t scratch_guard(unsigned addr, unsigned locals) {")
+    self.emit("  if (addr < 0x2000 && (addr & 0x7ff) < 8 && (locals & (1u << (addr & 7)))) scratch_reached = true;")
+    self.emit("  return (uint16_t)addr;")
+    self.emit("}")
+    self.emit("")
+  }
 
   if banked {
     let layout = program.layout
@@ -325,11 +336,13 @@ pub fn Transpiler::transpile(
   program: @ir.Program,
   native~: Array[String] = [],
   locals~: Bool = false,
+  check_scratch~: Bool = false,
 ) -> Transpiler raise TranspileError {
   for name in native {
     if program.function(name) is None { raise UnknownNativeRoutine(name) }
   }
   let conv = if locals { Convention::locals_of(program) } else { Convention::machine() }
+  conv.check = locals && check_scratch
   let constants_h: File = {
     name: "constants.h",
     contents: {

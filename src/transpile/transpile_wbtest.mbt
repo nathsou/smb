@@ -228,3 +228,13 @@ test "with --locals, a call to a hand-written routine goes through the machine's
   assert_eq(code.contains("} machine = { &a, &x, &y, &carry_flag, &zero_flag, &neg_flag, &overflow_flag };"), true)
   assert_eq(file_of(output, "code.h").contains("void Probe(void);"), true)
 }
+
+test "with --locals, a scratch value that never leaves the routine is a local" {
+  // Temp keeps $00 to itself; Pass leaves $01 for Use, which reads it after
+  // the call: that one stays in RAM
+  let source = ".org $c000\nBoot:\n jsr Temp\n jsr Pass\n lda #$00\nIdle:\n jmp Idle\nTemp:\n lda $20\n sta $00\n lda $21\n clc\n adc $00\n sta $22\n rts\nPass:\n lda #$05\n sta $01\n jsr Use\n rts\nUse:\n lda $01\n sta $23\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let code = code_c(transpile_low(lower_fixture(source), locals=true))
+  assert_eq(code.contains("void Temp(void) {\n  uint8_t t0;\n  t0 = ram[0x20];\n  ram[0x22] = (uint8_t)(ram[0x21] + t0);"), true)
+  assert_eq(code.contains("ram[1] = 5;\n  Use();"), true)
+  assert_eq(code.contains("ram[0x23] = ram[1];"), true)
+}
