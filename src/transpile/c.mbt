@@ -45,6 +45,8 @@ priv struct CFunc {
   // With locals, its scratch values that are locals, and the statement
   // being printed (-1: the block's terminator), for which they say.
   webs : Webs?
+  // The map types A, X and Y hold, by block and statement (register_types).
+  mut types : Array[Array[Array[String]]]
   mut block : Int
   mut stmt : Int
 }
@@ -227,18 +229,84 @@ fn CFunc::access(self : CFunc, space : @ir.Mem, a : @ir.Expr) -> String {
 // The map type of a value: a typed variable's, kept by masking and
 // combining it with others of its type.
 fn CFunc::type_of(self : CFunc, e : @ir.Expr) -> String {
+  let env = match self.types.get(self.block) {
+    Some(by_stmt) => by_stmt[if self.stmt < 0 { by_stmt.length() - 1 } else { self.stmt }]
+    None => ["", "", ""]
+  }
+  self.type_with(e, env)
+}
+
+// The same with the types A, X and Y hold (a register loaded from a typed
+// variable holds its type until written).
+fn CFunc::type_with(self : CFunc, e : @ir.Expr, env : Array[String]) -> String {
   match e {
+    Var(A) => env[0]
+    Var(X) => env[1]
+    Var(Y) => env[2]
     Load(Ram, a) =>
       match self.views.place(a) {
         Some({ view, .. }) => view.type_name
         None => ""
       }
     Binary(And | Or | Xor, l, r) => {
-      let t = self.type_of(l)
-      if t != "" { t } else { self.type_of(r) }
+      let t = self.type_with(l, env)
+      if t != "" { t } else { self.type_with(r, env) }
     }
     _ => ""
   }
+}
+
+fn register_slot(v : @ir.Var) -> Int {
+  match v {
+    A => 0
+    X => 1
+    Y => 2
+    _ => -1
+  }
+}
+
+// The types A, X and Y hold before each statement of each block (and,
+// last, before its terminator): a forward pass over the blocks.
+fn CFunc::register_types(self : CFunc) -> Array[Array[Array[String]]] {
+  let f = self.f
+  let out : Array[Array[Array[String]]] = f.blocks.map(fn(_) { [] })
+  let ins : Array[Array[String]?] = f.blocks.map(fn(_) { None })
+  ins[f.entry] = Some(["", "", ""])
+  let mut changed = true
+  while changed {
+    changed = false
+    for b, block in f.blocks {
+      guard ins[b] is Some(start) else { continue }
+      let env = start.copy()
+      let rows = []
+      for s in block.stmts {
+        rows.push(env.copy())
+        match s {
+          Assign(v, e) if register_slot(v) >= 0 => env[register_slot(v)] = self.type_with(e, env)
+          Call(g) | CallValue(_, g, _) => {
+            let outputs = self.conv.sig(g).outputs
+            for v in [@ir.Var::A, X, Y] {
+              if (outputs & v.bit()) != 0 || !self.conv.locals { env[register_slot(v)] = "" }
+            }
+          }
+          _ => ()
+        }
+      }
+      rows.push(env.copy())
+      out[b] = rows
+      for t in block.term.successors() {
+        let next = match ins[t] {
+          None => env.copy()
+          Some(old) => old.mapi(fn(i, ty) { if ty == env[i] { ty } else { "" } })
+        }
+        if ins[t] != Some(next) {
+          ins[t] = Some(next)
+          changed = true
+        }
+      }
+    }
+  }
+  out
 }
 
 // `e`, a constant of the type `type_name` by name.
@@ -749,9 +817,11 @@ fn function_body(f : @ir.Function, views : Views, conv : Convention) -> Array[Li
     memory: conv.memory(f.name),
     after,
     webs: if locals { conv.webs.get(f.name) } else { None },
+    types: [],
     block: 0,
     stmt: -1,
   }
+  c.types = c.register_types()
   let pos = f.blocks.map(fn(_) { -1 })
   let layout = []
   // only blocks reachable from the entry are printed
