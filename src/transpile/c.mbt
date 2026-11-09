@@ -1185,7 +1185,7 @@ fn Emitter::emit_function(self : Emitter, program : @ir.Program, f : @ir.Functio
   let plan = scratch_plan_named(f, views, conv)
   let (body, regs) = function_body(f, views, conv, plan~)
   let text = body.map(fn(line) { match line { Text(_, t) => t; Mark(_) => "" } }).join("\n")
-  let idents = identifiers(text)
+  let idents = identifiers(text, members=false)
   // what the map says of its parameters and results
   if conv.has_locals(f.name) {
     let named = views.params.get(f.name).unwrap_or([]) + views.results.get(f.name).unwrap_or([])

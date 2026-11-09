@@ -43,6 +43,7 @@ generated C next to the game.
 - [x] Records over the object slots and sprites, scratch bytes named per routine, 16-bit carry chains (SMB)
 - [x] Each value a register holds its own variable, named from the map (`apply_gravity(can_rise, x, down_force, up_force, max_speed)`), scratch inputs as parameters (SMB)
 - [x] Every routine's parameters, results and scratch values, every label and the task and sound bytes named in the map (SMB)
+- [x] Every value inside the routines named in the map, by the instruction that writes it (SMB)
 - [ ] Manually rewrite portions of the code to higher level C
 
 See [toward a modern C program](docs/modern-runtime.md) for how these steps are

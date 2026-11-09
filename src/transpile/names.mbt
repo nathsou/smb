@@ -108,7 +108,7 @@ fn names_taken(views : Views, f : @ir.Function, conv : Convention) -> Set[String
 
 // Whether a routine's registers are named.
 fn Convention::nameable(self : Convention, f : @ir.Function) -> Bool {
-  self.has_locals(f.name) && !f.helper
+  self.has_locals(f.name)
 }
 
 // The names of scratch values the map leaves unnamed: a value a routine
@@ -604,30 +604,31 @@ fn CFunc::register_names(self : CFunc) -> RegNames? {
     if web.find(node) != node { continue }
     let r = web.reg[node]
     let slot = reg_slot(r)
-    let candidate = if entry_param[node] {
-      conv.param_names.get(f.name).unwrap_or(Map([])).get(slot.bit())
-    } else if !valued[node].is_empty() {
-      Some(valued[node][0])
-    } else if loads[node] > 0 && others[node] == 0 && results[node].is_empty() && default_var(r) is Some(dv) {
-      Some(dv.1)
-    } else if returned[node] && map_result(self.views, conv, f.name, r) is Some((name, _)) {
-      Some(name)
-    } else if agreed(results[node]) is Some(name) {
-      Some(name)
-    } else {
-      agreed(args[node])
+    if entry_param[node] {
+      match conv.param_names.get(f.name).unwrap_or(Map([])).get(slot.bit()) {
+        Some(name) => name_of[node] = name
+        None => ()
+      }
+      continue
     }
-    match candidate {
-      Some(name) =>
-        if entry_param[node] {
-          name_of[node] = name
-        } else if !taken.contains(name) &&
-          !(if valued[node].is_empty() { self.views.taken } else { self.views.value_taken }).contains(name) &&
-          owner.get(name).unwrap_or(r) == r {
-          owner[name] = r
-          name_of[node] = name
-        }
-      None => ()
+    // the first of these names that is free: the map's for the value, a
+    // `param *` byte's, the routine's result, what calls give or take
+    let candidates : Array[(String, Bool)] = valued[node].map(fn(v) { (v, true) })
+    if loads[node] > 0 && others[node] == 0 && results[node].is_empty() && default_var(r) is Some(dv) {
+      candidates.push((dv.1, false))
+    }
+    if returned[node] && map_result(self.views, conv, f.name, r) is Some((name, _)) { candidates.push((name, false)) }
+    if agreed(results[node]) is Some(name) { candidates.push((name, false)) }
+    if agreed(args[node]) is Some(name) { candidates.push((name, false)) }
+    for c in candidates {
+      let (name, from_map) = c
+      if !taken.contains(name) &&
+        !(if from_map { self.views.value_taken } else { self.views.taken }).contains(name) &&
+        owner.get(name).unwrap_or(r) == r {
+        owner[name] = r
+        name_of[node] = name
+        break
+      }
     }
   }
   let name = fn(node : Int, r : Int) {
@@ -649,19 +650,42 @@ fn CFunc::register_names(self : CFunc) -> RegNames? {
   })
   // what a tail call writes: the callee's result names (the return reads
   // them there)
+  // (a jump's or dispatch's cases: the routine's own result names; what
+  // the dispatcher gives them: its result names)
   let term_defs = f.blocks.map(fn(block) {
     let out = Array::makei(7, fn(r) { local_names[r] })
-    if block.term is TailCall(g) {
-      for r in 0..<7 {
-        if (conv.sig(g).outputs & held_vars[r].bit()) == 0 { continue }
-        match map_result(self.views, conv, g, r) {
-          Some((given, _)) if !taken.contains(given) && !self.views.taken.contains(given) && owner.get(given).unwrap_or(r) == r => {
-            owner[given] = r
-            out[r] = given
-          }
-          _ => ()
+    let give = fn(r : Int, named : (String, String)?) {
+      match named {
+        Some((given, _)) if out[r] == local_names[r] && !taken.contains(given) && !self.views.taken.contains(given) && owner.get(given).unwrap_or(r) == r => {
+          owner[given] = r
+          out[r] = given
         }
+        _ => ()
       }
+    }
+    let cases_write = fn(cases : Array[(Int, String)]) {
+      cases.fold(init=0, fn(acc, c) { acc | conv.sig(c.1).outputs })
+    }
+    match block.term {
+      TailCall(g) =>
+        for r in 0..<7 {
+          if (conv.sig(g).outputs & held_vars[r].bit()) == 0 { continue }
+          give(r, map_result(self.views, conv, g, r))
+          if (own.outputs & held_vars[r].bit()) != 0 { give(r, map_result(self.views, conv, f.name, r)) }
+        }
+      Jump(_, cases) =>
+        for r in 0..<7 {
+          if (cases_write(cases) & own.outputs & held_vars[r].bit()) != 0 { give(r, map_result(self.views, conv, f.name, r)) }
+        }
+      Dispatch(h, _, cases) =>
+        for r in 0..<7 {
+          if (conv.dispatch_writes(h) & held_vars[r].bit()) != 0 {
+            give(r, map_result(self.views, conv, h, r))
+          } else if (cases_write(cases) & own.outputs & held_vars[r].bit()) != 0 {
+            give(r, map_result(self.views, conv, f.name, r))
+          }
+        }
+      _ => ()
     }
     out
   })

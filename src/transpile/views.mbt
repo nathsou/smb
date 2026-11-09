@@ -328,7 +328,8 @@ fn Record::type_of(self : Record, field : String) -> String {
 }
 
 // Identifiers of C text, outside comments.
-fn identifiers(text : String) -> Set[String] {
+// (with members~ false, not the members of records: `.x`)
+fn identifiers(text : String, members~ : Bool = true) -> Set[String] {
   let found : Set[String] = Set([])
   for line in text.split("\n") {
     let line = line.to_owned()
@@ -338,17 +339,21 @@ fn identifiers(text : String) -> Set[String] {
     }
     let word = StringBuilder()
     let mut length = 0
+    let mut previous = ' '
+    let mut member = false
     for ch in code {
       if ch.is_ascii_alphabetic() || ch == '_' || (length > 0 && ch >= '0' && ch <= '9') {
+        if length == 0 { member = previous == '.' }
         word.write_char(ch)
         length += 1
       } else if length > 0 {
-        found.add(word.to_string())
+        if members || !member { found.add(word.to_string()) }
         word.reset()
         length = 0
       }
+      previous = ch
     }
-    if length > 0 { found.add(word.to_string()) }
+    if length > 0 && (members || !member) { found.add(word.to_string()) }
   }
   found
 }

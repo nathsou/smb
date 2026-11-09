@@ -217,6 +217,10 @@ test "map records group arrays and scratch lines name a routine's bytes" {
   assert_eq(named.results.map(fn(e) { (e.routine, e.register, e.name) }), [("reset", "carry", "hit")])
   let labelled = parse_map("routine $8000 reset\nlabel $8004 loop_top ; the loop\n")
   assert_eq(labelled.labels, [(0x8004, "loop_top", "the loop")])
+  let valued = parse_map("routine $8000 reset\nvalue $8004 a speed ; pixels\nvalue $8004 temp sum\nvalue $8006 carry hit\n")
+  assert_eq(valued.values.map(fn(v) { (v.address, v.register, v.name, v.description) }), [
+    (0x8004, "a", "speed", "pixels"), (0x8004, "temp", "sum", ""), (0x8006, "carry", "hit", ""),
+  ])
   let rejected = [
     "var $0010 kind 5\nrecord enemy kind missing\n",
     "var $0010 kind\nrecord enemy kind\n",
@@ -231,6 +235,9 @@ test "map records group arrays and scratch lines name a routine's bytes" {
     "routine $8000 reset\nresult reset carry\n",
     "routine $8000 reset\nlabel $8000 again\n",
     "routine $8000 reset\nlabel $8004 reset\n",
+    "routine $8000 reset\nvalue $8004 q speed\n",
+    "routine $8000 reset\nvalue $8004 a\n",
+    "routine $8000 reset\nvalue $8004 a speed\nvalue $8004 a pace\n",
   ]
   for text in rejected {
     try parse_map(text) catch { _ => () } noraise { _ => fail("accepted: \{text}") }

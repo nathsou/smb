@@ -276,6 +276,13 @@ pub(all) struct MapType {
   description : String
 } derive(@debug.Debug)
 
+pub(all) struct MapValue {
+  address : Int32
+  register : String
+  name : String
+  description : String
+} derive(@debug.Debug)
+
 pub(all) struct Program {
   image : Image
   instructions : Map[Int32, Instruction]
@@ -318,6 +325,7 @@ pub(all) struct RomMap {
   params : Array[MapParam]
   results : Array[MapParam]
   labels : Array[(Int32, String, String)]
+  values : Array[MapValue]
 } derive(@debug.Debug)
 pub fn RomMap::bank_name(Self, Int32) -> String
 pub fn RomMap::empty() -> Self

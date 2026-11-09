@@ -800,10 +800,13 @@ table $8dbf text_new_quest 31
 table $8dde text_press_b 17
 table $8def text_select_world 21
 routine $8e04 dispatch                  ; jump through the address table that follows the call, indexed by A
+result dispatch y table_offset ; the offset of the high byte of the entry in the table
+result dispatch carry upper_half ; the index was 128 or more
 scratch dispatch $04 table_low ; the table's address (the return address), low byte
 scratch dispatch $05 table_high ; the table's address, high byte
 scratch dispatch $06 target_low ; the routine's address, low byte
 scratch dispatch $07 target_high ; the routine's address, high byte
+param dispatch a index ; the entry to jump to
 routine $8e19 clear_screens             ; clear both screens (hand-written)
 routine $8e2d clear_screen              ; fill one screen with blank tiles and clear its attributes (hand-written)
 param clear_screen a nametable ; the high byte of the nametable's address
@@ -868,6 +871,7 @@ table $8fcb sprite_zero 4
 routine $8fcf start_game                ; clear game memory and enter the first area
 value $8fcf y clear_end
 value $8fd4 y index
+value $8fd1 a cleared
 routine $8fe4 start_area                ; reset area state and position the player at the entrance
 value $8fe4 y clear_end
 value $8fe9 x index
@@ -1663,6 +1667,7 @@ scratch update_bullet $00 distance ; the horizontal distance to the player
 value $ba45 y direction
 value $ba4c y direction
 value $ba4f y speed_index
+result update_bullet x object ; the object slot
 label $ba85 bullet_gone ; the bullet left the screen
 table $ba89 hammer_slots 9
 table $ba92 hammer_speeds 2
@@ -1868,6 +1873,56 @@ scratch update_enemies_and_loops $02 spawn_page ; the new enemy's page
 scratch update_enemies_and_loops $03 spawn_x ; the new enemy's X
 scratch update_enemies_and_loops $06 range_page ; the page of the spawn range's edge
 scratch update_enemies_and_loops $07 range_x ; the X of the spawn range's edge
+value $c047 a active
+value $c063 a parent_active
+value $c12f a frenzy
+value $c144 y data_pos
+value $c147 a first_byte
+value $c15a y data_pos
+value $c15b a second_byte
+value $c168 temp range_end
+value $c178 y data_pos
+value $c179 a second_byte
+value $c189 y data_pos
+value $c18a a first_byte
+value $c197 y data_pos
+value $c198 a second_byte
+value $c1b0 a first_byte
+value $c1b2 a column_x
+value $c1b6 carry no_borrow
+value $c1c0 a first_byte
+value $c1d1 carry in_range
+value $c1d9 a first_byte
+value $c1de a row_y
+value $c1e5 y data_pos
+value $c1e6 a second_byte
+value $c1f1 a second_byte
+value $c1f3 a kind
+value $c206 a kind
+value $c216 a frenzy_kind
+value $c222 a frenzy_kind
+value $c232 y data_pos
+value $c233 a third_byte
+value $c239 a world
+value $c23f y data_pos
+value $c245 y data_pos
+value $c246 a third_byte
+value $c253 a first_byte
+value $c71b y group_kind
+value $c726 y group_kind
+value $c72d y group_kind
+value $c71e a group
+value $c72f a group
+value $c732 y group_y
+value $c738 y group_y
+value $c746 y group_count
+value $c74c y group_count
+value $c763 a group_x
+value $c768 temp next_x
+value $c884 a handler
+value $c88d a handler
+value $c886 y its_kind
+value $c888 carry special
 table $c06b loop_worlds 11
 table $c076 loop_pages 11
 table $c081 loop_y_positions 11
@@ -1890,6 +1945,11 @@ label $c231 enemy_data_page ; a page command in the enemy data
 routine $c26c init_enemy                ; initialize the enemy in slot X by its kind
 param init_enemy x object ; the slot of the enemy just loaded
 result init_enemy x object ; the same slot
+value $c26c a handler
+value $c27e a handler
+value $c26e carry special
+value $c272 y kind
+value $c275 a lower_y
 table $c282 enemy_initializers 110
 routine $c2f0 init_nothing              ; no initialization
 routine $c2f1 init_goomba               ; initialize a goomba: a walker with a small box
@@ -1910,6 +1970,7 @@ param init_red_koopa x object ; the enemy's slot
 table $c326 hammer_bro_walk_times 2
 routine $c328 init_hammer_bro           ; initialize a hammer bro standing, with its first walk timer
 param init_hammer_bro x object ; the enemy's slot
+value $c32f y difficulty
 routine $c33d init_flyer_or_swimmer     ; initialize an enemy at rest, with a tall box
 param init_flyer_or_swimmer x object ; the enemy's slot
 routine $c342 init_blooper              ; initialize a blooper at rest, with a small box
@@ -1919,6 +1980,10 @@ param set_small_box x object ; the enemy's slot
 routine $c34a init_red_paratroopa       ; initialize a red paratroopa's flight around its height
 param init_red_paratroopa x object ; the enemy's slot
 param init_red_paratroopa carry carry_in ; the carry its height is computed with
+value $c34a y offset
+value $c353 y offset
+value $c34c a start_y
+value $c356 a center
 routine $c35a set_tall_box              ; give the enemy the tall box, facing left
 param set_tall_box x object ; the enemy's slot
 routine $c35c set_box_facing_left       ; set the enemy's box kind to A, facing left, at rest vertically
@@ -1938,6 +2003,15 @@ param setup_lakitu x object ; the enemy's slot
 table $c398 lakitu_aim_offsets 12
 routine $c3a4 update_lakitu_spawner     ; bring Lakitu back and throw spinies
 param update_lakitu_spawner x object ; the frenzy object's slot
+value $c3b2 y lakitu_slot
+value $c3bb y lakitu_slot
+value $c40c y aim_index
+value $c417 y aim_index
+value $c40d x aim_slot
+value $c418 x aim_slot
+value $c420 y speed
+value $c437 y direction
+value $c43f y direction
 label $c3e6 lakitu_present ; a lakitu is already out
 label $c3e3 lakitu_done ; back to the object slot
 label $c3d3 lakitu_slot_found ; a free slot for the lakitu
@@ -1947,6 +2021,9 @@ routine $c459 init_long_firebar         ; initialize a long firebar, as two fire
 param init_long_firebar x object ; the enemy's slot
 routine $c45c init_firebar              ; initialize a firebar's speed and direction by its kind, centered on its block
 param init_firebar x object ; the enemy's slot
+value $c465 y kind_index
+value $c47b temp center_x
+value $c481 a page
 table $c488 flying_fish_x_offsets 16
 table $c498 flying_fish_speeds 12
 table $c4a4 flying_fish_intervals 4
@@ -1954,17 +2031,42 @@ routine $c4a8 init_flying_fish          ; launch a flying cheep cheep at the pla
 param init_flying_fish x object ; the enemy's slot
 scratch init_flying_fish $00 fish_limit ; the slot past which no fish is launched
 scratch init_flying_fish $01 aim_offset ; the offset of the fish's aim
+value $c4b6 a interval
+value $c4bc y limit
+value $c4c3 y limit
+value $c4cd a pick
+value $c4d7 a lead
+value $c4dd a lead
+value $c4e3 a lead
+value $c4d9 y speed
+value $c4fc y fish_index
+value $c50a y fish_index
+value $c516 a reversed
+value $c524 temp ahead_x
+value $c52b a page
+value $c53a a page
+value $c533 temp behind_x
 routine $c549 init_bowser               ; initialize Bowser, his health and timers, and his second slot
 param init_bowser x object ; the enemy's slot
 routine $c575 copy_enemy                ; copy the enemy into a free slot, linked to it
 param copy_enemy x object ; the enemy's slot
+value $c575 y free_slot
 table $c59d flame_heights 4
 table $c5a1 flame_force_offsets 2
 routine $c5a3 init_bowser_flame         ; launch a flame from Bowser, or from the right of the screen
 param init_bowser_flame x object ; the enemy's slot
+value $c5a3 a timer
+value $c5b1 y bowser
+value $c5bf a next_timer
+value $c5c7 a next_timer
+value $c5cf a height_index
+value $c604 a height_index
+value $c60d y force_index
+value $c613 y force_index
 routine $c5d8 place_flame               ; put a flame at height A, right of the screen
 param place_flame a height ; the flame's Y
 param place_flame x object ; the enemy's slot
+value $c5de temp start_x
 routine $c61f finish_flame              ; activate a flame with its box
 param finish_flame x object ; the enemy's slot
 result finish_flame a leftover_a ; what the activation leaves in A
@@ -1973,11 +2075,25 @@ table $c637 firework_y_offsets 6
 routine $c63d init_firework             ; launch a firework around the star flag, on its timer
 param init_firework x object ; the enemy's slot
 scratch init_firework $00 star_flag_page ; the star flag's page
+value $c64a y flag_slot
+value $c658 temp left_x
+value $c669 y firework_index
+value $c66c temp firework_x
 table $c68a bit_masks 8
 table $c692 frenzy_y_positions 8
 table $c69a swimming_fish_kinds 2
 routine $c69c spawn_frenzy_enemy        ; bullet bills or cheep cheeps arriving from the side
 param spawn_frenzy_enemy x object ; the frenzy object's slot
+value $c6aa y fish_kind
+value $c6b3 y fish_kind
+value $c6bb y fish_kind
+value $c6c0 a kind
+value $c717 a kind
+value $c6d4 a bit
+value $c6e1 a bit
+value $c6d6 y bit_index
+value $c6d7 a mask
+value $c6fd y enemy_slot
 label $c71b spawn_group ; a group of enemies
 label $c711 frenzy_cannon_sound ; play the cannon's sound
 label $c6ff frenzy_slot_found ; a free slot for the frenzy enemy
@@ -1986,12 +2102,17 @@ label $c6d6 frenzy_bit_test ; test the frenzy's move bit
 label $c6c3 frenzy_kind_set ; the frenzy enemy's kind
 routine $c787 init_piranha              ; initialize a piranha plant inside its pipe
 param init_piranha x object ; the enemy's slot
+value $c790 a start_y
 routine $c7a0 init_frenzy               ; start a frenzy by the enemy's kind: lakitu's spinies, flying cheep cheeps, flames, fireworks, bullets
 param init_frenzy x object ; the frenzy object's slot
+value $c7a0 a kind
+value $c7a6 a handler
+result init_frenzy x object ; the object slot
 table $c7ab frenzy_initializers 12
 routine $c7b7 init_no_frenzy            ; no frenzy
 routine $c7b8 end_frenzy                ; end the frenzy, and send the lakitu away
 param end_frenzy x object ; the enemy's slot
+value $c7b8 y enemy_slot
 routine $c7d1 init_bouncing_paratroopa  ; initialize a bouncing paratroopa moving left
 param init_bouncing_paratroopa x object ; the enemy's slot
 routine $c7d9 set_tall_box_b            ; give the enemy the tall box
@@ -2001,16 +2122,25 @@ param set_box_kind a box ; the box kind
 param set_box_kind x object ; the enemy's slot
 routine $c7df init_balance_platform     ; initialize one platform of a balance lift and pair it with the other
 param init_balance_platform x object ; the enemy's slot
+value $c7ed y partner
+value $c7f7 y partner
+value $c7ef a alignment
 routine $c803 init_drop_platform        ; initialize a platform that drops when stood on
 param init_drop_platform x object ; the enemy's slot
 routine $c80b init_side_platform        ; initialize a platform moving side to side
 param init_side_platform x object ; the enemy's slot
 routine $c812 init_vertical_platform    ; initialize a platform moving up and down around its height
 param init_vertical_platform x object ; the enemy's slot
+value $c812 y offset
+value $c81d y offset
+value $c814 a distance
+value $c81b a distance
 routine $c828 init_platform             ; initialize a platform at rest, with its box
 param init_platform x object ; the enemy's slot
 routine $c82b set_platform_box          ; give the platform its box, shorter in castles and in late hard mode
 param set_platform_box x object ; the enemy's slot
+value $c82b a box
+value $c839 a box
 routine $c83f large_lift_up             ; initialize a large lift going up
 param large_lift_up x object ; the enemy's slot
 routine $c845 large_lift_down           ; initialize a large lift going down
@@ -2028,6 +2158,9 @@ table $c86e platform_offset_high 3
 routine $c871 offset_platform           ; move the platform by the offset Y
 param offset_platform x object ; the enemy's slot
 param offset_platform y offset_index ; the offset's index in platform_offset_low/high
+value $c874 temp new_x
+value $c879 a page
+value $c87b a new_page
 routine $c881 finish_enemy_init         ; no initialization
 label $c882 run_object ; run the object in the slot
 table $c892 enemy_runners 68
@@ -2037,6 +2170,7 @@ result run_retainer x object ; the object slot
 routine $c8e0 run_normal_enemy          ; run an enemy: draw it, collide it with the ground, enemies and the player, move it
 routine $c905 move_enemy                ; move an enemy by its kind
 result move_enemy x object ; the object slot
+value $c905 a kind
 table $c90a enemy_movers 42
 routine $c934 move_nothing              ; no movement
 routine $c935 run_bowser_flame          ; move a flame and collide it with the player
@@ -2044,55 +2178,112 @@ routine $c947 run_firebar               ; rotate a firebar and collide it with t
 routine $c94d run_small_platform        ; run a small lift: collide it with the player, draw it, move it
 routine $c965 run_large_platform        ; run a large platform: collide it with the player, move it, draw it
 routine $c982 move_large_platform       ; move a large platform by its kind
+value $c985 a handler
 table $c98a large_platform_movers 14
 routine $c998 erase_enemy               ; clear the enemy's slot
 param erase_enemy x object ; the enemy's slot
 result erase_enemy a cleared ; 0, what the slot was cleared with
 routine $c9b0 move_podoboo              ; jump a podoboo out of the lava at random intervals
+value $c9bb a pick
 table $c9ce hammer_throw_masks 2
 table $c9d0 walk_speed_adders 4
 table $c9d4 revived_speeds 4
 routine $c9d8 update_hammer_bro         ; throw hammers, jump between floors and walk back and forth
 scratch update_hammer_bro $00 jump_kind ; the jump's kind (up, down)
+value $ca20 a bro_y
 table $ca10 hammer_bro_jump_lengths 2
 routine $ca37 hammer_bro_jump           ; start a hammer bro's jump up or down a floor
 param hammer_bro_jump y jump_speed ; the vertical speed of the jump
 scratch hammer_bro_jump $00 jump_kind ; the jump's kind (up, down)
+value $ca44 y length_index
+value $ca4a y length_index
+value $ca45 a difficulty
+value $ca54 a timer
 routine $ca58 hammer_bro_walk           ; walk a hammer bro back and forth, facing the player
+value $ca58 y walk_speed
+value $ca60 y walk_speed
+value $ca64 y direction
+value $ca6b y direction
 routine $ca77 move_walker               ; walk an enemy, move it as a shell or kicked, revive a shell, remove a squashed goomba
 result move_walker y page_step ; $ff when it moved left, else 0
+value $ca8c a shell_state
+value $ca9d a state
+value $cab4 a speed
+value $cac8 a timer
+value $cad4 y direction
 label $cac8 shell_revive ; time the shell's revival
 label $cab4 shell_moving ; the enemy is a moving shell
 routine $cae5 move_defeated_enemy       ; let a defeated enemy fall off the screen
 routine $caf9 move_hopping_paratroopa   ; bounce a paratroopa along
 routine $caff move_red_paratroopa       ; fly a red paratroopa up and down
+value $bf70 y going_down
+value $bf75 y going_down
+value $cb01 a moving
 routine $cb25 move_green_paratroopa     ; fly a green paratroopa back and forth, bobbing
 scratch move_green_paratroopa $00 bob_step ; the vertical step of the bobbing
+value $cb2b y step
+value $cb39 y step
 routine $cb45 sway_green_paratroopa     ; sway a flying paratroopa
 routine $cb47 sway_counters             ; oscillating primary/secondary counters for back-and-forth motion
 param sway_counters a sway_limit ; the counters' limit
 scratch sway_counters $01 sway_limit_copy ; the counters' limit
+value $cb4f y sway
 label $cb60 sway_check ; which way the sway goes
 label $cb5d sway_down ; sway down
 routine $cb66 sway_offset               ; move the enemy by its sway speed, in the sway's direction
 scratch sway_offset $00 moved ; the step of the sway
+value $cb69 y direction
+value $cb7a y direction
+value $cb76 a reversed
 table $cb87 blooper_masks 2
 routine $cb89 move_blooper              ; swim a blooper toward the player in spurts, or let it sink
 param move_blooper carry carry_in ; the carry the caller leaves
+value $cb92 a pick
+value $cb9e y direction
+value $cba2 y direction
+value $cba9 y direction
+value $cbb2 a new_y
+value $cbc3 temp right_x
+value $cbc9 a page
+value $cbd7 a page
+value $cbd1 temp left_x
 routine $cbdf blooper_swim              ; time a blooper's spurts up and its sinking
 param blooper_swim carry carry_in ; the carry the distance check leaves
+value $cbf6 a rise
+value $cc0b a rise
+value $cc2d carry below_player
 label $cc21 blooper_sink ; the blooper sinks
 routine $cc36 move_bullet               ; fly a bullet left, or let it fall once stomped
 table $cc46 swimming_fish_speeds 4
 routine $cc4a move_swimming_fish        ; swim a cheep cheep along, drifting up and down
 scratch move_swimming_fish $02 drift_speed ; the fish's speed
 scratch move_swimming_fish $03 drift_step ; the vertical drift's step
+value $cc4c a defeated
+value $cc64 temp force_left
+value $cc6b temp new_x
+value $cc71 a page
+value $cc87 temp fraction_down
+value $cc8e temp lower_y
+value $cc94 a new_y_page
+value $ccaa a new_y_page
+value $cc9d temp fraction_up
+value $cca4 temp higher_y
+value $ccae y drift
+value $ccb8 y drift
+value $ccb3 a drift_distance
+value $ccbd a drift_distance
 table $ccc7 firebar_offsets 99
 table $cd2a firebar_mirrors 4
 table $cd2e firebar_table_offsets 12
 table $cd3a firebar_y_positions 2
 routine $cd3c update_firebar            ; rotate a firebar, draw its balls and collide them with the player
 scratch update_firebar $06 ball_y ; the ball's screen Y
+value $cd55 a bar_angle
+value $cd66 a bar_angle
+value $cd75 a screen_y
+value $cd7d a screen_x
+value $cd8c y ball_count
+value $cd94 y ball_count
 label $cd6a firebar_ball_loop ; place the next ball
 routine $cdbb draw_firebar_ball         ; place a firebar ball's sprite by its offsets from the center
 scratch draw_firebar_ball $01 offset_x ; the ball's horizontal offset from the center
@@ -2100,6 +2291,19 @@ scratch draw_firebar_ball $02 offset_y ; the ball's vertical offset from the cen
 scratch draw_firebar_ball $03 mirror ; which way the offsets go
 scratch draw_firebar_ball $06 oam_offset ; the ball's sprite in the OAM copy
 scratch draw_firebar_ball $05 mirror_bits ; the mirror bits shifted
+value $cdbf y sprite_offset
+value $cdc1 a dx
+value $cdc9 a dx
+value $cdcc a ball_screen_x
+value $cdc3 carry keep_x
+value $cddd a distance_x
+value $cde3 a distance_x
+value $cdea a ball_screen_y
+value $cdee a ball_screen_y
+value $ce00 a ball_screen_y
+value $cdf5 a dy
+value $cdfd a dy
+value $cdf7 carry keep_y
 routine $ce08 firebar_ball_collision    ; draw a firebar ball and hurt the player it touches
 param firebar_ball_collision y oam_offset ; the ball's sprite in the OAM copy
 scratch firebar_ball_collision $06 ball_y ; the ball's screen Y
@@ -2107,6 +2311,18 @@ scratch firebar_ball_collision $07 ball_x ; the ball's screen X
 scratch firebar_ball_collision $00 saved_ball ; the ball's index, kept on the stack
 scratch firebar_ball_collision $04 ball_offset_y ; the ball's offset from the player's top
 scratch firebar_ball_collision $05 ball_count ; the balls tested
+value $ce10 a paused
+value $ce1c y player_top
+value $ce30 y player_top
+value $ce31 a probe_y
+value $ce67 a probe_y
+value $ce33 a distance_x
+value $ce3a a distance_x
+value $ce4a a player_center
+value $ce4f a distance_y
+value $ce56 a distance_y
+value $ce6f x push_dir
+value $ce77 x push_dir
 label $ce85 next_ball_offset ; the next ball's offset
 label $ce6f ball_hits_player ; the ball touches the player
 label $ce32 ball_distance_x ; the horizontal distance to the ball
@@ -2117,31 +2333,93 @@ scratch firebar_ball_position $00 ball ; which ball of the bar
 scratch firebar_ball_position $01 offset_x ; the ball's horizontal offset from the center
 scratch firebar_ball_position $02 offset_y ; the ball's vertical offset from the center
 scratch firebar_ball_position $03 mirror ; which way the offsets go
+value $ce8f a x_step
+value $ce98 a x_step
+value $ceaa a angle_copy
+value $ceaf a y_step
+value $ceb8 a y_step
+value $cecf a mirror_bits
 table $ced5 random_y_ranges 5
 table $ceda flying_fish_priorities 5
 routine $cedf move_flying_fish          ; fly a cheep cheep in an arc out of the water
+value $cefe y range_index
+value $cf1d y range_index
+value $cf02 a distance
+value $cf0a a distance
+value $cf14 a force
 table $cf25 lakitu_speed_adjust 3
 routine $cf28 move_lakitu               ; float a lakitu after the player, throwing spinies, or let it leave
+value $cf3c a speed
+value $cf50 a speed
+value $cf45 y index
+value $cf55 y direction
+value $cf66 y direction
+value $cf62 a reversed
 routine $cf6c lakitu_chase              ; a lakitu's speed toward the player, matching the player's scrolling
 scratch lakitu_chase $00 distance ; the horizontal distance to the player
+value $cf6c y side
+value $cf73 y side
+value $cf98 a speed
+value $cfa7 y scroll_index
+value $cfb2 y scroll_index
+value $cfc0 y scroll_index
+value $cfcf y scroll_index
+value $cfd1 a speed
+value $cfd4 y count
 label $cfd1 lakitu_aim ; aim at the player
 table $cfdd bridge_tile_columns 15
 routine $cfec collapse_bridge           ; collapse Bowser's bridge one piece at a time, then drop Bowser
+value $cfec x bowser
+value $d03c x bowser
+value $cff7 a state
 routine $d00f move_dying_bowser         ; let a defeated Bowser fall
 label $d015 bridge_fall_done ; the bridge is gone
 table $d061 bowser_move_ranges 4
 routine $d065 run_bowser                ; walk, jump, breathe fire and throw hammers as Bowser
+value $d0ed a new_x
+value $d0f2 y new_speed
+value $d0f8 y new_speed
+value $d105 y new_speed
+value $d0fb a distance
+value $d103 a distance
+value $d10f a timer
+value $d133 a next_timer
+value $d149 a world
+value $d161 a body
 routine $d071 kill_all_enemies          ; clear every enemy slot
 label $d10f bowser_turn ; Bowser turns around
 routine $d17b draw_bowser               ; draw both halves of Bowser
+value $d17e y offset
+value $d185 y offset
+value $d189 a half_x
+value $d18b y copy
+value $d1a6 x half_slot
+value $d1b2 a saved_slot
 routine $d1bc bowser_half               ; draw one half of Bowser and collide it with the player
 result bowser_half x object ; the object slot
 table $d1d1 flame_timers 8
 routine $d1d9 next_flame_timer          ; the next interval between Bowser's flames
 result next_flame_timer a flame_timer ; frames until the next flame
+value $d1d9 y index
 routine $d1eb update_bowser_flame       ; move a flame left toward its height and draw it
 scratch update_bowser_flame $00 flame_speed ; the flame's speed
 scratch update_bowser_flame $01 flame_attributes ; the flame sprites' attributes
+value $d1f0 a speed
+value $d1f7 a speed
+value $d1ff temp force_left
+value $d206 temp new_x
+value $d20c a page
+value $d213 a flame_y
+value $d22b y attributes
+value $d233 y attributes
+value $d237 y sprite_offset
+value $d25d y sprite_offset
+value $d23a x part
+value $d24e a part_x
+value $d268 y sprite_offset
+value $d26b a offscreen
+value $d277 a offscreen
+value $d281 a offscreen
 routine $d295 run_firework              ; burst a firework and award its points
 label $d2bd firework_done ; the firework is over
 table $d2cd star_flag_y_offsets 4
@@ -2149,25 +2427,53 @@ table $d2d1 star_flag_x_offsets 4
 table $d2d5 star_flag_tiles 4
 routine $d2d9 run_star_flag             ; dispatch on the end of the area: time points, star flag, fireworks
 result run_star_flag x object ; the object slot
+value $d2de a task
 table $d2e8 star_flag_tasks 10
 routine $d2f2 count_fireworks           ; the fireworks by the time's last digit (1, 3 or 6)
+value $d2f2 y next_state
+value $d2fb y next_state
+value $d301 y next_state
+value $d2f4 a fireworks
+value $d307 a fireworks
 routine $d30e next_star_flag_task       ; advance to the next star flag task
 routine $d311 star_flag_done            ; nothing left to do
 routine $d312 award_time_points         ; turn the remaining time into points, a digit at a time
+value $d318 a time_left
 routine $d336 award_area_points         ; add the pending points to the current player's score and queue it
+value $d348 a player_bits
 routine $d34e raise_star_flag           ; raise the star flag on the castle, then launch the fireworks
+value $d359 a fireworks
+value $d359 negative none
 routine $d365 draw_star_flag            ; draw the star flag's four sprites
+value $d368 y sprite_offset
+value $d38f y sprite_offset
+value $d36b x part
 routine $d39e next_star_flag_task_b     ; advance to the next star flag task
 routine $d3a2 wait_area_end             ; keep the star flag drawn until its timer and the music end
 routine $d3b0 move_piranha              ; raise and lower a piranha plant, staying in its pipe while the player is near
 scratch move_piranha $00 distance ; the horizontal distance to the player
+value $d3da a reversed
+value $d3e0 a target_y
+value $d3e7 a target_y
+value $d3f9 a new_y
 label $d40a piranha_hide ; the piranha stays hidden
 routine $d410 spin_firebar              ; turn a firebar's angle by its speed, in its direction
 param spin_firebar a spin_speed ; the angle's step
 result spin_firebar a angle ; the bar's new angle
 scratch spin_firebar $07 spin_step ; the angle's step
+value $d41b temp turned_forward
+value $d429 temp turned_back
 routine $d432 update_balance_platform   ; move a balance lift's two platforms against each other with the player's weight, and drop them past the top
 scratch update_balance_platform $00 partner_contact ; the platform the player stands on
+value $d43b a partner
+value $d477 a contact
+value $d480 temp fall_speed
+value $d486 a speed_high
+value $d486 zero slow
+value $d4a7 y partner_slot
+value $d4ab a moved
+value $d4b4 a contact
+value $d5c7 a contact
 label $d4a7 balance_partner ; move the other platform by as much
 label $d4a4 balance_fall ; move the platform down
 label $d49e balance_stop ; stop the platforms
@@ -2179,41 +2485,89 @@ result draw_platform_rope x list_index ; the rope's offset in VRAM list 1
 scratch draw_platform_rope $00 rope_vram_low ; the rope's VRAM address, low byte
 scratch draw_platform_rope $01 rope_vram_high ; the rope's VRAM address, high byte
 scratch draw_platform_rope $02 rope_page ; the platform's page
+value $d546 temp rope_x
+value $d546 carry page_carry
+value $d54e carry page_carry
+value $d546 a rope_left
+value $d54e a rope_left
+value $d54e temp rope_x2
+value $d560 x rope_y
+value $d569 x rope_y
+value $d56a a row_bits
+value $d56e carry row_bit7
+value $d56e a row_twice
+value $d56f temp row_bit6
+value $d56f a row_shifted
 label $d598 balance_fall_off ; the platforms fall
 routine $d5b1 stop_balance_platforms    ; stop both platforms of a balance lift
 param stop_balance_platforms y partner_slot ; the other platform's slot
 routine $d5d3 move_vertical_platform    ; move a platform up and down between its limits, carrying the player
+value $d5d5 a moving
 routine $d5fe carry_player_vertically   ; move the player standing on the platform with it
 routine $d607 move_side_platform        ; move a platform side to side, carrying the player
 routine $d614 carry_player_horizontally ; move the player standing on the platform sideways with it
 scratch carry_player_horizontally $00 moved ; the platform's step
+value $d617 temp new_x
+value $d617 carry page_carry
+value $d61b a page
+value $d621 a page
+value $d626 a page
+value $d61d y step
 routine $d631 drop_platform             ; drop a platform the player stands on
 routine $d63d right_platform            ; move a platform right while the player stands on it
 scratch right_platform $00 moved ; the platform's step
 routine $d64f move_large_lift           ; move a large lift, carrying the player
 routine $d655 move_small_lift           ; move a small lift, carrying the player
 routine $d65b move_lift                 ; move a lift by its vertical speed
+value $d664 temp fraction_sum
+value $d66a a old_y
+value $d66c a new_y
 routine $d67a check_enemy_offscreen     ; remove an enemy that left the screen's range
 param check_enemy_offscreen x object ; the enemy's slot
 scratch check_enemy_offscreen $00 left_page ; the page of the range's left edge
 scratch check_enemy_offscreen $01 left_x ; the X of the range's left edge
 scratch check_enemy_offscreen $02 right_page ; the page of the range's right edge
 scratch check_enemy_offscreen $03 right_x ; the X of the range's right edge
+value $d680 a range_left
+value $d68d a range_left
+value $d683 y kind
+value $d685 carry range_carry
+value $d689 carry range_carry
+value $d68d carry range_carry
+value $d68d temp wider_left
+value $d68f temp left_edge
+value $d696 temp left_page_diff
+value $d69d temp right_edge
+value $d6aa carry past_left_x
+value $d6ae a left_diff
+value $d6b4 carry past_right_x
+value $d6b8 a right_diff
 label $d68f offscreen_range ; the range the enemy may be in
 routine $d6d9 fireball_enemy_collision  ; check a fireball against the enemies, every other frame
+value $d6d9 a state
+value $d6ec x enemy_slot
+value $d730 x enemy_slot
+value $d6fc a kind
 label $d72c fireball_enemy_box ; test the enemy's box
 table $d736 bowser_lookalikes 8
 routine $d73e fireball_hit_enemy        ; hurt the enemy a fireball hit, or Bowser
 param fireball_hit_enemy x fireball_slot ; the fireball's slot
 scratch fireball_hit_enemy $01 enemy_hit ; the slot of the enemy hit
+value $d743 a active
+value $d752 a kind
+value $d76d y world
+value $d775 a fall_state
+value $d77b a fall_state
 label $d75c fireball_hits_bowser ; the fireball hit Bowser
 routine $d795 defeat_enemy              ; knock an enemy out, with its score
 param defeat_enemy x object ; the enemy's slot
 result defeat_enemy y leftover_y ; what the score leaves in Y
+value $d797 carry piranha_carry
 routine $d7bc smack_enemy_score         ; show score A over the enemy and play the kick sound
 param smack_enemy_score a score ; the score to show
 param smack_enemy_score x object ; the enemy's slot
 routine $d7c4 player_hammer_collision   ; hurt the player a hammer hits, unless invincible
+value $d7ee a reversed
 label $d847 set_powerup_task ; start the player's powerup task
 label $d840 grow_player ; the player grows
 label $d83a powerup_score ; the powerup's score
@@ -2221,10 +2575,23 @@ table $d84d leftover_speeds 2
 table $d84f kicked_shell_speeds 2
 table $d851 demoted_koopa_speeds 2
 routine $d853 player_enemy_collision    ; collide the player with an enemy: stomp, kick a shell, collect a powerup, or get hurt
+value $d80c a powerup
+value $d820 a power
+value $d881 y kind
+value $d8eb y chain
+value $d89a zero untouched
+value $d8f9 a speed
+value $d8f9 zero still
+value $d973 a stomped_kind
+value $d975 y points_index
+value $d987 y points_index
+value $d98c y points_index
+value $d991 y points_index
 table $d892 kicked_shell_points 3
 routine $d92c injure_player             ; hurt the player, unless already blinking
 routine $d931 force_injury              ; shrink the player, or kill a small one
 param force_injury a power ; the player's power after the injury
+value $d931 x power_was
 label $d946 injury_state ; the player's injured state
 routine $d948 set_player_routine        ; set the player's task and state, pausing the timers
 param set_player_routine a new_task ; the player's task
@@ -2239,6 +2606,8 @@ table $d965 stomp_points 4
 table $d9d2 revival_rates 2
 routine $da05 face_player               ; turn the enemy toward the player
 result face_player y direction ; the direction toward the player
+value $da05 y facing
+value $da0c y facing
 routine $da11 spawn_floating_score      ; show score A floating over the enemy
 param spawn_floating_score a score ; the score to show
 param spawn_floating_score x object ; the enemy's slot
@@ -2246,12 +2615,21 @@ result spawn_floating_score a score_x ; the score's X
 table $da25 set_bit_masks 7
 table $da2c clear_bit_masks 7
 routine $da33 enemy_enemy_collisions    ; collide the enemy with the others, turning or knocking them out
+value $da3d a kind
+value $da53 x other_index
+value $daae x other_index
+value $da5e a other_kind
+value $da86 a shell
 label $daaa enemy_pair_tested ; the pair was tested this frame
 routine $dab4 enemy_pair_collision      ; settle a collision between two enemies: a shell or a kicked enemy knocks the other out, else both turn
 param enemy_pair_collision y other ; the other enemy's slot
 scratch enemy_pair_collision $01 other_slot ; the other enemy's slot
+value $dab9 a defeated
+value $db02 y chain_slot
+value $db0f x shell_slot
 routine $db1c turn_enemy_around         ; turn an enemy around, if its kind turns
 param turn_enemy_around x object ; the enemy's slot
+value $db1c a kind
 routine $db36 reverse_enemy             ; reverse the enemy's direction and speed
 param reverse_enemy x object ; the enemy's slot
 result reverse_enemy y reversed_speed ; the enemy's new speed
@@ -2263,12 +2641,16 @@ scratch player_on_large_platform $00 platform_top ; the platform's Y
 routine $db78 large_platform_collision_done; the slot being processed
 routine $db7b small_platform_collision  ; check the player against a small lift's two halves
 scratch small_platform_collision $00 halves_left ; the platform's halves left to test
+value $db7b a paused
 label $dbba small_platform_land ; land the player on the platform
 label $dbb7 small_platform_off ; the platform is off screen
 routine $dbbc platform_landing          ; land the player on a platform, or stop it against its side or bottom
 param platform_landing x object ; the platform's slot
 param platform_landing y box_offset ; the platform's box offset in boxes
 scratch platform_landing $00 landing_kind ; how the player meets the platform
+value $dbde a contact
+value $dbea a contact
+value $dbe0 y kind
 label $dc14 platform_landed ; the player stands on it
 table $dc17 small_platform_y_offsets 2
 routine $dc19 place_player_on_small_platform; put the player on top of a small lift
@@ -2278,6 +2660,8 @@ param place_player_on_vertical_platform x object ; the platform's slot
 routine $dc23 place_player_on_platform_y; put the player on top of a platform at height A
 param place_player_on_platform_y a platform_y ; the platform's Y
 param place_player_on_platform_y x object ; the platform's slot
+value $dc29 y platform_page
+value $dc30 temp standing_y
 routine $dc41 check_player_vertical     ; whether the player is too low or off screen to collide (carry set then)
 result check_player_vertical carry too_low ; the player is too low or off screen
 routine $dc52 enemy_box_offset          ; the box offset of the slot being processed
@@ -2290,6 +2674,28 @@ result enemy_box_offset_for a edge_bits ; the enemy's offscreen bits
 table $dc62 player_bg_top_extents 2
 routine $dc64 player_bg_collision       ; collide the player with the background: ceilings and bumped blocks, floors and springs, walls, coins, vines, the flagpole and pipes
 scratch player_bg_collision $04 probe_column ; the X within the metatile of the probe
+value $dc69 a task
+value $dc73 a new_state
+value $dc7a a new_state
+value $dc82 a new_state
+value $dc98 y probe_set
+value $dca4 y probe_set
+value $dcaa y probe_set
+value $dcab a first_probe
+value $dcb1 x extent_index
+value $dcb9 x extent_index
+value $dd69 a height
+value $dd88 a height
+value $ddce a attribute
+value $dde2 y timer_index
+value $dde9 y timer_index
+value $ddf0 a task
+value $de2e y probe_x
+value $de61 x flag_height
+value $de6d x flag_height
+value $de63 a height
+value $dea1 y facing
+value $dea8 a column_x
 label $de0e touch_axe ; the player reached the axe
 label $de05 collect_coin ; take the coin
 label $ddff stop_at_side ; stop the player at the block's side
@@ -2319,8 +2725,23 @@ result is_spring_metatile carry spring ; it is part of a spring
 routine $dee8 enter_pipe                ; enter the pipe under the player when down is held over it, or warp
 scratch enter_pipe $00 left_metatile ; the metatile under the player's left foot
 scratch enter_pipe $01 right_metatile ; the metatile under the player's right foot
+value $df0c a warp
+value $df15 x warp_index
+value $df1c x warp_index
+value $df21 x warp_index
+value $df16 a pipe_x
+value $df25 y world
 routine $df4b block_player_side         ; push the player out of a block at its side and stop it
 scratch block_player_side $00 push_step ; the step the player is pushed by
+value $df4d y speed
+value $df51 x side
+value $df54 x side
+value $df5e x side
+value $df59 a push
+value $df64 a push
+value $df6b y push_high
+value $df73 y push_high
+value $df77 temp pushed_x
 label $df81 side_blocked ; the side is blocked
 table $df8b solid_metatile_limits 4
 routine $df8f is_solid_metatile         ; whether metatile A is solid (carry set then)
@@ -2329,7 +2750,7 @@ result is_solid_metatile carry solid ; it is solid
 table $df96 climb_metatile_limits 4
 routine $df9a is_climb_metatile         ; whether metatile A is climbable (carry set then)
 param is_climb_metatile a touched_metatile ; the metatile
-result is_climb_metatile y touched_metatile ; the metatile
+result is_climb_metatile y metatile_copy ; the metatile
 result is_climb_metatile carry climbable ; it can be climbed
 routine $dfa1 is_coin_metatile          ; whether metatile A is a coin, with its sound (carry set then)
 param is_coin_metatile a touched_metatile ; the metatile
@@ -2339,17 +2760,39 @@ routine $dfb0 metatile_group            ; metatile A's group, its top two bits
 param metatile_group a touched_metatile ; the metatile
 result metatile_group y metatile_copy ; the metatile
 result metatile_group x group ; its top two bits
+value $dfb1 a group_bits
+value $dfb3 carry bit7
+value $dfb3 a shifted
+value $dfb4 temp bit6
 table $dfb9 enemy_bg_states 6
 table $dfbf enemy_bg_speeds 2
 routine $dfc1 enemy_bg_collision        ; land an enemy on the ground, bump it against walls, and knock it out from a bumped block
 scratch enemy_bg_collision $02 enemy_buffer_y ; the enemy's Y in the block buffer
 scratch enemy_bg_collision $04 probe_column ; the X within the metatile of the probe
+value $dfcc y kind
+value $e003 y buffer_offset
+value $e07e a state
+value $e090 a timer
+value $e098 a timer
+value $e092 y kind
+value $e0a5 a its_kind
+value $e0bd y direction
+value $e0c4 y direction
+value $e0ec a state
+value $e0ee y state_index
+value $e0f4 a new_state
+value $e0f9 a new_state
 routine $e01b check_stun_enemy          ; stun an enemy hit from below, turning a paratroopa into a koopa
 param check_stun_enemy a kind_hit ; the enemy's kind
 param check_stun_enemy x object ; the enemy's slot
 routine $e02f stun_enemy                ; flip an enemy over, bouncing it away from the player
 param stun_enemy x object ; the enemy's slot
 result stun_enemy y leftover_y ; what the bounce leaves in Y
+value $e041 a bounce
+value $e048 a bounce
+value $e04c y direction
+value $e053 y direction
+value $e054 a kind
 label $e0cd enemy_on_ground ; land the enemy on the ground
 label $e04a stun_bounce ; bounce the stunned enemy
 routine $e0fe enemy_side_check          ; turn an enemy that walks into a wall
@@ -2360,6 +2803,8 @@ result player_enemy_distance carry right_of_player ; the enemy is at or right of
 result player_enemy_distance negative left_of_player ; the enemy is left of the player
 scratch player_enemy_distance $00 distance ; the enemy's x minus the player's
 param player_enemy_distance x object ; the enemy's slot
+value $e146 temp dx
+value $e14c temp dpage
 routine $e14f land_enemy                ; stop an enemy on the floor, aligned to its block
 routine $e15b enemy_height_check        ; whether the enemy is low enough to collide with the background (carry set then)
 result enemy_height_check carry low_enough ; the enemy can touch the background
@@ -2390,12 +2835,16 @@ routine $e252 enemy_box_offscreen_bits  ; hide the enemy's box when off screen, 
 param enemy_box_offscreen_bits y kept_y ; Y as the caller has it
 scratch enemy_box_offscreen_bits $00 box_size ; the box offscreen size
 scratch enemy_box_offscreen_bits $01 distance_bits ; the distance from the edge
+value $e255 temp from_left
+value $e25c a page_diff
+value $e268 a masked
 routine $e273 large_platform_box        ; a large platform's collision box, unless off screen
 result large_platform_box x object ; the object slot
 routine $e27c enemy_box_core            ; compute and clip the enemy's box
 param enemy_box_core x enemy_slot ; the enemy's slot (its object slot less one)
 routine $e289 hide_box                  ; move the enemy's box off screen
 param hide_box x obj_slot ; the object's slot
+value $e28c y box_offset
 routine $e29c compute_box               ; the box of object X from its screen position and box kind
 result compute_box y box_offset ; the box's offset in boxes
 scratch compute_box $00 box_slot ; the slot of the box (X)
@@ -2403,17 +2852,30 @@ scratch compute_box $01 box_x ; the object's screen x
 scratch compute_box $02 box_y ; the object's screen y
 param compute_box x obj_slot ; the object's slot, which has the box kind
 param compute_box y screen_slot ; the slot whose screen position the box is at
+value $e2aa a box_start
+value $e2ac y box_index
+value $e2c6 y box_index
+value $e2b2 x size_index
+value $e2c5 x size_index
 routine $e2de clip_box_to_screen        ; clamp the box at the screen's edges
 param clip_box_to_screen y box_offset ; the box's offset in boxes
 scratch clip_box_to_screen $01 middle_page ; the page of the screen's middle
 scratch clip_box_to_screen $02 middle_x ; the x of the screen's middle
 param clip_box_to_screen x obj_slot ; the object's slot
+value $e2e2 temp middle
+value $e2f3 carry right_half
+value $e30c a left
 routine $e325 player_collides           ; whether the player's box overlaps box Y (carry set then)
 routine $e327 objects_collide           ; bounding box overlap test, carry set on collision
 param objects_collide x first_box ; one box's offset in boxes
 param objects_collide y second_box ; the other's
 result objects_collide carry collided ; the boxes overlap
 scratch objects_collide $06 saved_box ; the second box's offset
+value $e32d a edge
+value $e33c a edge2
+value $e335 zero touching
+value $e364 zero touching
+value $e36b zero touching
 label $e37e next_axis ; test the boxes on the other axis
 scratch objects_collide $07 axes_left ; the axes left to test
 routine $e388 enemy_block_check         ; the metatile at probe Y around the enemy (zero set when none)
@@ -2463,16 +2925,32 @@ scratch block_probe $04 probe_column ; the X within the metatile of the probe
 scratch block_probe $05 probe_page_bit ; the page bit of the probe point
 scratch block_probe $06 buffer_column ; the block buffer column's address, low byte
 scratch block_probe $07 buffer_high ; the address's high byte
+value $e3f7 temp probe_x
+value $e3ff a page_bit
+value $e401 carry odd_page
+value $e402 a column_bits
+value $e410 a probe_y_raw
+value $e416 a row_offset
+value $e424 a position
+value $e429 a position
 table $e433 vine_y_offsets 2
 routine $e435 draw_vine                 ; draw a stretch of the vine
 param draw_vine y vine_segment ; the stretch of the vine
 scratch draw_vine $00 segment_copy ; the stretch of the vine
+value $e449 a vine_x
+value $e456 a right_x
+value $e477 x count
+value $e485 y sprite_offset
+value $e4a5 y sprite_offset
+value $e490 x part
 routine $e4ae stack_six_sprites         ; put six sprites one above the other from height A
 param stack_six_sprites a top_y ; the top sprite's Y
 param stack_six_sprites y oam_offset ; the first sprite's offset in the OAM copy
 scratch stack_six_sprites $02 next_offset ; the offset given back
 result stack_six_sprites y oam_offset ; the offset given back
 result stack_six_sprites carry y_carry ; the carry out of the last Y
+value $e4ae x count
+value $e4b4 temp next_y
 table $e4c0 hammer_first_x 4
 table $e4c4 hammer_first_y 4
 table $e4c8 hammer_second_x 4
@@ -2481,10 +2959,21 @@ table $e4d0 hammer_first_tiles 4
 table $e4d4 hammer_second_tiles 4
 table $e4d8 hammer_attributes 4
 routine $e4dc draw_hammer               ; draw a hammer, spinning while thrown
+value $e4ec x frame
+value $e4f6 x frame
+value $e4fb a first_y
+value $e50c a first_x
+value $e513 temp second_x
+value $e525 a attribute
 label $e4f7 draw_hammer_frame ; draw the hammer's frame
 label $e4f0 hammer_spinning ; the hammer spins
 table $e541 flagpole_score_tiles 10
 routine $e54b draw_flagpole_flag        ; draw the flag and the score it shows
+value $e54e a flag_x
+value $e555 a right_x
+value $e55e temp score_x
+value $e55e carry x_carry
+value $e567 temp lower_y
 routine $e5b3 hide_six_sprites          ; move six sprites below the screen
 param hide_six_sprites y oam_offset ; the first sprite's offset in the OAM copy
 routine $e5b5 fill_six_sprites          ; set six sprites' Y to A
@@ -2501,13 +2990,33 @@ param fill_two_sprites a top_y ; the sprites' Y
 param fill_two_sprites y oam_offset ; the first sprite's offset in the OAM copy
 routine $e5c8 draw_large_platform       ; draw a large platform, shorter in castles and in late hard mode
 result draw_large_platform x object ; the object slot
+value $e5c8 y first_offset
+value $e5dd y area
+value $e5eb y sprite_offset
+value $e61a a bits
+value $e624 a bits
+value $e62e a bits
+value $e638 a bits
+value $e64e carry offscreen_bit
 label $e5eb platform_width ; the platform's width
 table $e682 jumping_coin_tiles 4
 routine $e686 draw_coin_or_score        ; draw a jumping coin, then the score it leaves
+value $e657 carry odd_frame
+value $e661 a coin_x
+value $e68f a score_y
+value $e69a a score_x
+value $e6a3 a frame
+value $e6a8 x tile_index
+value $e6b0 y sprite_offset
 table $e6be powerup_tiles 16
 table $e6ce powerup_attributes 4
 routine $e6d2 draw_powerup              ; draw the powerup, its colors cycling for the star and flower
 scratch draw_powerup $07 rows_left ; the powerup's rows left to color
+value $e6e2 x kind
+value $e6ec a kind_copy
+value $e706 y sprite_offset
+value $e709 a popped_kind
+value $e717 a attribute
 table $e73e enemy_tiles 258
 table $e840 enemy_tile_offsets 27
 table $e85b enemy_attributes 27
@@ -2515,6 +3024,43 @@ table $e876 enemy_animation_masks 2
 table $e878 spring_tile_offsets 5
 routine $e87d draw_enemy                ; draw an enemy's sprites by its kind and animation frame, flipped when defeated
 scratch draw_enemy $02 enemy_top ; the enemy's top Y
+value $e8a9 a state
+value $e8af y frame_row
+value $e8b6 y frame_row
+value $e8cf y frame_row
+value $e8d9 y frame_row
+value $e8b0 a graphics_kind
+value $e8bc a graphics_kind
+value $e8d3 a graphics_kind
+value $e8de a graphics_kind
+value $e8c4 a attribute
+value $e8cb a attribute
+value $e8f2 a bowser_flag
+value $e8f7 y bowser_kind
+value $e8fd y bowser_kind
+value $e900 y graphics
+value $e906 a state
+value $e92e y frame_row
+value $e930 a bowser_flag
+value $e9b0 y graphics
+value $e9ca y self_slot
+value $e9d2 a state_bits
+value $e9e2 a timer
+value $e9fa a graphics_kind
+value $ea58 y sprite_offset
+value $ea5b a graphics_kind
+value $ea74 y sprite_offset
+value $ea76 x swap_offset
+value $ea89 x swap_offset
+value $ea77 a graphics_kind
+value $eaab a graphics_kind
+value $eaad x row_kind
+value $eadf a attribute
+value $eaea a attribute
+value $eaf0 a attribute
+value $eb02 a attribute
+value $eb0a a attribute
+value $eb28 a attribute
 label $e94c bowser_tiles ; Bowser's tiles
 label $e946 enemy_flip ; flip the enemy vertically
 label $eb12 enemy_attributes ; the sprites' attributes
@@ -2522,6 +3068,12 @@ label $ea4b draw_enemy_rows ; draw the enemy's rows
 label $ea37 check_enemy_flip ; whether to flip the enemy upside down
 label $ea29 enemy_animation ; the enemy's animation frame
 routine $eb64 clip_enemy_sprites        ; hide the rows and columns of the enemy's sprites that are off screen, and remove it below the screen
+value $eb6a a bits
+value $eb74 a bits
+value $eb7f a bits
+value $eb89 a bits
+value $eb93 a bits
+value $eb94 carry bottom_off
 routine $ebaa draw_enemy_row            ; draw a row of the enemy's tiles
 param draw_enemy_row x tile_index ; the row's index in enemy_tiles
 result draw_enemy_row x tile_index ; the next row's index
@@ -2538,13 +3090,27 @@ param draw_sprite_row x tile_index ; the row's index in the tile table
 result draw_sprite_row x tile_index ; the next row's index
 param draw_sprite_row a right_tile ; the tile of the right sprite
 result draw_sprite_row carry oam_carry ; the carry out of the next OAM offset
+value $f286 a tile
+value $f292 a flip_bits
+value $f29e a flip_bits
+value $f2a0 a row_attr
+value $f2a8 a y_pos
+value $f2b0 a x_pos
+value $f2c4 temp advanced
 routine $ebb7 hide_enemy_row            ; hide a row of the enemy's sprites at offset A
 param hide_enemy_row a row_offset ; the row's offset from the enemy's first sprite
 result hide_enemy_row y oam_offset ; the row's offset in the OAM copy
+value $ebb8 temp row_sprite
 routine $ebc1 hide_enemy_column         ; hide a column of the enemy's sprites
 param hide_enemy_column a column_offset ; the column's offset from the enemy's first sprite
 table $ebcd block_tiles 4
 routine $ebd1 draw_block                ; draw a bumped block's sprites
+value $ec0a a metatile
+value $ec18 a palette
+value $ec20 a palette
+value $ec26 a palette_flipped
+value $ec2b a palette_both
+value $ec35 a offscreen
 routine $ec46 check_left_column         ; hide the sprite column at Y when the object is off the left edge (bit 3 of A)
 param check_left_column a edge_bits ; the offscreen bits (bit 3: off the left edge)
 param check_left_column y oam_offset ; the column's offset in the OAM copy
@@ -2553,36 +3119,84 @@ param hide_column y oam_offset ; the column's offset in the OAM copy
 result hide_column a hidden_y ; the Y below the screen
 routine $ec53 draw_brick_chunks         ; draw the four flying chunks of a broken brick
 scratch draw_brick_chunks $00 chunk_palette ; the chunks' palette bits
+value $ec59 y task
+value $ec70 a spin
+value $ec8c a origin
+value $ec92 temp spread
+value $ec95 temp mirror
+value $ec97 a right_x
+value $ec9c a lower_y
+value $ecae temp spread2
+value $ecb1 temp mirror2
+value $ecb3 a lower_right_x
+value $ecc1 carry top_off
 label $ecde draw_fireball ; draw the fireball
 routine $eced draw_firebar_tile         ; set a firebar ball's tile and flip, spinning with the frame count
 param draw_firebar_tile y oam_offset ; the ball's sprite in the OAM copy
+value $ecf0 a phase
+value $ecfc a attribute
+value $ed00 a attribute
 label $ed09 draw_fireball_explosion ; draw the fireball's explosion
 table $ed06 explosion_tiles 3
 routine $ed17 draw_explosion            ; draw frame A of a fireball's or firework's explosion
 param draw_explosion a frame ; the explosion's frame
 param draw_explosion y oam_offset ; the first sprite's offset in the OAM copy
+value $ed17 x frame_index
+value $ed1f y sprite_offset
+value $ed26 a top
+value $ed2f a bottom
+value $ed3b a left
+value $ed44 a right
 routine $ed66 draw_small_platform       ; draw a small lift's two halves
+value $ed77 a left_x
+value $ed81 a middle_x
+value $ed8a a right_x
+value $ed94 x platform_y
+value $ed96 carry visible
+value $eda1 a lower_half_y
+value $eda8 a lower_half_y
+value $edb3 a offscreen
+value $edc3 a offscreen
 routine $ede1 draw_bubble               ; draw an air bubble
+value $eded y sprite_offset
 table $ee07 player_tile_offsets 16
 table $ee17 player_tiles 208            ; two tiles per row, top to bottom
 table $eee7 swim_kick_tiles 2
 routine $eee9 draw_player               ; draw the player by its task, blinking while injured, kicking while swimming
+value $ef0e a kick_phase
+value $ef12 x kick_index
+value $ef2c x kick_index
+value $ef13 y sprite_offset
+value $ef1e y sprite_offset
 routine $ef34 draw_player_action        ; draw the player's pose for its current action
 routine $ef45 draw_player_with_offset   ; draw the player at tile offset A, with its throwing pose
 param draw_player_with_offset a gfx_offset ; the player's tile offset
 scratch draw_player_with_offset $00 offscreen_columns ; the player's offscreen columns
+value $ef57 a anim_timer
+value $ef5a carry throw_done
+value $ef6d y throw_rows
+value $ef75 y throw_rows
+value $ef83 x column
+value $ef8e carry column_off
 table $ef9e lives_screen_player 6
 routine $efa4 draw_lives_screen_player  ; draw the player on the lives screen
+value $efa4 x index
 routine $efbe render_player             ; place the player's sprites on screen
 param render_player a rows ; the rows of tiles to draw
 scratch render_player $02 row_y ; the row's screen Y
 scratch render_player $07 rows_left ; the rows left to draw
+value $efc0 a screen_x
 routine $efdc draw_player_rows          ; draw the player's rows of tiles
 param draw_player_rows x tile_index ; the first row's index in player_tiles
 scratch draw_player_rows $07 rows_left ; the rows left to draw
 routine $efec player_action_offset      ; the tile offset of the player's pose: walking, skidding, jumping, swimming, climbing, crouching
 result player_action_offset a gfx_offset ; the pose's tile offset
 scratch player_action_offset $00 frame_limit ; the pose's last frame
+value $efec a state
+value $f068 a frames
+value $f06d a frames
+value $f084 a next_frame
+value $f08a a next_frame
 label $f050 swim_pose ; the swimming pose
 label $f044 climb_pose ; the climbing pose
 label $f03c walk_pose ; the walking pose
@@ -2599,11 +3213,23 @@ result size_offset y pose ; the pose for the player's size
 table $f09c change_size_frames 20
 routine $f0b0 animate_size_change       ; the tile offset while the player grows or shrinks
 result animate_size_change a gfx_offset ; the frame's tile offset
+value $f0b0 y frame_step
+value $f0b9 y frame_step
+value $f0be y frame_step
+value $f0db x small_frame
+value $f0dc y pose_index
+value $f0e3 y pose_index
 routine $f0d0 animation_offset          ; the tile offset of frame A of pose Y
 param animation_offset a frame ; the animation frame
 param animation_offset y pose ; the pose
 result animation_offset a gfx_offset ; the frame's tile offset
+value $f0d1 a frame_bits
+value $f0d2 carry high_bit
 routine $f0e9 fix_player_attributes     ; fix the flip of the player's sprites for some poses
+value $f0e9 y sprite_offset
+value $f0f2 a gfx
+value $f112 a attribute
+value $f124 a attribute
 label $f117 mirror_player_rows ; mirror the player's rows
 routine $f12a player_screen_position    ; the player's position relative to the screen
 result player_screen_position y screen_slot ; the player's slot
@@ -2632,6 +3258,7 @@ param screen_position x obj_slot ; the object's slot
 param screen_position y screen_slot ; the slot its screen position goes to
 result screen_position carry past_left_edge ; it is right of the screen's left edge
 result screen_position a relative_x ; its X relative to the screen
+value $f179 temp relative
 routine $f180 player_offscreen_bits     ; which parts of the player are off screen
 routine $f187 fireball_offscreen_bits   ; which parts of a fireball are off screen
 routine $f191 bubble_offscreen_bits     ; which parts of an air bubble are off screen
@@ -2653,17 +3280,28 @@ routine $f1c0 offscreen_bits            ; which parts of object X are off screen
 param offscreen_bits x obj_slot ; the object's slot
 param offscreen_bits y screen_slot ; the slot the bits go to
 scratch offscreen_bits $00 edge_bits_copy ; the offscreen bits so far
+value $f1c8 a vertical_bits
+value $f1ce y screen_slot
 routine $f1d7 offscreen_bits_parts      ; the object's horizontal and vertical offscreen bits combined
 param offscreen_bits_parts x obj_slot ; the object's slot
 result offscreen_bits_parts a edge_bits ; its offscreen bits
 scratch offscreen_bits_parts $00 high_bits ; the horizontal bits, shifted
 scratch offscreen_bits_parts $04 slot_copy ; the object's slot
+value $f241 temp height_diff
+value $f247 a page_diff
+value $f249 x bits_index
+value $f250 x bits_index
+value $f25d x bits_index
 table $f1e3 x_offscreen_bits 16
 table $f1f3 x_edge_defaults 3
 routine $f1f6 compute_x_offscreen_bits  ; which columns of object X are off the screen's left or right edge
 param compute_x_offscreen_bits x obj_slot ; the object's slot
 result compute_x_offscreen_bits a edge_bits ; its horizontal offscreen bits
 scratch compute_x_offscreen_bits $04 slot_copy ; the object's slot
+value $f1fe temp edge_diff
+value $f202 a edge_page
+value $f205 a page_diff
+value $f21e a x_bits
 table $f22b y_offscreen_bits 9
 table $f234 y_edge_defaults 3
 table $f237 high_position_units 2
@@ -2675,8 +3313,16 @@ scratch edge_distance_bits $06 limit ; the distance beyond which the default hol
 scratch edge_distance_bits $07 distance ; the object's distance from the edge
 result edge_distance_bits x edge_bits ; the offscreen bits
 scratch edge_distance_bits $05 base_copy ; the bits the distance adds to
+value $f26f a dist
+value $f278 a bits_index
+value $f27e a bits_index
+value $f27a carry right_edge
 routine $f2d0 update_sound              ; per-frame sound engine entry point
 param update_sound x leftover_x ; the X the frame interrupt leaves
+value $f2d0 a mode
+value $f2f3 a pause_sound
+value $f316 a counter
+value $f367 y level
 label $f37d skip_dmc_level ; leave the DMC level
 label $f35d clear_sound_requests ; clear the requests
 label $f34b run_sound_effects ; the sound effects and music
@@ -2736,6 +3382,44 @@ table $f3b1 swim_stomp_envelope 14
 routine $f41b square1_sfx               ; start or continue the pulse 1 sound effects: jump, swim, stomp, bump, flagpole, fireball, pipe and injury
 param square1_sfx x leftover_x ; the X the sound engine passes along
 result square1_sfx x leftover_x ; the X it passes along
+value $f3df a counter
+value $f3f9 a duration
+value $f3ff a duration
+value $f40d a counter
+value $f41b y request
+value $f41b negative small_jump
+value $f423 carry big_jump
+value $f427 carry bump
+value $f42b carry stomp
+value $f42f carry smack
+value $f433 carry pipe
+value $f437 carry throw_fireball
+value $f43b carry flagpole
+value $f43f a playing
+value $f43f negative jumping
+value $f445 carry big_jumping
+value $f445 a rest
+value $f448 carry bumping
+value $f448 a rest
+value $f44b carry stomping
+value $f44b a rest
+value $f44e carry smacking
+value $f44e a rest
+value $f451 carry piping
+value $f451 a rest
+value $f454 carry throwing
+value $f454 a rest
+value $f457 carry flagging
+value $f469 y step
+value $f46c a envelope
+value $f499 a control
+value $f49d a control
+value $f4bb a counter
+value $f4be carry odd
+value $f4be a half
+value $f4c1 carry odd2
+value $f4c1 a quarter
+value $f4c4 a phase
 label $f4a2 count_pulse1_sfx ; count the pulse 1 sound down
 label $f48d continue_smack_sfx ; the smack sound goes on
 label $f47d start_smack_sfx ; start the enemy smack sound
@@ -2764,6 +3448,44 @@ result stop_square2_sfx x leftover_x ; the X it passes along
 routine $f57c square2_sfx               ; start or continue the pulse 2 sound effects: coin, powerup, vine, 1-up, timer and Bowser's fall
 param square2_sfx x leftover_x ; the X the sound engine passes along
 result square2_sfx x leftover_x ; the X it passes along
+value $f518 a duration
+value $f51e a duration
+value $f52c a counter
+value $f545 a counter
+value $f557 a counter
+value $f55a carry odd
+value $f55a a step
+value $f582 y request
+value $f582 negative bowser_fall
+value $f58a carry coin
+value $f58e carry grow_powerup
+value $f592 carry grow_vine
+value $f596 carry blast
+value $f59a carry timer_tick
+value $f59e carry powerup_grab
+value $f5a2 carry extra_life
+value $f5a6 a playing
+value $f5a6 negative falling
+value $f5ac carry coin_playing
+value $f5ac a rest
+value $f5af carry growing
+value $f5af a rest
+value $f5b2 carry growing_vine
+value $f5b2 a rest
+value $f5b5 carry blasting
+value $f5b5 a rest
+value $f5b8 carry ticking
+value $f5b8 a rest
+value $f5bb carry grabbing
+value $f5bb a rest
+value $f5d3 a counter
+value $f5e7 a counter_bits
+value $f5ec a counter_bits
+value $f5ec carry odd
+value $f5fc a duration
+value $f600 a duration
+value $f615 a step
+value $f616 y step_index
 label $f658 count_noise_sfx ; count the noise down
 label $f64d set_noise_regs ; set the noise channel
 label $f640 continue_brick_sfx ; the brick shatter goes on
@@ -2781,6 +3503,18 @@ table $f62b brick_shatter_notes 16
 routine $f667 noise_sfx                 ; start or continue the noise sound effects: brick shatter and Bowser's flame
 param noise_sfx x leftover_x ; the X the sound engine passes along
 result noise_sfx x leftover_x ; the X it passes along
+value $f640 a counter
+value $f643 carry odd
+value $f643 a half
+value $f646 y step
+value $f64a a envelope
+value $f68c a envelope
+value $f667 y request
+value $f66d carry brick
+value $f671 carry flame
+value $f675 a playing
+value $f679 carry brick_playing
+value $f679 a rest
 label $f685 continue_flame_sfx ; the flame goes on
 label $f680 start_flame_sfx ; start Bowser's flame
 routine $f691 continue_music            ; play the next notes of the music on each channel
@@ -2788,6 +3522,51 @@ param continue_music x leftover_x ; the X the sound engine passes along
 result continue_music x leftover_x ; the X it passes along
 routine $f694 update_music              ; start the requested area or event music, then play its next notes
 param update_music x leftover_x ; the X the sound engine passes along
+value $f694 a song
+value $f698 a song
+value $f6f2 a song
+value $f74b a song
+value $f752 a song
+value $f757 a song
+value $f75d a song
+value $f6b1 x saved_area
+value $f6b6 y header_index
+value $f6ed y header_index
+value $f6f1 y header_index
+value $f6e2 y header_index
+value $f6cf y ground_header
+value $f6e9 y ground_header
+value $f6f8 y header
+value $f6f2 carry found
+value $f712 a noise_start
+value $f73f y pos
+value $f743 a note_data
+value $f784 a note_data
+value $f743 negative is_length
+value $f78a a envelope_start
+value $f78f a envelope_start
+value $f780 y pos
+value $f786 x sfx_playing
+value $f7c5 y pos
+value $f7e9 a envelope_start
+value $f7ee a envelope_start
+value $f810 a sweep_value
+value $f815 a sweep_value
+value $f821 y pos
+value $f825 a triangle_byte
+value $f83a a triangle_byte
+value $f860 a triangle_byte
+value $f864 a triangle_byte
+value $f868 a triangle_byte
+value $f825 negative is_length
+value $f836 y pos
+value $f841 x triangle_length
+value $f878 y pos
+value $f891 a drum
+value $f8a1 a noise_control
+value $f8a9 a noise_control
+value $f8b1 a noise_control
+value $f8b9 a noise_control
 label $f8b9 noise_volume ; the beat's volume
 label $f88a noise_length ; the beat's length
 label $f86d noise_notes ; the noise's next beat
@@ -2808,10 +3587,16 @@ param alternate_length a note_byte ; the note byte
 result alternate_length x note_copy ; the note byte
 result alternate_length y length_index ; the length's index in note_lengths
 result alternate_length a length ; the note's length in frames
+value $f8c6 carry low_bit
+value $f8c7 a rotated
+value $f8c8 temp bit7
+value $f8c8 a rotated2
+value $f8c9 temp bit6
 routine $f8cb note_length               ; the length of note A in the current tempo
 param note_length a note_byte ; the note byte
 result note_length y length_index ; the length's index in note_lengths
 result note_length a length ; the note's length in frames
+value $f8ce temp offset_sum
 routine $f8d8 load_square_envelope      ; the pulse channels' duty and envelope for the music playing
 result load_square_envelope x duty ; the pulse channels' duty and envelope
 result load_square_envelope y sweep ; the sweep byte

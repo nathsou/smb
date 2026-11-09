@@ -583,32 +583,40 @@ a variable of its own. A web is named, in this order, for:
    the map's `param ROUTINE REG NAME`, or `param * x object slot`, in a
    routine that every call enters with X equal to `slot` (and a web of X
    that only loads of `slot` write);
-2. the routine's result, if a return reads it (`result ROUTINE REG NAME`);
-3. the result of the calls that write it, if they agree;
-4. the map parameter of the calls it is passed to, if they agree.
+2. the map's name for a value one of its instructions writes
+   (`value $ADDR REG NAME`, below);
+3. the routine's result, if a return reads it (`result ROUTINE REG NAME`);
+4. the result of the calls that write it, if they agree;
+5. the map parameter of the calls it is passed to, if they agree.
 
-The webs left unnamed share their register's variable, as before, and so do
-those whose name a view, a record, a routine, a temporary, one of the
-routine's scratch names or another register's variable already has. Webs of
-one register may share a variable however they are named: no read takes a
-value from another web. A read prints the web that reaches it, and a write
-the web it starts. At a call, a result written through a pointer the callee
-also reads stays the variable it came from. At a tail call, or the cases of a
-dispatch, what the call writes goes to the registers' own variables, and the
-return reads it there.
+A web takes the first of these that is free: not a view, a record, a
+routine, a temporary, one of the routine's scratch names or another
+register's variable (a `value` name may be a record's member, since a value
+is a variable and not a `#define`). The webs left unnamed share their
+register's variable, as before. Webs of one register may share a variable
+however they are named: no read takes a value from another web. A read
+prints the web that reaches it, and a write the web it starts. At a call, a
+result written through a pointer the callee also reads stays the variable
+it came from. At a tail call, what the call writes takes the callee's
+result name, or the routine's; at the cases of a jump or a dispatch, the
+routine's result name, and what the dispatcher gives the cases, its own
+(`table_offset`, `upper_half`).
 
 ```c
-uint8_t move_enemy(uint8_t object) {        void update_balance_platform(uint8_t object) {
-  uint8_t a, x, y;                            ...
-  bool carry;                                 object = enemy_offscreen_bits(x, &y);
-  a = enemy(object).kind;                     ...
-  switch (dispatch(0xc909, a, &y, &carry)) {
+uint8_t move_enemy(uint8_t object) {
+  uint8_t table_offset, kind;
+  bool upper_half;
+  kind = enemy(object).kind;
+  switch (dispatch(0xc909, kind, &table_offset, &upper_half)) {
     case 0xca77: move_walker(object); return object;
 
-bool player_enemy_distance(uint8_t x, bool *out_left_of_player) {
-  ...
-  right_of_player = diff2 >= 0;
-  left_of_player = ((uint8_t)diff2 & 0x80) != 0;
+bool player_enemy_distance(uint8_t object, bool *out_left_of_player) {
+  bool right_of_player, left_of_player;
+  int dx = enemy(object).x - player_x;
+  distance = (uint8_t)dx;
+  int dpage = enemy(object).page - player_page - (dx < 0);
+  right_of_player = dpage >= 0;
+  left_of_player = ((uint8_t)dpage & 0x80) != 0;
   *out_left_of_player = left_of_player; return right_of_player;
 }
 ```
@@ -641,6 +649,32 @@ value draws, and flags for the sprite attribute bits and the sound engine's
 request bits (established by the code that sets each one: `pulse1_sfx`'s
 bump is set by the block, enemy and fireball bumps) name the constants
 beside those variables: `if (player_task != PLAYER_TASK_DYING)`.
+
+`value $ADDR REG NAME` names the value the instruction at `ADDR` writes to a
+register or flag, the web it starts, and `value $ADDR temp NAME` the
+temporary it computes (a sum, a difference, a bit shifted out; the 16-bit
+sum of a carry chain is named by its low byte's instruction). The IR keeps
+each statement's instruction address through every pass for this, and
+`--addresses` prints it after each C statement (`speed = (uint8_t)(fall_speed
+>> 8); // @c000`), which is how the values left to name are found. SMB's
+map has 1,344 `value` lines (105 of them temporaries): no routine has `a`,
+`x`, `y`, a flag, `sum` or `diff` left, but the generated `dispatch`, whose
+statements are all at the call's address and so cannot be told apart by
+it:
+
+```c
+uint16_t fraction_sum = (uint16_t)(obj(obj_slot).y_fraction + obj(obj_slot).y_force);
+fraction_carry = fraction_sum >= 0x100;
+obj(obj_slot).y_fraction = (uint8_t)fraction_sum;
+speed_high = 0;
+old_speed = obj(obj_slot).y_speed;
+if ((old_speed & 0x80) != 0) {
+  speed_high = (uint8_t)-0x1;
+}
+```
+
+A body's locals are those its text uses, record members aside (`.x` is not
+the variable `x`).
 
 Checks: the replays, the checked build and the routine diff as above, with
 0 mismatches. While the naming was written, the routine diff caught a call
@@ -971,11 +1005,6 @@ original renderer are unchanged.
   (159 take an `x`): many are entered with X something other than `slot`
   from some call, or through a jump table, which the analysis takes no
   equality from. A context-sensitive analysis (per call) would find more.
-- Names for the values that stay in a register's own variable inside a
-  routine (about 4,000 uses of `a`, `x`, `y` and the flags: the accumulator
-  between a load and a store, loop counters) and for the arithmetic
-  temporaries (`sum`, `diff`, `carry_out`). The map would need a line that
-  names a value by the instruction that writes it.
 - A proof per routine that the C with locals computes what the reference
   computes, for every input (as acnl does with an SMT solver), for the paths
   that neither the replay nor the differential test's states take.
