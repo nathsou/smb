@@ -51,9 +51,9 @@ CARTRIDGES = {
 
 
 def check_scratch_names():
-    """Every scratch, parameter, result and label name in the map reaches the code:
-    a name that clashes with an identifier, a view or a record member is
-    left out silently."""
+    """Every scratch, parameter, result, label and value name in the map
+    reaches the code: a name that clashes with an identifier, a view or a
+    record member is left out silently. A value is of the routine above it."""
     code = (ROOT / "codegen/game/code.c").read_text()
     functions = {}
     for match in re.finditer(r"^\w[\w *]* (\w+)\(([^)\n]*)\) \{$(.*?)^\}$", code, re.M | re.S):
@@ -62,9 +62,16 @@ def check_scratch_names():
     for match in re.finditer(r"^\w[\w *]* (\w+)\(([^)\n]*)\);$", (ROOT / "codegen/game/code.h").read_text(), re.M):
         functions.setdefault(match.group(1), match.group(2))
     missing = []
+    routine = None
     for line in (ROOT / "maps/smb.map").read_text().splitlines():
         fields = line.split(";")[0].split()
-        if len(fields) == 4 and fields[0] == "scratch":
+        if len(fields) >= 3 and fields[0] == "routine":
+            routine = fields[2]
+        elif len(fields) == 4 and fields[0] == "value":
+            # (declared there: a local, a parameter or a temporary)
+            if not re.search(rf"\b(uint8_t|uint16_t|bool|int)\b[^;=(){{}}]*\b{fields[3]}\b", functions.get(routine, "")):
+                missing.append(f"value {routine} {fields[1]} {fields[2]} {fields[3]}")
+        elif len(fields) == 4 and fields[0] == "scratch":
             routine, byte, name = fields[1], int(fields[2][1:], 16), fields[3]
             # (in the routine: its body or parameters, by the name or NAME_ram)
             if not re.search(rf"\b{name}(_ram)?\b", functions.get(routine, "")):
@@ -79,7 +86,7 @@ def check_scratch_names():
                 missing.append(f"{fields[0]} {routine} {fields[2]} {name}")
     if missing:
         sys.exit("Map names left out of the code: " + ", ".join(missing))
-    print("Every map scratch, parameter, result and label name reaches the code")
+    print("Every map scratch, parameter, result, label and value name reaches the code")
 
 
 def check_cartridge(name, frames):

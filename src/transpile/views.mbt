@@ -91,15 +91,22 @@ priv struct Views {
   results : Map[String, Array[(Int, String, String)]]
   // `param *`: register, name, the RAM byte it equals, description
   default_params : Array[(Int, String, Int, String)]
+  // the names of values by the instruction that writes them (the map's
+  // `value`): register (in `local_names` order, -1 for a temporary), name,
+  // description
+  values : Map[Int, Array[(Int, String, String)]]
   // what a name the map gives a register must not be: an identifier of the
   // generated code, a view, a record or its field
   taken : Set[String]
+  // what a value's name (the map's `value`) must not be: the same but a
+  // record's field (a value is a variable, not a #define)
+  value_taken : Set[String]
 }
 
 fn Views::empty() -> Views {
   {
     by_symbol: Map([]), list: [], origin: 0x8000, stack: false, types: Map([]), records: [], fields: Map([]), scratch: Map([]),
-    params: Map([]), results: Map([]), default_params: [], taken: Set([]),
+    params: Map([]), results: Map([]), default_params: [], taken: Set([]), value_taken: Set([]), values: Map([]),
   }
 }
 
@@ -202,10 +209,14 @@ fn Views::from_map(low : @lower.AsmLowering, reserved : Set[String]) -> Views {
   for name in reserved { all_taken.add(name) }
   for name in c_reserved { all_taken.add(name) }
   for entry in p.map.entries { all_taken.add(entry.name.to_lower()) }
+  let value_taken = all_taken.copy()
+  for r in views.records { value_taken.add(r.name) }
   for name in members { all_taken.add(name) }
   // (scratch names are taken in their own routines only: see names_taken)
   all_taken.add("stack")
   all_taken.add("machine")
+  value_taken.add("stack")
+  value_taken.add("machine")
   let register = fn(name : String) {
     let mut found = 0
     for i, r in @image.map_registers {
@@ -241,6 +252,18 @@ fn Views::from_map(low : @lower.AsmLowering, reserved : Set[String]) -> Views {
     results,
     default_params,
     taken: all_taken,
+    value_taken,
+    values: {
+      let out : Map[Int, Array[(Int, String, String)]] = Map([])
+      for e in p.map.values {
+        let r = if e.register == "temp" { -1 } else { register(e.register) }
+        match out.get(e.address) {
+          Some(list) => list.push((r, e.name, e.description))
+          None => out[e.address] = [(r, e.name, e.description)]
+        }
+      }
+      out
+    },
   }
 }
 

@@ -66,14 +66,34 @@ let local_names : Array[String] = [
   "a", "x", "y", "carry", "zero", "negative", "overflow", "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7",
 ]
 
-fn temp_names(f : @ir.Function, locals~ : Bool = false) -> Array[String] {
+fn temp_names(f : @ir.Function, locals~ : Bool = false, views? : Views) -> Array[String] {
+  // the map's names for them, by the instruction computing them (see `value`)
+  let given : Map[Int, String] = Map([])
+  let reserved : Set[String] = Set([])
+  if views is Some(views) && locals {
+    for block in f.blocks {
+      for k, s in block.stmts {
+        guard s is Let(t, _) && views.values.get(block.pc(k)) is Some(list) else { continue }
+        for e in list {
+          if e.0 == -1 && !reserved.contains(e.1) && !views.value_taken.contains(e.1) {
+            given[t] = e.1
+            reserved.add(e.1)
+          }
+        }
+      }
+    }
+  }
   let seen : Map[String, Int] = Map([])
-  f.temps.map(fn(t) {
+  f.temps.mapi(fn(i, t) {
+    if given.get(i) is Some(name) { return name }
     // the bit a rotate shifts out, `carry_out` beside the local `carry`
     let hint = if locals && local_names.contains(t.hint) { t.hint + "_out" } else { t.hint }
-    let n = seen.get(hint).unwrap_or(0) + 1
-    seen[hint] = n
-    if n == 1 { hint } else { hint + n.to_string() }
+    for ;; {
+      let n = seen.get(hint).unwrap_or(0) + 1
+      seen[hint] = n
+      let name = if n == 1 { hint } else { hint + n.to_string() }
+      if !reserved.contains(name) { break name }
+    }
   })
 }
 
@@ -132,6 +152,13 @@ fn CFunc::local_scratch(self : CFunc, a : @ir.Expr) -> Int? {
 fn CFunc::local_scratch_write(self : CFunc, a : @ir.Expr) -> Int? {
   guard self.webs is Some(webs) && scratch_of(a) is Some(k) && self.stmt >= 0 else { return None }
   if (webs.defs[self.block][self.stmt] & (1 << k)) != 0 { Some(k) } else { None }
+}
+
+// With --addresses, a statement with the address of its instruction.
+fn CFunc::address(self : CFunc, b : Int, k : Int, text : String) -> String {
+  let pc = self.f.blocks[b].pc(k)
+  if !self.conv.addresses || pc < 0 { return text }
+  text + " // @" + hex(pc)
 }
 
 fn CFunc::at(self : CFunc, block : Int, stmt : Int) -> Unit {
@@ -731,10 +758,10 @@ fn Structurer::stmts(self : Structurer, b : Int) -> Unit {
     }
     match self.c.word_stmt(self.c.words, b, k, s, live) {
       Some("") => continue
-      Some(text) => { self.emit(text); continue }
+      Some(text) => { self.emit(self.c.address(b, k, text)); continue }
       None => ()
     }
-    self.emit(self.c.stmt(s, live~))
+    self.emit(self.c.address(b, k, self.c.stmt(s, live~)))
   }
   self.c.at(b, -1)
 }
@@ -905,7 +932,7 @@ fn new_cfunc(f : @ir.Function, views : Views, conv : Convention, plan : ScratchP
   let after = if locals { conv.live_after(f) } else { [] }
   {
     f,
-    names: temp_names(f, locals~),
+    names: temp_names(f, locals~, views~),
     views,
     conv,
     locals,

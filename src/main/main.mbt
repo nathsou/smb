@@ -66,6 +66,7 @@ fn run() -> Unit raise Error {
     reference: flag("--reference"),
     locals: flag("--locals"),
     check_scratch: flag("--check-scratch"),
+    addresses: flag("--addresses"),
     wasm: wasm_path != "",
     layout,
     force_dispatch: flag("--wasm-dispatch"),

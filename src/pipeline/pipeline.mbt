@@ -46,6 +46,7 @@ pub(all) struct Options {
   reference : Bool // unoptimised IR (the differential test's reference)
   locals : Bool // registers, flags and scratch bytes as C locals and parameters (the C only)
   check_scratch : Bool // with locals, computed accesses checked against the scratch bytes (tests)
+  addresses : Bool // each C statement followed by its instruction address
   wasm : Bool
   layout : Map[String, Int] // runtime addresses for the WebAssembly module
   force_dispatch : Bool
@@ -59,6 +60,7 @@ pub fn Options::default() -> Options {
     reference: false,
     locals: false,
     check_scratch: false,
+    addresses: false,
     wasm: false,
     layout: Map([]),
     force_dispatch: false,
@@ -98,7 +100,7 @@ pub fn recompile(
   progress("optimize")
   if options.reference { ir.analyze() |> ignore } else { ir.optimize() }
   progress("c")
-  let c = @transpile.Transpiler::transpile(low, ir, native=options.native, locals=options.locals, check_scratch=options.check_scratch) catch {
+  let c = @transpile.Transpiler::transpile(low, ir, native=options.native, locals=options.locals, check_scratch=options.check_scratch, addresses=options.addresses) catch {
     err => raise fail("C", err)
   }
   let polls = polls.map(fn(location) {

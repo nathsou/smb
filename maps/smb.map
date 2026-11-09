@@ -500,12 +500,27 @@ table $806d vram_lists_high 19
 table $8080 vram_list_reset_offsets 2
 routine $8082 frame_interrupt           ; once per frame: present the display updates, then run the game
 routine $8182 handle_pause              ; start toggles pause while playing
+value $8182 a mode
+value $81b0 a state
+value $81b9 a new_state
+value $81c0 a new_state
 label $81c2 store_pause_state ; keep the pause state as it is
 routine $81c6 shuffle_sprite_slots      ; rotate OAM slots so that dropped sprites flicker instead of vanishing
 result shuffle_sprite_slots x leftover_x ; where the slot loop leaves X (the game mode gets it)
 scratch shuffle_sprite_slots $00 shuffle_limit ; the slot offset below which slots stay
+value $81cd x index
+value $81cf a old_offset
+value $81da temp shuffled
+value $81da a new_offset
+value $81e0 a new_offset
+value $81eb x next_pos
+value $81f0 x next_pos
+value $81f7 y group
+value $81f9 a first_offset
+value $8200 a second_offset
 routine $8212 run_game_mode             ; dispatch on the game mode (title, playing, victory, game over)
 param run_game_mode x leftover_x ; the X the frame interrupt leaves: 7, or the sprite shuffler's
+value $8212 a mode
 table $8218 game_mode_tasks 8
 routine $8220 hide_all_sprites          ; move every sprite below the screen
 routine $8223 hide_sprites_but_zero     ; move every sprite but sprite 0 (the status bar split) below the screen
@@ -514,9 +529,14 @@ param hide_sprites_from y oam_offset ; the first sprite's offset in the OAM copy
 result hide_sprites_from y oam_offset ; 0, past the last sprite
 routine $8231 title_mode                ; dispatch on the title's task: screen setup, title menu, new game
 param title_mode x leftover_x ; the X the frame interrupt leaves
+value $8231 a task
 table $8237 title_mode_tasks 8
 table $823f world_select_template 6
 routine $8245 title_menu                ; title screen input: start, world select, demo
+value $8245 y choose_world
+value $8275 y choose_world
+value $824a a buttons
+value $8303 x digit
 label $82d8 start_pressed ; start begins the game
 label $82c9 restart_title ; the demo is over: back to the title
 label $82c0 run_title_frame ; run a frame of the attract mode
@@ -526,20 +546,36 @@ param start_continue a world ; the world to continue from
 result start_continue x leftover_x ; 0, where its loop leaves X
 table $831d player_select_icon_data 8
 routine $8325 draw_player_select_icon   ; queue the title's mushroom cursor at the selected player count
+value $8325 y index
 table $8340 demo_buttons 21
 table $8355 demo_durations 22
 routine $836b play_demo                 ; feed recorded buttons to the player in attract mode
 result play_demo carry demo_over ; the recording has ended
+value $836b x action
+value $8378 a duration
 routine $838b victory_mode              ; run the victory task, and the remaining objects once the bridge is down
 param victory_mode x leftover_x ; the X the frame interrupt leaves
+value $8393 x first_slot
 routine $83a0 run_victory_task          ; dispatch on the victory task: collapse the bridge, walk, messages, next world
 param run_victory_task x leftover_x ; the X the frame interrupt leaves
+value $83a0 a task
 table $83a6 victory_tasks 10
 routine $83b0 start_victory             ; aim the walk at the next page and start the victory music
 routine $83bd victory_walk              ; walk the player right and scroll until the page past the bridge
 param victory_walk x leftover_x ; the X the frame interrupt leaves
+value $83bd y walk_right
+value $83cf y walk_right
+value $83df temp scroll_sum
 label $83d0 drive_victory_walk ; walk the player on
 routine $83f6 show_victory_messages     ; queue the thank-you messages one by one, then set the end timer
+value $83fb a step
+value $840f a step
+value $840b carry past_two
+value $8418 y message
+value $842c carry done
+value $8454 carry done
+value $8447 temp next_step
+value $844f a new_step
 label $8456 messages_done ; every message is shown
 label $8443 advance_message ; the next message
 label $8434 message_music ; the music for the message
@@ -550,9 +586,23 @@ table $84b7 popup_score_digits 12
 routine $84c3 update_score_popups       ; floating score numbers after defeating enemies
 param update_score_popups x popup_slot ; the floating score's slot
 result update_score_popups x popup_slot ; the slot, or the object slot when one was drawn
+value $84c3 a kind
+value $84cc a kind
+value $84d1 y score_kind
+value $84d2 a timer
+value $84f4 x digit
+value $8503 a its_kind
+value $852b a height
+value $852e carry no_borrow
+value $8532 carry no_borrow
+value $8532 temp raised
+value $853a temp sprite_top
+value $853f a left
+value $8557 x tile_index
 label $852b draw_popup ; draw the floating score
 routine $8567 run_screen_task           ; dispatch on the screen setup task: clear, palettes, status bar, intermission, columns
 param run_screen_task x leftover_x ; the X the frame interrupt leaves
+value $8567 a task
 table $856d screen_tasks 30
 routine $858b clear_screen_task         ; hide the sprites and clear both screens, then queue the palette list
 routine $859b intermission_setup        ; queue the colors of small Mario on a black background for the intermission
@@ -565,9 +615,16 @@ table $85cb background_color_lists 4
 table $85cf background_colors 8
 table $85d7 player_colors 12
 routine $85e3 queue_background_color    ; queue the background color override, if any, and the player's colors
+value $85e3 y color
 routine $85f1 queue_player_colors       ; queue the palette of the current player's colors and the background color
 scratch queue_player_colors $00 count ; the colors left to copy
 result queue_player_colors x list_end ; VRAM list 1's length after the colors
+value $85f1 x list_pos
+value $85f4 y color_index
+value $85fb y color_index
+value $8604 y color_index
+value $8619 y background
+value $861e y background
 routine $863f set_vram_list1_length     ; set the length of VRAM list 1
 param set_vram_list1_length a length ; VRAM list 1's new length
 routine $8643 queue_mushroom_palette    ; in mushroom-style areas, queue their palette
@@ -577,8 +634,10 @@ routine $864f skip_mushroom_palette     ; advance the screen task
 routine $8652 draw_status_bar_top       ; queue the status bar's labels
 routine $865a draw_status_bar_bottom    ; queue the player's counters and the world-area number
 param draw_status_bar_bottom x leftover_x ; the X the frame interrupt leaves
+value $865d x list_pos
 routine $8693 show_time_up              ; show TIME UP after the time ran out, else skip it
 routine $86a8 show_intermission         ; show the lives screen, or GAME OVER, unless the area skips it
+value $86a8 a mode
 routine $86c7 start_intermission        ; queue text A, start the screen timer and turn the screen on
 param start_intermission a text ; the text list to queue
 label $86e0 skip_intermission ; the area skips the lives screen
@@ -586,6 +645,8 @@ routine $86e6 render_area_columns       ; build the screen column by column whil
 param render_area_columns x leftover_x ; the X the frame interrupt leaves
 routine $86ff draw_title_screen         ; queue the title screen's layout, stored in CHR ROM (hand-written)
 routine $8732 clear_lists_draw_icon     ; on the title screen, clear the VRAM list and draw the player select cursor
+value $8732 a mode
+value $8737 x index
 routine $8745 next_screen_task_b        ; advance the screen setup task
 routine $8749 draw_top_score            ; queue the top score, then advance the game mode task
 param draw_top_score x leftover_x ; the X the frame interrupt leaves
@@ -602,6 +663,23 @@ table $87f2 text_warp_numbers 12
 table $87fe text_offsets 10
 routine $8808 queue_text                ; copy one of the text lists into the VRAM update list
 param queue_text a text ; the text list to queue
+value $880a y text_index
+value $8813 y text_index
+value $881b x offset
+value $881e y list_pos
+value $8820 a tile
+value $8833 a text
+value $8834 x which
+value $8835 carry warp_text
+value $8840 a lives_shown
+value $8846 a lives_shown
+value $8842 carry two_digits
+value $8864 a player
+value $8876 y index
+value $8886 x digit_offset
+value $8887 y list_pos
+value $8893 y list_pos
+value $8839 x text_rank
 label $882e text_end ; the end of the text list
 routine $889d wait_screen_timer         ; when the screen timer ends, hide the sprites and restart it
 routine $88a5 restart_screen_timer      ; restart the screen timer and advance the screen task
@@ -615,6 +693,22 @@ scratch render_column $04 attribute_index ; the attribute byte's index
 scratch render_column $05 odd_column ; the column is the right one of its metatile
 scratch render_column $06 metatile_set_low ; the metatile set's address, low byte
 scratch render_column $07 metatile_set_high ; the metatile set's address, high byte
+value $88b5 y list_start
+value $88d5 a attribute
+value $88d9 carry top_bit
+value $88d9 a rest
+value $88da temp second_bit
+value $88dc y set_index
+value $88f3 a tile_half
+value $88f8 y tile_index
+value $88f9 x row_pos
+value $88fb a left_tile
+value $8901 a right_tile
+value $8906 y attribute_pos
+value $890e carry odd_row
+value $8911 temp bit_out
+value $8913 temp bit_out2
+value $8947 y new_length
 label $8930 store_attribute ; merge the bits into the attribute byte
 label $892e count_attribute_row ; the next row of attributes
 label $892a shift_attribute_bits ; move the attribute bits to the metatile's quarter
@@ -622,6 +716,11 @@ routine $896a render_attributes         ; queue the attribute bytes of the colum
 result render_attributes x list_end ; VRAM list 2's length after the attributes
 scratch render_attributes $00 vram_high ; the attribute's VRAM address, high byte
 scratch render_attributes $01 vram_low ; the attribute's VRAM address, low byte
+value $8970 temp column
+value $8976 a nametable_high
+value $8985 a half_column
+value $898d y list_pos
+value $8998 a next_low
 routine $89bd select_vram_list2         ; select VRAM list 2 for the next frame
 table $89c3 cycling_palette_ids 6
 table $89c9 blank_palette 8
@@ -629,6 +728,10 @@ table $89d1 cycling_palettes 16
 routine $89e1 cycle_palette             ; animate the question-block palette every eighth frame
 param cycle_palette x kept_x ; given back when no palette is queued
 scratch cycle_palette $00 count ; the colors left to copy
+value $89e3 a phase
+value $89ee y index
+value $89fb x list_pos
+value $8a07 y color_index
 table $8a39 block_tile_offsets 20
 routine $8a4d erase_coin_or_axe         ; queue the metatile that replaces a collected coin or the axe
 routine $8a61 redraw_block              ; queue a hit block's new metatile and count the block down
@@ -636,6 +739,10 @@ param redraw_block a new_metatile ; the block's new metatile
 routine $8a6b redraw_block_blank        ; queue a blank metatile where a block was
 routine $8a6d queue_block_tiles         ; queue the four tiles of the metatile that replaces block A
 param queue_block_tiles a new_metatile ; the metatile that replaces the block
+value $8a6d y tile_set
+value $8a73 y tile_set
+value $8a7d y tile_set
+value $8a86 y tile_set
 routine $8a8f advance_vram_list         ; set VRAM list 1's length past the metatile just queued
 param advance_vram_list y list_index ; the offset in VRAM list 1 of the last tile queued
 result advance_vram_list y list_index ; the same offset
@@ -652,6 +759,14 @@ result queue_metatile x kept_x ; X as it came
 result queue_metatile carry address_carry ; the carry out of the VRAM address
 scratch queue_metatile $02 buffer_y ; the block's y in the block buffer
 scratch queue_metatile $06 buffer_column ; the low byte of the block's address in the block buffer
+value $8a9e y nametable_high
+value $8aa6 y nametable_high
+value $8aa0 a column
+value $8ab6 a row
+value $8ab8 carry row_bit7
+value $8ab8 a row_twice
+value $8abc temp row_bit6
+value $8abe temp low_sum
 routine $8acd queue_metatile_tiles      ; write the four tiles and nametable address of a queued metatile
 param queue_metatile_tiles x tile_offset ; the metatile's offset in block_tile_offsets
 param queue_metatile_tiles y list_index ; the offset in VRAM list 1
@@ -660,6 +775,9 @@ scratch queue_metatile_tiles $00 kept_x ; X as queue_metatile got it
 scratch queue_metatile_tiles $04 vram_low ; the VRAM address, low byte
 scratch queue_metatile_tiles $05 vram_high ; the VRAM address, high byte
 result queue_metatile_tiles x restored_x ; X as queue_metatile got it
+value $8ae5 a address_low
+value $8aeb temp next_row
+value $8af0 a address_high
 table $8b08 metatile_sets_low 4
 table $8b0c metatile_sets_high 4
 table $8b10 metatiles_palette0 156
@@ -695,6 +813,9 @@ param read_joypad a buttons ; the bits shifted in so far
 param read_joypad x joypad ; which joypad
 result read_joypad a buttons ; the buttons read
 scratch read_joypad $00 last_read ; the port's last read
+value $8e6a y bits_left
+value $8e6d a port_bits
+value $8e75 carry pressed
 routine $8edd apply_vram_list           ; apply the VRAM update list that $00-$01 point to (hand-written)
 routine $8ee6 set_scroll                ; set both scroll positions (hand-written)
 param set_scroll a scroll ; both scroll positions
@@ -712,9 +833,22 @@ scratch queue_counter_digits $03 digit_count ; the digits left to write
 param queue_counter_digits a counter ; the counter's number, minus one
 param queue_counter_digits x kept_x ; given back when no counter is queued
 result queue_counter_digits x list_end ; VRAM list 1's length after the digits, or kept_x
+value $8f14 a counter_index
+value $8f1c y position_index
+value $8f1d x list_pos
+value $8f20 a address_high
+value $8f26 a address_high
+value $8f31 a digit_total
+value $8f3d a digits_end
+value $8f44 y first_digit
+value $8f45 x list_pos
 routine $8f5f add_digits                ; decimal add with carry across score or time digits
 param add_digits y digit_offset ; the offset of the last digit to add to
 result add_digits x leftover_x ; 6, where the digit loop leaves X
+value $8f66 x index
+value $8f6c a digit
+value $8f8a a digit
+value $8f8f a digit
 label $8f8e carry_digit ; carry into the next digit
 label $8f87 borrow_digit ; borrow from the next digit
 label $8f7c clear_score_add ; clear the pending score
@@ -723,19 +857,45 @@ label $8f68 add_next_digit ; add the next digit
 routine $8f97 update_top_score          ; copy either player's score to the top score when higher
 routine $8f9e check_top_score           ; copy the player's score at X to the top score when higher
 param check_top_score x score_offset ; the offset of the player's score
+value $8f9e y top_index
+value $8fa0 carry not_lower
+value $8fa4 carry not_lower
+value $8fa1 a digit
+value $8fad x from
+value $8fae y to
 table $8fbc default_sprite_slots 15
 table $8fcb sprite_zero 4
 routine $8fcf start_game                ; clear game memory and enter the first area
+value $8fcf y clear_end
+value $8fd4 y index
 routine $8fe4 start_area                ; reset area state and position the player at the entrance
+value $8fe4 y clear_end
+value $8fe9 x index
+value $8ff3 a start_page
+value $8ffb a start_page
+value $900a y nametable_high
+value $9010 y nametable_high
+value $900c a odd_page
+value $901d a column_pos
+value $9037 a world
+value $903a zero world_five
 label $904a check_halfway ; start at the halfway page if reached
 routine $9061 setup_new_game            ; reset the lives and time for a new game, then set up the area
 routine $9071 setup_area_display        ; reset the area's display state and sprite slots, and start the area music
+value $9076 y index
+value $90b4 y index
+value $908b a page
+value $90a9 x slot_index
 routine $90cc clear_memory              ; clear RAM below the offset in Y, sparing the stack in use
 scratch clear_memory $06 pointer_low ; the page's address, low byte
 scratch clear_memory $07 pointer_page ; the page being cleared
 label $90de skip_stack_byte ; spare the byte in use by the stack
 table $90e7 area_music_kinds 6
 routine $90ed queue_area_music          ; request the music of the area's kind, entrance or clouds
+value $90f9 y music_kind
+value $9106 y music_kind
+value $910e y music_kind
+value $90fb a entrance
 label $9110 queue_music_kind ; request the music of the area's kind
 table $9116 entrance_x_positions 4
 table $911a entrance_alt_y 2
@@ -744,10 +904,23 @@ table $9125 entrance_priorities 8
 table $912d time_limits 4
 routine $9131 place_player              ; entrance kind, starting position and time limit
 scratch place_player $07 random_bit ; a random bit for the bubble's timer
+value $9148 y swim
+value $9152 y swim
+value $9156 x entrance
+value $9162 x entrance
+value $9159 y alt
+value $9178 y limit
+value $91ab y vine_block
 table $91bd halfway_pages 16
 routine $91cd lose_life                 ; count a life lost: game over, or restart at the halfway page and switch players
+value $91ed x halfway_index
+value $91fd a halfway
+value $9203 a halfway
+value $920d a start_page
+value $9206 carry past_screen
 routine $9218 game_over_mode            ; dispatch on the game over task
 param game_over_mode x leftover_x ; the X the frame interrupt leaves
+value $9218 a task
 table $921e game_over_tasks 6
 routine $9224 start_game_over           ; stop the status bar split and the music, then show GAME OVER
 routine $9237 game_over_screen          ; end the game on start or when the screen timer runs out
@@ -755,17 +928,21 @@ routine $9248 end_game                  ; switch to the other player if they hav
 routine $9264 continue_game             ; restart the current player small in the area's first page
 routine $9282 switch_players            ; swap the current player's state with the other's, if they have lives (carry clear when switched)
 result switch_players carry not_switched ; the other player has no lives left
+value $9295 x index
 routine $92aa set_unused_flag           ; set a byte the game never reads
 routine $92af do_nothing                ; return at once
 routine $92b0 run_parser_task           ; run one of the eight steps that build the next column, the attributes after the last
 param run_parser_task x leftover_x ; the X the frame interrupt leaves
 result run_parser_task x leftover_x ; the X a step leaves
+value $92b0 y task
+value $92b5 y task
 routine $92c8 run_parser_subtask        ; dispatch on the column step: parse the area data, render the column, advance
 param run_parser_subtask a step ; the column step
 param run_parser_subtask x leftover_x ; the X the frame interrupt leaves
 result run_parser_subtask x leftover_x ; the X a step leaves
 table $92cb parser_tasks 16
 routine $92db advance_column            ; advance the parser one column, and to the next page every 16
+value $92e1 a column
 table $92f7 background_scene_offsets 3
 table $92fa background_scenes 144
 table $938a background_scene_metatiles 36
@@ -778,6 +955,37 @@ result parse_area_column x leftover_x ; where the decoding loop leaves X
 scratch parse_area_column $00 scenery_index ; the scenery's metatile index
 scratch parse_area_column $01 terrain_row ; the row of the terrain's next metatile
 scratch parse_area_column $07 terrain_metatile ; the terrain's metatile
+value $9404 x index
+value $940e y scenery
+value $9413 a page_mod
+value $941b a page_mod
+value $9421 a scene_offset
+value $9422 carry offset_carry
+value $9423 temp scene_index
+value $942a a scene
+value $9433 a scene_kind
+value $943a x metatile_index
+value $9440 y scene_row
+value $9455 x foreground
+value $945a y fg_index
+value $945d x fg_row
+value $945f a fg_metatile
+value $946d y area
+value $9479 a terrain
+value $947e a terrain
+value $9486 a terrain
+value $948a x terrain_pos
+value $9490 y pattern_index
+value $94a8 y bit
+value $94de y buffer_offset
+value $94e5 a attribute
+value $94e7 carry top_bit
+value $94e7 a rest
+value $94e8 temp second_bit
+value $94ea y limit_index
+value $94eb a metatile
+value $94f3 a metatile
+value $94f5 y buffer_pos
 label $94d3 column_done ; the column's metatiles are drawn
 label $947e draw_terrain ; draw the terrain's metatiles
 label $9455 draw_foreground ; draw the foreground scenery's metatiles
@@ -785,6 +993,15 @@ label $941f draw_background_scenery ; draw the background scenery's metatiles
 table $9504 block_buffer_limits 4
 routine $9508 process_area_objects      ; decode the area objects of the three slots for the current column
 result process_area_objects x leftover_x ; where the slot loop leaves X
+value $9514 a area_byte
+value $951f y next_pos
+value $9520 a page_byte
+value $9531 a first_byte
+value $9533 a object_row
+value $9539 y next_pos
+value $953a a second_byte
+value $9546 y next_pos
+value $9547 a page_byte
 label $9571 next_object_slot ; the next slot
 label $956e advance_object ; go to the next area object
 label $956b object_behind ; the object is behind the parser
@@ -795,41 +1012,98 @@ routine $9595 decode_area_object        ; decode the area object in slot X and d
 param decode_area_object y kept_y ; Y as the caller has it
 scratch decode_area_object $00 object_bits ; the object's kind bits
 scratch decode_area_object $07 row ; the object's row
+value $959d x row_base
+value $95ab x row_base
+value $95b1 x row_base
+value $959f a first_byte
+value $95a5 a low_nibble
+value $95bf a kind_bits
+value $95cb y next_pos
+value $95cc a second_byte
+value $95d2 a command
+value $95d4 a command
+value $95dd a kind_bits
+value $95e6 y next_pos
+value $95e7 a second_byte
+value $95e9 a bits
+value $95f1 a second_byte
+value $95f3 a kind_bits
+value $95fe a second_byte
+value $9608 a upper_bits
+value $960d y next_pos
+value $960e a second_byte
+value $9610 a upper_bits
+value $9615 a kind_bits
+value $9628 a next_byte
+value $9649 a next_byte
+value $9650 a column
+value $9662 a handler
 label $9616 decode_object_kind ; decode the object's kind
 routine $9645 check_loop_object         ; nothing: loop commands are handled elsewhere
 label $9656 object_pending ; the object waits for its page
 table $9667 area_object_handlers 94
 routine $96c5 change_area_attributes    ; set the terrain and scenery, or the background color, from an attribute object
+value $96c8 y data_pos
+value $96c9 a attributes
+value $96d0 a attributes
+value $96dc a scenery_bits
+value $96e3 a foreground
+value $96ec a foreground
 routine $96f2 warp_zone_lock            ; show the warp zone message for the world, remove the piranhas and lock the scroll
+value $96f2 x warp_text
+value $96f9 x warp_text
+value $9700 x warp_text
 routine $970d lock_scroll               ; toggle the scroll lock
 routine $9716 remove_enemies            ; deactivate the enemies of kind A
 scratch remove_enemies $00 removed_kind ; the enemy kind to remove
 param remove_enemies a kind_to_remove ; the enemy kind to deactivate
+value $971a x enemy_slot
 table $9728 frenzy_kinds 3
 routine $972b start_frenzy              ; queue the frenzy of the object kind in $00, unless one of its enemies is out
 scratch start_frenzy $00 object_kind ; the frenzy's object kind
+value $972d a frenzy
+value $973a a frenzy
+value $9730 y enemy_slot
 label $973c queue_frenzy ; queue the frenzy
 routine $9740 draw_area_style_object    ; draw a tree ledge, mushroom ledge or cannon, by the area's style
+value $9740 a style
 table $9746 area_style_handlers 6
 routine $974c draw_tree_ledge           ; draw a column of a tree ledge: its left end, middle or right end, and the trunk
+value $974f a length
+value $974f negative starting
+value $9767 x row_pos
 routine $9778 draw_mushroom_ledge       ; draw a column of a mushroom ledge: its ends, middle and stem
 scratch draw_mushroom_ledge $06 half_length ; half the ledge's length
+value $978d y length
+value $9797 x row_pos
+value $97a2 x stem_row
 routine $97aa draw_stem_full            ; fill the column below the row after X with metatile A
 param draw_stem_full a fill_metatile ; the metatile to fill with
 param draw_stem_full x row ; the row above the first one filled
 routine $97b0 draw_stem_none            ; fill the column from the object's row with metatile A
 param draw_stem_none a fill_metatile ; the metatile to fill with
 scratch draw_stem_none $07 row ; the object's row
+value $97b0 x start_row
 table $97b7 pulley_rope_metatiles 3
 routine $97ba draw_pulley_rope          ; draw a column of a pulley's rope: its left end, middle or right end
+value $97bd y part
+value $97c1 y part
+value $97c7 y part
 table $97cf castle_metatiles 55
 routine $9806 draw_castle               ; draw a column of a castle, and put the star flag on a large one
 scratch draw_castle $06 castle_row ; the castle's row being drawn
 scratch draw_castle $07 castle_height ; the castle's height
+value $9812 y metatile_index
+value $9815 x castle_y
+value $9832 x object
+value $9838 a castle_part
+value $983f y castle_top
 label $9869 castle_door ; the castle's door
 routine $986f draw_water_pipe           ; draw a column of a water pipe
 scratch draw_water_pipe $07 row ; the object's row
+value $9875 x pipe_row
 routine $9882 draw_intro_pipe           ; draw a column of the pipe the player enters at the start of an area
+value $988e x clear_row
 table $989f side_pipe_shafts 4
 table $98a3 side_pipe_tops 4
 table $98a7 side_pipe_bottoms 4
@@ -840,13 +1114,23 @@ result draw_side_pipe y pipe_length ; the length left
 result draw_side_pipe carry past_end ; past the pipe's last column
 scratch draw_side_pipe $05 shaft_row ; the row of the pipe's shaft
 scratch draw_side_pipe $06 length ; the pipe's length
+value $98b7 y part
+value $98be x top_row
+value $98ca x top_row
+value $98c6 x fill_row
 table $98dd vertical_pipe_metatiles 8
 routine $98e5 draw_vertical_pipe        ; may also spawn a piranha plant
 scratch draw_vertical_pipe $00 object_kind ; the pipe's kind
 scratch draw_vertical_pipe $06 pipe_rows ; the pipe's rows
+value $98fa y pipe_part
+value $9908 temp piranha_x
+value $9926 y pipe_kind
+value $9927 x pipe_row
+value $992f x shaft_row
 routine $9939 get_pipe_height           ; the pipe's height and length from its area object
 result get_pipe_height y pipe_length ; the pipe's length
 scratch get_pipe_height $06 length ; the pipe's length
+value $9939 y fixed_length
 routine $994a find_free_enemy_slot      ; the first inactive enemy slot (carry set when none)
 result find_free_enemy_slot x enemy_slot ; the first inactive enemy slot
 result find_free_enemy_slot carry none_free ; every slot is in use
@@ -862,10 +1146,14 @@ param draw_bridge_at_row_middle a row ; the bridge's row
 routine $997f draw_bridge_low           ; draw a column of a low bridge
 routine $9981 draw_bridge_at_row        ; draw a column of a bridge at row A: the rail, then the bridge down to the floor
 param draw_bridge_at_row a row ; the bridge's row
+value $9986 x rail_row
+value $998c x fill_row
 routine $9994 draw_flag_balls           ; draw the balls on top of the flagpole
 routine $999e draw_flagpole             ; draw the flagpole and place its flag object in enemy slot 5
+value $99b5 temp flag_x
 routine $99d0 draw_endless_rope         ; draw a rope down the whole column
 routine $99d7 draw_balance_rope         ; draw a column of a balance lift's rope
+value $99e3 x object
 routine $99e9 draw_rope                 ; draw rope from row X for Y rows
 param draw_rope x row ; the first row
 param draw_rope y rows ; the rows below it
@@ -877,30 +1165,45 @@ routine $9a01 draw_castle_bridge        ; draw a column of the bridge before Bow
 routine $9a09 draw_axe                  ; draw the axe, and its palette
 routine $9a0e draw_small_object         ; draw the single metatile of a small object at its row
 scratch draw_small_object $00 object_kind ; the small object's kind
+value $9a0e y kind_index
 routine $9a19 draw_empty_block          ; draw a used block
 scratch draw_empty_block $07 row ; the object's row
+value $9a1c x block_row
 routine $9a20 draw_single_column        ; put metatile A at row X
 param draw_single_column a fill_metatile ; the metatile to put
 param draw_single_column x row ; the row
 table $9a25 solid_block_metatiles 4
 table $9a29 brick_metatiles 5
 routine $9a2e draw_brick_row            ; draw a column of a row of bricks, of the area's kind
+value $9a2e y brick_kind
+value $9a36 y brick_kind
 routine $9a3e draw_solid_row            ; draw a column of a row of solid blocks, of the area's kind
 routine $9a44 draw_row_of               ; draw a column of a row of metatile A
 param draw_row_of a fill_metatile ; the metatile of the row
 scratch draw_row_of $07 row ; the object's row
 routine $9a48 draw_row_height1          ; put the metatile pushed on the stack at the object's row
 scratch draw_row_height1 $07 row ; the object's row
+value $9a48 x fill_row
 routine $9a50 draw_brick_column         ; draw a column of bricks, of the area's kind
 routine $9a59 draw_solid_column         ; draw a column of solid blocks, of the area's kind
 routine $9a5f draw_column_of            ; draw a column of metatile A, the object's height
 param draw_column_of a fill_metatile ; the metatile of the column
 scratch draw_column_of $07 row ; the object's row
+value $9a64 x start_row
 routine $9a69 draw_cannon               ; draw a cannon and record it for the cannons that fire bullets
+value $9a6c x cannon_row
+value $9a73 x body_row
+value $9a74 y rest
+value $9a7c x fill_row
+value $9a85 x cannon_index
+value $9a9a x next_cannon
+value $9a9f x next_cannon
 table $9aa5 staircase_heights 9
 table $9aae staircase_rows 9
 routine $9ab7 draw_staircase            ; draw a column of a staircase, one step higher each column
+value $9ac4 y step
 routine $9ad3 place_spring              ; place a spring in a free enemy slot and draw its base
+value $9af4 x base_row
 routine $9b01 draw_hidden_1up           ; draw the hidden 1-up block, once, where it is enabled
 routine $9b0e draw_question_block       ; draw a question block with the item of the object's kind
 scratch draw_question_block $00 object_kind ; the area object's kind
@@ -908,6 +1211,8 @@ routine $9b14 draw_coin_brick           ; draw a brick with coins, ready to give
 routine $9b19 draw_item_brick           ; draw a brick with the item of the object's kind, by the area's kind
 scratch draw_item_brick $00 object_kind ; the area object's kind
 scratch draw_item_brick $07 item ; the item's offset among the bumpable metatiles
+value $9b1e a brick_base
+value $9b26 a brick_base
 routine $9b2c draw_block_metatile       ; draw bumpable metatile Y at the object's row
 param draw_block_metatile y bumpable ; the bumpable metatile's index
 scratch draw_block_metatile $07 row ; the object's row
@@ -916,6 +1221,11 @@ scratch get_area_object_kind $00 object_kind ; the area object's kind
 result get_area_object_kind y area_object_kind ; the area object's kind
 table $9b3d hole_metatiles 4
 routine $9b41 draw_hole                 ; also sets up whirlpools in water areas
+value $9b4b x whirlpool
+value $9b52 temp whirlpool_x
+value $9b64 a span
+value $9b69 x next_slot
+value $9b6e x next_slot
 routine $9b7d fill_column_down          ; fill the column from row X down with metatile A for Y + 1 rows, leaving some metatiles in place
 param fill_column_down a fill_metatile ; the metatile to fill with
 param fill_column_down x row ; the first row
@@ -932,24 +1242,55 @@ result get_object_fixed_length carry first_column ; the object's first column (i
 routine $9bbb get_object_row_size       ; the object's row ($07) and its height from its area data
 scratch get_object_row_size $07 row ; the object's row
 result get_object_row_size y height ; the object's height
+value $9bbb y data_pos
+value $9bbe a row_byte
+value $9bc4 y size_pos
+value $9bc5 a size_byte
 routine $9bcb get_object_x              ; the X position of the current column
 result get_object_x a column_x ; the X position of the current column
 routine $9bd3 get_object_y              ; the Y position of the object's row ($07)
 scratch get_object_y $07 row ; the object's row
 result get_object_y a row_y ; the Y position of the row
+value $9bd8 a row_top
 table $9bdd block_buffer_addresses 4
 routine $9be1 get_block_buffer_address  ; the block buffer address of column A ($06-$07)
 param get_block_buffer_address a column ; the column's position
 scratch get_block_buffer_address $06 buffer_column ; the column's address in the block buffer, low byte
 scratch get_block_buffer_address $07 buffer_high ; the address's high byte
+value $9be6 y page_half
 table $9bf8 loop_area_offsets 11
 routine $9c03 load_area_pointer         ; find the area of the world and area number, and its kind
 routine $9c09 get_area_kind             ; the area's kind, from the area pointer's bits 5-6
 param get_area_kind a area_bits ; the area pointer (bits 5-6: the kind)
 result get_area_kind a area_type ; the area's kind
+value $9c09 a kind_bits
+value $9c0b carry bit7
+value $9c0b a shifted1
+value $9c0c temp bit6
+value $9c0c a shifted2
+value $9c0d temp bit5
 routine $9c13 find_area_pointer         ; the area pointer of the world and area number
 result find_area_pointer a area_bits ; the area pointer
 routine $9c22 load_area_data            ; level layout and enemy list pointers, header attributes
+value $9c38 y list_index
+value $9c4d y layout_index
+value $9c5a a header
+value $9c5d a foreground
+value $9c66 a foreground
+value $9c6b a header
+value $9c76 a time_bits
+value $9c79 temp time_bit1
+value $9c79 a time_rest
+value $9c7a temp time_bit0
+value $9c80 a header2
+value $9c88 a header2
+value $9c94 a style_bits
+value $9c97 temp style_bit1
+value $9c97 a style_rest
+value $9c98 temp style_bit0
+value $9c99 a style
+value $9ca1 a style
+value $9ca9 temp layout_start
 table $9cb4 world_area_offsets 8
 table $9cbc areas_world1 5
 table $9cc1 areas_world2 5
@@ -1034,35 +1375,73 @@ table $ae06 water_layout_1 63
 table $ae45 water_layout_2 123
 table $aec0 water_layout_3 28
 routine $aedc playing_mode              ; dispatch on the playing task: start the area, set up the screen, run a frame
+value $aedc a task
 table $aee2 playing_mode_tasks 8
 routine $aeea run_game_frame            ; one frame of play: player, enemies, objects, scrolling, drawing
+value $af01 x enemy_slot
+value $af0b x enemy_slot
+value $af1c x block_slot
+value $af23 x block_slot
+value $af32 x kept
+value $af41 a star
+value $af55 a phase
+value $af5c a phase
 label $af67 end_game_frame ; the frame's last steps
 label $af64 reset_palette ; reset the player's palette
 routine $af6f update_scroll_column      ; build the next column when 32 pixels have scrolled, unless VRAM list 2 is pending
 param update_scroll_column x leftover_x ; the X the frame interrupt leaves
+value $af7b a scrolled
+value $af7e carry full_column
 routine $af93 scroll_with_player        ; scroll the screen with the player past the middle, unless it is locked
+value $afb1 y scroll_less
 routine $afc4 scroll_screen             ; scroll the screen by Y pixels and keep the player inside it
 param scroll_screen y pixels_to_scroll ; the pixels to scroll by
 result scroll_screen x leftover_x ; the X the edge check leaves
 scratch scroll_screen $00 nametable_bit ; the page's nametable bit
+value $afc4 a amount
+value $afd1 temp new_left
+value $afd1 a left_x
+value $afdd a left_page
 routine $b000 check_player_offscreen    ; push the player back inside the screen's edges, stopping it against them
 result check_player_offscreen x leftover_x ; where the check leaves X
 scratch check_player_offscreen $00 saved_bits ; the player's offscreen bits
+value $b007 y edge
+value $b00c y edge
+value $b017 temp pushed_x
 label $b02e stop_platform_scroll ; no scroll from a platform
 table $b034 screen_edge_offsets 2
 table $b036 offscreen_joypad_masks 2
 routine $b038 update_screen_edges       ; the screen's right edge from its left
 result update_screen_edges a right_x ; the X of the screen's right edge
+value $b03c temp right_edge
 routine $b04a run_player_task           ; dispatch on the player's task: entering, pipes, flagpole, growing, dying, control
 param run_player_task x leftover_x ; the X the frame interrupt leaves
+value $b04a a task
 table $b04f player_tasks 26
 routine $b069 enter_area                ; walk in, come up a pipe or climb a vine
+value $b078 a entrance
+value $b0b7 y climbing
+value $b0c1 y climbing
 label $b0d3 finish_entry ; the player is in the area
 routine $b0e6 drive_player              ; control the player as if the joypad held A
 param drive_player a buttons ; the buttons to hold
 routine $b0e9 control_player            ; joypad to movement, collisions, animation
 param control_player x leftover_x ; the X the frame interrupt leaves
 scratch control_player $07 pit_page ; the vertical page below which the player is in a pit
+value $b115 a vertical
+value $b12e y box_kind
+value $b135 y box_kind
+value $b13c y box_kind
+value $b141 a direction
+value $b149 a direction
+value $b143 y speed
+value $b143 negative moving_left
+value $b163 a task
+value $b179 a height_page
+value $b188 x deadly
+value $b194 x deadly
+value $b19b y music_queued
+value $b1a0 y music_queued
 label $b1aa check_death_fall ; whether the player has fallen into a pit
 label $b104 read_player_buttons ; take the joypad's buttons
 routine $b1c7 vine_climb_in             ; climb the player up the vine into the area above, then enter it
@@ -1076,9 +1455,16 @@ param change_area_after_pipe y entrance ; the entrance to the next area
 routine $b213 change_area               ; turn the screen off and restart the area setup
 result change_area a leftover_a ; what A holds after the setup
 routine $b21f walk_into_side_pipe       ; walk the player right into a side pipe until aligned
+value $b223 y walk
+value $b22d y walk
+value $b227 a offset
 routine $b233 grow_or_shrink            ; while the game pauses to change the player's size, start it, then finish
+value $b233 a pause
 routine $b245 injury_blink              ; shrink the player after an injury, then let them move while blinking
+value $b245 a pause
+value $b248 zero at_start
 routine $b255 start_size_change         ; start growing or shrinking the player
+value $b255 y changing
 routine $b269 player_dying              ; let the player fall once the death pause is over
 routine $b273 player_task_done          ; back to normal control, timers running
 routine $b27d get_fire_flower           ; cycle the player's palette while getting a fire flower, then restore it
@@ -1091,11 +1477,15 @@ table $b2c2 hidden_1up_coin_counts 8
 routine $b2ca walk_to_castle            ; walk the player to the castle, raise the star flag, then go to the next area (and arm the hidden 1-up)
 routine $b315 next_area                 ; go to the next area of the world
 routine $b329 move_player               ; move the player by its state: on the ground, jumping or swimming, falling, climbing
+value $b329 a crouch
+value $b336 a crouch
+value $b343 a state
 label $b33b move_by_state ; move by the player's state
 table $b351 player_movement_states 8
 routine $b35a move_on_ground            ; move the player on the ground, with friction and facing the joypad
 routine $b36d move_falling              ; move the player in the air with falling gravity
 routine $b376 move_jumping_or_swimming  ; move the player up, cutting the jump short when A is released, or swimming
+value $b3a6 a horizontal
 label $b393 hold_jump ; the jump button is held
 routine $b3ac move_in_air               ; move the player in the air, with gravity
 scratch move_in_air $01 up_force ; force while moving up
@@ -1103,6 +1493,18 @@ table $b3c7 climb_steps_low 4
 table $b3cb climb_steps_high 4
 routine $b3cf move_climbing             ; move the player on a vine, and off it to the sides
 scratch move_climbing $00 page_step ; the climb's vertical page step
+value $b3d3 temp fraction_sum
+value $b3d3 carry fraction_carry
+value $b3d9 y speed_high
+value $b3df y speed_high
+value $b3db a speed
+value $b3e2 temp new_y
+value $b3ee a pushing
+value $b3fd x step_index
+value $b405 x step_index
+value $b409 x step_index
+value $b3ff y facing
+value $b40d temp new_x
 table $b424 jump_gravity 7
 table $b42b fall_gravity 7
 table $b432 jump_speeds 7
@@ -1116,74 +1518,178 @@ routine $b450 player_physics            ; jumping, swimming, climbing and walkin
 param player_physics x leftover_x ; the X the frame interrupt leaves
 result player_physics x leftover_x ; where the speed choice leaves X
 scratch player_physics $00 friction_index ; the friction amounts' index
+value $b456 y climb_index
+value $b45f y climb_index
+value $b464 y climb_index
+value $b45a a climb_buttons
+value $b46b a period
+value $b474 a period
+value $b480 a jump_button
+value $b4a5 y jump_index
+value $b4c2 y jump_index
+value $b4c7 y jump_index
+value $b4cc y jump_index
+value $b4d1 y jump_index
+value $b4dc y jump_index
+value $b4e3 y jump_index
+value $b4bb a speed
+value $b511 a jump_sound
+value $b518 a jump_sound
+value $b51c y speed_index
+value $b52d y speed_index
+value $b533 y speed_index
+value $b545 y speed_index
+value $b56a y speed_index
+value $b585 carry friction_bit
 label $b55e set_max_speeds ; the maximum speeds
 label $b559 reset_running_timer ; keep the running timer up
 label $b545 running_physics ; the speeds when running
 label $b51c ground_physics ; the speeds on the ground
 table $b58c player_anim_periods 3
 routine $b58f set_player_anim_speed     ; the player's walking animation speed and running state from its speed
+value $b58f y period_index
+value $b598 y period_index
+value $b59d y period_index
+value $b591 a running
+value $b5ab a running
+value $b5a1 a buttons
 label $b5c5 set_anim_period ; the animation's period
 label $b5b3 turn_or_skid ; the player turns or skids
 routine $b5cc apply_friction            ; accelerate or slow the player horizontally, up to its maximum speed
 param apply_friction a direction ; the left and right buttons held
+value $b5cc a pressed
+value $b5d3 a speed
+value $b5ea a speed
+value $b5f4 a speed
+value $b608 a speed
+value $b612 a speed
+value $b61e a speed
+value $b5d3 negative leftward
+value $b5e2 temp faster
+value $b600 temp slower
 label $b620 store_abs_speed ; keep the speed's magnitude
 label $b617 abs_speed ; the speed's magnitude
 label $b5fc accelerate_left ; speed up to the left
 label $b5de accelerate_right ; speed up to the right
 routine $b624 update_fireballs_and_bubbles; throw a fireball on B when fiery, update both fireballs and the air bubbles
+value $b62d a b_button
+value $b63a x throw_slot
+value $b657 y period
+value $b673 x bubble_slot
 table $b687 fireball_speeds 2
 routine $b689 update_fireball           ; move a fireball, bounce it off the floor, and explode it on a wall or enemy
 param update_fireball x fireball_slot ; the fireball's slot
+value $b68d carry exploding
+value $b690 y state
+value $b699 temp start_x
+value $ed0c a explosion_step
+value $ed13 carry explosion_done
 routine $b6f9 update_bubble             ; move an air bubble up, or let the player breathe out a new one
 scratch update_bubble $07 random_bit ; a random bit for the bubble's timer
 routine $b70b spawn_bubble              ; start an air bubble at the player's mouth
 scratch spawn_bubble $07 random_bit ; a random bit for the bubble's timer
 param spawn_bubble x bubble_slot ; the air bubble's slot
+value $b70b y mouth_offset
+value $b712 y mouth_offset
+value $b70f carry facing_right
+value $b715 temp start_x
 routine $b732 move_bubble               ; move an air bubble up, removing it at the water's surface
 scratch move_bubble $07 random_bit ; a random bit for the bubble's speed
 param move_bubble x bubble_slot ; the air bubble's slot
+value $b738 temp risen
+value $b740 a new_y
+value $b746 a new_y
 table $b74b bubble_forces 2
 table $b74d bubble_intervals 2
 routine $b74f tick_time_limit           ; count the time down, warn when it runs low, and end the player when it runs out
+value $b754 a task
 routine $b7a4 warp_zone_trigger         ; once the player reaches the warp zone's pipes, unlock the scroll and enable the warps
+value $b7ab a height
 routine $b7b8 update_whirlpools         ; pull the player toward the whirlpools of water areas
+value $b7b8 a area
+value $b7c5 y whirlpool
+value $b7cb temp right_edge
+value $b7cb carry edge_carry
+value $b7d0 a page
+value $b7dc carry no_borrow
+value $b7e1 a left_diff
+value $b7ed a right_diff
+value $b7ff temp center
+value $b816 a side
+value $b81d temp pulled_left
+value $b823 a new_page
+value $b837 a new_page
+value $b831 temp pulled_right
 label $b83b pull_player ; pull the player toward the whirlpool
 label $b7f5 whirlpool_area ; the player is in a whirlpool
 table $b84b flagpole_score_bounds 5
 table $b850 flagpole_score_digits 5
 routine $b855 update_flagpole           ; lower the flag while the player slides down the pole, and award the flag's score
+value $b873 carry at_bottom
+value $b87a temp flag_y
+value $b881 a new_flag_y
+value $b889 temp score_y
+value $b899 y score_kind
 label $b899 flagpole_score ; the flagpole's score
 table $b8b6 spring_offsets 4
 routine $b8ba update_spring             ; compress and release the spring, launching the player higher with A
+value $b8c2 a step
+value $b8c8 y phase
+value $b8dc a spring_y
+value $b8e7 a a_button
 routine $b91e spawn_vine                ; start a vine growing from the bumped block
 param spawn_vine x enemy_slot ; the slot of the vine
 param spawn_vine y block_slot ; the bumped block's slot
+value $b930 a vine_y
+value $b935 y vine_index
 table $b949 vine_heights 2
 routine $b94b update_vine               ; grow the vine and draw it
 scratch update_vine $02 vine_oam_offset ; the vine's first sprite in the OAM copy
+value $b95e carry odd_frame
+value $b989 y vine_index
+value $b9a9 y buffer_offset
 table $b9ba cannon_masks 2
 routine $b9bc update_cannons            ; fire bullets from the cannons on screen, at random
+value $b9c1 x enemy_slot
+value $b9cc y difficulty
+value $b9cf a pick
+value $b9d2 carry no_cannon
+value $b9d6 y cannon_index
+value $b9dc a timer
 label $ba1a update_cannon_slot ; the cannon in this slot
 table $ba31 bullet_speeds 2
 routine $ba33 update_bullet             ; move a bullet toward the player and remove it off screen
 scratch update_bullet $00 distance ; the horizontal distance to the player
+value $ba45 y direction
+value $ba4c y direction
+value $ba4f y speed_index
 label $ba85 bullet_gone ; the bullet left the screen
 table $ba89 hammer_slots 9
 table $ba92 hammer_speeds 2
 routine $ba94 spawn_hammer              ; give the hammer bro in slot a hammer, when a free one comes up (carry set then)
 result spawn_hammer carry spawned ; a hammer was thrown
+value $ba97 a pick
+value $ba9e a pick
+value $baa0 y hammer
 routine $bac3 update_hammer             ; throw a hammer, then let it fly in an arc
+value $baca a state
+value $bacc y bro_slot
+value $bacf carry in_hand
+value $bb02 a speed
+value $bb0f temp hand_x
 label $bb2b hammer_position ; the hammer's screen position and box
 label $bb28 hammer_hits_player ; test the hammer against the player
 label $bb09 hammer_in_hand ; the hammer follows the bro's hand
 routine $bb38 spawn_block_coin          ; launch a coin out of a bumped block
 param spawn_block_coin x block_slot ; the bumped block's slot
 param spawn_block_coin carry carry_in ; the carry the coin's height is computed with
+value $bb49 a coin_y
 routine $bb51 spawn_jumping_coin        ; launch a coin from the spot above a bumped block
 param spawn_jumping_coin x block_slot ; the bumped block's slot
 param spawn_jumping_coin carry carry_in ; the carry the coin's height is computed with
 scratch spawn_jumping_coin $06 buffer_column ; the low byte of the block's address in the block buffer
 scratch spawn_jumping_coin $02 buffer_y ; the block's y in the block buffer
+value $bb5e a column_shifted
 routine $bb6c launch_coin               ; start a coin's jump and count it
 param launch_coin x block_slot ; the bumped block's slot
 param launch_coin y misc_slot ; the coin's slot
@@ -1193,6 +1699,11 @@ result find_free_misc_slot y misc_slot ; the free slot, or the last
 result find_free_misc_slot carry none_free ; no slot is free
 label $bb92 misc_slot_found ; the slot is free
 routine $bb96 update_misc_objects       ; update the hammers and jumping coins, scrolling the rest with the screen
+value $bb96 x misc_slot
+value $bbde x misc_slot
+value $bb9a a state
+value $bbb1 temp scrolled_x
+value $bbb8 a page
 label $bbf4 next_misc_slot ; the next misc slot
 label $bbe8 jumping_coin ; a coin jumping out of a block
 table $bbf8 coin_digit_offsets 2
@@ -1202,21 +1713,41 @@ routine $bbfe give_coin                 ; count a coin, with a 1-up every 100, a
 routine $bc27 add_score                 ; add the pending score to the current player's and queue it
 routine $bc30 queue_counters_for_player ; queue the current player's score and coins
 routine $bc36 queue_counters            ; queue the counters chosen by A
+value $bc39 y list_length
 label $bc49 place_powerup ; place the powerup in its slot
 routine $bc60 spawn_powerup             ; bring out the powerup from its block, a mushroom or flower by the player's size
+value $bc71 a kind
+value $bc78 a kind
 routine $bc85 update_powerup            ; raise the powerup out of its block, then move it by its kind
+value $bc89 a state
+value $bc95 a kind
+value $bcbb a rise_step
 label $bcaa move_powerup ; move the powerup
 table $bceb block_y_offsets 2
 routine $bced bump_head                 ; the player hit a block from below
 param bump_head a hit_metatile ; the metatile hit
 scratch bump_head $00 hit_copy ; the metatile hit
 scratch bump_head $05 pushed_metatile ; the metatile pushed before the bump
+value $bcee a bounce_state
+value $bcf8 a bounce_state
+value $bd02 a hit_row
+value $bd14 y small
+value $bd22 y coin_metatile
+value $bd3e y coin_metatile
+value $bd55 y offset_index
+value $bd61 y offset_index
+value $bd68 a top
 label $bd62 block_height ; the block's height above the player
 label $bd41 bumped_metatile ; the block's metatile once bumped
 routine $bd84 place_block_object        ; put a block object at the block the player hit
 param place_block_object x block_slot ; the bumped block's slot
+value $bd87 temp center_x
+value $bd8f a page
 routine $bd9b bump_block                ; bounce the block the player hit, and give what it holds
 scratch bump_block $05 pushed_metatile ; the metatile the block was
+value $bdb6 a contents
+value $bdbb a contents
+value $bdb7 carry past_coins
 table $bdc0 block_contents_handlers 18
 routine $bdd2 block_gives_mushroom      ; give a mushroom or fire flower
 param block_gives_mushroom x block_slot ; the bumped block's slot
@@ -1240,13 +1771,25 @@ scratch shatter_brick $07 buffer_high ; the high byte of the block's address in 
 routine $be1f collect_coin_above        ; collect a coin standing on the hit block
 scratch collect_coin_above $07 buffer_high ; the high byte of the block's address in the block buffer
 result collect_coin_above x block_slot ; the bumped block's slot
+value $be22 y row
+value $be28 a above
+value $be2c y above_row
 routine $be41 spawn_brick_chunks        ; start the four chunks of a broken brick
 param spawn_brick_chunks x block_slot ; the brick's slot
+value $be67 a lower_y
 routine $be70 update_block_objects      ; move a bumped block or brick chunks, and replace the block when it lands
+value $be70 a state
+value $be9c a state
+value $beae a state
+value $bec7 a state
+value $becf a state
+value $be74 a kind
 label $bed1 block_gone ; the block's slot is cleared
 label $becf block_rest ; the block comes to rest
 routine $bed4 update_block_metatiles    ; write the metatile of a hit block to the block buffer and redraw it
 scratch update_block_metatiles $07 metatile_count ; the metatiles left to write
+value $beeb a row
+value $bef0 y row_offset
 routine $bf02 move_enemy_x              ; move the enemy in slot X horizontally
 result move_enemy_x a pixels_moved ; the whole pixels moved, with the sub-pixel carry
 result move_enemy_x y page_step ; $ff when moving left, else 0
@@ -1259,6 +1802,14 @@ scratch move_object_x $00 pixel_speed ; the whole pixels of the speed
 scratch move_object_x $01 fraction_speed ; the sub-pixel part of the speed
 scratch move_object_x $02 page_carry ; the page step: $ff when moving left
 param move_object_x x obj_slot ; the object's slot
+value $bf13 a speed_low
+value $bf1c a pixels
+value $bf21 a pixels
+value $bf32 temp force_sum
+value $bf39 a force_carry
+value $bf3b carry fraction_carry
+value $bf3e temp new_x
+value $bf44 a new_page
 routine $bf63 move_enemy_down_fast      ; move an enemy down quickly, or a falling platform
 routine $bf6b move_falling_platform     ; move a falling platform down, its speed limited
 routine $bf6d move_vertically           ; move an object down with gravity, the force in Y
@@ -1287,6 +1838,9 @@ routine $bfb4 move_platform_down        ; move a lift down
 routine $bfb7 move_platform_up          ; move a lift up
 routine $bfb9 move_platform             ; move a lift up or down (A), slower for dropping platforms
 param move_platform a can_rise ; nonzero: the lift rises
+value $bfba y kind
+value $bfbd a force
+value $bfc3 a force
 routine $bfd1 move_paratroopa_vertically; move an object vertically by its gravity parameters
 param move_paratroopa_vertically a can_rise ; nonzero: the up force applies too
 routine $bfd7 apply_gravity             ; vertical speed, sub-pixel force and position with a speed cap
@@ -1296,6 +1850,16 @@ scratch apply_gravity $02 max_speed ; the downward speed cap
 scratch apply_gravity $07 speed_sign ; the sign of the vertical speed
 param apply_gravity a can_rise ; nonzero: the up force applies too
 param apply_gravity x obj_slot ; the object's slot in the object arrays
+value $bfdc temp fraction_sum
+value $bfe2 y speed_high
+value $bfe4 a old_speed
+value $bfeb temp new_y
+value $bff1 a new_page
+value $bff9 temp fall_speed
+value $c000 a speed
+value $c027 temp rise_speed
+value $c02e a rising
+value $bfdc carry fraction_carry
 routine $c047 update_enemies_and_loops  ; load the next enemies and loop commands from the area's enemy data, then run the object in slot X
 result update_enemies_and_loops x object ; the object slot
 scratch update_enemies_and_loops $00 spawn_y ; the new enemy's Y

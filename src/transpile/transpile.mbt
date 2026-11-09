@@ -357,12 +357,14 @@ pub fn Transpiler::transpile(
   native~: Array[String] = [],
   locals~: Bool = false,
   check_scratch~: Bool = false,
+  addresses~: Bool = false,
 ) -> Transpiler raise TranspileError {
   for name in native {
     if program.function(name) is None { raise UnknownNativeRoutine(name) }
   }
   let conv = if locals { Convention::locals_of(program) } else { Convention::machine() }
   conv.check = locals && check_scratch
+  conv.addresses = addresses
   let constants_h: File = {
     name: "constants.h",
     contents: {

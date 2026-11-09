@@ -175,6 +175,18 @@ pub(all) struct RomMap {
   params: Array[MapParam] // names of routines' register parameters (see `param`)
   results: Array[MapParam] // names of their results (see `result`)
   labels: Array[(Int, String, String)] // names of places inside routines (see `label`): address, name, description
+  values: Array[MapValue] // names of the values instructions write (see `value`)
+} derive(Debug)
+
+// value $ADDR REG NAME: the value the instruction at ADDR writes to a
+// register or flag (a, x, y, carry, zero, negative, overflow), or the
+// temporary it computes (temp: a sum, a difference, a bit shifted out),
+// named where the C has `a` or `sum`.
+pub(all) struct MapValue {
+  address: Int
+  register: String
+  name: String
+  description: String
 } derive(Debug)
 
 // record NAME VAR...: arrays of RAM indexed alike (one object slot's
@@ -213,7 +225,7 @@ pub(all) struct MapParam {
 pub let map_registers : Array[String] = ["a", "x", "y", "carry", "zero", "negative", "overflow"]
 
 pub fn RomMap::empty() -> RomMap {
-  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, follow: false, preempt: 0, jumps: [], jump_tables: [], inline: [], ram_code: [], copied: [], threads: [], records: [], scratch: [], params: [], results: [], labels: [] }
+  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, follow: false, preempt: 0, jumps: [], jump_tables: [], inline: [], ram_code: [], copied: [], threads: [], records: [], scratch: [], params: [], results: [], labels: [], values: [] }
 }
 
 // The name of a switchable bank, the prefix of its entries.
@@ -295,6 +307,7 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
   let params: Array[MapParam] = []
   let results: Array[MapParam] = []
   let labels: Array[(Int, String, String)] = []
+  let values: Array[MapValue] = []
   let shadows: Array[(Int, Int)] = []
   let names: Set[String] = Set([])
   fn claim(name: String) raise ImageError {
@@ -353,6 +366,19 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
         raise InvalidImage("Duplicate map \{fields[0]} name: \{line}")
       }
       list.push({ routine: fields[1], register: fields[2], name: fields[3], variable: if every { fields[4] } else { "" }, description })
+      continue
+    }
+    // value $ADDR REG NAME
+    if fields[0] == "value" {
+      if fields.length() != 4 { raise InvalidImage("Map value line needs an address, a register and a name: \{line}") }
+      if !map_registers.contains(fields[2]) && fields[2] != "temp" {
+        raise InvalidImage("Map value names a register, a flag or temp: \{line}")
+      }
+      let address = parse_number(fields[1])
+      if values.iter().any(fn(v) { v.address == address && v.register == fields[2] }) {
+        raise InvalidImage("Duplicate map value name: \{line}")
+      }
+      values.push({ address, register: fields[2], name: fields[3], description })
       continue
     }
     // label $ADDR NAME: a place inside a routine (a branch's target), named
@@ -608,7 +634,7 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       raise InvalidImage("Parameter name for an unknown variable: \{e.variable}")
     }
   }
-  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), follow, preempt, jumps, jump_tables, inline, ram_code, copied, threads, records, scratch, params, results, labels }
+  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), follow, preempt, jumps, jump_tables, inline, ram_code, copied, threads, records, scratch, params, results, labels, values }
 }
 
 pub(all) struct Cartridge {

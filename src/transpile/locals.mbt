@@ -253,6 +253,8 @@ priv struct Convention {
   // Computed accesses checked against the scratch bytes that are locals
   // (`--check-scratch`, for the tests).
   mut check : Bool
+  // each statement followed by its instruction address (for naming values)
+  mut addresses : Bool
   sigs : Map[String, Signature]
   // What waiting for an interrupt reads: the roots' demand, and the scratch
   // bytes the interrupt handlers read on entry.
@@ -293,7 +295,7 @@ fn Convention::pointer_param(self : Convention, f : String, s : Slot) -> String 
 }
 
 fn Convention::machine() -> Convention {
-  { locals: false, check: false, sigs: Map([]), root: 0, webs: Map([]), entered: Map([]), same_x: Map([]), param_names: Map([]), scratch_names: Map([]), derived_params: Map([]), derived_results: Map([]) }
+  { locals: false, check: false, addresses: false, sigs: Map([]), root: 0, webs: Map([]), entered: Map([]), same_x: Map([]), param_names: Map([]), scratch_names: Map([]), derived_params: Map([]), derived_results: Map([]) }
 }
 
 fn Convention::sig(self : Convention, name : String) -> Signature {
@@ -562,7 +564,7 @@ fn solve(
       let primary = if f.helper || m { None } else { slots_of(outputs & memory.lnot()).get(0) }
       sigs[f.name] = { machine: m, memory, params: 0, outputs, kept: kept[f.name], primary, promoted: 0 }
     }
-    let conv = { locals: true, check: false, sigs, root, webs: Map([]), entered: Map([]), same_x: Map([]), param_names: Map([]), scratch_names: Map([]), derived_params: Map([]), derived_results: Map([]) }
+    let conv = { locals: true, check: false, addresses: false, sigs, root, webs: Map([]), entered: Map([]), same_x: Map([]), param_names: Map([]), scratch_names: Map([]), derived_params: Map([]), derived_results: Map([]) }
     // parameters: a least fixpoint, they only grow; a routine is followed
     // again when one it calls or goes to takes more
     let work = program.functions.map(fn(f) { f.name })

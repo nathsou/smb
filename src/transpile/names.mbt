@@ -99,7 +99,7 @@ fn map_result(views : Views, conv : Convention, f : String, r : Int) -> (String,
 fn names_taken(views : Views, f : @ir.Function, conv : Convention) -> Set[String] {
   let taken : Set[String] = Set([])
   for name in local_names { taken.add(name) }
-  for name in temp_names(f, locals=true) { taken.add(name) }
+  for name in temp_names(f, locals=true, views~) { taken.add(name) }
   let plan = scratch_plan_named(f, views, conv)
   for name in plan.ram { if name != "" { taken.add(name) } }
   for name in plan.locals { taken.add(name) }
@@ -587,6 +587,18 @@ fn CFunc::register_names(self : CFunc) -> RegNames? {
       for s in slots_of(bit) { taken.add(conv.pointer_param(f.name, s)) }
     }
   }
+  // the map's names for the values instructions write (see `value`)
+  let valued : Array[Array[String]] = Array::makei(n, fn(_) { [] })
+  for b, block in f.blocks {
+    for k, _ in block.stmts {
+      guard self.views.values.get(block.pc(k)) is Some(list) else { continue }
+      for e in list {
+        if e.0 < 0 || e.0 >= 7 { continue }
+        let d = def_node[b][k][e.0]
+        if d >= 0 { valued[web.find(d)].push(e.1) }
+      }
+    }
+  }
   let name_of : Array[String] = Array::make(n, "")
   for node in 0..<n {
     if web.find(node) != node { continue }
@@ -594,6 +606,8 @@ fn CFunc::register_names(self : CFunc) -> RegNames? {
     let slot = reg_slot(r)
     let candidate = if entry_param[node] {
       conv.param_names.get(f.name).unwrap_or(Map([])).get(slot.bit())
+    } else if !valued[node].is_empty() {
+      Some(valued[node][0])
     } else if loads[node] > 0 && others[node] == 0 && results[node].is_empty() && default_var(r) is Some(dv) {
       Some(dv.1)
     } else if returned[node] && map_result(self.views, conv, f.name, r) is Some((name, _)) {
@@ -607,7 +621,9 @@ fn CFunc::register_names(self : CFunc) -> RegNames? {
       Some(name) =>
         if entry_param[node] {
           name_of[node] = name
-        } else if !taken.contains(name) && !self.views.taken.contains(name) && owner.get(name).unwrap_or(r) == r {
+        } else if !taken.contains(name) &&
+          !(if valued[node].is_empty() { self.views.taken } else { self.views.value_taken }).contains(name) &&
+          owner.get(name).unwrap_or(r) == r {
           owner[name] = r
           name_of[node] = name
         }
