@@ -44,6 +44,9 @@ pub fn from_assembly(text : String) -> @image.Program raise PipelineError {
 pub(all) struct Options {
   native : Array[String] // routines supplied by hand-written C
   reference : Bool // unoptimised IR (the differential test's reference)
+  locals : Bool // registers, flags and scratch bytes as C locals and parameters (the C only)
+  check_scratch : Bool // with locals, computed accesses checked against the scratch bytes (tests)
+  addresses : Bool // each C statement followed by its instruction address
   wasm : Bool
   layout : Map[String, Int] // runtime addresses for the WebAssembly module
   force_dispatch : Bool
@@ -55,6 +58,9 @@ pub fn Options::default() -> Options {
   {
     native: [],
     reference: false,
+    locals: false,
+    check_scratch: false,
+    addresses: false,
     wasm: false,
     layout: Map([]),
     force_dispatch: false,
@@ -94,7 +100,7 @@ pub fn recompile(
   progress("optimize")
   if options.reference { ir.analyze() |> ignore } else { ir.optimize() }
   progress("c")
-  let c = @transpile.Transpiler::transpile(low, ir, native=options.native) catch {
+  let c = @transpile.Transpiler::transpile(low, ir, native=options.native, locals=options.locals, check_scratch=options.check_scratch, addresses=options.addresses) catch {
     err => raise fail("C", err)
   }
   let polls = polls.map(fn(location) {
@@ -141,10 +147,11 @@ fn hex(v : Int) -> String {
   "0x" + v.to_string(radix=16)
 }
 
-// A C header with the map's names alone (no ROM needed): its types,
-// addresses of variables, registers and tables, and prototypes of the
-// routines, for the
-// hand-written code that works alongside the generated program.
+// A C header with the map's names alone (no ROM needed): its types and the
+// addresses of variables, registers and tables, for the hand-written code
+// that works alongside the generated program. (The routines' prototypes
+// depend on the ROM's code: the transpiler writes those the hand-written
+// code needs, routines.h.)
 pub fn map_header(map_text : String, source~ : String) -> String raise PipelineError {
   let map = @image.parse_map(map_text) catch { err => raise fail("Map", err) }
   let out = StringBuilder()
@@ -157,7 +164,7 @@ pub fn map_header(map_text : String, source~ : String) -> String raise PipelineE
     seen.add(entry.name)
     let comment = if entry.description == "" { "" } else { " // " + entry.description }
     match entry.kind {
-      Routine => out.write_string("void \{entry.name}(void);\{comment}\n")
+      Routine => ()
       _ => out.write_string("#define \{entry.name} \{hex(entry.address)}\{comment}\n")
     }
   }

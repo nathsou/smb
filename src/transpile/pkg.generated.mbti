@@ -18,6 +18,7 @@ pub(all) suberror EmitterError {
 
 pub(all) suberror TranspileError {
   UnknownNativeRoutine(String)
+  LocalsUnsupported(String)
 } derive(@debug.Debug)
 
 // Types and methods
@@ -37,7 +38,7 @@ pub fn File::write(Self, dir~ : String) -> Unit raise
 pub(all) struct Transpiler {
   files : Array[File]
 }
-pub fn Transpiler::transpile(@lower.AsmLowering, @ir.Program, native? : Array[String]) -> Self raise TranspileError
+pub fn Transpiler::transpile(@lower.AsmLowering, @ir.Program, native? : Array[String], locals? : Bool, check_scratch? : Bool, addresses? : Bool) -> Self raise TranspileError
 
 // Type aliases
 

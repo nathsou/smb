@@ -53,6 +53,182 @@ enum {
   AREA_KIND_CASTLE = 3,
 };
 
+// pulse1_sfx bits: pulse 1's sound effects (stomp also for a swim stroke)
+enum {
+  PULSE1_SFX_BIG_JUMP = 0x01,
+  PULSE1_SFX_BUMP = 0x02,
+  PULSE1_SFX_STOMP = 0x04,
+  PULSE1_SFX_SMACK = 0x08,
+  PULSE1_SFX_PIPE_INJURY = 0x10,
+  PULSE1_SFX_FIREBALL = 0x20,
+  PULSE1_SFX_FLAGPOLE = 0x40,
+  PULSE1_SFX_SMALL_JUMP = 0x80,
+};
+
+// pulse2_sfx bits: pulse 2's sound effects
+enum {
+  PULSE2_SFX_COIN = 0x01,
+  PULSE2_SFX_GROW_POWERUP = 0x02,
+  PULSE2_SFX_GROW_VINE = 0x04,
+  PULSE2_SFX_BLAST = 0x08,
+  PULSE2_SFX_TIMER_TICK = 0x10,
+  PULSE2_SFX_POWERUP_GRAB = 0x20,
+  PULSE2_SFX_EXTRA_LIFE = 0x40,
+  PULSE2_SFX_BOWSER_FALL = 0x80,
+};
+
+// noise_sfx bits: the noise channel's sound effects
+enum {
+  NOISE_SFX_BRICK_SHATTER = 0x01,
+  NOISE_SFX_BOWSER_FLAME = 0x02,
+};
+
+// event_music bits: event music
+enum {
+  EVENT_MUSIC_DEATH = 0x01,
+  EVENT_MUSIC_GAME_OVER = 0x02,
+  EVENT_MUSIC_VICTORY = 0x04,
+  EVENT_MUSIC_CASTLE_CLEAR = 0x08,
+  EVENT_MUSIC_LEVEL_CLEAR = 0x20,
+  EVENT_MUSIC_HURRY_UP = 0x40,
+  EVENT_MUSIC_SILENCE = 0x80,
+};
+
+// area_music bits: area music
+enum {
+  AREA_MUSIC_WATER = 0x01,
+  AREA_MUSIC_GROUND = 0x02,
+  AREA_MUSIC_UNDERGROUND = 0x04,
+  AREA_MUSIC_CASTLE = 0x08,
+  AREA_MUSIC_CLOUD = 0x10,
+  AREA_MUSIC_PIPE_INTRO = 0x20,
+  AREA_MUSIC_STAR = 0x40,
+  AREA_MUSIC_SILENCE = 0x80,
+};
+
+// player_task values: the player's routine (player_tasks)
+enum {
+  PLAYER_TASK_PLACE = 0,
+  PLAYER_TASK_VINE_CLIMB_IN = 1,
+  PLAYER_TASK_SIDE_PIPE_EXIT = 2,
+  PLAYER_TASK_DOWN_PIPE = 3,
+  PLAYER_TASK_FLAGPOLE = 4,
+  PLAYER_TASK_WALK_TO_CASTLE = 5,
+  PLAYER_TASK_LOSE_LIFE = 6,
+  PLAYER_TASK_ENTER_AREA = 7,
+  PLAYER_TASK_CONTROL = 8,
+  PLAYER_TASK_GROW_OR_SHRINK = 9,
+  PLAYER_TASK_INJURY_BLINK = 10,
+  PLAYER_TASK_DYING = 11,
+  PLAYER_TASK_FIRE_FLOWER = 12,
+};
+
+// screen_task values: the screen setup's step (screen_tasks)
+enum {
+  SCREEN_TASK_CLEAR_SCREEN = 0,
+  SCREEN_TASK_INTERMISSION_SETUP = 1,
+  SCREEN_TASK_STATUS_BAR_TOP = 2,
+  SCREEN_TASK_STATUS_BAR_BOTTOM = 3,
+  SCREEN_TASK_TIME_UP = 4,
+  SCREEN_TASK_WAIT = 5,
+  SCREEN_TASK_INTERMISSION = 6,
+  SCREEN_TASK_WAIT_AGAIN = 7,
+  SCREEN_TASK_RENDER_COLUMNS = 8,
+  SCREEN_TASK_AREA_PALETTE = 9,
+  SCREEN_TASK_BACKGROUND_COLOR = 10,
+  SCREEN_TASK_MUSHROOM_PALETTE = 11,
+  SCREEN_TASK_TITLE_SCREEN = 12,
+  SCREEN_TASK_CLEAR_LISTS = 13,
+  SCREEN_TASK_TOP_SCORE = 14,
+};
+
+// star_flag_task values: the end of the area's step (star_flag_tasks)
+enum {
+  STAR_FLAG_TASK_DONE = 0,
+  STAR_FLAG_TASK_COUNT_FIREWORKS = 1,
+  STAR_FLAG_TASK_TIME_POINTS = 2,
+  STAR_FLAG_TASK_RAISE_FLAG = 3,
+  STAR_FLAG_TASK_WAIT_END = 4,
+};
+
+// sprite_attribute bits: a sprite's attribute bits (the low two: its palette)
+enum {
+  SPRITE_ATTRIBUTE_BEHIND = 0x20,
+  SPRITE_ATTRIBUTE_FLIP_X = 0x40,
+  SPRITE_ATTRIBUTE_FLIP_Y = 0x80,
+};
+
+// vram_list values: the VRAM update list to draw (vram_lists_low/high)
+enum {
+  VRAM_LIST_LIST1 = 0,
+  VRAM_LIST_WATER_PALETTES = 1,
+  VRAM_LIST_GROUND_PALETTES = 2,
+  VRAM_LIST_UNDERGROUND_PALETTES = 3,
+  VRAM_LIST_CASTLE_PALETTES = 4,
+  VRAM_LIST_TITLE_BUFFER = 5,
+  VRAM_LIST_LIST2 = 6,
+  VRAM_LIST_LIST2_AGAIN = 7,
+  VRAM_LIST_BOWSER_PALETTE = 8,
+  VRAM_LIST_DAY_SNOW_PALETTE = 9,
+  VRAM_LIST_NIGHT_SNOW_PALETTE = 10,
+  VRAM_LIST_MUSHROOM_PALETTE = 11,
+  VRAM_LIST_THANKS_MARIO = 12,
+  VRAM_LIST_THANKS_LUIGI = 13,
+  VRAM_LIST_OTHER_CASTLE = 14,
+  VRAM_LIST_QUEST_OVER = 15,
+  VRAM_LIST_NEW_QUEST = 16,
+  VRAM_LIST_PRESS_B = 17,
+  VRAM_LIST_SELECT_WORLD = 18,
+};
+
+// enemy_kind values
+enum {
+  ENEMY_KIND_RED_KOOPA_OFF_LEDGES = 1,
+  ENEMY_KIND_BUZZY_BEETLE = 2,
+  ENEMY_KIND_RED_KOOPA = 3,
+  ENEMY_KIND_HAMMER_BRO = 5,
+  ENEMY_KIND_GOOMBA = 6,
+  ENEMY_KIND_BLOOPER = 7,
+  ENEMY_KIND_BULLET = 8,
+  ENEMY_KIND_CHEEP_CHEEP_SLOW = 10,
+  ENEMY_KIND_CHEEP_CHEEP_FAST = 11,
+  ENEMY_KIND_PODOBOO = 12,
+  ENEMY_KIND_PIRANHA = 13,
+  ENEMY_KIND_BOUNCING_PARATROOPA = 14,
+  ENEMY_KIND_RED_PARATROOPA = 15,
+  ENEMY_KIND_FLYING_PARATROOPA = 16,
+  ENEMY_KIND_LAKITU = 17,
+  ENEMY_KIND_SPINY = 18,
+  ENEMY_KIND_FLYING_CHEEP_CHEEPS = 20,
+  ENEMY_KIND_BOWSER_FLAME = 21,
+  ENEMY_KIND_FIREWORKS = 22,
+  ENEMY_KIND_BULLETS_AND_CHEEP_CHEEPS = 23,
+  ENEMY_KIND_END_FRENZY = 24,
+  ENEMY_KIND_FIREBAR_SLOW = 27,
+  ENEMY_KIND_FIREBAR_FAST = 28,
+  ENEMY_KIND_FIREBAR_SLOW_REVERSE = 29,
+  ENEMY_KIND_FIREBAR_FAST_REVERSE = 30,
+  ENEMY_KIND_LONG_FIREBAR = 31,
+  ENEMY_KIND_BALANCE_PLATFORM = 36,
+  ENEMY_KIND_VERTICAL_PLATFORM = 37,
+  ENEMY_KIND_LIFT_UP = 38,
+  ENEMY_KIND_LIFT_DOWN = 39,
+  ENEMY_KIND_SIDE_PLATFORM = 40,
+  ENEMY_KIND_DROP_PLATFORM = 41,
+  ENEMY_KIND_RIGHT_PLATFORM = 42,
+  ENEMY_KIND_SMALL_LIFT_UP = 43,
+  ENEMY_KIND_SMALL_LIFT_DOWN = 44,
+  ENEMY_KIND_BOWSER = 45,
+  ENEMY_KIND_POWERUP = 46,
+  ENEMY_KIND_VINE = 47,
+  ENEMY_KIND_FLAGPOLE_FLAG = 48,
+  ENEMY_KIND_STAR_FLAG = 49,
+  ENEMY_KIND_SPRING = 50,
+  ENEMY_KIND_BULLET_CANNON = 51,
+  ENEMY_KIND_WARP_ZONE = 52,
+  ENEMY_KIND_RETAINER = 53,
+};
+
 #define PPU_CTRL 0x2000
 #define PPU_MASK 0x2001
 #define PPU_STATUS 0x2002
@@ -468,67 +644,23 @@ enum {
 #define WORLD_SELECT_UNLOCKED 0x7fc
 #define CONTINUE_WORLD 0x7fd
 #define WARM_BOOT_MARKER 0x7ff
-void reset(void); // power-on and reset: clear memory, set up the display, then idle
 #define VRAM_LISTS_LOW 0x805a
 #define VRAM_LISTS_HIGH 0x806d
 #define VRAM_LIST_RESET_OFFSETS 0x8080
-void frame_interrupt(void); // once per frame: present the display updates, then run the game
-void handle_pause(void); // start toggles pause while playing
-void shuffle_sprite_slots(void); // rotate OAM slots so that dropped sprites flicker instead of vanishing
-void run_game_mode(void); // dispatch on the game mode (title, playing, victory, game over)
 #define GAME_MODE_TASKS 0x8218
-void hide_all_sprites(void);
-void hide_sprites_but_zero(void);
-void hide_sprites_from(void);
-void title_mode(void);
 #define TITLE_MODE_TASKS 0x8237
 #define WORLD_SELECT_TEMPLATE 0x823f
-void title_menu(void); // title screen input: start, world select, demo
-void start_continue(void);
 #define PLAYER_SELECT_ICON_DATA 0x831d
-void draw_player_select_icon(void);
 #define DEMO_BUTTONS 0x8340
 #define DEMO_DURATIONS 0x8355
-void play_demo(void); // feed recorded buttons to the player in attract mode
-void victory_mode(void);
-void run_victory_task(void);
 #define VICTORY_TASKS 0x83a6
-void start_victory(void);
-void victory_walk(void);
-void show_victory_messages(void);
-void next_game_mode_task(void);
-void finish_world(void);
 #define POPUP_TILES 0x849f
 #define POPUP_SCORE_DIGITS 0x84b7
-void update_score_popups(void); // floating score numbers after defeating enemies
-void run_screen_task(void);
 #define SCREEN_TASKS 0x856d
-void clear_screen_task(void);
-void intermission_setup(void);
 #define AREA_PALETTE_LISTS 0x85bb
-void queue_area_palette(void);
-void select_vram_list(void);
-void next_screen_task(void);
 #define BACKGROUND_COLOR_LISTS 0x85cb
 #define BACKGROUND_COLORS 0x85cf
 #define PLAYER_COLORS 0x85d7
-void queue_background_color(void);
-void queue_player_colors(void);
-void set_vram_list1_length(void);
-void queue_mushroom_palette(void);
-void select_vram_list_b(void);
-void skip_mushroom_palette(void);
-void draw_status_bar_top(void);
-void draw_status_bar_bottom(void);
-void show_time_up(void);
-void show_intermission(void);
-void start_intermission(void);
-void render_area_columns(void); // build the screen column by column while the display is off
-void draw_title_screen(void);
-void clear_lists_draw_icon(void);
-void next_screen_task_b(void);
-void draw_top_score(void);
-void next_game_mode_task_b(void);
 #define TEXT_STATUS_BAR 0x8752
 #define TEXT_WORLD_LIVES 0x8779
 #define TEXT_TIME_UP_2P 0x8798
@@ -539,24 +671,10 @@ void next_game_mode_task_b(void);
 #define TEXT_LUIGI 0x87ed
 #define TEXT_WARP_NUMBERS 0x87f2
 #define TEXT_OFFSETS 0x87fe
-void queue_text(void); // copy one of the text lists into the VRAM update list
-void wait_screen_timer(void);
-void restart_screen_timer(void);
-void render_column(void); // turn one column of metatiles into a VRAM update
-void render_attributes(void);
-void select_vram_list2(void);
 #define CYCLING_PALETTE_IDS 0x89c3
 #define BLANK_PALETTE 0x89c9
 #define CYCLING_PALETTES 0x89d1
-void cycle_palette(void); // animate the question-block palette every eighth frame
 #define BLOCK_TILE_OFFSETS 0x8a39
-void erase_coin_or_axe(void);
-void redraw_block(void);
-void redraw_block_blank(void);
-void queue_block_tiles(void);
-void advance_vram_list(void);
-void queue_metatile(void);
-void queue_metatile_tiles(void);
 #define METATILE_SETS_LOW 0x8b08
 #define METATILE_SETS_HIGH 0x8b0c
 #define METATILES_PALETTE0 0x8b10
@@ -578,51 +696,19 @@ void queue_metatile_tiles(void);
 #define TEXT_NEW_QUEST 0x8dbf
 #define TEXT_PRESS_B 0x8dde
 #define TEXT_SELECT_WORLD 0x8def
-void dispatch(void); // jump through the address table that follows the call, indexed by A
-void clear_screens(void);
-void clear_screen(void);
-void read_joypads(void);
-void read_joypad(void);
-void apply_vram_list(void);
-void set_scroll(void);
-void set_ppu_ctrl(void);
 #define COUNTER_POSITIONS 0x8ef4
 #define COUNTER_OFFSETS 0x8f00
-void queue_player_counters(void);
-void queue_counter_digits(void); // write a score, coin count or time to the VRAM update list
-void add_digits(void); // decimal add with carry across score or time digits
-void update_top_score(void);
-void check_top_score(void);
 #define DEFAULT_SPRITE_SLOTS 0x8fbc
 #define SPRITE_ZERO 0x8fcb
-void start_game(void); // clear game memory and enter the first area
-void start_area(void); // reset area state and position the player at the entrance
-void setup_new_game(void);
-void setup_area_display(void);
-void clear_memory(void); // clear RAM below the offset in Y, sparing the stack in use
 #define AREA_MUSIC_KINDS 0x90e7
-void queue_area_music(void);
 #define ENTRANCE_X_POSITIONS 0x9116
 #define ENTRANCE_ALT_Y 0x911a
 #define ENTRANCE_Y_POSITIONS 0x911c
 #define ENTRANCE_PRIORITIES 0x9125
 #define TIME_LIMITS 0x912d
-void place_player(void); // entrance kind, starting position and time limit
 #define HALFWAY_PAGES 0x91bd
-void lose_life(void);
-void game_over_mode(void);
 #define GAME_OVER_TASKS 0x921e
-void start_game_over(void);
-void game_over_screen(void);
-void end_game(void);
-void continue_game(void);
-void switch_players(void);
-void set_unused_flag(void);
-void do_nothing(void);
-void run_parser_task(void);
-void run_parser_subtask(void);
 #define PARSER_TASKS 0x92cb
-void advance_column(void);
 #define BACKGROUND_SCENE_OFFSETS 0x92f7
 #define BACKGROUND_SCENES 0x92fa
 #define BACKGROUND_SCENE_METATILES 0x938a
@@ -630,98 +716,26 @@ void advance_column(void);
 #define FOREGROUND_SCENES 0x93b1
 #define TERRAIN_METATILES 0x93d8
 #define TERRAIN_PATTERNS 0x93dc
-void parse_area_column(void); // decode the level layout for one metatile column
 #define BLOCK_BUFFER_LIMITS 0x9504
-void process_area_objects(void);
-void next_area_object(void);
-void decode_area_object(void);
-void check_loop_object(void);
 #define AREA_OBJECT_HANDLERS 0x9667
-void change_area_attributes(void);
-void warp_zone_lock(void);
-void lock_scroll(void);
-void remove_enemies(void);
 #define FRENZY_KINDS 0x9728
-void start_frenzy(void);
-void draw_area_style_object(void);
 #define AREA_STYLE_HANDLERS 0x9746
-void draw_tree_ledge(void);
-void draw_mushroom_ledge(void);
-void draw_stem_full(void);
-void draw_stem_none(void);
 #define PULLEY_ROPE_METATILES 0x97b7
-void draw_pulley_rope(void);
 #define CASTLE_METATILES 0x97cf
-void draw_castle(void);
-void draw_water_pipe(void);
-void draw_intro_pipe(void);
 #define SIDE_PIPE_SHAFTS 0x989f
 #define SIDE_PIPE_TOPS 0x98a3
 #define SIDE_PIPE_BOTTOMS 0x98a7
-void draw_exit_pipe(void);
-void draw_side_pipe(void);
 #define VERTICAL_PIPE_METATILES 0x98dd
-void draw_vertical_pipe(void); // may also spawn a piranha plant
-void get_pipe_height(void);
-void find_free_enemy_slot(void);
-void draw_water_hole(void);
-void draw_question_row_high(void);
-void draw_question_row_low(void);
-void draw_question_row(void);
-void draw_bridge_high(void);
-void draw_bridge_middle(void);
-void draw_bridge_at_row_middle(void);
-void draw_bridge_low(void);
-void draw_bridge_at_row(void);
-void draw_flag_balls(void);
-void draw_flagpole(void);
-void draw_endless_rope(void);
-void draw_balance_rope(void);
-void draw_rope(void);
 #define COIN_METATILES 0x99ee
-void draw_coin_row(void);
 #define SMALL_OBJECT_ROWS 0x99fb
 #define SMALL_OBJECT_METATILES 0x99fe
-void draw_castle_bridge(void);
-void draw_axe(void);
-void draw_small_object(void);
-void draw_empty_block(void);
-void draw_single_column(void);
 #define SOLID_BLOCK_METATILES 0x9a25
 #define BRICK_METATILES 0x9a29
-void draw_brick_row(void);
-void draw_solid_row(void);
-void draw_row_of(void);
-void draw_row_height1(void);
-void draw_brick_column(void);
-void draw_solid_column(void);
-void draw_column_of(void);
-void draw_cannon(void);
 #define STAIRCASE_HEIGHTS 0x9aa5
 #define STAIRCASE_ROWS 0x9aae
-void draw_staircase(void);
-void place_spring(void);
-void draw_hidden_1up(void);
-void draw_question_block(void);
-void draw_coin_brick(void);
-void draw_item_brick(void);
-void draw_block_metatile(void);
-void get_area_object_kind(void);
 #define HOLE_METATILES 0x9b3d
-void draw_hole(void); // also sets up whirlpools in water areas
-void fill_column_down(void);
-void get_object_length(void);
-void get_object_fixed_length(void);
-void get_object_row_size(void);
-void get_object_x(void);
-void get_object_y(void);
 #define BLOCK_BUFFER_ADDRESSES 0x9bdd
-void get_block_buffer_address(void);
 #define LOOP_AREA_OFFSETS 0x9bf8
-void load_area_pointer(void);
-void get_area_kind(void);
-void find_area_pointer(void);
-void load_area_data(void); // level layout and enemy list pointers, header attributes
 #define WORLD_AREA_OFFSETS 0x9cb4
 #define AREAS_WORLD1 0x9cbc
 #define AREAS_WORLD2 0x9cc1
@@ -805,50 +819,14 @@ void load_area_data(void); // level layout and enemy list pointers, header attri
 #define WATER_LAYOUT_1 0xae06
 #define WATER_LAYOUT_2 0xae45
 #define WATER_LAYOUT_3 0xaec0
-void playing_mode(void);
 #define PLAYING_MODE_TASKS 0xaee2
-void run_game_frame(void); // one frame of play: player, enemies, objects, scrolling, drawing
-void update_scroll_column(void);
-void scroll_with_player(void);
-void scroll_screen(void);
-void check_player_offscreen(void);
 #define SCREEN_EDGE_OFFSETS 0xb034
 #define OFFSCREEN_JOYPAD_MASKS 0xb036
-void update_screen_edges(void);
-void run_player_task(void);
 #define PLAYER_TASKS 0xb04f
-void enter_area(void); // walk in, come up a pipe or climb a vine
-void drive_player(void);
-void control_player(void); // joypad to movement, collisions, animation
-void vine_climb_in(void);
-void set_alt_entrance(void);
-void enter_down_pipe(void);
-void move_player_down(void);
-void enter_side_pipe_exit(void);
-void change_area_after_pipe(void);
-void change_area(void);
-void walk_into_side_pipe(void);
-void grow_or_shrink(void);
-void injury_blink(void);
-void start_size_change(void);
-void player_dying(void);
-void player_task_done(void);
-void get_fire_flower(void);
-void cycle_player_palette(void);
-void reset_player_palette(void);
-void slide_down_flagpole(void);
 #define HIDDEN_1UP_COIN_COUNTS 0xb2c2
-void walk_to_castle(void);
-void next_area(void);
-void move_player(void);
 #define PLAYER_MOVEMENT_STATES 0xb351
-void move_on_ground(void);
-void move_falling(void);
-void move_jumping_or_swimming(void);
-void move_in_air(void);
 #define CLIMB_STEPS_LOW 0xb3c7
 #define CLIMB_STEPS_HIGH 0xb3cb
-void move_climbing(void);
 #define JUMP_GRAVITY 0xb424
 #define FALL_GRAVITY 0xb42b
 #define JUMP_SPEEDS 0xb432
@@ -858,355 +836,94 @@ void move_climbing(void);
 #define FRICTION_AMOUNTS 0xb447
 #define CLIMB_SPEEDS 0xb44a
 #define CLIMB_FORCES 0xb44d
-void player_physics(void); // jumping, swimming, climbing and walking speeds
 #define PLAYER_ANIM_PERIODS 0xb58c
-void set_player_anim_speed(void);
-void apply_friction(void);
-void update_fireballs_and_bubbles(void);
 #define FIREBALL_SPEEDS 0xb687
-void update_fireball(void);
-void update_bubble(void);
-void spawn_bubble(void);
-void move_bubble(void);
 #define BUBBLE_FORCES 0xb74b
 #define BUBBLE_INTERVALS 0xb74d
-void tick_time_limit(void);
-void warp_zone_trigger(void);
-void update_whirlpools(void);
 #define FLAGPOLE_SCORE_BOUNDS 0xb84b
 #define FLAGPOLE_SCORE_DIGITS 0xb850
-void update_flagpole(void);
 #define SPRING_OFFSETS 0xb8b6
-void update_spring(void);
-void spawn_vine(void);
 #define VINE_HEIGHTS 0xb949
-void update_vine(void);
 #define CANNON_MASKS 0xb9ba
-void update_cannons(void);
 #define BULLET_SPEEDS 0xba31
-void update_bullet(void);
 #define HAMMER_SLOTS 0xba89
 #define HAMMER_SPEEDS 0xba92
-void spawn_hammer(void);
-void update_hammer(void);
-void spawn_block_coin(void);
-void spawn_jumping_coin(void);
-void launch_coin(void);
-void find_free_misc_slot(void);
-void update_misc_objects(void);
 #define COIN_DIGIT_OFFSETS 0xbbf8
 #define SCORE_DIGIT_OFFSETS 0xbbfa
 #define COUNTER_SELECTORS 0xbbfc
-void give_coin(void);
-void add_score(void);
-void queue_counters_for_player(void);
-void queue_counters(void);
-void spawn_powerup(void);
-void update_powerup(void);
 #define BLOCK_Y_OFFSETS 0xbceb
-void bump_head(void); // the player hit a block from below
-void place_block_object(void);
-void bump_block(void);
 #define BLOCK_CONTENTS_HANDLERS 0xbdc0
-void block_gives_mushroom(void);
-void block_gives_star(void);
-void block_gives_kind_star(void);
-void block_gives_1up(void);
-void block_gives_kind(void);
-void block_gives_vine(void);
 #define BUMPABLE_METATILES 0xbde8
-void find_bumped_metatile(void);
-void shatter_brick(void);
-void collect_coin_above(void);
-void spawn_brick_chunks(void);
-void update_block_objects(void);
-void update_block_metatiles(void);
-void move_enemy_x(void);
-void move_player_x(void);
-void move_object_x(void); // add speed (4.4 fixed point) to position and page
-void move_enemy_down_fast(void);
-void move_falling_platform(void);
-void move_vertically(void);
-void move_drop_platform(void);
-void move_enemy_down_slow(void);
-void set_max_speed_mid(void);
-void move_enemy_jumping(void);
-void set_max_speed_high(void);
-void apply_gravity_enemy(void);
 #define BLOCK_MAX_SPEEDS 0xbf9f
-void apply_gravity_block(void);
-void apply_gravity_object(void);
-void move_platform_down(void);
-void move_platform_up(void);
-void move_platform(void);
-void move_paratroopa_vertically(void);
-void apply_gravity(void); // vertical speed, sub-pixel force and position with a speed cap
-void update_enemies_and_loops(void);
 #define LOOP_WORLDS 0xc06b
 #define LOOP_PAGES 0xc076
 #define LOOP_Y_POSITIONS 0xc081
-void load_enemies_and_loops(void); // loop commands and spawning enemies from the enemy list
-void spawn_enemy(void);
-void init_enemy(void);
 #define ENEMY_INITIALIZERS 0xc282
-void init_nothing(void);
-void init_goomba(void);
-void init_podoboo(void);
-void init_retainer(void);
 #define WALK_SPEEDS 0xc30c
-void init_walker(void);
-void set_enemy_speed(void);
-void init_red_koopa(void);
 #define HAMMER_BRO_WALK_TIMES 0xc326
-void init_hammer_bro(void);
-void init_flyer_or_swimmer(void);
-void init_blooper(void);
-void set_small_box(void);
-void init_red_paratroopa(void);
-void set_tall_box(void);
-void set_box_facing_left(void);
-void clear_vertical_motion(void);
-void init_bullet(void);
-void init_cheep_cheep(void);
-void init_lakitu(void);
-void setup_lakitu(void);
 #define LAKITU_AIM_OFFSETS 0xc398
-void update_lakitu_spawner(void); // bring Lakitu back and throw spinies
 #define FIREBAR_SPEEDS 0xc44f
 #define FIREBAR_DIRECTIONS 0xc454
-void init_long_firebar(void);
-void init_firebar(void);
 #define FLYING_FISH_X_OFFSETS 0xc488
 #define FLYING_FISH_SPEEDS 0xc498
 #define FLYING_FISH_INTERVALS 0xc4a4
-void init_flying_fish(void);
-void init_bowser(void);
-void copy_enemy(void);
 #define FLAME_HEIGHTS 0xc59d
 #define FLAME_FORCE_OFFSETS 0xc5a1
-void init_bowser_flame(void);
-void place_flame(void);
-void finish_flame(void);
 #define FIREWORK_X_OFFSETS 0xc631
 #define FIREWORK_Y_OFFSETS 0xc637
-void init_firework(void);
 #define BIT_MASKS 0xc68a
 #define FRENZY_Y_POSITIONS 0xc692
 #define SWIMMING_FISH_KINDS 0xc69a
-void spawn_frenzy_enemy(void); // bullet bills or cheep cheeps arriving from the side
-void init_piranha(void);
-void init_frenzy(void);
 #define FRENZY_INITIALIZERS 0xc7ab
-void init_no_frenzy(void);
-void end_frenzy(void);
-void init_bouncing_paratroopa(void);
-void set_tall_box_b(void);
-void set_box_kind(void);
-void init_balance_platform(void);
-void init_drop_platform(void);
-void init_side_platform(void);
-void init_vertical_platform(void);
-void init_platform(void);
-void set_platform_box(void);
-void large_lift_up(void);
-void large_lift_down(void);
-void large_lift_box(void);
-void small_lift_up(void);
-void small_lift_down(void);
-void small_lift_common(void);
 #define PLATFORM_OFFSET_LOW 0xc86b
 #define PLATFORM_OFFSET_HIGH 0xc86e
-void offset_platform(void);
-void finish_enemy_init(void);
 #define ENEMY_RUNNERS 0xc892
-void run_nothing(void);
-void run_retainer(void);
-void run_normal_enemy(void);
-void move_enemy(void);
 #define ENEMY_MOVERS 0xc90a
-void move_nothing(void);
-void run_bowser_flame(void);
-void run_firebar(void);
-void run_small_platform(void);
-void run_large_platform(void);
-void move_large_platform(void);
 #define LARGE_PLATFORM_MOVERS 0xc98a
-void erase_enemy(void);
-void move_podoboo(void);
 #define HAMMER_THROW_MASKS 0xc9ce
 #define WALK_SPEED_ADDERS 0xc9d0
 #define REVIVED_SPEEDS 0xc9d4
-void update_hammer_bro(void);
 #define HAMMER_BRO_JUMP_LENGTHS 0xca10
-void hammer_bro_jump(void);
-void hammer_bro_walk(void);
-void move_walker(void);
-void move_defeated_enemy(void);
-void move_hopping_paratroopa(void);
-void move_red_paratroopa(void);
-void move_green_paratroopa(void);
-void sway_green_paratroopa(void);
-void sway_counters(void); // oscillating primary/secondary counters for back-and-forth motion
-void sway_offset(void);
 #define BLOOPER_MASKS 0xcb87
-void move_blooper(void);
-void blooper_swim(void);
-void move_bullet(void);
 #define SWIMMING_FISH_SPEEDS 0xcc46
-void move_swimming_fish(void);
 #define FIREBAR_OFFSETS 0xccc7
 #define FIREBAR_MIRRORS 0xcd2a
 #define FIREBAR_TABLE_OFFSETS 0xcd2e
 #define FIREBAR_Y_POSITIONS 0xcd3a
-void update_firebar(void);
-void draw_firebar_ball(void);
-void firebar_ball_collision(void);
-void firebar_ball_position(void);
 #define RANDOM_Y_RANGES 0xced5
 #define FLYING_FISH_PRIORITIES 0xceda
-void move_flying_fish(void);
 #define LAKITU_SPEED_ADJUST 0xcf25
-void move_lakitu(void);
-void lakitu_chase(void);
 #define BRIDGE_TILE_COLUMNS 0xcfdd
-void collapse_bridge(void);
-void move_dying_bowser(void);
 #define BOWSER_MOVE_RANGES 0xd061
-void run_bowser(void);
-void kill_all_enemies(void);
-void draw_bowser(void);
-void bowser_half(void);
 #define FLAME_TIMERS 0xd1d1
-void next_flame_timer(void);
-void update_bowser_flame(void);
-void run_firework(void);
 #define STAR_FLAG_Y_OFFSETS 0xd2cd
 #define STAR_FLAG_X_OFFSETS 0xd2d1
 #define STAR_FLAG_TILES 0xd2d5
-void run_star_flag(void);
 #define STAR_FLAG_TASKS 0xd2e8
-void count_fireworks(void);
-void next_star_flag_task(void);
-void star_flag_done(void);
-void award_time_points(void);
-void award_area_points(void);
-void raise_star_flag(void);
-void draw_star_flag(void);
-void next_star_flag_task_b(void);
-void wait_area_end(void);
-void move_piranha(void);
-void spin_firebar(void);
-void update_balance_platform(void);
-void draw_platform_rope(void);
-void stop_balance_platforms(void);
-void move_vertical_platform(void);
-void carry_player_vertically(void);
-void move_side_platform(void);
-void carry_player_horizontally(void);
-void drop_platform(void);
-void right_platform(void);
-void move_large_lift(void);
-void move_small_lift(void);
-void move_lift(void);
-void check_enemy_offscreen(void);
-void fireball_enemy_collision(void);
 #define BOWSER_LOOKALIKES 0xd736
-void fireball_hit_enemy(void);
-void defeat_enemy(void);
-void smack_enemy_score(void);
-void player_hammer_collision(void);
 #define LEFTOVER_SPEEDS 0xd84d
 #define KICKED_SHELL_SPEEDS 0xd84f
 #define DEMOTED_KOOPA_SPEEDS 0xd851
-void player_enemy_collision(void);
 #define KICKED_SHELL_POINTS 0xd892
-void injure_player(void);
-void force_injury(void);
-void set_player_routine(void);
-void end_injury_check(void);
 #define STOMP_POINTS 0xd965
 #define REVIVAL_RATES 0xd9d2
-void face_player(void);
-void spawn_floating_score(void);
 #define SET_BIT_MASKS 0xda25
 #define CLEAR_BIT_MASKS 0xda2c
-void enemy_enemy_collisions(void);
-void enemy_pair_collision(void);
-void turn_enemy_around(void);
-void reverse_enemy(void);
-void large_platform_collision(void);
-void player_on_large_platform(void);
-void large_platform_collision_done(void);
-void small_platform_collision(void);
-void platform_landing(void);
 #define SMALL_PLATFORM_Y_OFFSETS 0xdc17
-void place_player_on_small_platform(void);
-void place_player_on_vertical_platform(void);
-void place_player_on_platform_y(void);
-void check_player_vertical(void);
-void enemy_box_offset(void);
-void enemy_box_offset_for(void);
 #define PLAYER_BG_TOP_EXTENTS 0xdc62
-void player_bg_collision(void);
 #define AREA_CHANGE_TIMERS 0xde03
-void erase_metatile(void);
 #define CLIMB_X_OFFSETS 0xde25
 #define CLIMB_PAGE_OFFSETS 0xde27
 #define FLAGPOLE_HEIGHTS 0xde29
-void is_hidden_block(void);
-void check_spring_landing(void);
-void is_spring_metatile(void);
-void enter_pipe(void);
-void block_player_side(void);
 #define SOLID_METATILE_LIMITS 0xdf8b
-void is_solid_metatile(void);
 #define CLIMB_METATILE_LIMITS 0xdf96
-void is_climb_metatile(void);
-void is_coin_metatile(void);
-void metatile_group(void);
 #define ENEMY_BG_STATES 0xdfb9
 #define ENEMY_BG_SPEEDS 0xdfbf
-void enemy_bg_collision(void);
-void check_stun_enemy(void);
-void stun_enemy(void);
-void enemy_side_check(void);
-void enemy_bump(void);
-void player_enemy_distance(void);
-void land_enemy(void);
-void enemy_height_check(void);
-void enemy_jump_check(void);
-void kill_enemy_on_block(void);
-void check_under_enemy(void);
-void is_passable_metatile(void);
-void fireball_bg_collision(void);
 #define BOX_SIZES 0xe1fd // left, top, right and bottom offsets by box kind
-void fireball_box(void);
-void misc_box(void);
-void fireball_box_common(void);
-void enemy_box(void);
-void small_platform_box(void);
-void enemy_box_offscreen_bits(void);
-void large_platform_box(void);
-void enemy_box_core(void);
-void hide_box(void);
-void compute_box(void);
-void clip_box_to_screen(void);
-void player_collides(void);
-void objects_collide(void); // bounding box overlap test, carry set on collision
-void enemy_block_check(void);
-void fireball_block_check(void);
-void block_check_common(void);
 #define BLOCK_PROBE_STARTS 0xe3ad
 #define BLOCK_PROBE_X 0xe3b0
 #define BLOCK_PROBE_Y 0xe3cc
-void block_probe_feet(void);
-void block_probe_head(void);
-void block_probe_side(void);
-void block_probe_player(void);
-void block_probe(void); // metatile at an object's probe point
 #define VINE_Y_OFFSETS 0xe433
-void draw_vine(void);
-void stack_six_sprites(void);
 #define HAMMER_FIRST_X 0xe4c0
 #define HAMMER_FIRST_Y 0xe4c4
 #define HAMMER_SECOND_X 0xe4c8
@@ -1214,110 +931,33 @@ void stack_six_sprites(void);
 #define HAMMER_FIRST_TILES 0xe4d0
 #define HAMMER_SECOND_TILES 0xe4d4
 #define HAMMER_ATTRIBUTES 0xe4d8
-void draw_hammer(void);
 #define FLAGPOLE_SCORE_TILES 0xe541
-void draw_flagpole_flag(void);
-void hide_six_sprites(void);
-void fill_six_sprites(void);
-void fill_four_sprites(void);
-void fill_three_sprites(void);
-void fill_two_sprites(void);
-void draw_large_platform(void);
 #define JUMPING_COIN_TILES 0xe682
-void draw_coin_or_score(void);
 #define POWERUP_TILES 0xe6be
 #define POWERUP_ATTRIBUTES 0xe6ce
-void draw_powerup(void);
 #define ENEMY_TILES 0xe73e
 #define ENEMY_TILE_OFFSETS 0xe840
 #define ENEMY_ATTRIBUTES 0xe85b
 #define ENEMY_ANIMATION_MASKS 0xe876
 #define SPRING_TILE_OFFSETS 0xe878
-void draw_enemy(void);
-void clip_enemy_sprites(void);
-void draw_enemy_row(void);
-void draw_sprite_row(void);
-void hide_enemy_row(void);
-void hide_enemy_column(void);
 #define BLOCK_TILES 0xebcd
-void draw_block(void);
-void check_left_column(void);
-void hide_column(void);
-void draw_brick_chunks(void);
-void draw_firebar_tile(void);
 #define EXPLOSION_TILES 0xed06
-void draw_explosion(void);
-void draw_small_platform(void);
-void draw_bubble(void);
 #define PLAYER_TILE_OFFSETS 0xee07
 #define PLAYER_TILES 0xee17 // two tiles per row, top to bottom
 #define SWIM_KICK_TILES 0xeee7
-void draw_player(void);
-void draw_player_action(void);
-void draw_player_with_offset(void);
 #define LIVES_SCREEN_PLAYER 0xef9e
-void draw_lives_screen_player(void);
-void render_player(void);
-void draw_player_rows(void);
-void player_action_offset(void);
-void animate_player(void);
-void size_offset(void);
 #define CHANGE_SIZE_FRAMES 0xf09c
-void animate_size_change(void);
-void animation_offset(void);
-void fix_player_attributes(void);
-void player_screen_position(void);
-void bubble_screen_position(void);
-void fireball_screen_position(void);
-void screen_position_restore(void);
-void misc_screen_position(void);
-void enemy_screen_position(void);
-void block_screen_position(void);
-void screen_position_at(void);
-void screen_position(void); // coordinates relative to the left edge of the screen
-void player_offscreen_bits(void);
-void fireball_offscreen_bits(void);
-void bubble_offscreen_bits(void);
-void misc_offscreen_bits(void);
 #define OBJECT_SLOT_OFFSETS 0xf1a5
-void object_slot(void);
-void enemy_offscreen_bits(void);
-void block_offscreen_bits(void);
-void offset_slot(void);
-void offscreen_bits(void);
-void offscreen_bits_parts(void);
 #define X_OFFSCREEN_BITS 0xf1e3
 #define X_EDGE_DEFAULTS 0xf1f3
-void compute_x_offscreen_bits(void);
 #define Y_OFFSCREEN_BITS 0xf22b
 #define Y_EDGE_DEFAULTS 0xf234
 #define HIGH_POSITION_UNITS 0xf237
-void edge_distance_bits(void);
-void update_sound(void); // per-frame sound engine entry point
-void set_square1_regs(void);
-void play_square1(void);
-void set_square1_freq(void);
-void set_freq(void);
-void set_square2_regs(void);
-void play_square2(void);
-void set_square2_freq(void);
-void set_triangle_freq(void);
 #define SWIM_STOMP_ENVELOPE 0xf3b1
-void square1_sfx(void);
-void stop_square1_sfx(void);
 #define EXTRA_LIFE_NOTES 0xf4d4
 #define POWERUP_GRAB_NOTES 0xf4da
 #define POWERUP_REVEAL_NOTES 0xf4f8
-void stop_square2_sfx(void);
-void square2_sfx(void);
 #define BRICK_SHATTER_NOTES 0xf62b
-void noise_sfx(void);
-void continue_music(void);
-void update_music(void);
-void alternate_length(void);
-void note_length(void);
-void load_square_envelope(void);
-void load_envelope_entry(void);
 #define SONG_HEADER_OFFSETS 0xf90d
 #define HURRY_UP_HEADER 0xf93e
 #define STAR_HEADER 0xf943

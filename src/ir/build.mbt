@@ -17,6 +17,7 @@ priv struct Builder {
   program : @image.Program
   f : Function
   stmts : Array[Stmt]
+  pcs : Array[Int] // the location of each statement's instruction
   // the location of the instruction being built: code of a bank reads the
   // window from its bank
   mut at : Int
@@ -175,6 +176,7 @@ fn Builder::operand(self : Builder, mode : @lower.AsmAddressingMode) -> Operand 
 
 fn Builder::emit(self : Builder, s : Stmt) -> Unit {
   self.stmts.push(s)
+  self.pcs.push(self.at)
 }
 
 fn Builder::temp(self : Builder, hint : String, width : Width, value : Expr) -> Expr {
@@ -464,9 +466,9 @@ fn Exits::rts(self : Exits, low : @lower.AsmLowering, program : @image.Program) 
   match self.rts {
     Some(b) => b
     None => {
-      let builder : Builder = { low, program, f: self.f, stmts: [], at: 0 }
+      let builder : Builder = { low, program, f: self.f, stmts: [], pcs: [], at: 0 }
       exact_return(builder)
-      self.f.blocks.push({ label: "", stmts: builder.stmts, term: Return })
+      self.f.blocks.push({ label: "", stmts: builder.stmts, pcs: builder.pcs, term: Return })
       self.rts = Some(self.f.blocks.length() - 1)
       self.f.blocks.length() - 1
     }
@@ -478,7 +480,7 @@ fn Exits::suspend(self : Exits, start : Int) -> Int {
   match self.suspends.get(start) {
     Some(b) => b
     None => {
-      self.f.blocks.push({ label: "", stmts: [], term: Suspend(start) })
+      self.f.blocks.push({ label: "", stmts: [], pcs: [], term: Suspend(start) })
       self.suspends[start] = self.f.blocks.length() - 1
       self.f.blocks.length() - 1
     }
@@ -489,7 +491,7 @@ fn Exits::ret(self : Exits) -> Int {
   match self.ret {
     Some(b) => b
     None => {
-      self.f.blocks.push({ label: "", stmts: [], term: Return })
+      self.f.blocks.push({ label: "", stmts: [], pcs: [], term: Return })
       self.ret = Some(self.f.blocks.length() - 1)
       self.f.blocks.length() - 1
     }
@@ -500,7 +502,7 @@ fn Exits::tail(self : Exits, name : String) -> Int {
   match self.tails.get(name) {
     Some(b) => b
     None => {
-      self.f.blocks.push({ label: "", stmts: [], term: TailCall(name) })
+      self.f.blocks.push({ label: "", stmts: [], pcs: [], term: TailCall(name) })
       self.tails[name] = self.f.blocks.length() - 1
       self.f.blocks.length() - 1
     }
@@ -511,7 +513,7 @@ fn Exits::trap(self : Exits, pc : Int) -> Int {
   match self.traps.get(pc) {
     Some(b) => b
     None => {
-      self.f.blocks.push({ label: "", stmts: [], term: Trap(pc) })
+      self.f.blocks.push({ label: "", stmts: [], pcs: [], term: Trap(pc) })
       self.traps[pc] = self.f.blocks.length() - 1
       self.f.blocks.length() - 1
     }
@@ -561,7 +563,7 @@ fn build_routine(
     // (a label once: a block made of what follows a call can carry the
     // call's address)
     if used.contains(label) { label = "" } else if label != "" { used.add(label) }
-    f.blocks.push({ label, stmts: [], term: Return })
+    f.blocks.push({ label, stmts: [], pcs: [], term: Return })
   }
   f.entry = index[sub.entry.id]
   let exact = program.exact.val
@@ -571,9 +573,9 @@ fn build_routine(
   let preempt = program.map.preempt > 0
   fn poll(id : Int, to : Int, block : Int) -> Int {
     if !preempt || id < 0 || @image.bank_of(id) != @image.bank_of(to) || (to & 0xffff) > (id & 0xffff) { return block }
-    f.blocks.push({ label: "", stmts: [], term: Suspend(block) })
+    f.blocks.push({ label: "", stmts: [], pcs: [], term: Suspend(block) })
     let suspend = f.blocks.length() - 1
-    f.blocks.push({ label: "", stmts: [Effect("cpu_poll", [])], term: Branch(Runtime("cpu_preempted"), suspend, block) })
+    f.blocks.push({ label: "", stmts: [Effect("cpu_poll", [])], pcs: [-1], term: Branch(Runtime("cpu_preempted"), suspend, block) })
     f.polls.push((f.blocks.length() - 1, id))
     f.blocks.length() - 1
   }
@@ -608,7 +610,7 @@ fn build_routine(
     // the block taking statements: a call that keeps its return address
     // ends one, as the return may go past this routine
     let mut current = i
-    let mut builder : Builder = { low, program, f, stmts: [], at: 0 }
+    let mut builder : Builder = { low, program, f, stmts: [], pcs: [], at: 0 }
     let mut term : Term? = None
     for item in bb.items {
       if term is Some(_) { continue } // after a fallthrough made a tail call
@@ -627,12 +629,13 @@ fn build_routine(
               // (not the bytes the program changes)
               if byte >= 0 { differs = Binary(Or, differs, Binary(Ne, Load(space, Const(id + k)), Const(byte))) }
             }
-            f.blocks.push({ label: "", stmts: [], term: Return })
+            f.blocks.push({ label: "", stmts: [], pcs: [], term: Return })
             let next = f.blocks.length() - 1
             f.blocks[current].stmts = builder.stmts
+            f.blocks[current].pcs = builder.pcs
             f.blocks[current].term = Branch(differs, exits.trap(id), next)
             current = next
-            builder = { low, program, f, stmts: [], at: id }
+            builder = { low, program, f, stmts: [], pcs: [], at: id }
           }
           // a switch to another coroutine's stack (see switch.mbt)
           if op == TXS && program.switches.contains(id) { builder.emit(Effect("cpu_switch", [])) }
@@ -688,13 +691,14 @@ fn build_routine(
                   push(builder, Const(return_address >> 8))
                   push(builder, Const(return_address & 0xff))
                   builder.emit(Call(rename(name)))
-                  f.blocks.push({ label: "", stmts: [], term: Return })
+                  f.blocks.push({ label: "", stmts: [], pcs: [], term: Return })
                   let next = f.blocks.length() - 1
                   f.blocks[current].stmts = builder.stmts
+            f.blocks[current].pcs = builder.pcs
                   // returned elsewhere: past this routine too
                   f.blocks[current].term = Branch(Binary(Ne, Runtime("cpu_return"), Const(back)), exits.ret(), next)
                   current = next
-                  builder = { low, program, f, stmts: [], at: id }
+                  builder = { low, program, f, stmts: [], pcs: [], at: id }
                 }
                 Absolute(Ident(name~, ..)) => builder.emit(Call(rename(name)))
                 _ => raise BuildError("Unresolved call")
@@ -763,7 +767,7 @@ fn build_routine(
             let after = fallthrough(bb)
             let traps = exits.trap(site)
             let blocks = cases.map(fn(c) {
-              f.blocks.push({ label: "", stmts: [Call(c.1)], term: Goto(after) })
+              f.blocks.push({ label: "", stmts: [Call(c.1)], pcs: [-1], term: Goto(after) })
               let at = f.blocks.length() - 1
               if exact {
                 // returned elsewhere: past this routine too
@@ -779,7 +783,7 @@ fn build_routine(
             let traps = exits.trap(site)
             let blocks = cases.map(fn(c) {
               if returns_at(c.0) { return (c.0, if exact { exits.rts(low, program) } else { exits.ret() }) }
-              f.blocks.push({ label: "", stmts: [], term: TailCall(c.1) })
+              f.blocks.push({ label: "", stmts: [], pcs: [], term: TailCall(c.1) })
               (c.0, f.blocks.length() - 1)
             })
             term = Some(Switch(t, blocks, traps))
@@ -791,6 +795,7 @@ fn build_routine(
       }
     }
     f.blocks[current].stmts = builder.stmts
+    f.blocks[current].pcs = builder.pcs
     f.blocks[current].term = match term {
       Some(t) => t
       None => Goto(fallthrough(bb))
@@ -809,12 +814,12 @@ fn build_helper(
 ) -> Function raise BuildError {
   let f = new_function(name, [], false, true)
   let exits : Exits = { f, tails: Map([]), traps: Map([]), suspends: Map([]), ret: None, rts: None }
-  let mut builder : Builder = { low, program, f, stmts: [], at: dispatch.helper }
+  let mut builder : Builder = { low, program, f, stmts: [], pcs: [], at: dispatch.helper }
   // The table is read through the return address of the original call.
   push(builder, Unary(Hi, Param))
   push(builder, Unary(Lo, Param))
   let finish = fn(builder : Builder, term : Term) -> Int {
-    f.blocks.push({ label: "", stmts: builder.stmts, term })
+    f.blocks.push({ label: "", stmts: builder.stmts, pcs: builder.pcs, term })
     f.blocks.length() - 1
   }
   let pending : Array[(Int, Expr, Int)] = [] // block, condition, trap
@@ -827,7 +832,7 @@ fn build_helper(
       let cond = if step.taken { cond_of(inst.op) } else { simplify(Unary(Not, cond_of(inst.op))) }
       let b = finish(builder, Return)
       pending.push((b, cond, exits.trap(other)))
-      builder = { low, program, f, stmts: [], at: dispatch.helper }
+      builder = { low, program, f, stmts: [], pcs: [], at: dispatch.helper }
       continue
     }
     let mode = low.lower_mode(@image.source_mode(program.image, inst), op=Some(inst.op), absolute=inst.mode.has_prefix("abs")) catch {
@@ -888,15 +893,15 @@ pub fn build(low : @lower.AsmLowering, native~ : Set[String]) -> Program raise B
     let f = new_function(@image.address_name(program.image, address), [
       "The routine at $\{hex4(address)} in the bank mapped there.",
     ], false, false)
-    f.blocks.push({ label: "", stmts: [], term: Trap(address) })
+    f.blocks.push({ label: "", stmts: [], pcs: [], term: Trap(address) })
     let cases = []
     for location in program.windows[address] {
       guard @image.bank_of(location) is Some(bank) else { continue }
-      f.blocks.push({ label: "", stmts: [], term: TailCall(@image.address_name(program.image, location)) })
+      f.blocks.push({ label: "", stmts: [], pcs: [], term: TailCall(@image.address_name(program.image, location)) })
       cases.push((bank, f.blocks.length() - 1))
     }
     let mapped = Runtime(@image.window_bank_variable(@image.window_of(address)))
-    f.blocks.push({ label: "", stmts: [], term: Switch(mapped, cases, 0) })
+    f.blocks.push({ label: "", stmts: [], pcs: [], term: Switch(mapped, cases, 0) })
     f.entry = f.blocks.length() - 1
     functions.push(f)
   }
@@ -918,11 +923,11 @@ pub fn build(low : @lower.AsmLowering, native~ : Set[String]) -> Program raise B
   for handler in [Some(nmi), irq] {
     guard handler is Some(name) && program.exact.val && by_name.get(name) is Some(i) else { continue }
     let f = functions[i]
-    let builder : Builder = { low, program, f, stmts: [], at: 0 }
+    let builder : Builder = { low, program, f, stmts: [], pcs: [], at: 0 }
     push(builder, Const(0))
     push(builder, Const(0))
     push_status(builder, 0x20)
-    f.blocks.push({ label: "", stmts: builder.stmts, term: Goto(f.entry) })
+    f.blocks.push({ label: "", stmts: builder.stmts, pcs: builder.pcs, term: Goto(f.entry) })
     f.entry = f.blocks.length() - 1
   }
   let reset = rename(program.roots[0])
@@ -930,7 +935,7 @@ pub fn build(low : @lower.AsmLowering, native~ : Set[String]) -> Program raise B
   if program.map.preempt > 0 && by_name.get(reset) is Some(i) {
     let f = functions[i]
     let budget = program.map.preempt
-    f.blocks.push({ label: "", stmts: [Effect("cpu_preemption", [Const(budget & 0xff), Const(budget >> 8)])], term: Goto(f.entry) })
+    f.blocks.push({ label: "", stmts: [Effect("cpu_preemption", [Const(budget & 0xff), Const(budget >> 8)])], pcs: [-1], term: Goto(f.entry) })
     f.entry = f.blocks.length() - 1
   }
   // MMC3: the runtime checks the game selects the PRG mode it was
@@ -939,7 +944,7 @@ pub fn build(low : @lower.AsmLowering, native~ : Set[String]) -> Program raise B
   if layout.windows.length() == 2 && by_name.get(reset) is Some(i) {
     let f = functions[i]
     let mode = if layout.windows[0] == 0xa000 { 1 } else { 0 }
-    f.blocks.push({ label: "", stmts: [Effect("mapper_prg_mode", [Const(mode)])], term: Goto(f.entry) })
+    f.blocks.push({ label: "", stmts: [Effect("mapper_prg_mode", [Const(mode)])], pcs: [-1], term: Goto(f.entry) })
     f.entry = f.blocks.length() - 1
   }
   {

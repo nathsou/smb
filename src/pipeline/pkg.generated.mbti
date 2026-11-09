@@ -27,6 +27,9 @@ pub suberror PipelineError {
 pub(all) struct Options {
   native : Array[String]
   reference : Bool
+  locals : Bool
+  check_scratch : Bool
+  addresses : Bool
   wasm : Bool
   layout : Map[String, Int32]
   force_dispatch : Bool

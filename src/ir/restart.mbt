@@ -111,11 +111,14 @@ pub fn Program::make_restartable(self : Program) -> Unit raise BuildError {
         if !is_reset && restarts_at(g) {
           // the restart itself: nothing after it runs here
           block.stmts = block.stmts[:i].to_owned()
+          block.pcs = pcs_slice(block.pcs, 0, end=i)
           block.stmts.push(Effect("cpu_restart", [Const(number(g))]))
+          block.pcs.push(-1)
           block.term = Return
           continue
         }
-        let rest = f.block(block.stmts[i + 1:].to_owned(), block.term)
+        let rest = f.block(block.stmts[i + 1:].to_owned(), block.term, pcs=pcs_slice(block.pcs, i + 1))
+        block.pcs = pcs_slice(block.pcs, 0, end=i + 1)
         block.stmts = block.stmts[:i + 1].to_owned()
         block.term = Branch(Runtime("cpu_restarting"), restart, rest)
         work.push(rest)
@@ -124,11 +127,13 @@ pub fn Program::make_restartable(self : Program) -> Unit raise BuildError {
       match block.term {
         TailCall(g) if !is_reset && restarts_at(g) => {
           block.stmts.push(Effect("cpu_restart", [Const(number(g))]))
+          block.pcs.push(-1)
           block.term = Return
         }
         // the reset routine keeps its frame: it calls, and goes on
         TailCall(g) if is_reset && may_restart(g) => {
           block.stmts.push(Call(g))
+          block.pcs.push(-1)
           block.term = Branch(Runtime("cpu_restarting"), restart, returns)
         }
         Dispatch(_, _, cases) | Jump(_, cases) if cases.iter().any(fn(c) { restarts_at(c.1) }) =>

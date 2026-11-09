@@ -39,7 +39,11 @@ generated C next to the game.
 - [x] A second game: Metroid (MMC1 banks, waits for the interrupt, return-address tricks)
 - [x] A third game: Super Mario Bros. 3 (MMC3: two bank windows, CHR banks, frames split by the scanline IRQ)
 - [x] Five more: Bomberman, Tetris, Zelda, The Chessmaster and Kirby's Adventure (restarts, code in RAM, coroutines, preemption)
-- [ ] Registers as C locals and parameters
+- [x] Registers as C locals and parameters (SMB), the hand-written routines included
+- [x] Records over the object slots and sprites, scratch bytes named per routine, 16-bit carry chains (SMB)
+- [x] Each value a register holds its own variable, named from the map (`apply_gravity(can_rise, x, down_force, up_force, max_speed)`), scratch inputs as parameters (SMB)
+- [x] Every routine's parameters, results and scratch values, every label and the task and sound bytes named in the map (SMB)
+- [x] Every value inside the routines named in the map, by the instruction that writes it (SMB)
 - [ ] Manually rewrite portions of the code to higher level C
 
 See [toward a modern C program](docs/modern-runtime.md) for how these steps are
@@ -134,9 +138,18 @@ routines, tables and variables this project's own names (see
 [recompiling from the ROM](docs/modern-runtime.md#recompiling-from-the-rom)).
 The generator recovers reachable instructions and callable regions from the
 vectors, builds an IR, optimises it and emits structured C and, with
-`--wasm`, WebAssembly. The hand-written display routines
+`--wasm`, WebAssembly. For SMB, `--locals` makes registers and flags each
+routine's parameters, results and locals in the C (`uint8_t
+lakitu_chase(uint8_t x)`; see [registers as locals and
+parameters](docs/modern-runtime.md#registers-as-locals-and-parameters)).
+The map also groups arrays into records (`enemy(x).kind`), names the
+scratch bytes and the parameters and results per routine, and `--locals`
+prints 16-bit carry chains as one sum (`WORD(obj(x).page, obj(x).x) + ...`),
+each value a register holds as a variable of its own, and the scratch bytes
+a routine only reads on entry as parameters. The hand-written display routines
 (`codegen/native/display.c`) use `codegen/native/smb.h`, the map's names as
-a C header (`make header`, no ROM needed). See the
+a C header (`make header`, no ROM needed), and `codegen/native/routines.h`,
+their signatures with `--locals` (`make native-interface`, from the ROM). See the
 [analysis and migration notes](docs/recompiler-migration.md) and
 [toward a modern C program](docs/modern-runtime.md).
 

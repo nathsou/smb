@@ -7,10 +7,10 @@ fn transpile_fixture(source: String) -> Transpiler raise {
   transpile_low(low)
 }
 
-fn transpile_low(low: @lower.AsmLowering, native~: Array[String] = [], reference~: Bool = false) -> Transpiler raise {
+fn transpile_low(low: @lower.AsmLowering, native~: Array[String] = [], reference~: Bool = false, locals~: Bool = false) -> Transpiler raise {
   let program = @ir.build(low, native=Set::from_array(native))
   if reference { program.analyze() |> ignore } else { program.optimize() }
-  Transpiler::transpile(low, program, native~)
+  Transpiler::transpile(low, program, native~, locals~)
 }
 
 test "dispatch emission uses the 6502 indirect-jump page wrap" {
@@ -117,7 +117,7 @@ test "read-modify-write outside RAM goes through the bus" {
   assert_eq(code.contains("dynamic_ram_write(0x6001, (uint8_t)(read_byte(0x6001) << 1));"), true)
 }
 
-fn transpile_rom(source: String, map_text: String) -> Map[String, String] raise {
+fn transpile_rom(source: String, map_text: String, locals~: Bool = false) -> Map[String, String] raise {
   let items = @parse.Parser::new(@parse.Lexer::new(source).tokenize()).parse()
   let image = @image.assemble(items)
   let map = @image.parse_map(map_text)
@@ -126,7 +126,7 @@ fn transpile_rom(source: String, map_text: String) -> Map[String, String] raise 
   let low = @lower.AsmLowering::new(program.source, program=Some(program))
   low.lower()
   let files : Map[String, String] = Map([])
-  for file in transpile_low(low).files { files[file.name] = file.contents }
+  for file in transpile_low(low, locals~).files { files[file.name] = file.contents }
   files
 }
 
@@ -174,4 +174,134 @@ test "constants beside typed variables are written by name" {
   // a mask with most bits set names those it clears
   assert_eq(code.contains("kept = joypad1 & ~BUTTON_A;"), true)
   assert_eq(code.contains("game_mode != GAME_MODE_GAME_OVER"), true)
+}
+
+fn file_of(output: Transpiler, name: String) -> String {
+  for file in output.files {
+    if file.name == name { return file.contents }
+  }
+  ""
+}
+
+test "with --locals, registers read are parameters and registers read after are results" {
+  // Get reads X and produces A; Boot, a root, keeps the machine's registers
+  // and passes them
+  let source = ".org $c000\nBoot:\n ldx #$01\n ldy #$02\n jsr Get\n sta $10\n sty $11\n lda #$00\nIdle:\n jmp Idle\nGet:\n lda $20,x\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let output = transpile_low(lower_fixture(source), locals=true)
+  let code = file_of(output, "code.c")
+  assert_eq(code.contains("uint8_t Get(uint8_t x) {\n  uint8_t a;\n  a = ram[(uint8_t)(0x20 + x)];\n  return a;\n}"), true)
+  assert_eq(code.contains("  a = Get(x);\n"), true)
+  assert_eq(code.contains("void Boot(void) {"), true)
+  assert_eq(file_of(output, "code.h").contains("uint8_t Get(uint8_t x);"), true)
+  // the adapter the differential test runs it through
+  let adapter = file_of(output, "machine.c")
+  assert_eq(adapter.contains("// in: x; out: a\nvoid machine_Get(void) {\n  uint8_t v_a = a;\n  uint8_t v_x = x;\n  poison();\n  v_a = Get(v_x);\n  a = v_a;\n}"), true)
+  // without --locals, no change
+  let plain = transpile_low(lower_fixture(source))
+  assert_eq(code_c(plain).contains("// in: x; out: a\nvoid Get(void) {"), true)
+  assert_eq(file_of(plain, "machine.c"), "")
+}
+
+test "with --locals, a result passed through on some path is also a parameter" {
+  // Maybe writes Y only when $20 is not zero: Y is its result, and its
+  // parameter for the other path
+  let source = ".org $c000\nBoot:\n jsr Outer\n lda #$00\nIdle:\n jmp Idle\nOuter:\n ldy #$05\n jsr Maybe\n sty $11\n rts\nMaybe:\n lda $20\n beq Skip\n ldy #$01\nSkip:\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let code = code_c(transpile_low(lower_fixture(source), locals=true))
+  assert_eq(code.contains("uint8_t Maybe(uint8_t y) {"), true)
+  assert_eq(code.contains("void Outer(void) {\n  uint8_t y;\n  y = 5;\n  y = Maybe(y);\n  ram[0x11] = y;\n  return;\n}"), true)
+}
+
+test "with --locals, the first result is returned and the others written through pointers" {
+  let source = ".org $c000\nBoot:\n jsr Outer\n lda #$00\nIdle:\n jmp Idle\nOuter:\n jsr Pair\n stx $10\n sty $11\n rts\nPair:\n ldx $20\n ldy $21\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let code = code_c(transpile_low(lower_fixture(source), locals=true))
+  assert_eq(code.contains("uint8_t Pair(uint8_t *out_y) {\n  uint8_t x, y;\n  x = ram[0x20];\n  y = ram[0x21];\n  *out_y = y; return x;\n}"), true)
+  assert_eq(code.contains("  x = Pair(&y);\n"), true)
+}
+
+test "with --locals, a hand-written routine has the signature of its original code" {
+  // Probe is native: it takes X and returns A, as its original code does;
+  // routines.h declares it for the hand-written C, and machine_calls.c
+  // gives it to a game that keeps the machine's registers
+  let source = ".org $c000\nBoot:\n jsr Outer\n lda #$00\nIdle:\n jmp Idle\nOuter:\n ldx $30\n jsr Probe\n sta $10\n rts\nProbe:\n lda $20,x\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let output = transpile_low(lower_fixture(source), native=["Probe"], locals=true)
+  assert_eq(code_c(output).contains("  x = ram[0x30];\n  a = Probe(x);\n  ram[0x10] = a;\n"), true)
+  assert_eq(file_of(output, "code.h").contains("uint8_t Probe(uint8_t x);"), true)
+  let routines = file_of(output, "routines.h")
+  assert_eq(routines.contains("#ifdef MACHINE_CALLS\n#define Probe locals_Probe\n#endif"), true)
+  assert_eq(routines.contains("uint8_t Probe(uint8_t x); // returns a"), true)
+  assert_eq(file_of(output, "machine_calls.c").contains("void Probe(void) {\n  a = locals_Probe(x);\n}"), true)
+}
+
+test "with --locals, a scratch value that never leaves the routine is a local" {
+  // Temp keeps $00 to itself; Pass leaves $01 for Use, which takes it by
+  // value: Pass's local, passed
+  let source = ".org $c000\nBoot:\n jsr Temp\n jsr Pass\n lda #$00\nIdle:\n jmp Idle\nTemp:\n lda $20\n sta $00\n lda $21\n clc\n adc $00\n sta $22\n rts\nPass:\n lda #$05\n sta $01\n jsr Use\n rts\nUse:\n lda $01\n sta $23\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let code = code_c(transpile_low(lower_fixture(source), locals=true))
+  assert_eq(code.contains("void Temp(void) {\n  uint8_t t0;\n  t0 = ram[0x20];\n  ram[0x22] = (uint8_t)(ram[0x21] + t0);"), true)
+  assert_eq(code.contains("  t1 = 5;\n  Use(t1);"), true)
+  assert_eq(code.contains("void Use(uint8_t t1) {\n  ram[0x23] = t1;"), true)
+}
+
+test "with --locals, a register given back as it was is no result" {
+  // Walk moves X on, then reloads it from $10, which its only caller set
+  // to X: X comes back as it went in, and Outer keeps its own
+  let source = ".org $c000\nBoot:\n jsr Outer\n lda #$00\nIdle:\n jmp Idle\nOuter:\n ldx $30\n stx $10\n jsr Walk\n stx $20\n rts\nWalk:\n inx\n stx $21\n ldx $10\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let output = transpile_low(lower_fixture(source), locals=true)
+  let code = code_c(output)
+  assert_eq(code.contains("void Walk(uint8_t x) {\n  ram[0x21] = (uint8_t)(x + 1);\n  return;\n}"), true)
+  assert_eq(code.contains("  Walk(x);\n  ram[0x20] = x;\n"), true)
+  // the differential test enters it as every call does, and checks X
+  let adapters = file_of(output, "machine.c")
+  assert_eq(adapters.contains("void enter_Walk(void) {"), true)
+  assert_eq(adapters.contains("// in: x; out: x\nvoid machine_Walk(void) {"), true)
+}
+
+test "with --locals, a carry chain is 16-bit arithmetic" {
+  // Add: $20/$21 += $22/$23; Sub: $24/$25 -= $26/$27; Cmp: $28/$29 >= $2a/$2b;
+  // Keep: the carry out of the high byte is used, so the chain stays
+  let source = ".org $c000\nBoot:\n jsr Add\n jsr Sub\n jsr Cmp\n jsr Keep\n lda #$00\nIdle:\n jmp Idle\nAdd:\n lda $20\n clc\n adc $22\n sta $20\n lda $21\n adc $23\n sta $21\n rts\nSub:\n lda $24\n sec\n sbc $26\n sta $24\n lda $25\n sbc $27\n sta $25\n rts\nCmp:\n lda $28\n cmp $2a\n lda $29\n sbc $2b\n bcc Less\n inc $2c\nLess:\n rts\nKeep:\n lda $20\n clc\n adc $22\n sta $20\n lda $21\n adc $23\n sta $21\n bcc Done\n inc $2d\nDone:\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let code = code_c(transpile_low(lower_fixture(source), locals=true))
+  assert_eq(code.contains("  uint16_t sum = (uint16_t)(WORD(ram[0x21], ram[0x20]) + WORD(ram[0x23], ram[0x22]));\n  ram[0x20] = (uint8_t)sum;\n  ram[0x21] = (uint8_t)(sum >> 8);\n"), true)
+  assert_eq(code.contains("  uint16_t diff = (uint16_t)(WORD(ram[0x25], ram[0x24]) - WORD(ram[0x27], ram[0x26]));\n  ram[0x24] = (uint8_t)diff;\n  ram[0x25] = (uint8_t)(diff >> 8);\n"), true)
+  assert_eq(code.contains("  carry = WORD(ram[0x29], ram[0x28]) >= WORD(ram[0x2b], ram[0x2a]);\n"), true)
+  assert_eq(code.contains("  uint16_t sum2 = (uint16_t)(ram[0x21] + ram[0x23] + (sum >= 0x100));\n  ram[0x21] = (uint8_t)sum2;\n  if (sum2 < 0x100) {"), true)
+  // without --locals, the chain is as the machine runs it
+  let machine = code_c(transpile_low(lower_fixture(source)))
+  assert_eq(machine.contains("WORD("), false)
+}
+
+test "with --locals, the map names a routine's parameters and results, and each value a register holds" {
+  // main loads X from slot and passes 5 to move, which stores it and then
+  // reuses A; hit's carry is its result
+  let source = ".org $c000\nBoot:\n jsr Main\nIdle:\n jmp Idle\nMain:\n ldx $20\n lda #$05\n jsr Move\n jsr Hit\n bcc Done\n inc $31\nDone:\n rts\nMove:\n sta $40,x\n lda $48,x\n sta $50,x\n sta $58,x\n rts\nHit:\n lda $60\n cmp $61\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let map = "routine $c000 boot\nroutine $c006 update\nroutine $c015 move\nroutine $c01e hit\nroutine $c023 tick\nvar $0020 slot\nvar $0031 hits\nvar $0040 speeds 8\nvar $0048 heights 8\nvar $0050 depths 8\nvar $0058 widths 8\nvar $0060 wall_x\nvar $0061 player_x\nparam * x object slot ; the object being processed\nparam move a speed ; pixels per frame\nresult hit carry blocked ; the wall is in the way\n"
+  let files = transpile_rom(source, map, locals=true)
+  let code = files["code.c"]
+  // X loaded from slot is `object`; 5 goes to move's `speed`; hit's carry is
+  // `blocked` in its caller too
+  assert_eq(code.contains("void update(void) {\n  uint8_t object, speed;\n  bool blocked;\n  object = slot;\n  speed = 5;\n  move(speed, object);\n  blocked = hit();\n  if (!blocked) {"), true)
+  // the parameter keeps its name, and A's next value is its own variable
+  assert_eq(code.contains("// speed: pixels per frame\nvoid move(uint8_t speed, uint8_t object) {\n  uint8_t a;\n  speeds(object) = speed;\n  a = heights(object);\n  depths(object) = a;\n  widths(object) = a;"), true)
+  assert_eq(code.contains("// blocked: the wall is in the way\nbool hit(void) {\n  bool blocked;\n  blocked = wall_x >= player_x;\n  return blocked;"), true)
+  assert_eq(files["code.h"].contains("void move(uint8_t speed, uint8_t object);"), true)
+  // a name a view already has stays the register's
+  let clash = transpile_rom(source, map.replace(old="param move a speed", new="param move a heights"), locals=true)
+  assert_eq(clash["code.c"].contains("void move(uint8_t a, uint8_t object) {"), true)
+}
+
+test "with --locals, a scratch byte a routine reads on entry and keeps to itself is a parameter" {
+  // use takes $00 by value, and update's 3 is a local named for it; the 0
+  // that keep's callee may read (an index into the scratch bytes) stays in
+  // RAM
+  let source = ".org $c000\nBoot:\n jsr Update\nIdle:\n jmp Idle\nUpdate:\n lda #$03\n sta $00\n jsr Use\n lda #$00\n sta $00\n lda #$04\n sta $01\n jsr Keep\n rts\nUse:\n lda $00\n sta $10\n rts\nKeep:\n jsr Inner\n rts\nInner:\n ldx $20\n lda $00,x\n sta $11\n rts\nTick:\n rti\n.org $fffa\n.dw Tick, Boot, Tick\n"
+  let map = "routine $c000 boot\nroutine $c006 update\nroutine $c019 use\nroutine $c01e keep\nroutine $c022 inner\nroutine $c029 tick\nvar $0010 count_copy\nvar $0011 picked\nvar $0020 index\nscratch use $00 count ; how many\n"
+  let files = transpile_rom(source, map, locals=true)
+  let code = files["code.c"]
+  assert_eq(code.contains("void update(void) {\n  uint8_t count;\n  count = 3;\n  use(count);\n  count_ram = 0;\n  ram[1] = 4;\n  keep();"), true)
+  // (the byte, named for the callee it is passed to; RAM's value of it too)
+  assert_eq(code.contains("#define count_ram ram[0] // named for the callee it is passed to (in RAM)"), true)
+  assert_eq(code.contains("void use(uint8_t count) {\n  count_copy = count;"), true)
+  assert_eq(code.contains("void keep(void) {"), true)
+  // the differential test passes it from RAM, and writes no result back
+  assert_eq(files["machine.c"].contains("  uint8_t v_t0 = ram[0];\n  poison();\n  use(v_t0);\n}"), true)
 }

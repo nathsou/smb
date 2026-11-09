@@ -60,7 +60,8 @@ The names and descriptions are this project's own; the repository holds no
 game code or data, and the generated C goes to `codegen/game/` (`make
 codegen` with your ROM). The hand-written routines include
 `codegen/native/smb.h`, the map's names as a header generated from the map
-alone (`make header`). Code generated from the ROM and from the disassembly
+alone (`make header`), and `codegen/native/routines.h`, the signatures they
+have and call with, generated with the game (`make native-interface`). Code generated from the ROM and from the disassembly
 (before it was removed) were checked identical in behaviour (per-frame
 trace, ROM framebuffer hash and the routine-level differential test pairing
 routines by address). `tests/nrom128.map` names the independent NROM fixture,
@@ -232,6 +233,36 @@ The compiled code behaves identically (per-frame traces, routine diff) and
 runs at the same speed. Assembly input has no map, and its C keeps
 addresses.
 
+Arrays indexed alike are the fields of a record (the map's `record` lines):
+a structure laid out over the same bytes, with each field at its array's
+address and gaps between them, so `enemy(x)` is the structure at `$0f + x`:
+
+```c
+struct enemy_record {
+  uint8_t active; // $000f
+  uint8_t gap0[6];
+  uint8_t kind; // $0016
+  ...
+};
+#define enemy(i) (*(struct enemy_record *)&ram[0xf + (i)])
+
+enemy_kind(x) = 0xd;    ->  enemy(x).kind = ENEMY_KIND_PIRANHA;
+sprite_tile[4 + y] = a; ->  sprite(4 + y).tile = a;
+```
+
+SMB's records are the object slots (`obj`, which runs over the player,
+the enemies, the fireballs, the blocks, the misc objects and the bubbles in
+turn, and `enemy`, `fireball`, `block`, `misc`, `bubble`), the floating
+scores (`popup`), the cannons and the OAM copy's sprites (`sprite`, four
+bytes each, indexed by byte offset). In a record whose fields are
+consecutive bytes, as the sprites', a byte reached past a field is the field
+of a later element: `$0203 + 2` is the next sprite's tile, `sprite(4 +
+y).tile`. The arrays of a record lose their own views. The index stays
+within the record (it does not wrap around page zero or RAM), which
+`--check-scratch` checks with the other indexed accesses (see Scratch
+values). The generated C reads 1,146 fields this way, 689 of them the
+enemies'.
+
 A constant beside a typed variable is written as the type's value: one it
 is compared with, stored to it, or used to mask or combine it (also when
 the variable is combined with others of its type first). Bits are the names
@@ -245,12 +276,420 @@ if (area_kind == 0)                        ->  if (area_kind == AREA_KIND_WATER)
 ```
 
 The types are anonymous C enums in `vars.h` and in `codegen/native/smb.h`,
-and the variables stay bytes.
+and the variables stay bytes. A register loaded from a typed variable holds
+its type until written (a forward pass per function), so constants beside it
+are named too:
+
+```c
+a = enemy_kind(x);
+if (a != ENEMY_KIND_SPINY) {
+  if (a != ENEMY_KIND_PIRANHA) {
+```
+
+SMB's `enemy_kind` names the kinds the code establishes: the routines that
+`enemy_initializers`, `enemy_runners` and the large platforms' dispatch give
+each kind, and the code that sets or tests one (`draw_vertical_pipe` sets the
+piranha, `draw_flagpole` the flag, `fireball_hit_enemy` spares the buzzy
+beetle). Every routine of `maps/smb.map` has a one-line description, the
+comment above its function.
+
+With `--locals`, a 16-bit addition or subtraction, done a byte at a time
+with the carry going from the low byte into the high one, is one sum
+(`src/transpile/words.mbt`). The low sum takes the high bytes as `WORD(hi,
+lo)`, and the high byte is the sum's:
+
+```c
+uint16_t sum2 = (uint16_t)(obj(x).x + pixel_speed + carry);
+obj(x).x = (uint8_t)sum2;
+a = (uint8_t)(obj(x).page + page_carry + (sum2 >= 0x100));
+                 ->
+uint16_t sum2 = (uint16_t)(WORD(obj(x).page, obj(x).x) + WORD(page_carry, pixel_speed) + carry);
+obj(x).x = (uint8_t)sum2;
+a = (uint8_t)(sum2 >> 8);
+```
+
+This is exact when the low sum carries (or borrows) at most once, so the
+carry test is the sum's bit 8; when the sum is otherwise used only for its
+low byte; and when nothing between the two statements writes what the high
+bytes read, as they are now read first. A comparison of the low bytes
+followed by a subtraction of the high ones that keeps only the carry is a
+16-bit comparison, `carry = WORD(obj(x).page, obj(x).x) >= WORD(middle_page,
+middle_x);`. SMB has 49 such sums and 2 comparisons. A chain whose high
+byte's carry goes on (three-byte positions, the score's digits) stays as it
+is.
 
 JSRs are plain C calls: SMB's replay was identical with and without the
 emulated return-address stack, and the generator's static stack checks reject
 programs that inspect return addresses outside a proven dispatcher.
 NMI delivery restores the status flags in C instead of pushing PC and P.
+
+## Registers as locals and parameters
+
+Without options, routines share the machine's registers and flags as
+globals, as the 6502 does. With `--locals` (SMB's `make codegen` and the
+page), each routine has its own (`src/transpile/locals.mbt`). What it reads
+of its caller's registers and flags are its parameters, what its callers
+read after it returns are its results, and the rest are locals:
+
+```c
+// in: x; out: a                     uint8_t lakitu_chase(uint8_t x) {
+void lakitu_chase(void) {      ->      uint8_t a, y;
+  y = 0;                               bool negative;
+  player_enemy_distance();             y = 0;
+  if (neg_flag) {                      player_enemy_distance(x, &negative);
+                                       if (negative) {
+```
+
+- Results are the interface's outputs: what the routine may change that a
+  caller reads afterwards. The first, in the order A, X, Y, carry, zero,
+  negative, overflow, is returned. The others are written through pointers,
+  `out_y`, or `inout_y` when the routine also reads Y.
+- Parameters are what is live on the routine's entry when its returns read
+  its results. That is what it reads before writing, plus the results it
+  passes through unchanged on some path (a routine that only sometimes sets
+  Y takes Y and returns it). They are a least fixpoint over the program: a
+  call reads its callee's parameters and sets its results.
+- A call assigns only the results live after it, and a tail call whose
+  results are the routine's is `return f(x);`. An assignment of a pure value
+  to a local nothing reads is left out. Some were live while flags were
+  globals, because a routine called later could read them.
+- The interrupt and decimal flags and SP stay global. The stack is memory.
+
+Some routines keep the machine's registers: the roots (`reset` and
+`frame_interrupt`, which the runtime enters), routines that wait for an
+interrupt, and `clear_memory`, which clears RAM through a pointer, scratch
+bytes and stack page included (a routine the hand-written code calls that
+stores through a pointer). They are printed as without `--locals`. A call
+from them to a routine with locals passes the globals (`x =
+move_lakitu(x);`). A call the other way goes through `machine`, the
+machine's registers by pointer (`*machine.y = y; clear_memory(); a =
+*machine.a;`), twice in SMB.
+
+The hand-written routines have locals too, with the signatures their
+original code gives them; see Hand-written routines.
+
+The runtime's `indirect_y_addr` and `indirect_x_addr` read the machine's X
+and Y. With locals the pointer is read by `zero_page_pointer` and the index
+added in the generated code. `cpu_unresolved_jump` is declared
+`noreturn`, so a routine that returns a value needs no return after a trap.
+
+In SMB, 211 routines return a value, 40 also write results through pointers,
+and 223 take parameters and return nothing. The C compiles without warnings
+under the Makefile's flags. Coroutines, restarts and preemption keep the
+machine's registers: `--locals` refuses programs that use them. The other
+games are recompiled as before.
+
+### Results given back as they were
+
+Callers read X after most of SMB's object routines, which walk other arrays
+with it and reload it from `slot` (the object slot being processed) before
+returning. X is then no result: the routine gives it back as it was, and
+the caller keeps its own.
+
+```c
+uint8_t move_enemy_x(uint8_t *inout_x, uint8_t *out_y) {      // before
+uint8_t move_enemy_x(uint8_t x, uint8_t *out_y) {             // after
+  ...
+  x = slot;
+```
+
+A forward analysis tracks which locations are equal, as a partition:
+registers and flags, their entry values, scratch bytes, pushed stack slots,
+constants and the RAM bytes that code with locals loads into X or Y. A copy
+joins the copied location's class, a push and a pull move a value through
+the stack, and a call separates what the callee may change. Three facts
+come out of it, each a greatest fixpoint over the program:
+
+- what a routine is entered with equal, at every call (X and `slot`);
+- what it leaves equal at every return (X reloaded from `slot`), which a
+  call then joins in the caller;
+- what it gives back as it was: a register every return holds the entry
+  value of, which comes off its results.
+
+RAM bytes change only by their own stores, by indexed stores that may reach
+them without wrapping around page zero or RAM (an index from a scratch byte
+stays within them), by pointer stores above the stack page (anywhere in the
+routines that keep the machine's state: `clear_memory` clears all of RAM),
+and by calls that do one of these. A hand-written routine's original code is
+not taken for what its C does: it may change any of them and gives nothing
+back as it was, and the routines it calls are entered with no equality. In
+SMB, 41 routines that would return a value without this analysis no longer
+do (211 against 252), and 125 return X, as a result or through `out_x` (174
+without).
+
+The analyses are worklists: the parameters' fixpoint follows a routine again
+only when one it calls takes more, the equalities' flow runs blocks in
+reverse postorder and again only when what comes into them changes, and a
+routine is followed again only when what it is entered with or what a callee
+gives back changes. With `--locals` (and the naming below) the recompiler
+takes about 3.7 s for SMB from the command line (`moon run`, 1.9 s
+without), and the page's recompile about 2.1 s (1 s without, measured in
+Node), which the page then caches.
+
+### Scratch values
+
+The scratch bytes `$00-$07` stay in RAM between routines, which is how SMB
+uses them: it leaves values there for the routine it calls next, or for its
+caller. Within a routine, a value in one of them that never leaves it is a
+local, `t0` to `t7`:
+
+```c
+uint8_t render_column(void) {
+  uint8_t a, x, y, t0, t3;
+  ...
+    t3 = ram[3] >> 1;     // values of $03 only this routine reads
+    t3 = t3 >> 1;
+    t3 = t3 >> 1;
+    ram[3] = t3 >> 1;     // one that reaches its return, in RAM
+```
+
+So `ram[0]` in the C is a value that crosses a routine's edge, and `t0` one
+that does not. For each scratch byte, the writes of a routine are joined
+with the reads they reach (its webs). A web that only the routine's own
+accesses of the byte take part in is a local. A web stays in RAM when it is
+reached from the routine's entry, read at a return the caller reads it
+after, or read or written by a call. A call that must write the byte (a
+greatest fixpoint over the program) ends the web that came before. An index
+into the scratch bytes (`ram[1 + y]`) also keeps the web in RAM. What callers
+read of a scratch byte after a call, and what interrupt handlers read on
+entry, are found as for registers, over the calls. In SMB, 18 routines have
+scratch locals (100 uses). Most scratch values cross a call, and stay in RAM.
+
+The map names what a scratch byte holds in a routine (`scratch ROUTINE $0K
+NAME ; description`). Where the byte is a local throughout the routine, the
+local takes the name; otherwise the routine is printed between `#define NAME
+ram[K] // description` and `#undef NAME`:
+
+```c
+#define pixel_speed ram[0] // the whole pixels of the speed
+#define fraction_speed ram[1] // the sub-pixel part of the speed
+#define page_carry ram[2] // the page step: $ff when moving left
+uint8_t move_object_x(uint8_t x, uint8_t *out_page_step) {
+  ...
+  uint16_t sum = (uint16_t)(obj(x).x_force + fraction_speed);
+```
+
+SMB's map names 42 bytes over 24 routines (gravity, horizontal movement,
+sprite rows, collision boxes, the VRAM queue, bubbles, platforms).
+
+A scratch byte a routine reads on entry is a parameter when only its own
+accesses take part in the value it is entered with, and calls that take
+the byte the same way: no return its callers read the byte after, no call
+that reads it in RAM, no index into the scratch bytes, no wait. Its
+callers then pass it, from a local of theirs or from RAM (`ram[2]`, where
+the byte has to stay there for another reader). This is a greatest fixpoint:
+a byte one routine no longer takes by value may stay in RAM in the
+routines that pass it to it. The hand-written routines and those they
+call, the targets of computed jumps and dispatches, the roots and the
+dispatchers keep the scratch bytes in RAM.
+
+```c
+void apply_gravity(uint8_t can_rise, uint8_t x, uint8_t down_force, uint8_t up_force, uint8_t max_speed);
+
+void apply_gravity_object(uint8_t max_speed, uint8_t x, uint8_t down_force, uint8_t up_force) {
+  uint8_t can_rise;
+  ram[2] = max_speed;
+  can_rise = 0;
+  apply_gravity(can_rise, x, down_force, up_force, ram[2]); return;
+}
+```
+
+The parameter takes the name its local has. A value the map leaves
+unnamed takes the name of the callee's parameter it is passed to, up the
+calls: `apply_gravity_object` passes its caller's `$00` and `$01` on as
+`down_force` and `up_force`. 41 routines take 71 scratch values by value.
+Of the 509 `ram[k]` in the C, 93 are such arguments; 125 accesses read a
+scratch byte by its `#define`d name. A name that an identifier, a
+view, a record or a record's field already has is left out (a `#define`
+would rewrite `.kind`), and `tests/check_codegen.py` fails if a map name
+never reaches the code.
+
+In routines with locals, accesses through pointers and indexed accesses
+from other bases are taken to stay out of the scratch bytes. SMB's pointers
+lead to ROM, the block buffers and the VRAM lists, and its indices stay
+within their arrays. The routines that keep the machine's state are taken
+to read and write any scratch byte through a computed address, unless the
+address's bounds rule it out (the stack). `clear_memory` clears them
+through a pointer.
+
+What RAM keeps of the scratch bytes between frames is then dead, and
+differs from before. `./hash --mask-scratch` leaves `$00-$07` out of the
+state hash. `tests/golden/warpless.scratch.trace` holds those hashes,
+recorded from the build without `--locals`, which still matches
+`warpless.trace`; `tests/check_codegen.py --rom` checks both.
+
+Checks:
+
+- The replay matches `warpless.scratch.trace` and `warpless.audio` on every
+  frame, and both framebuffer hashes are unchanged.
+- `--check-scratch` generates the C with what the analyses take of computed
+  addresses checked: an access that reaches a scratch byte that is a local
+  where it is made (`scratch_guard`), an index in page zero or RAM that wraps
+  (`page_guard`, `ram_end_guard`), an index from a scratch byte that leaves
+  them (`scratch_index_guard`), a pointer store in a routine with locals
+  below $0200 (`pointer_guard`). One that fails sets `guard_failed`, and
+  `./hash --check-scratch` fails on it. None does over the replay.
+- The routine-level differential test runs every routine through its
+  adapter in `machine.c`, which is generated with `--locals`. The adapter
+  takes the routine's parameters from the machine's registers and
+  overwrites them before the call, so a routine that reads them instead of
+  its own fails. It then writes the results back, and the registers it
+  gives back as they were, so those are compared too. Scratch bytes are
+  compared where they are results, as registers are. A state first takes on
+  what every call enters the routine with (`enter_NAME`: `slot` set to X). A
+  run where the guards fail is tried again with X and Y below $20, as the
+  game's object and sprite indices are, and left out if they fail again: the
+  game's indices never go there, and the program relies on that. 0
+  mismatches over the same 530 routines, 155,519 runs; 1,020 are left out.
+- The build without `--locals`, which reaches the hand-written routines
+  through `machine_calls.c`, still matches `warpless.trace`, and so does the
+  split WebAssembly build, whose runtime has the adapters, on all 7,987
+  frames.
+- The WebAssembly module is byte-identical with and without `--locals`
+  (only the C is printed differently).
+- The NROM-128 fixture runs with `--locals` too (ROM-free, in CI), from its
+  assembly and from its iNES image.
+- Mutations of the generated C:
+  - every sync to `machine` dropped: diverges at frame 0;
+  - every write-back through a pointer dropped: the replay crashes;
+  - one carry write-back inverted: the routine diff reports 3 routines;
+  - the runtime's `indirect_y_addr` printed in routines with locals: the
+    replay crashes;
+  - every read of a scratch local made from RAM instead: diverges at frame
+    7;
+  - the 16-bit comparisons printed with `>` for `>=`: diverges at frame
+    282, and the high bytes taken as `sum >> 7`: the game hangs.
+
+  Two single-site mutations were not caught. One was equivalent: the
+  routine saves Y in `$01` and reloads it before the write-back. The other
+  drops the sync before `select_vram_list_b` in `queue_mushroom_palette`, on
+  a path that only levels with `area_style == 1` take, and neither the
+  replay nor the random states reach it. The generator makes the same
+  choice at every site, so a mistake in it shows up at sites the replay
+  does reach. A proof per routine would cover the paths the tests miss (see
+  Remaining work).
+
+### Each value its own variable
+
+A routine reuses its registers for one value after another: `apply_gravity`
+first holds in A whether the object may rise, then its speed, then the
+speed with the force added. With the registers as locals, a register is one
+C variable, which a parameter's name could not stay on. `src/transpile/names.mbt`
+joins each register's writes with the reads they reach, where the register
+is live (its webs, as for the scratch bytes): a web is one value, and can be
+a variable of its own. A web is named, in this order, for:
+
+1. the routine's parameter, if the routine's entry is one of its writes:
+   the map's `param ROUTINE REG NAME`, or `param * x object slot`, in a
+   routine that every call enters with X equal to `slot` (and a web of X
+   that only loads of `slot` write);
+2. the map's name for a value one of its instructions writes
+   (`value $ADDR REG NAME`, below);
+3. the routine's result, if a return reads it (`result ROUTINE REG NAME`);
+4. the result of the calls that write it, if they agree;
+5. the map parameter of the calls it is passed to, if they agree.
+
+A web takes the first of these that is free: not a view, a record, a
+routine, a temporary, one of the routine's scratch names or another
+register's variable (a `value` name may be a record's member, since a value
+is a variable and not a `#define`). The webs left unnamed share their
+register's variable, as before. Webs of one register may share a variable
+however they are named: no read takes a value from another web. A read
+prints the web that reaches it, and a write the web it starts. At a call, a
+result written through a pointer the callee also reads stays the variable
+it came from. At a tail call, what the call writes takes the callee's
+result name, or the routine's; at the cases of a jump or a dispatch, the
+routine's result name, and what the dispatcher gives the cases, its own
+(`table_offset`, `upper_half`).
+
+```c
+uint8_t move_enemy(uint8_t object) {
+  uint8_t table_offset, kind;
+  bool upper_half;
+  kind = enemy(object).kind;
+  switch (dispatch(0xc909, kind, &table_offset, &upper_half)) {
+    case 0xca77: move_walker(object); return object;
+
+bool player_enemy_distance(uint8_t object, bool *out_left_of_player) {
+  bool right_of_player, left_of_player;
+  int dx = enemy(object).x - player_x;
+  distance = (uint8_t)dx;
+  int dpage = enemy(object).page - player_page - (dx < 0);
+  right_of_player = dpage >= 0;
+  left_of_player = ((uint8_t)dpage & 0x80) != 0;
+  *out_left_of_player = left_of_player; return right_of_player;
+}
+```
+
+Names also come from the callees, up the calls until none changes: a
+parameter whose entry value is only passed to callees' named parameters
+(and given back) takes their name; a result that is only callees' named
+results takes theirs, and one reloaded from `slot` is `object`; a tail
+call's result takes the callee's result name (`object = queue_counters(a,
+x); return object;`). A scratch byte the map leaves unnamed that a routine
+passes to a callee taking it by value is named for the callee. A byte
+with values both local and in RAM in a routine names the local, and
+`NAME_ram` the RAM.
+
+The map's description of a named parameter or result goes above the
+function (`// can_rise: nonzero: the up force applies too`). SMB's map
+names every routine's parameters and results (309 `param` and 177 `result`
+lines) and its scratch values (196 `scratch` lines): no prototype has a
+register's name left, and no routine body a `tK` or a `ram[k]`. X that a
+routine passes along without reading it as anything, left by the frame
+interrupt or a loop, is `leftover_x`. A map name that never reaches its
+routine fails `tests/check_codegen.py`. Without any of these lines the C is
+the same as before, byte for byte.
+
+`label $ADDR NAME ; description` names a place inside a routine, where the C
+had `loc_ADDR`: all 247 of SMB's are named (`goto next_axis;`,
+`start_bump_sfx:`). Enums from the dispatch tables (`player_task`,
+`screen_task`, `star_flag_task`), the VRAM list selector by the list each
+value draws, and flags for the sprite attribute bits and the sound engine's
+request bits (established by the code that sets each one: `pulse1_sfx`'s
+bump is set by the block, enemy and fireball bumps) name the constants
+beside those variables: `if (player_task != PLAYER_TASK_DYING)`.
+
+`value $ADDR REG NAME` names the value the instruction at `ADDR` writes to a
+register or flag, the web it starts, and `value $ADDR temp NAME` the
+temporary it computes (a sum, a difference, a bit shifted out; the 16-bit
+sum of a carry chain is named by its low byte's instruction). The IR keeps
+each statement's instruction address through every pass for this, and
+`--addresses` prints it after each C statement (`speed = (uint8_t)(fall_speed
+>> 8); // @c000`), which is how the values left to name are found. SMB's
+map has 1,344 `value` lines (105 of them temporaries): no routine has `a`,
+`x`, `y`, a flag, `sum` or `diff` left, but the generated `dispatch`, whose
+statements are all at the call's address and so cannot be told apart by
+it:
+
+```c
+uint16_t fraction_sum = (uint16_t)(obj(obj_slot).y_fraction + obj(obj_slot).y_force);
+fraction_carry = fraction_sum >= 0x100;
+obj(obj_slot).y_fraction = (uint8_t)fraction_sum;
+speed_high = 0;
+old_speed = obj(obj_slot).y_speed;
+if ((old_speed & 0x80) != 0) {
+  speed_high = (uint8_t)-0x1;
+}
+```
+
+A body's locals are those its text uses, record members aside (`.x` is not
+the variable `x`).
+
+Checks: the replays, the checked build and the routine diff as above, with
+0 mismatches. While the naming was written, the routine diff caught a call
+after which X stays what it was (`same_x`): the analysis took the call to
+write X, so the value read after it lost its variable
+(`update_balance_platform`, `vram_list1[5 + x]`). The analysis now treats such
+a call as not writing X, as the printer does. Taking every call to read a
+scratch byte by value (a mutation of the condition for parameters) changes
+88 lines of the C and is caught by neither the replay nor the routine diff:
+its wrong parameters are passed what RAM holds anyway, except on paths the
+tests do not reach. The condition is the same reaching-writes rule as the
+scratch locals', but the tests do not guard it well. Once the map named a Y
+parameter that indexes a pointer, the replay and the routine diff caught
+that the pointer read named the index for its register (`zero_page_pointer(p)
++ y`) and not for its value.
 
 ## The WebAssembly backend
 
@@ -267,7 +706,9 @@ time in one memory:
   yield, traps, and the native routines);
 - the runtime imports the game routines it calls (the entry points and the
   routines the natives call); these are JavaScript trampolines to the game
-  module, instantiated after it;
+  module, instantiated after it. The game module keeps the machine's
+  registers, so the runtime is built with `machine_calls.c` (see
+  Hand-written routines);
 - the loader copies the ROM's PRG banks into the runtime's buffer.
 
 Constant parts of addresses go into the memory instructions' offsets, so
@@ -392,6 +833,42 @@ of the body, the contract the replacement must keep:
 // It must produce: y.
 ```
 
+With `--locals`, they take and return values like the other routines, with
+the signatures their original code gives them. `codegen/native/routines.h`
+declares them for the hand-written C, with the generated routines it calls:
+
+```c
+uint8_t clear_screens(void); // returns y
+void select_vram_list_b(uint8_t a);
+void run_game_mode(uint8_t x);
+```
+
+so `display.c` reads `y = clear_screens();` and `select_vram_list_b(5);`.
+`make native-interface` writes `routines.h` from the generated game, and
+`tests/check_routines.py` checks that it is the one generated and agrees
+with `code.h`. `frame_interrupt` passes `run_game_mode` and `update_sound`
+the X their original code passes them (7, where the loop over the random
+bytes leaves it, or the sprite shuffler's).
+
+A game that keeps the machine's registers (built without `--locals`, and the
+WebAssembly game module) calls them through `codegen/native/machine_calls.c`,
+generated alongside: built with `MACHINE_CALLS`, `routines.h` names the
+hand-written C's routines `locals_*`, and the adapters pass their values
+through the registers, both ways:
+
+```c
+void clear_screens(void) {
+  y = locals_clear_screens();
+}
+void locals_select_vram_list_b(uint8_t v_a) {
+  a = v_a;
+  select_vram_list_b();
+}
+```
+
+`codegen/native/smb.h`, which comes from the map alone, no longer declares
+the routines.
+
 ## Display without a PPU register model
 
 The routines that drove the PPU registers (`reset`,
@@ -401,7 +878,8 @@ The routines that drove the PPU registers (`reset`,
 auto-incrementing VRAM address, a buffered data port and vblank / sprite 0
 polling loops, they update a `Video` struct (`codegen/lib/video.h`):
 nametables, palette, sprites, control, mask, scroll and the status-bar split.
-They keep the original RAM side effects and the registers their callers read.
+They keep the original RAM side effects, and take and return the registers
+their original code does.
 
 The old PPU module is split in three:
 
@@ -521,11 +999,16 @@ original renderer are unchanged.
 
 ## Remaining work
 
-- Registers as C locals and parameters: the interfaces give each routine's
-  inputs and outputs, but callers and callees still share global registers.
-- Scratch bytes as C locals, parameters and return values: `$00-$07` are
-  most of the remaining `ram[...]` accesses.
-- Records: the sprite table and the object slots as structures over the
-  same bytes (`sprite_x[4 + y]` is the X of the sprite after `y / 4`).
+- Registers as locals in the other games, and in the WebAssembly game
+  module (which would let the runtime drop `machine_calls.c`).
+- The routines that still return X, and those whose X is not `object`
+  (159 take an `x`): many are entered with X something other than `slot`
+  from some call, or through a jump table, which the analysis takes no
+  equality from. A context-sensitive analysis (per call) would find more.
+- A proof per routine that the C with locals computes what the reference
+  computes, for every input (as acnl does with an SMT solver), for the paths
+  that neither the replay nor the differential test's states take.
+- Carry chains of three bytes and more (sub-pixel, pixel and page; the
+  score's digits), whose middle sum's carry goes on.
 - The status-bar split is decided after the frame's game logic, as before;
   hardware decides it at the sprite 0 hit, earlier in the frame.

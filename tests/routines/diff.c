@@ -1,7 +1,8 @@
 // Routine-level differential test: every generated routine is run twice
 // from the same machine state, once as currently generated and once as the
 // reference build (renamed ref_*, see check_routines.py), and the results are
-// compared (registers and flags only where the routine's callers read them).
+// compared (registers and flags only where the routine's callers read them,
+// and so the scratch bytes $00-$07, which are locals with --locals).
 // States come from the replay (real RAM and display contents) with
 // randomised registers and flags, and every other state also randomises some
 // RAM, so paths the replay never takes are exercised too.
@@ -29,9 +30,22 @@ typedef struct {
     void (*reference)(void);
     bool a, x, y; // registers callers read afterwards
     bool carry, zero, negative, overflow; // flags callers read afterwards
+    uint8_t scratch; // scratch bytes $00-$07 callers read afterwards, by bit
+    // With locals: makes a state one every call enters the routine with
+    // (its registers equal to the RAM bytes they are equal to there, X to
+    // `slot`), which what it gives back as it was may rest on; or NULL.
+    void (*enter)(void);
 } Routine;
 
 #include "routines.h" // generated: const Routine ROUTINES[]; ROUTINE_COUNT
+
+// With --check-scratch: set when a computed access did not keep to what
+// --locals takes of it (an index wrapped around page zero, a pointer store
+// went below $0200, an access reached a scratch byte that is a local). The
+// random registers lead indices where the game's never go; such runs are
+// left out, since the program relies on its indices staying in their
+// arrays (the replay checks that they do).
+extern bool guard_failed __attribute__((weak));
 
 extern bool controller1_strobe;
 extern uint8_t controller1_btn_index;
@@ -103,7 +117,10 @@ static const char *difference(const Routine *r, const Machine *ref, const Machin
     if (r->x && ref->x != cur->x) return "x";
     if (r->y && ref->y != cur->y) return "y";
     if (ref->sp != cur->sp) return "sp";
-    if (memcmp(ref->ram, cur->ram, RAM_SIZE) != 0) return "ram";
+    for (int k = 0; k < 8; k++) {
+        if ((r->scratch & (1 << k)) && ref->ram[k] != cur->ram[k]) return "scratch";
+    }
+    if (memcmp(ref->ram + 8, cur->ram + 8, RAM_SIZE - 8) != 0) return "ram";
     if (memcmp(&ref->video, &cur->video, sizeof(Video)) != 0) return "video";
     if (r->carry && ref->carry != cur->carry) return "carry";
     if (r->zero && ref->zero != cur->zero) return "zero";
@@ -141,7 +158,7 @@ int main(void) {
     }
     rec_close(&recording);
 
-    int failures = 0, completed = 0, exercised = 0;
+    int failures = 0, completed = 0, exercised = 0, outside = 0;
     for (int r = 0; r < ROUTINE_COUNT; r++) {
         const Routine *routine = &ROUTINES[r];
         int routine_completed = 0;
@@ -167,13 +184,49 @@ int main(void) {
                 }
 
                 Machine ref, cur;
-                restore(&start);
-                run(routine->reference, &ref);
-                restore(&start);
-                run(routine->current, &cur);
+                // a run whose indices go where the game's never do is tried
+                // again with small ones (the game's object and sprite indices)
+                bool inside = false;
+                for (int attempt = 0; attempt < 2 && !inside; attempt++) {
+                    if (attempt == 1) {
+                        start.x &= 0x1f;
+                        start.y &= 0x1f;
+                    }
+                    if (routine->enter) {
+                        restore(&start);
+                        routine->enter();
+                        save(&start);
+                    }
+                    restore(&start);
+                    run(routine->reference, &ref);
+                    restore(&start);
+                    if (&guard_failed) guard_failed = false;
+                    run(routine->current, &cur);
+                    inside = !(&guard_failed && guard_failed);
+                }
+                if (!inside) {
+                    outside++;
+                    continue;
+                }
 
                 const char *what = difference(routine, &ref, &cur);
-                if (what && !first) first = what;
+                if (what && !first) {
+                    first = what;
+                    // ROUTINE=name: what differs, the first time
+                    const char *focus = getenv("ROUTINE");
+                    if (focus && strcmp(focus, routine->name) == 0) {
+                        printf("%s, state %d.%d (%s): a=%02x x=%02x y=%02x\n", routine->name, s, k,
+                            k & 1 ? "RAM perturbed" : "replay RAM", start.a, start.x, start.y);
+                        for (int b = 0; b < RAM_SIZE; b++) {
+                            if (ref.ram[b] != cur.ram[b] || (b < 8 && start.ram[b] != ref.ram[b])) {
+                                printf("  $%04x: start %02x, reference %02x, current %02x\n",
+                                    b, start.ram[b], ref.ram[b], cur.ram[b]);
+                            }
+                        }
+                        printf("  a %02x/%02x x %02x/%02x y %02x/%02x carry %d/%d\n", ref.a, cur.a, ref.x, cur.x,
+                            ref.y, cur.y, ref.carry, cur.carry);
+                    }
+                }
                 if (ref.outcome == 0 && cur.outcome == 0) routine_completed++;
             }
         }
@@ -187,5 +240,8 @@ int main(void) {
 
     printf("Routines: %d, returned normally in some state: %d, runs completed: %d, mismatches: %d\n",
         ROUTINE_COUNT, exercised, completed, failures);
+    if (&guard_failed) {
+        printf("Runs left out, an access outside what --locals takes of it: %d\n", outside);
+    }
     return failures == 0 ? 0 : 1;
 }

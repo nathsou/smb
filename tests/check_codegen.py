@@ -4,8 +4,10 @@
 Without a ROM (as in CI): the analysis tests, the independent fixtures
 through the C and WebAssembly backends, the map header, and the runtime
 module. With --rom (smb.nes in the root): recompile the game, replay the
-recording natively against tests/golden/warpless.trace (debug and ROM
-tiles) and tests/golden/warpless.audio (APU writes and samples, also
+recording natively against tests/golden/warpless.trace (without --locals;
+with them, against warpless.scratch.trace, without the scratch bytes, and
+with every computed access checked against them; debug and ROM tiles) and
+tests/golden/warpless.audio (APU writes and samples, also
 through the page's AudioWorklet), the routine-level differential test, and the replay of the split
 WebAssembly build. With --metroid (metroid.nes in the root): recompile
 Metroid, check the reference interpreter (tests/interpreter.c) against
@@ -22,6 +24,7 @@ import argparse
 import pathlib
 import re
 import subprocess
+import sys
 import tempfile
 
 from check_fixtures import WASM_VARIANTS, waits
@@ -45,6 +48,45 @@ CARTRIDGES = {
     "chessmaster": "1700,4300",
     "kirby": "1500,3000",
 }
+
+
+def check_scratch_names():
+    """Every scratch, parameter, result, label and value name in the map
+    reaches the code: a name that clashes with an identifier, a view or a
+    record member is left out silently. A value is of the routine above it."""
+    code = (ROOT / "codegen/game/code.c").read_text()
+    functions = {}
+    for match in re.finditer(r"^\w[\w *]* (\w+)\(([^)\n]*)\) \{$(.*?)^\}$", code, re.M | re.S):
+        functions[match.group(1)] = match.group(2) + match.group(3)
+    # (the hand-written routines: their prototypes)
+    for match in re.finditer(r"^\w[\w *]* (\w+)\(([^)\n]*)\);$", (ROOT / "codegen/game/code.h").read_text(), re.M):
+        functions.setdefault(match.group(1), match.group(2))
+    missing = []
+    routine = None
+    for line in (ROOT / "maps/smb.map").read_text().splitlines():
+        fields = line.split(";")[0].split()
+        if len(fields) >= 3 and fields[0] == "routine":
+            routine = fields[2]
+        elif len(fields) == 4 and fields[0] == "value":
+            # (declared there: a local, a parameter or a temporary)
+            if not re.search(rf"\b(uint8_t|uint16_t|bool|int)\b[^;=(){{}}]*\b{fields[3]}\b", functions.get(routine, "")):
+                missing.append(f"value {routine} {fields[1]} {fields[2]} {fields[3]}")
+        elif len(fields) == 4 and fields[0] == "scratch":
+            routine, byte, name = fields[1], int(fields[2][1:], 16), fields[3]
+            # (in the routine: its body or parameters, by the name or NAME_ram)
+            if not re.search(rf"\b{name}(_ram)?\b", functions.get(routine, "")):
+                missing.append(f"{routine} {fields[2]} {name}")
+        elif len(fields) == 3 and fields[0] == "label":
+            if not re.search(rf"^\s*{fields[2]}:", code, re.M):
+                missing.append(f"label {fields[1]} {fields[2]}")
+        elif len(fields) >= 4 and fields[0] in ("param", "result"):
+            routine, name = fields[1], fields[3]
+            text = code if routine == "*" else functions.get(routine, "")
+            if not re.search(rf"\b{name}\b", text):
+                missing.append(f"{fields[0]} {routine} {fields[2]} {name}")
+    if missing:
+        sys.exit("Map names left out of the code: " + ", ".join(missing))
+    print("Every map scratch, parameter, result, label and value name reaches the code")
 
 
 def check_cartridge(name, frames):
@@ -92,11 +134,28 @@ if __name__ == "__main__":
         "tests/audio_queue.c", "codegen/lib/apu.c")
     run("./audio_queue")
     if args.rom:
+        with tempfile.TemporaryDirectory(prefix="smb-machine-") as directory:
+            # Without --locals: the original oracle (all of RAM), and the
+            # same frames without the scratch bytes $00-$07.
+            run("make", "codegen", "hash", f"GAME_DIR={directory}/game", "CODEGEN_OPTIONS=")
+            run("./hash", "--debug-chr", "--trace", "tests/golden/warpless.trace")
+            run("./hash", "--debug-chr", "--mask-scratch", "--trace", "tests/golden/warpless.scratch.trace")
+            # With --locals and every computed access checked: none reaches
+            # a scratch byte that is a local where it is made.
+            run("moon", "run", "src/main", "--", "--rom", "smb.nes", "--map", "maps/smb.map",
+                "--native", "codegen/native/routines.txt", "--locals", "--check-scratch",
+                "--output", f"{directory}/checked")
+            run("make", "hash", f"GAME_DIR={directory}/checked")
+            run("./hash", "--debug-chr", "--mask-scratch", "--check-scratch",
+                "--trace", "tests/golden/warpless.scratch.trace")
+        # The game as make codegen generates it (with --locals): what RAM
+        # keeps of the scratch bytes between frames is dead.
         run("make", "codegen")
         run("make", "hash")
-        run("./hash", "--debug-chr", "--trace", "tests/golden/warpless.trace",
+        run("./hash", "--debug-chr", "--mask-scratch", "--trace", "tests/golden/warpless.scratch.trace",
             "--audio-trace", "tests/golden/warpless.audio")
         run("./hash")
+        check_scratch_names()
         # Every generated routine against the unoptimised IR.
         run("python3", "tests/check_routines.py")
         run("make", "game-wasm")

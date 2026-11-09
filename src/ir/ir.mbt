@@ -146,7 +146,22 @@ pub(all) struct Block {
   label : String
   mut stmts : Array[Stmt]
   mut term : Term
+  // the location of the instruction each statement comes from (-1: none),
+  // parallel to `stmts`
+  mut pcs : Array[Int]
 } derive(Debug)
+
+// The locations from `from` to `end` ([] when they were not kept).
+pub fn pcs_slice(pcs : Array[Int], from : Int, end~ : Int = -1) -> Array[Int] {
+  let end = if end < 0 { pcs.length() } else { end }
+  if from >= end || end > pcs.length() { return [] }
+  pcs[from:end].to_owned()
+}
+
+// The location of the instruction statement k comes from, -1 when none.
+pub fn Block::pc(self : Block, k : Int) -> Int {
+  if k >= 0 && k < self.pcs.length() && self.pcs.length() == self.stmts.length() { self.pcs[k] } else { -1 }
+}
 
 pub(all) struct Temp {
   hint : String

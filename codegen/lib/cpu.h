@@ -19,7 +19,8 @@ extern uint16_t cpu_resume_pc;
 // so they push it on the guest stack themselves. Other calls are C calls.
 void cpu_push_return_address(uint16_t return_address);
 void cpu_yield(uint16_t pc);
-void cpu_unresolved_jump(uint16_t pc);
+// An unproven transfer: traps, never returns.
+void cpu_unresolved_jump(uint16_t pc) __attribute__((noreturn));
 void cpu_unsupported_io(uint16_t addr);
 
 // Exact returns (programs that read their return addresses): JSR pushes the
@@ -131,6 +132,13 @@ uint16_t indirect_y_addr(uint8_t addr);
 
 uint8_t indirect_x_val(uint8_t addr);
 uint8_t indirect_y_val(uint8_t addr);
+
+// The pointer stored at a zero-page address, its high byte read from the
+// next byte within page zero. Code with its registers as locals adds the
+// index itself (indirect_x_addr and indirect_y_addr read the machine's).
+static inline uint16_t zero_page_pointer(uint8_t addr) {
+    return (uint16_t)(ram[addr] | (ram[(uint8_t)(addr + 1)] << 8));
+}
 
 // engine
 void next_frame(void);

@@ -74,11 +74,35 @@ pub fn trap_address(name: String) -> Int? {
   try Some(@string.parse_int(name.view(start_offset=8).to_owned(), base=16)) catch { _ => None }
 }
 
+// The first label of each address in an image's source, for address_name
+// (built once per source; `forget_labels` when the source is rewritten).
+let label_cache : Ref[(Array[@parse.SourceItem], Int, Map[Int, String])?] = Ref(None)
+
+fn forget_labels() -> Unit {
+  label_cache.val = None
+}
+
+fn first_labels(image : Image) -> Map[Int, String] {
+  match label_cache.val {
+    Some((source, length, labels)) if physical_equal(source, image.source) && length == image.source.length() => return labels
+    _ => ()
+  }
+  let labels : Map[Int, String] = Map([])
+  for i, item in image.source {
+    if item is Label(name) && !labels.contains(image.addresses[i]) { labels[image.addresses[i]] = name }
+  }
+  label_cache.val = Some((image.source, image.source.length(), labels))
+  labels
+}
+
+// The names of places inside routines the ROM map gives (its `label`s),
+// for the recompilation under way.
+pub let map_labels : Ref[Map[Int, String]] = Ref(Map([]))
+
 pub fn address_name(image: Image, pc: Int) -> String {
   // Preserve source order for aliases, independent of hash-map iteration.
-  for i, item in image.source {
-    if image.addresses[i] == pc && item is Label(name) { return name }
-  }
+  if first_labels(image).get(pc) is Some(name) { return name }
+  if map_labels.val.get(pc) is Some(name) { return name }
   if image.banks.window_names.get(pc) is Some(name) { return name }
   match bank_of(pc) {
     Some(bank) => "loc_\{image.banks.names[bank]}_\{(pc & 0xffff).to_string(radix=16)}"

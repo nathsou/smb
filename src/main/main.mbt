@@ -6,6 +6,11 @@
 //   --map FILE --header FILE        only write the map's names as a C header
 //   --native FILE                   routines written by hand (see routines.txt)
 //   --reference                     the unoptimised IR (differential test)
+//   --locals                        registers, flags and scratch bytes as C
+//                                   locals and parameters (the C only; see
+//                                   src/transpile/locals.mbt)
+//     --check-scratch               for the tests: computed accesses checked
+//                                   against the scratch bytes that are locals
 //   --polls FILE                    where the foreground polls (a map with
 //                                   `preempt`), for the reference interpreter
 //   --wasm FILE                     also emit the WebAssembly game module
@@ -59,6 +64,9 @@ fn run() -> Unit raise Error {
   let output = @pipeline.recompile(program, {
     native,
     reference: flag("--reference"),
+    locals: flag("--locals"),
+    check_scratch: flag("--check-scratch"),
+    addresses: flag("--addresses"),
     wasm: wasm_path != "",
     layout,
     force_dispatch: flag("--wasm-dispatch"),

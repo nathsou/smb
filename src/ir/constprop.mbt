@@ -208,10 +208,15 @@ fn dead_stores(f : Function) -> Bool {
     }
     if keep.iter().any(fn(k) { !k }) {
       let out = []
+      let out_pcs = []
       for i, s in stmts {
-        if keep[i] { out.push(s) }
+        if keep[i] {
+          out.push(s)
+          out_pcs.push(block.pc(i))
+        }
       }
       block.stmts = out
+      block.pcs = out_pcs
       changed = true
     }
   }

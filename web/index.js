@@ -24,6 +24,7 @@ function cartridge(id, title, pageTitle, sha256) {
         map: `${id}.map`,
         runtime: 'runtime-cartridge.wasm',
         native: null,
+        locals: false,
         display: null,
         debugTiles: false,
         mapKey: `map:${id}`,
@@ -39,6 +40,9 @@ const GAMES = {
         map: 'smb.map',
         runtime: 'runtime.wasm',
         native: 'routines.txt',
+        // registers and flags as each routine's parameters, results and
+        // locals in the C (the WebAssembly is the same either way)
+        locals: true,
         display: 'display.c',
         debugTiles: true,
         mapKey: 'map',
@@ -390,7 +394,7 @@ function pickFile() {
 // Recompiles in a worker, or reuses an earlier result for the same inputs.
 async function build(inputs, viewer, progress) {
     progress.begin('cache');
-    const key = await store.digest(inputs.rom, inputs.map, inputs.native, inputs.layout, inputs.version);
+    const key = await store.digest(inputs.rom, inputs.map, inputs.native, inputs.locals ? 'locals' : '', inputs.layout, inputs.version);
     const cached = await store.get('builds', key);
     if (cached) {
         viewer.setStatus('RECOMPILED EARLIER: LOADED FROM THIS BROWSER\'S CACHE');
@@ -413,7 +417,7 @@ async function build(inputs, viewer, progress) {
             worker.terminate();
             reject(new Error(event.message || 'The recompiler failed to start'));
         };
-        worker.postMessage({ rom: inputs.rom, map: inputs.map, native: inputs.native, layout: inputs.layout });
+        worker.postMessage({ rom: inputs.rom, map: inputs.map, native: inputs.native, locals: inputs.locals, layout: inputs.layout });
     });
     viewer.setStatus(`RECOMPILED IN ${(result.ms / 1000).toFixed(1)} S: ${(result.wasm.length / 1024).toFixed(0)} KB OF WEBASSEMBLY`);
     const entry = { wasm: result.wasm, files: result.files, warning: result.warning };
@@ -429,8 +433,9 @@ function showWarning(text) {
     warning.hidden = !text;
 }
 
-// Generated files in reading order, then the hand-written display code.
-const FILE_ORDER = ['code.c', 'code.h', 'vars.h', 'constants.h', 'data.h', 'data.c'];
+// Generated files in reading order, then the hand-written display code
+// (after routines.h, the prototypes it is written against).
+const FILE_ORDER = ['code.c', 'code.h', 'vars.h', 'constants.h', 'data.h', 'data.c', 'routines.h'];
 const DEBUG_TILES_KEY = 'debug_tiles';
 const THEME_KEY = 'theme';
 
@@ -581,7 +586,7 @@ async function main() {
         steps.begin('runtime');
         const { memory, runtime, game } = await link(runtimeBytes, async layout => {
             const layoutText = Object.entries(layout).map(([name, address]) => `${name} ${address}`).join('\n');
-            const result = await build({ rom, map, native, layout: layoutText, version }, status, steps);
+            const result = await build({ rom, map, native, locals: currentGame.locals, layout: layoutText, version }, status, steps);
             files = result.files;
             warning = result.warning;
             steps.begin('link');

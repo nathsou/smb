@@ -49,6 +49,10 @@ pub fn load_dump(Bytes, RomMap) -> Dump raise ImageError
 
 pub fn load_ines(Bytes) -> Cartridge raise ImageError
 
+pub let map_labels : @ref.Ref[Map[Int32, String]]
+
+pub let map_registers : Array[String]
+
 pub fn operand(@parse.SourceAddressingMode) -> @parse.SourceExpr?
 
 pub fn parse_map(String) -> RomMap raise ImageError
@@ -244,10 +248,38 @@ pub(all) enum MapKind {
   Trap
 } derive(Eq, @debug.Debug)
 
+pub(all) struct MapParam {
+  routine : String
+  register : String
+  name : String
+  variable : String
+  description : String
+} derive(@debug.Debug)
+
+pub(all) struct MapRecord {
+  name : String
+  fields : Array[String]
+  description : String
+} derive(@debug.Debug)
+
+pub(all) struct MapScratch {
+  routine : String
+  byte : Int32
+  name : String
+  description : String
+} derive(@debug.Debug)
+
 pub(all) struct MapType {
   name : String
   flags : Bool
   members : Array[(String, Int32)]
+  description : String
+} derive(@debug.Debug)
+
+pub(all) struct MapValue {
+  address : Int32
+  register : String
+  name : String
   description : String
 } derive(@debug.Debug)
 
@@ -288,6 +320,12 @@ pub(all) struct RomMap {
   ram_code : Array[(Int32, Array[Int32])]
   copied : Array[(Int32, Int32, Int32, Int32)]
   threads : Array[Int32]
+  records : Array[MapRecord]
+  scratch : Array[MapScratch]
+  params : Array[MapParam]
+  results : Array[MapParam]
+  labels : Array[(Int32, String, String)]
+  values : Array[MapValue]
 } derive(@debug.Debug)
 pub fn RomMap::bank_name(Self, Int32) -> String
 pub fn RomMap::empty() -> Self

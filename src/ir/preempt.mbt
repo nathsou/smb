@@ -57,6 +57,7 @@ pub fn Program::make_preemptible(self : Program) -> Array[Int] {
         // straight on to the target (and no suspension left behind)
         guard f.blocks[block].term is Branch(_, suspend, target) else { continue }
         f.blocks[block].stmts = []
+        f.blocks[block].pcs = []
         f.blocks[block].term = Goto(target)
         f.blocks[suspend].term = Goto(target)
       } else {

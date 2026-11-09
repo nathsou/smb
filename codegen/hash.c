@@ -24,6 +24,14 @@
 //   --dump-audio FILE  write the samples as raw 32-bit floats (48 kHz, mono)
 //   --audio-chunk N    render in calls of N samples (the synthesizer must
 //                      resume anywhere, as audio callbacks ask for)
+//   --mask-scratch     leave the scratch bytes $00-$07 out of the state
+//                      hash: with --locals they are each routine's locals,
+//                      and what RAM keeps of them between frames is dead
+//                      (compare with tests/golden/warpless.scratch.trace,
+//                      recorded without --locals)
+//   --check-scratch    fail if a computed access did not keep to what
+//                      --locals takes of it (a program generated with
+//                      --check-scratch: see guard_failed in its code.h)
 
 #define ROM_PATH "smb.nes"
 #define REC_FILE "rec/warpless.rec"
@@ -33,6 +41,7 @@
 #define EXPECTED_ROM_FRAME_HASH 1633679932u
 #define EXPECTED_DEBUG_FRAME_HASH 508916200u
 #define EXPECTED_DEBUG_STATE_HASH 1794530440u
+#define EXPECTED_MASKED_STATE_HASH 1584392725u // without the scratch bytes
 #define AUDIO_SAMPLE_RATE 48000
 #define AUDIO_FRAME_SAMPLES (AUDIO_SAMPLE_RATE / 60)
 
@@ -42,6 +51,12 @@
 // dead return addresses whose values depend on the call convention.
 #define STACK_SCRATCH_START 0x140
 #define STACK_SCRATCH_END 0x200
+#define SCRATCH_BYTES 8
+
+static bool mask_scratch;
+
+// Set by the program generated with --check-scratch (see its code.h).
+extern bool guard_failed __attribute__((weak));
 
 static NESInputRecording recording;
 
@@ -59,7 +74,8 @@ static uint32_t hash_byte(uint32_t hash, uint8_t value) {
 
 static uint32_t hash_state(void) {
     uint32_t hash = HASH_OFFSET_BASIS;
-    hash = hash_bytes(hash, ram, STACK_SCRATCH_START);
+    size_t from = mask_scratch ? SCRATCH_BYTES : 0;
+    hash = hash_bytes(hash, ram + from, STACK_SCRATCH_START - from);
     hash = hash_bytes(hash, ram + STACK_SCRATCH_END, RAM_SIZE - STACK_SCRATCH_END);
     hash = hash_bytes(hash, video.nametable, NAMETABLE_SIZE);
     hash = hash_bytes(hash, video.palette.u8, PALETTE_SIZE);
@@ -108,6 +124,7 @@ static bool flag(int argc, char **argv, const char *name) {
 
 int main(int argc, char **argv) {
     bool debug_chr = flag(argc, argv, "--debug-chr");
+    mask_scratch = flag(argc, argv, "--mask-scratch");
     const char *trace_path = option(argc, argv, "--trace");
     const char *write_trace_path = option(argc, argv, "--write-trace");
     const char *dump = option(argc, argv, "--dump");
@@ -210,9 +227,10 @@ int main(int argc, char **argv) {
 
     bool ok = true;
     if (debug_chr) {
-        printf("State hash: %u, expected: %u\n", state_hash, EXPECTED_DEBUG_STATE_HASH);
+        uint32_t expected_state = mask_scratch ? EXPECTED_MASKED_STATE_HASH : EXPECTED_DEBUG_STATE_HASH;
+        printf("State hash%s: %u, expected: %u\n", mask_scratch ? " (without $00-$07)" : "", state_hash, expected_state);
         printf("Frame hash (debug tiles): %u, expected: %u\n", frame_hash, EXPECTED_DEBUG_FRAME_HASH);
-        ok = state_hash == EXPECTED_DEBUG_STATE_HASH && frame_hash == EXPECTED_DEBUG_FRAME_HASH;
+        ok = state_hash == expected_state && frame_hash == EXPECTED_DEBUG_FRAME_HASH;
     } else {
         printf("Frame hash (ROM tiles): %u, expected: %u\n", frame_hash, EXPECTED_ROM_FRAME_HASH);
         ok = frame_hash == EXPECTED_ROM_FRAME_HASH;
@@ -232,6 +250,18 @@ int main(int argc, char **argv) {
             ok = false;
         } else {
             printf("Per-frame audio matches %s\n", audio_trace_path);
+        }
+    }
+
+    if (flag(argc, argv, "--check-scratch")) {
+        if (&guard_failed == NULL) {
+            printf("The program was not generated with --check-scratch\n");
+            ok = false;
+        } else if (guard_failed) {
+            printf("A computed access did not keep to what --locals takes of it\n");
+            ok = false;
+        } else {
+            printf("Every computed access kept to what --locals takes of it\n");
         }
     }
 

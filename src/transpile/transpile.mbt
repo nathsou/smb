@@ -103,6 +103,7 @@ fn Emitter::emit_constants_h(self: Emitter, low: @lower.AsmLowering) -> Unit {
   self.emit("")
   self.emit("#define HIGH_BYTE(x) (((x) >> 8) & 0xff)")
   self.emit("#define LOW_BYTE(x) ((x) & 0xff)")
+  self.emit("#define WORD(hi, lo) ((hi) << 8 | (lo)) // two bytes as a 16-bit value")
   self.emit("")
 
   // in source order, with the comment that follows each definition
@@ -243,7 +244,7 @@ fn Emitter::emit_data_c(self: Emitter, low: @lower.AsmLowering) -> Unit {
 
 // `uses_ppu_bus`: the program writes PPU registers, which a host supplies
 // through ppu_bus.h (SMB's display code writes its state directly instead).
-fn Emitter::emit_code_h(self: Emitter, program: @ir.Program, uses_ppu_bus~: Bool) -> Unit {
+fn Emitter::emit_code_h(self: Emitter, program: @ir.Program, uses_ppu_bus~: Bool, conv~: Convention) -> Unit {
   let banked = !program.banks.is_empty()
   self.emit("#ifndef SMB_CODE_H")
   self.emit("#define SMB_CODE_H")
@@ -257,6 +258,36 @@ fn Emitter::emit_code_h(self: Emitter, program: @ir.Program, uses_ppu_bus~: Bool
   // cartridge runtime's mapper.c)
   if !banked { self.emit("void mapper_write(uint16_t addr, uint8_t value);") }
   self.emit("")
+  if conv.check {
+    self.emit("// --check-scratch: what --locals takes of computed addresses, checked.")
+    self.emit("// One that does not hold sets guard_failed.")
+    self.emit("extern bool guard_failed;")
+    self.emit("// not a scratch byte that is a local where the access is made (by bit)")
+    self.emit("static inline uint16_t scratch_guard(unsigned addr, unsigned locals) {")
+    self.emit("  if (addr < 0x2000 && (addr & 0x7ff) < 8 && (locals & (1u << (addr & 7)))) guard_failed = true;")
+    self.emit("  return (uint16_t)addr;")
+    self.emit("}")
+    self.emit("// an index in page zero, or in RAM, before it wraps: within it")
+    self.emit("static inline unsigned page_guard(unsigned addr) {")
+    self.emit("  if (addr > 0xff) guard_failed = true;")
+    self.emit("  return addr & 0xff;")
+    self.emit("}")
+    self.emit("static inline unsigned ram_end_guard(unsigned addr) {")
+    self.emit("  if (addr > 0x7ff) guard_failed = true;")
+    self.emit("  return addr & 0x7ff;")
+    self.emit("}")
+    self.emit("// an index from a scratch byte: within the scratch bytes")
+    self.emit("static inline unsigned scratch_index_guard(unsigned addr) {")
+    self.emit("  if (addr >= 8) guard_failed = true;")
+    self.emit("  return addr;")
+    self.emit("}")
+    self.emit("// a pointer store in a routine with locals: above the stack page")
+    self.emit("static inline uint16_t pointer_guard(unsigned addr) {")
+    self.emit("  if (addr < 0x200) guard_failed = true;")
+    self.emit("  return (uint16_t)addr;")
+    self.emit("}")
+    self.emit("")
+  }
 
   if banked {
     let layout = program.layout
@@ -288,7 +319,7 @@ fn Emitter::emit_code_h(self: Emitter, program: @ir.Program, uses_ppu_bus~: Bool
   self.emit("void cpu_nmi_entry(void);")
   self.emit("void cpu_irq_entry(void);")
   for f in program.functions {
-    if !f.helper { self.emit("void \{f.name}(void);") }
+    if !f.helper { self.emit(conv.prototype(f) + ";") }
   }
 
   self.emit("")
@@ -310,18 +341,30 @@ pub(all) struct Transpiler {
   files: Array[File]
 }
 
-pub(all) suberror TranspileError { UnknownNativeRoutine(String) } derive(Debug)
+pub(all) suberror TranspileError {
+  UnknownNativeRoutine(String)
+  LocalsUnsupported(String) // what a program has that --locals does not handle
+} derive(Debug)
 
 // `program` is the IR of `low`; routines it marks native are supplied by
 // hand-written C, and only their prototypes and contracts are generated.
+// With `locals`, registers and flags are each routine's parameters, results
+// and locals (see locals.mbt), and machine.c adapts every routine to the
+// machine's registers for the differential test.
 pub fn Transpiler::transpile(
   low: @lower.AsmLowering,
   program: @ir.Program,
   native~: Array[String] = [],
+  locals~: Bool = false,
+  check_scratch~: Bool = false,
+  addresses~: Bool = false,
 ) -> Transpiler raise TranspileError {
   for name in native {
     if program.function(name) is None { raise UnknownNativeRoutine(name) }
   }
+  let conv = if locals { Convention::locals_of(program) } else { Convention::machine() }
+  conv.check = locals && check_scratch
+  conv.addresses = addresses
   let constants_h: File = {
     name: "constants.h",
     contents: {
@@ -354,12 +397,14 @@ pub fn Transpiler::transpile(
 
   fn program_c(views : Views) -> String {
     let emitter = Emitter::new()
-    emitter.emit_program_c(program, low.preamble, views)
+    emitter.emit_program_c(program, low.preamble, views, conv)
     emitter.output.to_string()
   }
   // Names of the map become views (vars.h) unless the generated code
   // already uses them as identifiers.
   let views = Views::from_map(low, identifiers(program_c(Views::empty())))
+  // the names of parameters and results, for the prototypes and the bodies
+  if locals { conv.name_parameters(program, views) }
   let code_c = { name: "code.c", contents: program_c(views), is_lib: true }
   let vars_h = { name: "vars.h", contents: views.header(), is_lib: true }
 
@@ -367,10 +412,28 @@ pub fn Transpiler::transpile(
     name: "code.h",
     contents: {
       let emitter = Emitter::new()
-      emitter.emit_code_h(program, uses_ppu_bus=code_c.contents.contains("ppu_bus_"))
+      emitter.emit_code_h(program, uses_ppu_bus=code_c.contents.contains("ppu_bus_"), conv~)
       emitter.output.to_string()
     },
     is_lib: true,
+  }
+
+  let machine_c = {
+    name: "machine.c",
+    contents: {
+      let emitter = Emitter::new()
+      emitter.emit_machine_adapters(program, conv)
+      emitter.output.to_string()
+    },
+    is_lib: true,
+  }
+
+  // the hand-written routines' interface (committed in codegen/native)
+  let interface = if locals && program.functions.iter().any(fn(f) { f.native }) {
+    let (routines_h, machine_calls_c) = native_interface(program, conv)
+    [{ name: "routines.h", contents: routines_h, is_lib: true }, { name: "machine_calls.c", contents: machine_calls_c, is_lib: true }]
+  } else {
+    []
   }
 
   {
@@ -378,6 +441,6 @@ pub fn Transpiler::transpile(
       constants_h,
       data_h, data_c,
       code_h, code_c,
-    ] + (if views.list.is_empty() { [] } else { [vars_h] }),
+    ] + (if views.list.is_empty() { [] } else { [vars_h] }) + (if locals { [machine_c] } else { [] }) + interface,
   }
 }

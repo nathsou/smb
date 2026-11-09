@@ -1,14 +1,15 @@
 // Runs the recompiler (src/web, built to recompiler.js with
 // `moon build --target js`) off the main thread.
 //
-// Message in:  { rom: Uint8Array, map, native, layout } (strings)
+// Message in:  { rom: Uint8Array, map, native, layout } (strings) and
+//              locals (registers as C locals, see src/transpile/locals.mbt)
 // Messages out: { progress, took } as each stage starts (its key,
 //          src/pipeline; the last stage's milliseconds), then
 //          { wasm: Uint8Array, files: [{ name, contents }], warning, ms, took }
 //          or { error }
 import * as recompiler from './recompiler.js';
 
-self.onmessage = ({ data: { rom, map, native, layout } }) => {
+self.onmessage = ({ data: { rom, map, native, locals, layout } }) => {
     const start = performance.now();
     let stageStart = start;
     const took = () => {
@@ -17,7 +18,7 @@ self.onmessage = ({ data: { rom, map, native, layout } }) => {
         stageStart = now;
         return ms;
     };
-    const error = recompiler.recompile(rom, map, native, layout, stage => {
+    const error = recompiler.recompile(rom, map, native, Boolean(locals), layout, stage => {
         self.postMessage({ progress: stage, took: took() });
     });
     if (error !== '') {
