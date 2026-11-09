@@ -633,7 +633,7 @@ with values both local and in RAM in a routine names the local, and
 
 The map's description of a named parameter or result goes above the
 function (`// can_rise: nonzero: the up force applies too`). SMB's map
-names every routine's parameters and results (308 `param` and 173 `result`
+names every routine's parameters and results (309 `param` and 177 `result`
 lines) and its scratch values (196 `scratch` lines): no prototype has a
 register's name left, and no routine body a `tK` or a `ram[k]`. X that a
 routine passes along without reading it as anything, left by the frame
