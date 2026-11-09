@@ -66,8 +66,9 @@ fn Function::move_to_front(self : Function, first : Array[Int]) -> Unit {
   self.entry = index[self.entry]
 }
 
-fn Function::block(self : Function, stmts : Array[Stmt], term : Term) -> Int {
-  self.blocks.push({ label: "", stmts, term })
+fn Function::block(self : Function, stmts : Array[Stmt], term : Term, pcs~ : Array[Int] = []) -> Int {
+  let pcs = if pcs.length() == stmts.length() { pcs } else { stmts.map(fn(_) { -1 }) }
+  self.blocks.push({ label: "", stmts, term, pcs })
   self.blocks.length() - 1
 }
 
@@ -128,7 +129,8 @@ pub fn Program::make_resumable(self : Program) -> Unit raise BuildError {
       }
       if split is Some(i) {
         guard block.stmts[i] is Call(g) else { continue }
-        let rest = f.block(block.stmts[i + 1:].to_owned(), block.term)
+        let rest = f.block(block.stmts[i + 1:].to_owned(), block.term, pcs=pcs_slice(block.pcs, i + 1))
+        block.pcs = pcs_slice(block.pcs, 0, end=i)
         block.stmts = block.stmts[:i].to_owned()
         block.term = Goto(call(g, rest))
         work.push(rest)
@@ -144,6 +146,7 @@ pub fn Program::make_resumable(self : Program) -> Unit raise BuildError {
         Dispatch(helper, return_address, cases) if cases.iter().any(fn(c) { suspending.contains(c.1) }) => {
           let t = f.new_temp("target", U16)
           block.stmts.push(CallValue(t, helper, return_address))
+          block.pcs.push(-1)
           block.term = Switch(Temp(t), cases.map(fn(c) { (c.0, call(c.1, returns)) }), traps)
         }
         Jump(target, cases) if cases.iter().any(fn(c) { suspending.contains(c.1) }) =>

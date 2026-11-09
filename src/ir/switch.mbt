@@ -58,6 +58,7 @@ pub fn Program::make_switchable(self : Program) -> Unit raise BuildError {
       match block.term {
         TailCall(g) if self.threads.contains(g) => {
           block.stmts.push(Effect("cpu_start_thread", [Const(self.threads.search(g).unwrap() + 1)]))
+          block.pcs.push(-1)
           block.term = Return
         }
         _ =>

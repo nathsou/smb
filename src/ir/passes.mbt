@@ -30,6 +30,7 @@ fn dead_code(info : Analysis, f : Function) -> Bool {
   for block in f.blocks {
     let mut live = info.term_live(f, block.term, block_in)
     let kept = []
+    let kept_pcs = []
     let mut k = block.stmts.length() - 1
     while k >= 0 {
       let s = block.stmts[k]
@@ -45,6 +46,7 @@ fn dead_code(info : Analysis, f : Function) -> Bool {
         Some(r) => {
           if r != s { changed = true }
           kept.push(r)
+          kept_pcs.push(block.pc(k))
           live = info.stmt_live(r, live)
         }
         None => changed = true
@@ -52,7 +54,9 @@ fn dead_code(info : Analysis, f : Function) -> Bool {
       k -= 1
     }
     kept.rev_in_place()
+    kept_pcs.rev_in_place()
     block.stmts = kept
+    block.pcs = kept_pcs
   }
   changed
 }
@@ -188,6 +192,7 @@ fn forward(info : Analysis, f : Function) -> Bool {
         stmts[at] = simplify_stmt(stmts[at].map_exprs(fn(x) { name.replace(x, e) }))
       }
       stmts.remove(i) |> ignore
+      if block.pcs.length() > i { block.pcs.remove(i) |> ignore }
       changed = true
     }
   }
@@ -284,7 +289,8 @@ pub fn Program::inline_leaves(self : Program, limit~ : Int = 12) -> Int {
     for block in f.blocks {
       if !block.stmts.iter().any(fn(s) { s is Call(g) && leaves.contains(g) }) { continue }
       let out = []
-      for s in block.stmts {
+      let out_pcs = []
+      for i, s in block.stmts {
         match s {
           Call(g) if leaves.get(g) is Some(leaf) && g != f.name => {
             let temps = leaf.temps.map(fn(t) { f.new_temp(t.hint, t.width) })
@@ -295,6 +301,7 @@ pub fn Program::inline_leaves(self : Program, limit~ : Int = 12) -> Int {
               e
             }
             for inner in leaf.blocks[0].stmts {
+              out_pcs.push(block.pc(i))
               out.push(
                 match inner {
                   Let(t, e) => Let(temps[t], remap(e))
@@ -304,10 +311,14 @@ pub fn Program::inline_leaves(self : Program, limit~ : Int = 12) -> Int {
             }
             count += 1
           }
-          other => out.push(other)
+          other => {
+            out.push(other)
+            out_pcs.push(block.pc(i))
+          }
         }
       }
       block.stmts = out
+      block.pcs = out_pcs
     }
   }
   count

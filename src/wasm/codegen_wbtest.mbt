@@ -10,7 +10,7 @@ test "LEB128 encodings" {
 fn function_of(terms : Array[@ir.Term]) -> @ir.Function {
   {
     name: "f",
-    blocks: terms.map(fn(t) { { label: "", stmts: [], term: t } }),
+    blocks: terms.map(fn(t) { { label: "", stmts: [], term: t, pcs: [] } }),
     entry: 0,
     temps: [],
     doc: [],
