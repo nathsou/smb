@@ -1,0 +1,29 @@
+[package]
+name = "smb-3ds"
+description = "The recompiled game on the Nintendo 3DS, in layers for the stereoscopic screen"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+build = "build.rs"
+
+[package.metadata.citronnade]
+title = "smb 3DS"
+author = "nathsou"
+
+[dependencies]
+citronnade = { git = "https://github.com/nathsou/citronnade", branch = "dev" }
+
+# A standalone package, not part of a workspace above it.
+[workspace]
+
+[profile.dev]
+panic = "abort"
+opt-level = 2
+
+[profile.release]
+panic = "abort"
+opt-level = 3
+lto = true
+codegen-units = 1
+debug = 1

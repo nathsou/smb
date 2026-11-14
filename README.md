@@ -77,6 +77,12 @@ and `GAME=smb3` (`codegen/smb3/`, `./smb3`), and for `bomberman.nes`,
 `tetris.nes`, `zelda.nes`, `chessmaster.nes` and `kirby.nes` with
 `GAME=bomberman`, `tetris`, `zelda`, `chessmaster` and `kirby`.
 
+### Nintendo 3DS
+
+`platforms/3ds/` runs the recompiled SMB on the 3DS, in stereoscopic 3D:
+the level data puts the scenery behind the screen and the sprites in front
+of it. See [its README](platforms/3ds/README.md).
+
 ## WebAssembly
 
 The page recompiles your ROM in the browser: the recompiler (MoonBit compiled
