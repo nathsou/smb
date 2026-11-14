@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "citronnade"
 version = "0.1.0"
-source = "git+https://github.com/nathsou/citronnade?branch=dev#9d5034c2a511b0bddb7ed1cd4f0ca3610943baf8"
+source = "git+https://github.com/nathsou/citronnade?branch=dev#25aaa451dd5192f04051f982f891c72694e3ac6b"
 dependencies = [
  "citronnade-formats",
  "citronnade-gpu",
@@ -17,12 +17,12 @@ dependencies = [
 [[package]]
 name = "citronnade-formats"
 version = "0.1.0"
-source = "git+https://github.com/nathsou/citronnade?branch=dev#9d5034c2a511b0bddb7ed1cd4f0ca3610943baf8"
+source = "git+https://github.com/nathsou/citronnade?branch=dev#25aaa451dd5192f04051f982f891c72694e3ac6b"
 
 [[package]]
 name = "citronnade-gpu"
 version = "0.1.0"
-source = "git+https://github.com/nathsou/citronnade?branch=dev#9d5034c2a511b0bddb7ed1cd4f0ca3610943baf8"
+source = "git+https://github.com/nathsou/citronnade?branch=dev#25aaa451dd5192f04051f982f891c72694e3ac6b"
 dependencies = [
  "citronnade-rt",
  "citronnade-services",
@@ -32,7 +32,7 @@ dependencies = [
 [[package]]
 name = "citronnade-macros"
 version = "0.1.0"
-source = "git+https://github.com/nathsou/citronnade?branch=dev#9d5034c2a511b0bddb7ed1cd4f0ca3610943baf8"
+source = "git+https://github.com/nathsou/citronnade?branch=dev#25aaa451dd5192f04051f982f891c72694e3ac6b"
 dependencies = [
  "citronnade-shader",
 ]
@@ -40,12 +40,12 @@ dependencies = [
 [[package]]
 name = "citronnade-rt"
 version = "0.1.0"
-source = "git+https://github.com/nathsou/citronnade?branch=dev#9d5034c2a511b0bddb7ed1cd4f0ca3610943baf8"
+source = "git+https://github.com/nathsou/citronnade?branch=dev#25aaa451dd5192f04051f982f891c72694e3ac6b"
 
 [[package]]
 name = "citronnade-services"
 version = "0.1.0"
-source = "git+https://github.com/nathsou/citronnade?branch=dev#9d5034c2a511b0bddb7ed1cd4f0ca3610943baf8"
+source = "git+https://github.com/nathsou/citronnade?branch=dev#25aaa451dd5192f04051f982f891c72694e3ac6b"
 dependencies = [
  "citronnade-rt",
 ]
@@ -53,7 +53,7 @@ dependencies = [
 [[package]]
 name = "citronnade-shader"
 version = "0.1.0"
-source = "git+https://github.com/nathsou/citronnade?branch=dev#9d5034c2a511b0bddb7ed1cd4f0ca3610943baf8"
+source = "git+https://github.com/nathsou/citronnade?branch=dev#25aaa451dd5192f04051f982f891c72694e3ac6b"
 
 [[package]]
 name = "smb-3ds"
