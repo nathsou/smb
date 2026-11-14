@@ -1,6 +1,6 @@
 [package]
 name = "smb-3ds"
-description = "The recompiled game on the Nintendo 3DS, in layers for the stereoscopic screen"
+description = "The recompiled games on the Nintendo 3DS, in layers for the stereoscopic screen"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
@@ -9,7 +9,7 @@ build = "build.rs"
 
 [package.metadata.citronnade]
 title = "smb 3DS"
-description = "The recompiled game in stereoscopic 3D"
+description = "Recompiled NES games in stereoscopic 3D"
 author = "nathsou"
 icon = "icon.png"
 

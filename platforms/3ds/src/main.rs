@@ -1,30 +1,36 @@
-//! The recompiled game on the Nintendo 3DS, built with Citronnade.
+//! Recompiled NES games on the Nintendo 3DS, built with Citronnade: one
+//! program with a game selector, each game keeping its place while another
+//! is played.
 //!
-//! The generated C (the game) and its runtime are compiled for the ARM11 by
-//! `build.rs` and called through the same ten functions the desktop and web
-//! front ends use. Each VBlank runs one NES frame; the APU's samples go to
-//! the DSP.
+//! The generated C (each game) and its runtime are compiled for the ARM11
+//! by `build.rs`, every game with its own copy of the runtime, and called
+//! through `c/game.c`'s functions (`games.rs`, generated, lists them). Each
+//! VBlank runs one NES frame of the game being played; the APU's samples go
+//! to the DSP.
 //!
 //! The picture is split into layers (codegen/lib/layers.c: the background,
-//! each pixel on a plane chosen from the level data, and the sprites), drawn
-//! as two textures that the GPU shows at different depths when the 3D
-//! slider is up: the sprites in front of the screen, the blocks, pipes and
-//! ground on it, the hills, clouds and bushes behind it, the status bar
-//! fixed on the screen. R toggles the layers off (the flat picture, drawn
-//! by the CPU).
+//! each pixel on a plane, and the sprites), drawn as two textures that the
+//! GPU shows at different depths when the 3D slider is up. In SMB the level
+//! data places the hills, clouds and bushes behind the screen, the blocks,
+//! pipes and ground on it, the status bar fixed; in the other games the
+//! background is on the screen. The sprites are in front. Frames the layers
+//! cannot draw (split mid-screen, switched tiles) are drawn flat by the CPU,
+//! as when R turns the layers off.
 //!
 //! Controls: the Circle Pad or the D-pad, A, B (or Y), START, SELECT. The
-//! bottom screen's buttons save and load a state on the SD card and choose
-//! how deep the 3D is.
+//! bottom screen's buttons save and load a state on the SD card, choose how
+//! deep the 3D is and go back to the games.
 #![no_std]
 #![no_main]
 
 extern crate alloc;
 
 use alloc::format;
+use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use citronnade::audio::{Audio, SampleFormat, WaveBuf, OUTPUT_RATE};
+use citronnade::gfx::Canvas;
 use citronnade::gpu::{
     self, shader, AttribType, Cull, Filter, Gpu, LinearBuffer, Primitive, RenderTarget, Shader, Source, TexEnv, TexFormat, TestFunc,
     Texture, VertexLayout, WriteMask,
@@ -35,47 +41,40 @@ use citronnade::time::Instant;
 
 const NES_WIDTH: u32 = 256;
 const NES_HEIGHT: u32 = 240;
-/// The CHR (tiles), extracted from your ROM by build.rs.
-static CHR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/chr.bin"));
-
-unsafe extern "C" {
-    fn cpu_init();
-    fn apu_init(sample_rate: usize);
-    fn video_init(chr: *const u8);
-    fn render_init();
-    fn cpu_reset_entry();
-    fn update_controller1(state: u8);
-    fn next_frame();
-    fn render_frame();
-    fn sound_end_frame();
-    fn apu_render(out: *mut f32, count: usize);
-    /// The picture render_frame draws: 256x240, RGB888.
-    static frame: [u8; (NES_WIDTH * NES_HEIGHT * 3) as usize];
-    /// A state between frames (state.h): the RAM, nametables, palette, OAM.
-    fn save_state(dest: *mut u8);
-    fn load_state(state: *mut u8);
-    static save_state_size: u32;
-    /// The NES's 64 colours, RGB.
-    static COLOR_PALETTE: [u8; 64 * 3];
-    fn layers_smb_level() -> LayerLevel;
-    fn layers_render(level: *const LayerLevel, target: *const LayerTarget) -> bool;
-    static layer_background_material: [u8; PIXELS];
-    static layer_backdrop: u8;
-}
-
 const PIXELS: usize = (NES_WIDTH * NES_HEIGHT) as usize;
 
-/// layers.h's LayerLevel.
-#[repr(C)]
-struct LayerLevel {
-    blocks: *const u8,
-    area_kind: i32,
-    climb_limits: [u8; 4],
+/// One game's functions (c/game.c).
+pub struct GameFns {
+    init: unsafe extern "C" fn(data: *const u8, size: usize, sample_rate: usize) -> i32,
+    controller: unsafe extern "C" fn(state: u8),
+    frame: unsafe extern "C" fn(),
+    end_frame: unsafe extern "C" fn(),
+    audio: unsafe extern "C" fn(out: *mut f32, count: usize),
+    render: unsafe extern "C" fn() -> *const u8,
+    layers: unsafe extern "C" fn(target: *const LayerTarget) -> bool,
+    materials: unsafe extern "C" fn() -> *const u8,
+    backdrop: unsafe extern "C" fn() -> u8,
+    state_size: unsafe extern "C" fn() -> u32,
+    save: unsafe extern "C" fn(dest: *mut u8),
+    load: unsafe extern "C" fn(state: *mut u8),
 }
+
+/// A game built in: its name, what it needs from its ROM (embedded at
+/// build time), whether its level data places its background
+/// (`layered_level`), and its functions.
+pub struct GameInfo {
+    id: &'static str,
+    title: &'static str,
+    data: &'static [u8],
+    layered_level: bool,
+    fns: GameFns,
+}
+
+include!(concat!(env!("OUT_DIR"), "/games.rs"));
 
 /// layers.h's LayerTarget.
 #[repr(C)]
-struct LayerTarget {
+pub struct LayerTarget {
     background: *mut u32,
     sprites: *mut u32,
     sprites_bytes: usize,
@@ -187,8 +186,7 @@ impl LayerRenderer {
 
     /// Draws this frame's layers into the textures; false when the frame
     /// needs the flat picture.
-    fn render(&mut self) -> bool {
-        let level = unsafe { layers_smb_level() };
+    fn render(&mut self, game: &GameFns) -> bool {
         let sprites = self.sprites.data_mut();
         let target = LayerTarget {
             background: self.background.data_mut().as_mut_ptr() as *mut u32,
@@ -200,15 +198,21 @@ impl LayerRenderer {
             row_offset: self.row_offset.as_ptr(),
             column_offset: self.column_offset.as_ptr(),
         };
-        unsafe { layers_render(&level, &target) }
+        unsafe { (game.layers)(&target) }
+    }
+
+    /// Clears the sprites' texture, which each game clears only where it
+    /// drew last: for a game played after another.
+    fn forget_sprites(&mut self) {
+        self.sprites.data_mut().fill(0);
     }
 
     /// Draws one eye's picture (`eye` -1 for the left, 1 for the right)
     /// into the render target: the backdrop, then the planes back to front,
     /// each shifted by its depth.
-    fn draw(&mut self, eye: f32, slider: f32) -> Result<()> {
+    fn draw(&mut self, game: &GameFns, eye: f32, slider: f32) -> Result<()> {
         let shift = |depth: f32| citronnade::math::round(depth * slider * eye);
-        let backdrop = unsafe { layer_backdrop } as usize * 3;
+        let backdrop = unsafe { (game.backdrop)() } as usize * 3;
         let c = unsafe { &COLOR_PALETTE[backdrop..backdrop + 3] };
         let gpu = &mut self.gpu;
         gpu.clear(&self.target, gpu::rgba(0, 0, 0, 255), 0)?;
@@ -297,7 +301,7 @@ fn controller(held: Buttons, stick: (i16, i16)) -> u8 {
     s
 }
 
-/// Streams the APU's samples to a DSP channel.
+/// Streams the playing game's APU samples to a DSP channel.
 struct Sound {
     audio: Option<Audio>,
     buffers: Vec<Arc<WaveBuf>>,
@@ -323,13 +327,13 @@ impl Sound {
     }
 
     /// Refills the buffers the DSP has played.
-    fn pump(&mut self) {
+    fn pump(&mut self, game: &GameFns) {
         let Some(a) = &self.audio else { return };
         let ch = a.channel(0);
         for buf in self.buffers.iter_mut() {
             if let Some(b) = Arc::get_mut(buf) {
                 if b.is_free() {
-                    unsafe { apu_render(self.scratch.as_mut_ptr(), SOUND_FRAMES) };
+                    unsafe { (game.audio)(self.scratch.as_mut_ptr(), SOUND_FRAMES) };
                     for (d, s) in b.samples_mut().iter_mut().zip(&self.scratch) {
                         *d = (s.clamp(-1.0, 1.0) * 32000.0) as i16;
                     }
@@ -341,7 +345,6 @@ impl Sound {
 }
 
 const SAVE_DIR: &str = "/3ds/smb-3ds";
-const SAVE_FILE: &str = "/3ds/smb-3ds/state.bin";
 
 /// The 3D presets: how far the planes move, times their depths, at full
 /// slider.
@@ -353,37 +356,70 @@ enum Action {
     Load,
     Depth,
     Layers,
+    Games,
 }
 
-/// The bottom screen's buttons: what they do and where they are.
-const BUTTONS: [(Action, i32, i32); 4] = [(Action::Save, 12, 56), (Action::Load, 164, 56), (Action::Depth, 12, 110), (Action::Layers, 164, 110)];
-const BUTTON_W: u32 = 144;
-const BUTTON_H: u32 = 44;
+/// The bottom screen's buttons while playing: what they do and where.
+const BUTTONS: [(Action, i32, i32, u32); 5] = [
+    (Action::Save, 12, 48, 144),
+    (Action::Load, 164, 48, 144),
+    (Action::Depth, 12, 98, 144),
+    (Action::Layers, 164, 98, 144),
+    (Action::Games, 12, 148, 296),
+];
+const BUTTON_H: u32 = 42;
 
 fn button_at((x, y): (u16, u16)) -> Option<Action> {
     let (x, y) = (x as i32, y as i32);
     BUTTONS
         .iter()
-        .find(|&&(_, bx, by)| (bx..bx + BUTTON_W as i32).contains(&x) && (by..by + BUTTON_H as i32).contains(&y))
-        .map(|&(a, _, _)| a)
+        .find(|&&(_, bx, by, w)| (bx..bx + w as i32).contains(&x) && (by..by + BUTTON_H as i32).contains(&y))
+        .map(|&(a, ..)| a)
 }
 
-/// Saves the game's state to the SD card.
-fn save() -> core::result::Result<(), &'static str> {
-    let mut state = alloc::vec![0u8; unsafe { save_state_size } as usize];
-    unsafe { save_state(state.as_mut_ptr()) };
+/// The selector's rows on the bottom screen.
+const ROW_Y: i32 = 40;
+const ROW_H: i32 = 30;
+
+fn row_at((x, y): (u16, u16), rows: usize) -> Option<usize> {
+    let (x, y) = (x as i32, y as i32);
+    if !(12..308).contains(&x) || y < ROW_Y {
+        return None;
+    }
+    let row = ((y - ROW_Y) / ROW_H) as usize;
+    (row < rows && (y - ROW_Y) % ROW_H < ROW_H - 4).then_some(row)
+}
+
+fn state_file(game: &GameInfo) -> String {
+    format!("{SAVE_DIR}/{}.state", game.id)
+}
+
+/// Saves a game's state to the SD card.
+fn save(game: &GameInfo) -> core::result::Result<(), &'static str> {
+    let mut state = alloc::vec![0u8; unsafe { (game.fns.state_size)() } as usize];
+    unsafe { (game.fns.save)(state.as_mut_ptr()) };
     citronnade::fs::create_dir_all(SAVE_DIR).map_err(|_| "Could not make /3ds/smb-3ds")?;
-    citronnade::fs::write(SAVE_FILE, &state).map_err(|_| "Could not write the state")
+    citronnade::fs::write(&state_file(game), &state).map_err(|_| "Could not write the state")
 }
 
 /// Loads the state saved on the SD card.
-fn load() -> core::result::Result<(), &'static str> {
-    let mut state = citronnade::fs::read(SAVE_FILE).map_err(|_| "No saved state yet")?;
-    if state.len() != unsafe { save_state_size } as usize {
+fn load(game: &GameInfo) -> core::result::Result<(), &'static str> {
+    let mut state = citronnade::fs::read(&state_file(game)).map_err(|_| "No saved state yet")?;
+    if state.len() != unsafe { (game.fns.state_size)() } as usize {
         return Err("The saved state is not from this version");
     }
-    unsafe { load_state(state.as_mut_ptr()) };
+    unsafe { (game.fns.load)(state.as_mut_ptr()) };
     Ok(())
+}
+
+/// Whether each game has started, and how its frames go.
+#[derive(Clone, Copy, Default)]
+struct Progress {
+    started: bool,
+    frames: u64,
+    total_us: u64,
+    /// The game, the picture (layers or flat), the sound, the drawing.
+    parts: [u64; 4],
 }
 
 /// What the bottom screen shows.
@@ -394,35 +430,68 @@ struct Menu {
     us: u64,
 }
 
+const TEXT: Color = Color::rgb(180, 190, 210);
+const BACKGROUND: Color = Color::rgb(20, 20, 28);
+
+fn button(b: &mut Canvas, x: i32, y: i32, w: u32, h: u32, label: &str, highlight: bool) {
+    b.fill_rect(x, y, w, h, if highlight { Color::rgb(70, 82, 124) } else { Color::rgb(46, 52, 74) });
+    b.rect(x, y, w, h, if highlight { Color::rgb(255, 214, 120) } else { Color::rgb(110, 122, 166) });
+    let (tw, th) = Canvas::text_size(label, 1);
+    b.text(x + (w as i32 - tw as i32) / 2, y + (h as i32 - th as i32) / 2, label, Color::WHITE, 1);
+}
+
 impl Menu {
-    fn label(&self, action: Action) -> alloc::string::String {
+    fn label(&self, action: Action) -> String {
         match action {
             Action::Save => "Save state".into(),
             Action::Load => "Load state".into(),
             Action::Depth => format!("3D: {}", DEPTHS[self.depth].0),
             Action::Layers => format!("Layers: {}", if self.layered { "on" } else { "off" }),
+            Action::Games => "Games".into(),
         }
     }
 
-    fn draw(&self, b: &mut citronnade::gfx::Canvas, frames: u64) {
-        let text = Color::rgb(180, 190, 210);
-        b.clear(Color::rgb(20, 20, 28));
-        b.text(12, 12, "Recompiled, not emulated", Color::WHITE, 1);
-        b.text(12, 30, &format!("{:5.2} ms per frame", self.us as f32 / 1000.0), text, 1);
-        for &(action, x, y) in BUTTONS.iter() {
-            b.fill_rect(x, y, BUTTON_W, BUTTON_H, Color::rgb(46, 52, 74));
-            b.rect(x, y, BUTTON_W, BUTTON_H, Color::rgb(110, 122, 166));
-            let label = self.label(action);
-            let (w, h) = citronnade::gfx::Canvas::text_size(&label, 1);
-            b.text(x + (BUTTON_W - w) as i32 / 2, y + (BUTTON_H - h) as i32 / 2, &label, Color::WHITE, 1);
+    fn draw(&self, b: &mut Canvas, game: &GameInfo, frames: u64) {
+        b.clear(BACKGROUND);
+        b.text(12, 12, game.title, Color::WHITE, 1);
+        b.text(12, 26, &format!("Recompiled, not emulated   {:5.2} ms per frame", self.us as f32 / 1000.0), TEXT, 1);
+        for &(action, x, y, w) in BUTTONS.iter() {
+            button(b, x, y, w, BUTTON_H, &self.label(action), false);
         }
         if let Some((message, until)) = self.message {
             if frames < until {
-                b.text(12, 168, message, Color::rgb(255, 214, 120), 1);
+                b.text(12, 198, message, Color::rgb(255, 214, 120), 1);
             }
         }
-        b.text(12, 196, "Circle Pad / D-pad, A, B or Y, START, SELECT", text, 1);
-        b.text(12, 212, "R: layers   START + SELECT + L/R: quit", text, 1);
+        b.text(12, 212, "R: layers   START + SELECT + L/R: quit", TEXT, 1);
+    }
+}
+
+/// The game selector: the list on the bottom screen, the chosen game's
+/// name on the top.
+fn draw_selector(screens: &mut Screens, chosen: usize, progress: &[Progress], message: Option<&str>) {
+    let (mut l, mut r) = screens.top_stereo();
+    for top in [&mut l, &mut r] {
+        top.clear(Color::rgb(12, 14, 24));
+        top.text(24, 24, "Recompiled NES games", Color::rgb(255, 214, 120), 2);
+        top.text(24, 52, "Statically recompiled to C from your own ROMs,", TEXT, 1);
+        top.text(24, 66, "not emulated.", TEXT, 1);
+        top.text(24, 110, GAMES[chosen].title, Color::WHITE, 2);
+        let status = if progress[chosen].started { "A: resume (it kept its place)" } else { "A: start" };
+        top.text(24, 140, status, TEXT, 1);
+        top.text(24, 210, "Up/Down or the stylus: choose   START: quit", TEXT, 1);
+    }
+    drop((l, r));
+    let mut b = screens.bottom();
+    b.clear(BACKGROUND);
+    b.text(12, 14, "Choose a game", Color::WHITE, 1);
+    for (i, game) in GAMES.iter().enumerate() {
+        let y = ROW_Y + i as i32 * ROW_H;
+        let label = if progress[i].started { format!("{}  (paused)", game.title) } else { String::from(game.title) };
+        button(&mut b, 12, y, 296, (ROW_H - 4) as u32, &label, i == chosen);
+    }
+    if let Some(message) = message {
+        b.text(12, 212, message, Color::rgb(255, 214, 120), 1);
     }
 }
 
@@ -433,41 +502,88 @@ fn main(sys: System) -> Result<()> {
     let mut screens = gsp.screens()?;
     let mut input = hid.input()?;
     let mut sound = Sound::new();
-    log!("smb-3ds: {} KiB of CHR, sound {}", CHR.len() / 1024, if sound.audio.is_some() { "on" } else { "off (no DSP firmware)" });
-
-    unsafe {
-        cpu_init();
-        apu_init(OUTPUT_RATE as usize);
-        video_init(CHR.as_ptr());
-        render_init();
-        cpu_reset_entry();
-    }
+    log!(
+        "smb-3ds: {} games ({}), sound {}",
+        GAMES.len(),
+        GAMES.iter().map(|g| g.id).collect::<Vec<_>>().join(", "),
+        if sound.audio.is_some() { "on" } else { "off (no DSP firmware)" }
+    );
 
     screens.set_top_mode(TopMode::Stereo);
     let mut layers = LayerRenderer::new()?;
     let mut menu = Menu { depth: 2, layered: true, message: None, us: 0 };
+    let mut progress = alloc::vec![Progress::default(); GAMES.len()];
+    // The game being played, or the selector; the selector's choice.
+    let mut playing: Option<usize> = None;
+    let mut chosen = 0;
+    let mut selector_message: Option<&'static str> = None;
     // The bottom screen is drawn only when it changes: into both of its
     // buffers, so two frames in a row.
     let mut redraw = 2;
     let mut was_touching = false;
-    let (mut frames, mut total_us, mut worst_us) = (0u64, 0u64, 0u64);
-    // Where the time goes: the game, the layers (or the flat picture), the
-    // sound (the APU's frame and the DSP's buffers), the GPU.
-    let mut parts = [0u64; 4];
+    let mut frames = 0u64;
     while apt.main_loop() {
         let state = input.scan();
-        if state.held().contains(Buttons::START | Buttons::SELECT) && state.down().intersects(Buttons::L | Buttons::R) {
+        let (held, down) = (state.held(), state.down());
+        let touch = state.touch();
+        let tap = touch.filter(|_| !was_touching);
+        was_touching = touch.is_some();
+        frames += 1;
+
+        let Some(index) = playing else {
+            // The selector.
+            if down.contains(Buttons::START) {
+                break;
+            }
+            let rows = GAMES.len();
+            let mut pick = tap.and_then(|t| row_at(t, rows));
+            if let Some(row) = pick {
+                chosen = row;
+            }
+            if down.intersects(Buttons::UP) {
+                chosen = (chosen + rows - 1) % rows;
+            }
+            if down.intersects(Buttons::DOWN) {
+                chosen = (chosen + 1) % rows;
+            }
+            if down.contains(Buttons::A) {
+                pick = Some(chosen);
+            }
+            if let Some(i) = pick {
+                let game = &GAMES[i];
+                if !progress[i].started {
+                    let ok = unsafe { (game.fns.init)(game.data.as_ptr(), game.data.len(), OUTPUT_RATE as usize) } == 0;
+                    log!("smb-3ds: starting {}: {}", game.id, if ok { "ok" } else { "failed" });
+                    if ok {
+                        progress[i].started = true;
+                    } else {
+                        selector_message = Some("That game could not start: is its ROM right?");
+                    }
+                }
+                if progress[i].started {
+                    playing = Some(i);
+                    layers.forget_sprites();
+                    menu.message = None;
+                    redraw = 2;
+                    continue;
+                }
+            }
+            draw_selector(&mut screens, chosen, &progress, selector_message);
+            screens.present();
+            continue;
+        };
+
+        // A game.
+        let game = &GAMES[index];
+        if held.contains(Buttons::START | Buttons::SELECT) && down.intersects(Buttons::L | Buttons::R) {
             break; // START + SELECT + L or R quits
         }
-        let touch = state.touch();
-        let tapped = touch.filter(|_| !was_touching).and_then(button_at);
-        was_touching = touch.is_some();
-        let action = if state.down().contains(Buttons::R) { Some(Action::Layers) } else { tapped };
+        let action = if down.contains(Buttons::R) { Some(Action::Layers) } else { tap.and_then(button_at) };
         if let Some(action) = action {
             // Between frames, where states are taken.
             let result = match action {
-                Action::Save => save().map(|_| "State saved"),
-                Action::Load => load().map(|_| "State loaded"),
+                Action::Save => save(game).map(|_| "State saved"),
+                Action::Load => load(game).map(|_| "State loaded"),
                 Action::Depth => {
                     menu.depth = (menu.depth + 1) % DEPTHS.len();
                     Ok("")
@@ -476,63 +592,68 @@ fn main(sys: System) -> Result<()> {
                     menu.layered = !menu.layered;
                     Ok("")
                 }
+                Action::Games => {
+                    playing = None;
+                    chosen = index;
+                    selector_message = None;
+                    continue;
+                }
             };
             let message = result.unwrap_or_else(|e| e);
             if !message.is_empty() {
-                log!("smb-3ds: {}", message);
+                log!("smb-3ds: {}: {}", game.id, message);
                 menu.message = Some((message, frames + 120));
             }
             redraw = 2;
         }
+
         let start = Instant::now();
         let depth = citronnade::slider_3d() * DEPTHS[menu.depth].1;
         unsafe {
-            update_controller1(controller(state.held(), state.circle_pad()));
-            next_frame();
+            (game.fns.controller)(controller(held, state.circle_pad()));
+            (game.fns.frame)();
         }
         let t0 = start.elapsed().as_micros() as u64;
-        let split = menu.layered && layers.render();
-        if !split {
-            unsafe { render_frame() };
-        }
+        let split = menu.layered && layers.render(&game.fns);
+        let flat = if split { None } else { Some(unsafe { core::slice::from_raw_parts((game.fns.render)(), PIXELS * 3) }) };
         let t1 = start.elapsed().as_micros() as u64;
-        unsafe { sound_end_frame() };
-        sound.pump();
+        unsafe { (game.fns.end_frame)() };
+        sound.pump(&game.fns);
         let t2 = start.elapsed().as_micros() as u64;
-
-        if split {
-            layers.draw(-1.0, depth)?;
-            screens.show_target(&mut layers.gpu, &layers.target, Screen::Top)?;
-            if depth > 0.0 {
-                layers.draw(1.0, depth)?;
-            }
-            screens.show_target_right(&mut layers.gpu, &layers.target)?;
-        } else {
+        if let Some(picture) = flat {
             let x0 = ((400 - NES_WIDTH) / 2) as i32;
             let (mut l, mut r) = screens.top_stereo();
-            l.clear(Color::BLACK);
-            r.clear(Color::BLACK);
-            l.draw_rgb888(x0, 0, NES_WIDTH, NES_HEIGHT, 1, unsafe { &frame });
-            r.draw_rgb888(x0, 0, NES_WIDTH, NES_HEIGHT, 1, unsafe { &frame });
+            for eye in [&mut l, &mut r] {
+                eye.clear(Color::BLACK);
+                eye.draw_rgb888(x0, 0, NES_WIDTH, NES_HEIGHT, 1, picture);
+            }
+        } else {
+            layers.draw(&game.fns, -1.0, depth)?;
+            screens.show_target(&mut layers.gpu, &layers.target, Screen::Top)?;
+            if depth > 0.0 {
+                layers.draw(&game.fns, 1.0, depth)?;
+            }
+            screens.show_target_right(&mut layers.gpu, &layers.target)?;
         }
         let us = start.elapsed().as_micros() as u64;
-        for (p, t) in parts.iter_mut().zip([t0, t1 - t0, t2 - t1, us - t2]) {
-            *p += t;
+        let p = &mut progress[index];
+        p.frames += 1;
+        p.total_us += us;
+        for (part, t) in p.parts.iter_mut().zip([t0, t1 - t0, t2 - t1, us - t2]) {
+            *part += t;
         }
-        total_us += us;
-        worst_us = worst_us.max(us);
-        frames += 1;
-        if frames == 120 {
-            let p = parts.map(|t| t / frames);
-            log!("smb-3ds: running, {} us per frame on average (game {}, picture {}, sound {}, GPU {})", total_us / frames, p[0], p[1], p[2], p[3]);
+        if p.frames == 120 {
+            let a = p.parts.map(|t| t / p.frames);
+            log!("smb-3ds: {}: {} us per frame on average (game {}, picture {}, sound {}, drawing {})", game.id, p.total_us / p.frames, a[0], a[1], a[2], a[3]);
         }
-        if frames == 400 && split {
+        if p.frames == 400 && split && game.layered_level {
             // How the level data splits this frame (once, for the log).
+            let materials = unsafe { core::slice::from_raw_parts((game.fns.materials)(), PIXELS) };
             let mut count = [0u32; 8];
-            for &m in unsafe { &layer_background_material }.iter() {
+            for &m in materials {
                 count[(m & 7) as usize] += 1;
             }
-            log!("smb-3ds: layers: backdrop {} scenery {} solid {} climb {} coin {} question {} hud {}", count[0], count[1], count[2], count[3], count[4], count[5], count[7]);
+            log!("smb-3ds: {}: layers: backdrop {} scenery {} solid {} climb {} coin {} question {} hud {}", game.id, count[0], count[1], count[2], count[3], count[4], count[5], count[7]);
         }
 
         // The frame time twice a second, and the message's end.
@@ -541,11 +662,11 @@ fn main(sys: System) -> Result<()> {
             redraw = 2;
         }
         if redraw > 0 {
-            menu.draw(&mut screens.bottom(), frames);
+            menu.draw(&mut screens.bottom(), game, frames);
             redraw -= 1;
         }
         screens.present();
     }
-    log!("smb-3ds: {} frames, {} us average, {} us worst", frames, total_us / frames.max(1), worst_us);
+    log!("smb-3ds: bye");
     Ok(())
 }

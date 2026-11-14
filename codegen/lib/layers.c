@@ -41,14 +41,6 @@ static int screen_of(int table) {
     return 0;
 }
 
-static bool needs_scanlines(void) {
-    if (video.split_count != 0 || (video.ctrl & VIDEO_CTRL_SPRITE_8X16)) return true;
-    for (int i = 0; i < 8; i++) {
-        if (video.chr_banks[i] != i) return true;
-    }
-    return false;
-}
-
 static uint8_t plane_of(uint8_t material) {
     switch (material) {
     case M_BACKDROP: return PLANE_CLEAR;
@@ -58,21 +50,55 @@ static uint8_t plane_of(uint8_t material) {
     }
 }
 
+// The settings a scanline is drawn with (render.c's general path): its
+// part of the frame, or the whole frame's; and whether it is a status bar,
+// fixed on the screen (SMB's at the top, SMB3's at the bottom).
+typedef struct {
+    uint8_t ctrl, mask;
+    const uint8_t *banks;
+    int x, y; // in the 512x480 plane of the nametables, at this scanline
+    bool status;
+} Line;
+
+static Line line_settings(int line, int status_from) {
+    Line s;
+    if (video.split_count == 0) {
+        s = (Line){ video.ctrl, video.mask, video.chr_banks,
+                    video.scroll_x + ((video.ctrl & 1) ? 256 : 0),
+                    video.scroll_y + ((video.ctrl & 2) ? 240 : 0) + line, false };
+    } else {
+        const VideoSplit *split = &video.splits[0];
+        for (int i = 1; i < video.split_count; i++) {
+            if (video.splits[i].line <= line) split = &video.splits[i];
+        }
+        s = (Line){ split->ctrl, split->mask, split->chr_banks, split->x, split->y + (line - split->line), line >= status_from };
+    }
+    if (video.status_bar && line < 32) {
+        // SMB's: the first screen's top, unscrolled
+        s.ctrl &= (uint8_t)~3;
+        s.x = 0;
+        s.y = line;
+        s.status = true;
+    }
+    s.x = ((s.x % 512) + 512) % 512;
+    s.y = ((s.y % 480) + 480) % 480;
+    return s;
+}
+
 bool layers_render(const LayerLevel *level, const LayerTarget *target) {
     uint8_t backdrop = video.palette.u8[0] & 63;
     layer_backdrop = backdrop;
-    if (needs_scanlines()) return false;
-    bool show_background = video.mask & VIDEO_MASK_BACKGROUND;
-    bool show_sprites = video.mask & VIDEO_MASK_SPRITES;
-    bool left_background = video.mask & VIDEO_MASK_BACKGROUND_LEFT;
-    bool left_sprites = video.mask & VIDEO_MASK_SPRITES_LEFT;
-    size_t bg_bank = (video.ctrl & 0x10) ? 0x1000 : 0;
-    size_t sprite_bank = (video.ctrl & 0x08) ? 0x1000 : 0;
-    int base_x = video.scroll_x + ((video.ctrl & 0x01) ? 256 : 0);
-    int base_y = video.scroll_y + ((video.ctrl & 0x02) ? 240 : 0);
     const uint32_t *columns = target->column_offset;
     size_t nametables[4];
     for (int t = 0; t < 4; t++) nametables[t] = video_nametable_offset((uint16_t)(0x2000 + t * 0x400));
+    // a part of the frame that starts low on the screen and runs to its
+    // bottom, with settings of its own, is a status bar (SMB3's)
+    int status_from = SCREEN_HEIGHT;
+    if (video.split_count > 1 && video.splits[video.split_count - 1].line >= 160) {
+        status_from = video.splits[video.split_count - 1].line;
+    }
+    static Line lines[SCREEN_HEIGHT];
+    for (int y = 0; y < SCREEN_HEIGHT; y++) lines[y] = line_settings(y, status_from);
 
     // The background colours as texels: the backdrop and four palettes of three.
     uint32_t colors[4][4];
@@ -84,32 +110,32 @@ bool layers_render(const LayerLevel *level, const LayerTarget *target) {
 
     // The background, one run of a tile's pixels at a time.
     for (int y = 0; y < SCREEN_HEIGHT; y++) {
-        bool status = video.status_bar && y < 32;
-        uint8_t clear_material = status ? M_HUD : M_BACKDROP;
-        uint32_t clear_texel = colors[0][0] | target->plane_bits[status ? PLANE_FIXED : PLANE_CLEAR];
+        const Line *s = &lines[y];
+        uint8_t clear_material = s->status ? M_HUD : M_BACKDROP;
+        uint32_t clear_texel = colors[0][0] | target->plane_bits[s->status ? PLANE_FIXED : PLANE_CLEAR];
         uint32_t *out = target->background + target->row_offset[y];
         uint8_t *out_material = &layer_background_material[(size_t)y * SCREEN_WIDTH];
-        if (!show_background) {
-            for (int x = 0; x < SCREEN_WIDTH; x++) out[columns[x]] = clear_texel;
+        if (!(s->mask & VIDEO_MASK_BACKGROUND)) {
+            // black, as render.c draws it, on the screen's plane
+            uint32_t black = target->plane_bits[s->status ? PLANE_FIXED : PLANE_ON];
+            for (int x = 0; x < SCREEN_WIDTH; x++) out[columns[x]] = black;
             memset(out_material, clear_material, SCREEN_WIDTH);
             continue;
         }
-        // The row of the 512x480 plane of the nametables; the status bar is
-        // the first nametable's top, unscrolled.
-        int wy = status ? y : (base_y + y) % 480;
-        int table_y = wy >= 240 ? 2 : 0;
-        int ny = wy % 240;
+        int table_y = s->y >= 240 ? 2 : 0;
+        int ny = s->y % 240;
         size_t tile_row = (size_t)ny / 8;
         int fine_y = ny % 8;
+        uint16_t pattern_table = (s->ctrl & VIDEO_CTRL_BACKGROUND_BANK) ? 0x1000 : 0;
         int x = 0;
-        if (!left_background) {
+        if (!(s->mask & VIDEO_MASK_BACKGROUND_LEFT)) {
             for (; x < 8; x++) {
                 out[columns[x]] = clear_texel;
                 out_material[x] = clear_material;
             }
         }
         while (x < SCREEN_WIDTH) {
-            int wx = status ? x : (base_x + x) % 512;
+            int wx = (s->x + x) % 512;
             int table = table_y + (wx >= 256 ? 1 : 0);
             int nx = wx % 256;
             int fine_x = nx % 8;
@@ -121,10 +147,11 @@ bool layers_render(const LayerLevel *level, const LayerTarget *target) {
             uint8_t attributes = video.nametable[nametable + 960 + (tile_row / 4) * 8 + col / 4];
             unsigned shift = (unsigned)(((tile_row & 3) / 2) * 4 + ((col & 3) / 2) * 2);
             const uint32_t *palette = colors[(attributes >> shift) & 3];
-            unsigned low = chr_rom[bg_bank + (size_t)tile * 16 + (size_t)fine_y];
-            unsigned high = chr_rom[bg_bank + (size_t)tile * 16 + (size_t)fine_y + 8];
+            uint16_t address = (uint16_t)(pattern_table + tile * 16 + fine_y);
+            unsigned low = video_pattern(s->banks, address);
+            unsigned high = video_pattern(s->banks, (uint16_t)(address + 8));
             uint8_t material;
-            if (status) {
+            if (s->status) {
                 material = M_HUD;
             } else if (level->blocks != NULL && y >= 32) {
                 int screen = screen_of(table);
@@ -155,10 +182,11 @@ bool layers_render(const LayerLevel *level, const LayerTarget *target) {
     }
 
     // The sprites: the lowest-numbered sprite in front, those behind the
-    // background hidden by its opaque pixels. Only the texels the last
+    // background hidden by its opaque pixels. Each row with its scanline's
+    // settings (height, pattern table, banks). Only the texels the last
     // frame's sprites wrote need clearing.
     static uint32_t *last_sprites;
-    static uint32_t written[64 * 64];
+    static uint32_t written[64 * 16 * 8];
     static size_t written_count;
     if (target->sprites != last_sprites) {
         memset(target->sprites, 0, target->sprites_bytes);
@@ -167,41 +195,51 @@ bool layers_render(const LayerLevel *level, const LayerTarget *target) {
         for (size_t i = 0; i < written_count; i++) target->sprites[written[i]] = 0;
     }
     written_count = 0;
-    if (show_sprites) {
-        for (int i = 63; i >= 0; i--) {
-            const uint8_t *sprite = &video.oam[i * 4];
-            int sy = sprite[0] + 1, sx = sprite[3];
-            if (sy >= SCREEN_HEIGHT) continue;
-            uint8_t tile = sprite[1], attributes = sprite[2];
-            bool behind = attributes & 0x20;
-            bool flip_x = attributes & 0x40;
-            const uint8_t *palette = &video.palette.u8[0x10 + (size_t)(attributes & 3) * 4];
-            for (int row = 0; row < 8; row++) {
-                int y = sy + row;
-                if (y >= SCREEN_HEIGHT) break;
-                int src_row = (attributes & 0x80) ? 7 - row : row;
-                unsigned low = chr_rom[sprite_bank + (size_t)tile * 16 + (size_t)src_row];
-                unsigned high = chr_rom[sprite_bank + (size_t)tile * 16 + (size_t)src_row + 8];
-                if ((low | high) == 0) continue;
-                uint32_t row = target->row_offset[y];
-                const uint8_t *materials = &layer_background_material[(size_t)y * SCREEN_WIDTH];
-                for (int col = 0; col < 8; col++) {
-                    int x = sx + col;
-                    if (x >= SCREEN_WIDTH) break;
-                    if (!left_sprites && x < 8) continue;
-                    int bit = flip_x ? col : 7 - col;
-                    unsigned index = ((low >> bit) & 1) | (((high >> bit) & 1) << 1);
-                    if (index == 0) continue;
-                    uint32_t at = row + columns[x];
-                    if (behind && (materials[x] & M_OPAQUE)) {
-                        // hidden, and hiding the higher-numbered sprites
-                        // drawn before it (the NES's priority quirk)
-                        target->sprites[at] = 0;
-                        continue;
-                    }
-                    target->sprites[at] = target->colors[palette[index] & 63] | target->sprite_bits;
-                    written[written_count++] = at;
+    for (int i = 63; i >= 0; i--) {
+        const uint8_t *sprite = &video.oam[i * 4];
+        int sy = sprite[0] + 1, sx = sprite[3];
+        if (sy >= SCREEN_HEIGHT) continue;
+        uint8_t tile = sprite[1], attributes = sprite[2];
+        bool behind = attributes & 0x20;
+        bool flip_x = attributes & 0x40;
+        const uint8_t *palette = &video.palette.u8[0x10 + (size_t)(attributes & 3) * 4];
+        for (int dy = 0; dy < 16; dy++) {
+            int y = sy + dy;
+            if (y >= SCREEN_HEIGHT) break;
+            const Line *s = &lines[y];
+            bool tall = s->ctrl & VIDEO_CTRL_SPRITE_8X16;
+            int height = tall ? 16 : 8;
+            if (dy >= height) break;
+            if (!(s->mask & VIDEO_MASK_SPRITES)) continue;
+            int row = (attributes & 0x80) ? height - 1 - dy : dy;
+            uint16_t address;
+            if (tall) {
+                address = (uint16_t)(((tile & 1) ? 0x1000 : 0) + ((tile & 0xfe) + (row >= 8 ? 1 : 0)) * 16 + (row & 7));
+            } else {
+                address = (uint16_t)(((s->ctrl & VIDEO_CTRL_SPRITE_BANK) ? 0x1000 : 0) + tile * 16 + row);
+            }
+            unsigned low = video_pattern(s->banks, address);
+            unsigned high = video_pattern(s->banks, (uint16_t)(address + 8));
+            if ((low | high) == 0) continue;
+            bool left = s->mask & VIDEO_MASK_SPRITES_LEFT;
+            uint32_t row_offset = target->row_offset[y];
+            const uint8_t *materials = &layer_background_material[(size_t)y * SCREEN_WIDTH];
+            for (int col = 0; col < 8; col++) {
+                int x = sx + col;
+                if (x >= SCREEN_WIDTH) break;
+                if (!left && x < 8) continue;
+                int bit = flip_x ? col : 7 - col;
+                unsigned index = ((low >> bit) & 1) | (((high >> bit) & 1) << 1);
+                if (index == 0) continue;
+                uint32_t at = row_offset + columns[x];
+                if (behind && (materials[x] & M_OPAQUE)) {
+                    // hidden, and hiding the higher-numbered sprites
+                    // drawn before it (the NES's priority)
+                    target->sprites[at] = 0;
+                    continue;
                 }
+                target->sprites[at] = target->colors[palette[index] & 63] | target->sprite_bits;
+                written[written_count++] = at;
             }
         }
     }

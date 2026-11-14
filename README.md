@@ -79,9 +79,10 @@ and `GAME=smb3` (`codegen/smb3/`, `./smb3`), and for `bomberman.nes`,
 
 ### Nintendo 3DS
 
-`platforms/3ds/` runs the recompiled SMB on the 3DS, in stereoscopic 3D:
-the level data puts the scenery behind the screen and the sprites in front
-of it. See [its README](platforms/3ds/README.md).
+`platforms/3ds/` runs the recompiled SMB, SMB3, Metroid, Zelda and Tetris
+on the 3DS in one program with a game selector, in stereoscopic 3D: the
+sprites in front of the screen and, in SMB, the level data puts the
+scenery behind it. See [its README](platforms/3ds/README.md).
 
 ## WebAssembly
 
