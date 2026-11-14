@@ -9,7 +9,9 @@ build = "build.rs"
 
 [package.metadata.citronnade]
 title = "smb 3DS"
+description = "The recompiled game in stereoscopic 3D"
 author = "nathsou"
+icon = "icon.png"
 
 [dependencies]
 citronnade = { git = "https://github.com/nathsou/citronnade", branch = "dev" }

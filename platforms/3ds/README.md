@@ -24,10 +24,11 @@ plane shifted by its depth for each eye:
 | fixed | the status bar | on the screen |
 | sprites | Mario, enemies, items | 1.5 px in front |
 
-(depths at full 3D slider). With the slider down the picture is the flat
-picture, pixel for pixel. Frames that change the picture mid-screen (none in
-SMB's levels) fall back to the flat picture. A frame takes about 7.5 ms of
-the 16.7 ms budget, measured in the Azahar emulator.
+(depths at full 3D slider, for the "normal" preset; the bottom screen
+offers flat, subtle, normal and deep). With the slider down the picture is
+the flat picture, pixel for pixel. Frames that change the picture
+mid-screen (none in SMB's levels) fall back to the flat picture. A frame
+takes 7.5 to 9.5 ms of the 16.7 ms budget, measured in the Azahar emulator.
 
 ## Building
 
@@ -66,4 +67,9 @@ the DSP1 homebrew).
 - R: layers on or off (the flat picture)
 - START + SELECT + L or R: quit
 
-On a New 3DS the game asks for the faster CPU mode.
+The bottom screen's buttons save the game's state to
+`/3ds/smb-3ds/state.bin` on the SD card and load it back, choose the 3D
+depth, and turn the layers on or off. On a New 3DS the game asks for the
+faster CPU mode.
+
+The icon (`icon.png`, three stacked planes) is this project's own.

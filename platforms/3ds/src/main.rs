@@ -13,7 +13,9 @@
 //! fixed on the screen. R toggles the layers off (the flat picture, drawn
 //! by the CPU).
 //!
-//! Controls: the Circle Pad or the D-pad, A, B (or Y), START, SELECT.
+//! Controls: the Circle Pad or the D-pad, A, B (or Y), START, SELECT. The
+//! bottom screen's buttons save and load a state on the SD card and choose
+//! how deep the 3D is.
 #![no_std]
 #![no_main]
 
@@ -49,6 +51,10 @@ unsafe extern "C" {
     fn apu_render(out: *mut f32, count: usize);
     /// The picture render_frame draws: 256x240, RGB888.
     static frame: [u8; (NES_WIDTH * NES_HEIGHT * 3) as usize];
+    /// A state between frames (state.h): the RAM, nametables, palette, OAM.
+    fn save_state(dest: *mut u8);
+    fn load_state(state: *mut u8);
+    static save_state_size: u32;
     /// The NES's 64 colours, RGB.
     static COLOR_PALETTE: [u8; 64 * 3];
     fn layers_smb_level() -> LayerLevel;
@@ -334,6 +340,92 @@ impl Sound {
     }
 }
 
+const SAVE_DIR: &str = "/3ds/smb-3ds";
+const SAVE_FILE: &str = "/3ds/smb-3ds/state.bin";
+
+/// The 3D presets: how far the planes move, times their depths, at full
+/// slider.
+const DEPTHS: [(&str, f32); 4] = [("flat", 0.0), ("subtle", 0.5), ("normal", 1.0), ("deep", 1.6)];
+
+#[derive(Clone, Copy, PartialEq)]
+enum Action {
+    Save,
+    Load,
+    Depth,
+    Layers,
+}
+
+/// The bottom screen's buttons: what they do and where they are.
+const BUTTONS: [(Action, i32, i32); 4] = [(Action::Save, 12, 56), (Action::Load, 164, 56), (Action::Depth, 12, 110), (Action::Layers, 164, 110)];
+const BUTTON_W: u32 = 144;
+const BUTTON_H: u32 = 44;
+
+fn button_at((x, y): (u16, u16)) -> Option<Action> {
+    let (x, y) = (x as i32, y as i32);
+    BUTTONS
+        .iter()
+        .find(|&&(_, bx, by)| (bx..bx + BUTTON_W as i32).contains(&x) && (by..by + BUTTON_H as i32).contains(&y))
+        .map(|&(a, _, _)| a)
+}
+
+/// Saves the game's state to the SD card.
+fn save() -> core::result::Result<(), &'static str> {
+    let mut state = alloc::vec![0u8; unsafe { save_state_size } as usize];
+    unsafe { save_state(state.as_mut_ptr()) };
+    citronnade::fs::create_dir_all(SAVE_DIR).map_err(|_| "Could not make /3ds/smb-3ds")?;
+    citronnade::fs::write(SAVE_FILE, &state).map_err(|_| "Could not write the state")
+}
+
+/// Loads the state saved on the SD card.
+fn load() -> core::result::Result<(), &'static str> {
+    let mut state = citronnade::fs::read(SAVE_FILE).map_err(|_| "No saved state yet")?;
+    if state.len() != unsafe { save_state_size } as usize {
+        return Err("The saved state is not from this version");
+    }
+    unsafe { load_state(state.as_mut_ptr()) };
+    Ok(())
+}
+
+/// What the bottom screen shows.
+struct Menu {
+    depth: usize,
+    layered: bool,
+    message: Option<(&'static str, u64)>,
+    us: u64,
+}
+
+impl Menu {
+    fn label(&self, action: Action) -> alloc::string::String {
+        match action {
+            Action::Save => "Save state".into(),
+            Action::Load => "Load state".into(),
+            Action::Depth => format!("3D: {}", DEPTHS[self.depth].0),
+            Action::Layers => format!("Layers: {}", if self.layered { "on" } else { "off" }),
+        }
+    }
+
+    fn draw(&self, b: &mut citronnade::gfx::Canvas, frames: u64) {
+        let text = Color::rgb(180, 190, 210);
+        b.clear(Color::rgb(20, 20, 28));
+        b.text(12, 12, "Recompiled, not emulated", Color::WHITE, 1);
+        b.text(12, 30, &format!("{:5.2} ms per frame", self.us as f32 / 1000.0), text, 1);
+        for &(action, x, y) in BUTTONS.iter() {
+            b.fill_rect(x, y, BUTTON_W, BUTTON_H, Color::rgb(46, 52, 74));
+            b.rect(x, y, BUTTON_W, BUTTON_H, Color::rgb(110, 122, 166));
+            let label = self.label(action);
+            let (w, h) = citronnade::gfx::Canvas::text_size(&label, 1);
+            b.text(x + (BUTTON_W - w) as i32 / 2, y + (BUTTON_H - h) as i32 / 2, &label, Color::WHITE, 1);
+        }
+        if let Some((message, until)) = self.message {
+            if frames < until {
+                b.text(12, 168, message, Color::rgb(255, 214, 120), 1);
+            }
+        }
+        b.text(12, 196, "Circle Pad / D-pad, A, B or Y, START, SELECT", text, 1);
+        b.text(12, 212, "R: layers   START + SELECT + L/R: quit", text, 1);
+    }
+}
+
 #[citronnade::main]
 fn main(sys: System) -> Result<()> {
     let System { apt, gsp, hid, .. } = sys;
@@ -353,7 +445,11 @@ fn main(sys: System) -> Result<()> {
 
     screens.set_top_mode(TopMode::Stereo);
     let mut layers = LayerRenderer::new()?;
-    let mut layered = true;
+    let mut menu = Menu { depth: 2, layered: true, message: None, us: 0 };
+    // The bottom screen is drawn only when it changes: into both of its
+    // buffers, so two frames in a row.
+    let mut redraw = 2;
+    let mut was_touching = false;
     let (mut frames, mut total_us, mut worst_us) = (0u64, 0u64, 0u64);
     // Where the time goes: the game, the layers (or the flat picture), the
     // sound (the APU's frame and the DSP's buffers), the GPU.
@@ -363,18 +459,39 @@ fn main(sys: System) -> Result<()> {
         if state.held().contains(Buttons::START | Buttons::SELECT) && state.down().intersects(Buttons::L | Buttons::R) {
             break; // START + SELECT + L or R quits
         }
-        if state.down().contains(Buttons::R) {
-            layered = !layered;
-            log!("smb-3ds: layers {}", if layered { "on" } else { "off" });
+        let touch = state.touch();
+        let tapped = touch.filter(|_| !was_touching).and_then(button_at);
+        was_touching = touch.is_some();
+        let action = if state.down().contains(Buttons::R) { Some(Action::Layers) } else { tapped };
+        if let Some(action) = action {
+            // Between frames, where states are taken.
+            let result = match action {
+                Action::Save => save().map(|_| "State saved"),
+                Action::Load => load().map(|_| "State loaded"),
+                Action::Depth => {
+                    menu.depth = (menu.depth + 1) % DEPTHS.len();
+                    Ok("")
+                }
+                Action::Layers => {
+                    menu.layered = !menu.layered;
+                    Ok("")
+                }
+            };
+            let message = result.unwrap_or_else(|e| e);
+            if !message.is_empty() {
+                log!("smb-3ds: {}", message);
+                menu.message = Some((message, frames + 120));
+            }
+            redraw = 2;
         }
         let start = Instant::now();
-        let slider = citronnade::slider_3d();
+        let depth = citronnade::slider_3d() * DEPTHS[menu.depth].1;
         unsafe {
             update_controller1(controller(state.held(), state.circle_pad()));
             next_frame();
         }
         let t0 = start.elapsed().as_micros() as u64;
-        let split = layered && layers.render();
+        let split = menu.layered && layers.render();
         if !split {
             unsafe { render_frame() };
         }
@@ -384,10 +501,10 @@ fn main(sys: System) -> Result<()> {
         let t2 = start.elapsed().as_micros() as u64;
 
         if split {
-            layers.draw(-1.0, slider)?;
+            layers.draw(-1.0, depth)?;
             screens.show_target(&mut layers.gpu, &layers.target, Screen::Top)?;
-            if slider > 0.0 {
-                layers.draw(1.0, slider)?;
+            if depth > 0.0 {
+                layers.draw(1.0, depth)?;
             }
             screens.show_target_right(&mut layers.gpu, &layers.target)?;
         } else {
@@ -418,14 +535,15 @@ fn main(sys: System) -> Result<()> {
             log!("smb-3ds: layers: backdrop {} scenery {} solid {} climb {} coin {} question {} hud {}", count[0], count[1], count[2], count[3], count[4], count[5], count[7]);
         }
 
-        let mut b = screens.bottom();
-        b.clear(Color::rgb(20, 20, 28));
-        b.text(10, 10, "Recompiled, not emulated", Color::WHITE, 1);
-        b.text(10, 30, &format!("frame {:6}   {:4} us", frames, us), Color::rgb(180, 190, 210), 1);
-        b.text(10, 46, &format!("layers {}   3D slider {:.2}", if layered { "on" } else { "off" }, slider), Color::rgb(180, 190, 210), 1);
-        b.text(10, 180, "R: layers on/off", Color::rgb(180, 190, 210), 1);
-        b.text(10, 196, "Circle Pad / D-pad, A, B or Y, START, SELECT", Color::rgb(180, 190, 210), 1);
-        b.text(10, 212, "START + SELECT + L/R: quit", Color::rgb(180, 190, 210), 1);
+        // The frame time twice a second, and the message's end.
+        if frames % 30 == 0 || menu.message.is_some_and(|(_, until)| frames == until) {
+            menu.us = us;
+            redraw = 2;
+        }
+        if redraw > 0 {
+            menu.draw(&mut screens.bottom(), frames);
+            redraw -= 1;
+        }
         screens.present();
     }
     log!("smb-3ds: {} frames, {} us average, {} us worst", frames, total_us / frames.max(1), worst_us);
