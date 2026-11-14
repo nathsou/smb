@@ -72,6 +72,11 @@ cargo citronnade build --release
    Launcher, or send it over Wi-Fi with `cargo citronnade run --release`
    (the launcher's netloader: press Y).
 
+   To install it on the HOME Menu instead, build with `--cia` and install
+   `smb-3ds.cia` with FBI (custom firmware such as Luma3DS is needed: the
+   title is not signed). It installs as title `000400000F5B3000`. Like the
+   `.3dsx`, it contains your games: keep it to yourself.
+
 Sound needs the console's DSP firmware at `/3ds/dspfirm.cdc` (dump it with
 the DSP1 homebrew).
 

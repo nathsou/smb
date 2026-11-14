@@ -12,6 +12,9 @@ title = "smb 3DS"
 description = "Recompiled NES games in stereoscopic 3D"
 author = "nathsou"
 icon = "icon.png"
+# for `cargo citronnade build --cia` (an installable title)
+unique_id = "0xF5B30"
+product_code = "CTR-H-NESR"
 
 [dependencies]
 citronnade = { git = "https://github.com/nathsou/citronnade", branch = "dev" }
