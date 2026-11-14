@@ -117,10 +117,14 @@ fn resolve(image: Image, inst: Instruction, f: Facts) -> Instruction {
   match f.banking {
     Some(b) if target < 0x10000 && in_window(target) =>
       match b.mapped(window_of(target), image.banks.shadows) {
-        // (a bank the map does not name there and without code there is a
-        // path the program does not take: the window decides)
+        // (a bank the map does not name there, where it names others, and
+        // without code there is a path the program does not take: the
+        // window decides)
         [bank] if bank < image.banks.contents.length() &&
-          (image.banks.windows.get(target).unwrap_or([]).contains(bank) || known_bank(image, bank, target)) =>
+          (match image.banks.windows.get(target) {
+            Some(named) => named.contains(bank) || candidate(image, bank, target)
+            None => known_bank(image, bank, target)
+          }) =>
           { ..inst, arg: bank_location(bank, target) }
         _ => { ..inst, arg: inst.arg & 0xffff }
       }
@@ -769,8 +773,10 @@ fn explore_with(image: Image, waiting: Map[Int, Int], switching: Map[Int, Int]?)
       // calls into data; if it did, the dispatcher traps)
       let named = image.banks.windows.get(pc)
       let derived = match (named, derived) {
-        // a bank known exactly
-        (Some(banks), [bank]) if !banks.contains(bank) && known_bank(image, bank, pc) => [bank]
+        // a bank known exactly, which overrides the map's names only where
+        // its bytes look like code (a table of targets by tileset reaches
+        // each target with whatever bank the last tileset left)
+        (Some(banks), [bank]) if !banks.contains(bank) && known_bank(image, bank, pc) && candidate(image, bank, pc) => [bank]
         (Some(banks), _) => derived.filter(fn(b) { banks.contains(b) })
         (None, [bank]) => if known_bank(image, bank, pc) { [bank] } else { [] }
         (None, _) => derived.filter(fn(b) { candidate(image, b, pc) })
