@@ -34,6 +34,7 @@
 #include "cartridge.h"
 #include "rec.h"
 #include "mapper.h"
+#include "ppu_bus.h"
 #include "state_hash.h"
 #include "state.h"
 #include "render.h"
@@ -464,6 +465,7 @@ int main(int argc, char **argv) {
         rec_pokes(pokes, i, poke);
         polls_taken = 0;
         replaced_stack = false;
+        ppu_frame_start(); // as next_frame
         interrupt();
         // (not when the NMI handler restarted the game, as next_frame)
         if (!replaced_stack) mapper_frame(irq, left_enabled || !interrupt_disabled);

@@ -193,27 +193,16 @@ bool mapper_scanline(void) {
     return false;
 }
 
-static void split_at(uint8_t line, uint16_t x, uint16_t y) {
-    if (video.split_count == VIDEO_MAX_SPLITS) video.split_count--; // the last one gives way
-    VideoSplit *split = &video.splits[video.split_count++];
-    split->line = line;
-    split->ctrl = video.ctrl;
-    split->mask = video.mask;
-    memcpy(split->chr_banks, video.chr_banks, 8);
-    split->pad = 0;
-    split->x = (uint16_t)(x % 512);
-    split->y = (uint16_t)(y % 480);
-}
-
 void mapper_frame(void (*irq)(void), bool enabled) {
-    video.split_count = 0;
     if (mapper_number != 4) return;
+    // (the scanline IRQ's parts replace any the NMI handler made)
+    video.split_count = 0;
     for (int line = -1; line < SCREEN_HEIGHT; line++) {
         if (!(video.mask & (VIDEO_MASK_BACKGROUND | VIDEO_MASK_SPRITES))) continue;
         if (!mapper_scanline() || !enabled) continue;
         if (video.split_count == 0) {
             // the frame's top, from the scroll and control the NMI left
-            split_at(0, (uint16_t)(video.scroll_x + ((video.ctrl & 1) ? 256 : 0)),
+            video_split(0, (uint16_t)(video.scroll_x + ((video.ctrl & 1) ? 256 : 0)),
                      (uint16_t)(video.scroll_y + ((video.ctrl & 2) ? 240 : 0)));
         }
         ppu_address_written = false;
@@ -230,6 +219,6 @@ void mapper_frame(void (*irq)(void), bool enabled) {
             ? (uint16_t)(((v >> 11) & 1) * 240 + ((v >> 5) & 0x1f) * 8 + ((v >> 12) & 7))
             : (uint16_t)(last->y + (next - last->line));
         if (last->line == next) video.split_count--; // replaced
-        split_at((uint8_t)next, x, y);
+        video_split((uint8_t)next, x, y);
     }
 }

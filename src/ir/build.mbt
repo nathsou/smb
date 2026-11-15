@@ -942,6 +942,17 @@ pub fn build(low : @lower.AsmLowering, native~ : Set[String]) -> Program raise B
     f.blocks.push({ label: "", stmts: [Effect("mapper_prg_mode", [Const(mode)])], term: Goto(f.entry) })
     f.entry = f.blocks.length() - 1
   }
+  // routines that wait for sprite 0 tell the runtime first (see `sprite0`)
+  for entry in program.map.sprite0 {
+    let (pc, lines) = entry
+    let name = rename(@image.address_name(program.image, pc))
+    let f = match by_name.get(name) {
+      Some(i) => functions[i]
+      None => raise BuildError("The map's sprite0 routine \{name} is not a routine")
+    }
+    f.blocks.push({ label: "", stmts: [Effect("ppu_sprite0", [Const(lines)])], term: Goto(f.entry) })
+    f.entry = f.blocks.length() - 1
+  }
   {
     functions,
     by_name,

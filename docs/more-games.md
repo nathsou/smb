@@ -68,6 +68,18 @@ follow them as it follows MMC3's, so that `lda #5 / jsr switch / jsr $8000`
 calls bank 5's routine. Its many jump tables follow `jsr jump_by_index`, as
 in Tetris.
 
+Its status bar is a split at sprite 0: the NMI handler waits for sprite
+0's hit under the bar, runs delay loops, and writes the playfield's scroll
+($2006 for the vertical position). The runtime has no beam to time that,
+and its $2002 reads alternate for every polling loop, so `sprite0
+5:$8521 23` names the routine and the scanlines from the hit to its writes:
+the generated code calls `ppu_sprite0(23)` as the routine starts, the
+frame's top keeps the scroll set so far, and the routine's writes make the
+rest, from scanline 64. Without it the playfield did not move during
+vertical transitions, and the bar slid with it during horizontal ones.
+`make layers-check GAME=zelda` then `./layers_check zelda.nes --rec
+rec/zelda.rec` compares the 3DS's layers with render.c on every frame.
+
 ## The Chessmaster: coroutines and preemption
 
 The chess engine thinks for seconds without waiting for the interrupt, which

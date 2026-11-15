@@ -170,10 +170,11 @@ pub(all) struct RomMap {
   ram_code: Array[(Int, Array[Int])] // code the program writes to RAM: address and bytes
   copied: Array[(Int, Int, Int, Int)] // code it copies from ROM to RAM: address, bank (-1: fixed), ROM address, bytes
   threads: Array[Int] // where the program starts coroutines, on stacks of their own (see `thread`)
+  sprite0: Array[(Int, Int)] // routines that wait for sprite 0 to split the frame, and the scanlines from the hit to their scroll writes (see `sprite0`)
 } derive(Debug)
 
 pub fn RomMap::empty() -> RomMap {
-  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, follow: false, preempt: 0, jumps: [], jump_tables: [], inline: [], ram_code: [], copied: [], threads: [] }
+  { entries: [], roms: [], types: [], banks: [], prg_mode: 0, shadows: [], exact: false, follow: false, preempt: 0, jumps: [], jump_tables: [], inline: [], ram_code: [], copied: [], threads: [], sprite0: [] }
 }
 
 // The name of a switchable bank, the prefix of its entries.
@@ -250,6 +251,7 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
   let ram_code: Array[(Int, Array[Int])] = []
   let copied: Array[(Int, Int, Int, Int)] = []
   let threads: Array[Int] = []
+  let sprite0: Array[(Int, Int)] = []
   let shadows: Array[(Int, Int)] = []
   let names: Set[String] = Set([])
   fn claim(name: String) raise ImageError {
@@ -328,6 +330,20 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
         (address, [bank]) => bank_location(bank, address)
         _ => raise InvalidImage("A coroutine starts in one bank: \{line}")
       })
+      continue
+    }
+    // sprite0 [BANK:]$ADDR LINES: the routine there waits for sprite 0's hit
+    // and then writes the scroll for the rest of the frame (a status bar),
+    // LINES scanlines after the hit (its delay loops): the runtime, which
+    // has no beam, splits the frame there
+    if fields[0] == "sprite0" {
+      if fields.length() != 3 { raise InvalidImage("Map sprite0 line needs the routine's address and the scanlines: \{line}") }
+      let location = match parse_location(fields[1]) {
+        (address, []) => address
+        (address, [bank]) => bank_location(bank, address)
+        _ => raise InvalidImage("A sprite0 routine is in one bank: \{line}")
+      }
+      sprite0.push((location, parse_number(fields[2])))
       continue
     }
     // ram $ADDR BYTE...: code the program writes to RAM and runs there
@@ -499,7 +515,7 @@ pub fn parse_map(text: String) -> RomMap raise ImageError {
       raise InvalidImage("Unknown map type: \{entry.type_name}")
     }
   }
-  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), follow, preempt, jumps, jump_tables, inline, ram_code, copied, threads }
+  { entries, roms, types, banks, prg_mode, shadows, exact: exact || !inline.is_empty(), follow, preempt, jumps, jump_tables, inline, ram_code, copied, threads, sprite0 }
 }
 
 pub(all) struct Cartridge {

@@ -73,3 +73,15 @@ void video_write(uint16_t addr, uint8_t value) {
         *palette_entry(addr) = value;
     }
 }
+
+void video_split(uint8_t line, uint16_t x, uint16_t y) {
+    if (video.split_count == VIDEO_MAX_SPLITS) video.split_count--; // the last one gives way
+    VideoSplit *split = &video.splits[video.split_count++];
+    split->line = line;
+    split->ctrl = video.ctrl;
+    split->mask = video.mask;
+    memcpy(split->chr_banks, video.chr_banks, 8);
+    split->pad = 0;
+    split->x = (uint16_t)(x % 512);
+    split->y = (uint16_t)(y % 480);
+}

@@ -10,6 +10,11 @@ rom 085e5397a3487357c263dfa159fb0fe20a5f3ea8ef82d7af6a7e848d3b9364e8 131072 0 ; 
 exact   ; the machine's stack, byte for byte (as the reference interpreter has it)
 banks follow
 
+# The status bar: this routine waits for sprite 0's hit under it, then
+# runs delay loops and writes the playfield's scroll, which takes effect at
+# scanline 64 (the hit is at 41, sprite 0 being at y 39)
+sprite0 5:$8521 23
+
 # At power-on the game copies code from bank 1 to its RAM, and runs it there
 copied $6c90 1:$a500 $1270
 

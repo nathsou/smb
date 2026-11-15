@@ -84,6 +84,10 @@ void video_init(const uint8_t *chr);
 void video_init_chr(uint32_t size);
 // The 1 KiB banks of CHR.
 unsigned video_chr_banks(void);
+// Adds a part of the frame from scanline `line` on, with the current
+// control, mask and banks, scrolled to (x, y) in the 512x480 plane (the
+// last part gives way when there are already VIDEO_MAX_SPLITS).
+void video_split(uint8_t line, uint16_t x, uint16_t y);
 
 // A byte of the pattern tables ($0000-$1FFF) through the banks mapped.
 static inline uint8_t video_pattern(const uint8_t *banks, uint16_t addr) {

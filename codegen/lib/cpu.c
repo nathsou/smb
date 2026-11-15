@@ -430,6 +430,7 @@ inline void next_frame(void) {
     // drive the PPU registers), then the frame's scanlines raise the
     // mapper's IRQ.
 #ifdef PPU_BUS
+    ppu_frame_start();
     bool enabled = (video.ctrl & VIDEO_CTRL_NMI) ? cpu_interrupt(cpu_nmi_entry) : false;
 #else
     bool enabled = cpu_interrupt(cpu_nmi_entry);

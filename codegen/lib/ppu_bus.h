@@ -27,6 +27,12 @@ extern uint8_t ppu_fine_x;
 extern bool ppu_address_written;
 extern uint16_t ppu_address_set;
 
+// Called before each frame's NMI: the frame starts in one part.
+void ppu_frame_start(void);
+// Called by the generated code as the routine the map names with
+// `sprite0` starts: the frame splits `lines` scanlines after sprite 0's
+// hit, where the routine's scroll writes take effect.
+void ppu_sprite0(uint8_t lines);
 uint8_t ppu_bus_read(uint16_t addr);
 void ppu_bus_write(uint16_t addr, uint8_t value);
 void ppu_bus_oam_dma(uint8_t page);

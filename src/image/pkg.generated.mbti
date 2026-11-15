@@ -288,6 +288,7 @@ pub(all) struct RomMap {
   ram_code : Array[(Int32, Array[Int32])]
   copied : Array[(Int32, Int32, Int32, Int32)]
   threads : Array[Int32]
+  sprite0 : Array[(Int32, Int32)]
 } derive(@debug.Debug)
 pub fn RomMap::bank_name(Self, Int32) -> String
 pub fn RomMap::empty() -> Self

@@ -97,7 +97,7 @@ SOURCES += codegen/lib/state.c
 SOURCES += codegen/lib/debug_chr.c
 MAIN = codegen/main.c
 
-.PHONY: codegen header clean gpu-check runtime-wasm runtime-cartridge-wasm apu-wasm game-wasm web replay interpreter
+.PHONY: codegen header clean layers-check gpu-check runtime-wasm runtime-cartridge-wasm apu-wasm game-wasm web replay interpreter
 
 # The game is recompiled from your ROM into codegen/game, or codegen/GAME
 # with GAME=metroid, smb3, ... (not in the repository). The poll points of a
@@ -116,6 +116,11 @@ build: clean
 # codegen/replay.c): ./replay metroid.nes --rec rec/metroid.rec
 replay:
 	$(CC) $(CFLAGS) -o replay codegen/replay.c $(SOURCES) codegen/lib/rec.c codegen/lib/state_hash.c $(GC_FLAGS) -lm
+
+# The 3DS's layers (codegen/lib/layers.c) against render.c over a recording:
+# ./layers_check zelda.nes --rec rec/zelda.rec --dump 5
+layers-check:
+	$(CC) $(CFLAGS) $(if $(filter smb,$(GAME)),-DSMB_LEVEL) -o layers_check tests/layers_check.c $(SOURCES) codegen/lib/rec.c codegen/lib/layers.c $(GC_FLAGS) -lm
 
 # The reference interpreter replay is checked against (tests/interpreter.c):
 # ./interpreter metroid.nes --waits ... --rec rec/metroid.rec

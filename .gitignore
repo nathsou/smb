@@ -54,3 +54,5 @@ codegen/chessmaster/
 web/kirby.map
 codegen/kirby/
 /kirby
+layers_check
+layers_*.ppm
