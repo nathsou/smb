@@ -17,7 +17,7 @@ unique_id = "0xF5B30"
 product_code = "CTR-H-NESR"
 
 [dependencies]
-citronnade = { git = "https://github.com/nathsou/citronnade", branch = "dev" }
+citronnade = { git = "https://github.com/nathsou/citronnade" }
 
 # A standalone package, not part of a workspace above it.
 [workspace]

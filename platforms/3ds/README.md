@@ -55,7 +55,7 @@ takes about 0.1 ms of it.
    and Citronnade's tool:
 
 ```bash
-cargo install --git https://github.com/nathsou/citronnade --branch dev cargo-citronnade
+cargo install --git https://github.com/nathsou/citronnade cargo-citronnade
 ```
 
 3. Build, in this directory:
