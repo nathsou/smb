@@ -52,7 +52,7 @@ static uint8_t plane_of(uint8_t material) {
 
 // The settings a scanline is drawn with (render.c's general path): its
 // part of the frame, or the whole frame's; and whether it is a status bar,
-// fixed on the screen (SMB's at the top, SMB3's at the bottom).
+// fixed on the screen (SMB's and Zelda's at the top, SMB3's at the bottom).
 typedef struct {
     uint8_t ctrl, mask;
     const uint8_t *banks;
@@ -60,7 +60,7 @@ typedef struct {
     bool status;
 } Line;
 
-static Line line_settings(int line, int status_from) {
+static Line line_settings(int line, int status_from, int status_to) {
     Line s;
     if (video.split_count == 0) {
         s = (Line){ video.ctrl, video.mask, video.chr_banks,
@@ -71,7 +71,7 @@ static Line line_settings(int line, int status_from) {
         for (int i = 1; i < video.split_count; i++) {
             if (video.splits[i].line <= line) split = &video.splits[i];
         }
-        s = (Line){ split->ctrl, split->mask, split->chr_banks, split->x, split->y + (line - split->line), line >= status_from };
+        s = (Line){ split->ctrl, split->mask, split->chr_banks, split->x, split->y + (line - split->line), line >= status_from || line < status_to };
     }
     if (video.status_bar && line < 32) {
         // SMB's: the first screen's top, unscrolled
@@ -97,8 +97,14 @@ bool layers_render(const LayerLevel *level, const LayerTarget *target) {
     if (video.split_count > 1 && video.splits[video.split_count - 1].line >= 160) {
         status_from = video.splits[video.split_count - 1].line;
     }
+    // and a first part that ends high on the screen, before the rest
+    // scrolls on its own, is one too (Zelda's, split at sprite 0)
+    int status_to = 0;
+    if (video.split_count > 1 && video.splits[1].line <= 80) {
+        status_to = video.splits[1].line;
+    }
     static Line lines[SCREEN_HEIGHT];
-    for (int y = 0; y < SCREEN_HEIGHT; y++) lines[y] = line_settings(y, status_from);
+    for (int y = 0; y < SCREEN_HEIGHT; y++) lines[y] = line_settings(y, status_from, status_to);
 
     // The background colours as texels: the backdrop and four palettes of three.
     uint32_t colors[4][4];
