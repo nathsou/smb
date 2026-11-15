@@ -1,0 +1,175 @@
+# Metroid (NES): the names this project gives to the program's routines,
+# tables and variables, and what code discovery cannot recover by itself.
+#
+# The cartridge is an MMC1 board: eight 16 KiB banks of PRG ROM, the last
+# fixed at $C000, one of the others switched in at $8000, 8 KiB of RAM at
+# $6000 and CHR RAM. See src/image/rom.mbt for the syntax: entries in the
+# switchable window name their banks, and become one routine or table per
+# bank (prefixed with the bank's name) plus one for the window as the fixed
+# bank sees it.
+
+rom 649db8035018f2512ccea70aca6606c3b3a6988cd9ed43953b38dc5103dec7bb 131072 0 ; Metroid (USA)
+
+bank 0 title    ; title screen, password, ending
+bank 1 brinstar
+bank 2 norfair
+bank 3 tourian
+bank 4 kraid    ; Kraid's hideout
+bank 5 ridley   ; Ridley's hideout
+bank 6 graphics ; tiles the areas copy into CHR RAM
+
+# Types
+
+enum main_routine init=0 init_game=1 start_area=2 playing=3 game_over=4 paused=5 to_title=6 next=7 samus_appears=8 wait_timer=9
+flags button a=$01 b=$02 select=$04 start=$08 up=$10 down=$20 left=$40 right=$80
+enum bank title=0 brinstar=1 norfair=2 tourian=3 kraid=4 ridley=5 graphics=6
+
+# Variables
+
+var $00 scratch 8                 ; temporaries, pointers
+var $0c jump_pointer 2            ; where choose_routine jumps
+var $12 joypad_pressed 2 : button ; buttons pressed this frame, per joypad
+var $14 joypad_held 2 : button    ; buttons held, per joypad
+var $1a frame_ready               ; set by the interrupt, cleared before waiting for it
+var $1b ppu_strings_pending       ; the PPU string buffer at $07a1 holds strings to write
+var $1d title_mode                ; the title bank's routines run the game (title, password, ending)
+var $1e main_routine : main_routine
+var $1f title_routine             ; index into the title bank's routines
+var $23 current_bank : bank
+var $24 bank_request              ; bank to switch to plus one, 0 for none
+var $25 mmc1_control              ; what was last written to MMC1's control register
+var $28 mmc1_prg                  ; what was last written to MMC1's PRG bank register
+var $29 timer_divider             ; counts frames down to the slow timer's ticks
+var $2a timers 3                  ; count down every frame (the first) or every tenth (the others)
+var $2c delay                     ; frames to wait, counted down
+var $2d frame_count
+var $2e random 2                  ; random number generator state
+var $31 paused
+var $69 saved_x                   ; choose_routine keeps X and Y here
+var $6a saved_y
+var $fa ppu_mirroring             ; MMC1 control bits, mirroring in bit 3
+var $fc scroll_y
+var $fd scroll_x
+var $fe ppu_mask                  ; what the interrupt writes to $2001
+var $ff ppu_ctrl                  ; what the interrupt writes to $2000
+var $0200 sprites 256             ; copied to the PPU every frame
+var $0680 sound_requests 6        ; sound effects and music requested this frame
+var $07a0 ppu_string_length
+var $07a1 ppu_strings 79          ; strings the interrupt writes to the PPU
+
+io $2000 PPUCTRL
+io $2001 PPUMASK
+io $2002 PPUSTATUS
+io $2003 OAMADDR
+io $2005 PPUSCROLL
+io $2006 PPUADDR
+io $2007 PPUDATA
+io $4011 DMC_RAW
+io $4014 OAMDMA
+io $4015 APU_STATUS
+io $4016 JOYPAD1
+io $4017 APU_FRAME
+
+# Fixed bank: start up, the frame, bank switching
+
+routine $ffb0 reset                 ; power on: reset the mappers, wait for the PPU
+routine $c01a start                 ; clear RAM, set up the PPU and sound, run the main loop
+routine $c0bc main_loop             ; switch banks if asked, run the main routine, wait for the interrupt
+routine $c0d9 interrupt             ; sprites, PPU updates, scroll, joypads, sound
+routine $c000 update_random
+routine $c114 run_main_routine      ; the title bank's routines in title mode, else main_routines
+routine $c158 clear_screens
+routine $c16d clear_nametables
+routine $c1a3 hide_sprites
+routine $c215 read_joypads
+routine $c266 update_timers
+routine $c27c choose_routine        ; jump through the table after the call, indexed by A
+routine $c29a write_scroll
+routine $c2ca write_ppu_strings
+routine $c42c wait_frame            ; wait for the next interrupt
+routine $c434 clear_frame_ready
+routine $c439 screen_off            ; hide background and sprites at the next interrupt
+routine $c447 screen_on
+routine $c44d write_ppu_registers
+routine $c45d disable_interrupt
+routine $c4b2 write_mirroring
+routine $c4de switch_bank_if_requested
+routine $c4e8 switch_bank
+routine $c4fa write_mmc1_prg        ; the five serial writes of A to MMC1's PRG register
+
+table $c141 main_routines 20        ; by main_routine
+code  $c51f bank_inits 9            ; what switch_bank_if_requested does after switching to each bank
+
+routine $c801 init_main
+routine $c81d init_game
+routine $c8d1 start_area
+routine $c92b play
+routine $c9a6 game_over
+routine $c9b1 pause
+routine $c9c4 back_to_title
+routine $c9d7 samus_appears
+routine $c494 wait_delay
+
+# Inline tables after choose_routine, in the fixed bank
+
+table $cc22 choose_table_cc22 20
+table $cc7d choose_table_cc7d 10
+table $d1d7 choose_table_d1d7 20
+table $d4d3 choose_table_d4d3 24
+table $d7bd choose_table_d7bd 20
+table $ea1c choose_table_ea1c 10
+table $eae4 choose_table_eae4 16
+table $ede2 choose_table_ede2 22
+table $f36e choose_table_f36e 14
+table $f95d choose_table_f95d 12
+table $fc9d choose_table_fc9d 8
+table $fe31 choose_table_fe31 12
+
+# Title bank (0): fixed-bank code calls these in title mode
+
+routine 0:$8000 run_title_routine ; by title_routine
+routine 0:$9a07 screen_updates    ; the title screens' PPU updates, from the interrupt
+routine 0:$988a clear_sprites
+routine 0:$9f54 update_ending
+routine 0:$8ac7 update_title
+routine 0:$a93e bank_init         ; after switching to the title bank
+table 0:$802a routines 62         ; by title_routine
+table 0:$9ac5 choose_table_9ac5 16
+
+# The sound engine, a copy in every bank but the graphics bank
+
+routine 0-5:$b3b4 update_sound
+code 0-5:$b28b sound_defaults 10 5   ; handlers when no sound of a channel's kind is requested
+code 0-5:$b2bb sound_handlers 48     ; per channel kind, a handler per request bit
+code 0-5:$bc06 sound_handlers2 24
+table 0-5:$b778 sound_b778 2
+
+# The areas (banks 1-5): the engine they share at $8000, and their own code
+
+routine 1-5:$8058 area_8058
+routine 1-5:$80b0 area_80b0
+routine 1-5:$81d1 area_81d1
+routine 1-5:$81da area_81da
+routine 1-5:$8206 area_8206
+routine 1-5:$820f area_820f
+routine 1-5:$8296 area_8296
+routine 1-5:$832f area_832f
+routine 1-5:$8b13 area_8b13
+routine 1-5:$8b79 area_8b79
+code 1-5:$8048 enemy_moves 8 2 rts   ; addresses minus one, returned through
+table 1-5:$8b8f choose_table_8b8f 14
+
+# Each area's routines, through jumps at the same addresses in every area
+routine 1-5:$95a8 area_95a8
+routine 1-5:$95ab area_95ab
+routine 1-5:$95ae area_95ae
+routine 1-5:$95b1 area_95b1
+routine 1-5:$95b4 area_95b4
+routine 1-5:$95b7 area_95b7
+routine 1-5:$95ba area_95ba
+routine 1-5:$95bd area_95bd
+routine 1-5:$95c0 area_95c0
+routine 1-5:$95c3 area_95c3
+routine 1-5:$95e5 update_enemy    ; by the enemy's kind
+table 1-5:$95eb enemy_routines 32
+table 3:$9ddb choose_table_9ddb 22

@@ -1,0 +1,601 @@
+# Kirby's Adventure (NES): the names this project gives to the program's
+# routines, tables and variables, and what code discovery cannot recover by
+# itself.
+#
+# The cartridge is an MMC3 board: 64 banks of 8 KiB of PRG ROM, the game in
+# PRG mode 0 (bank 62 fixed at $C000, bank 63 at $E000, others switched in
+# at $8000 and $A000), 8 KiB of battery-backed RAM at $6000, and 256 KiB of
+# CHR ROM in 1 and 2 KiB banks. See src/image/rom.mbt for the syntax.
+
+rom 1250a80faf865aa5ee5585ad7639e5ef2b3fa541554effda5fad2cc5dc2acef5 524288 262144 ; Kirby's Adventure (USA)
+exact   ; the machine's stack, byte for byte (as the reference interpreter has it)
+
+# The banks the game wants at $8000 and $A000, which it switches from
+shadow $8000 $0048
+shadow $a000 $0049
+
+# The IRQ vector points to RAM, where the game writes the IRQ's code: what
+# it writes to the PPU's mask (or the mapper), and where it goes
+ram $0029 48 a9 .. 8d 00 e0 8d .. .. 4c .. ..
+
+routine $d805 far_call          ; jsr far_call, then the routine's address and bank
+inline $d805 3
+# The window each bank runs in (from the game's switches, far calls and a
+# recording)
+bank 18 bank18 $8000
+bank 19 bank19 $a000
+bank 20 bank20 $a000
+bank 21 bank21 $a000
+bank 22 bank22 $a000
+bank 23 bank23 $a000
+bank 24 bank24 $a000
+bank 29 bank29 $8000
+bank 33 bank33 $8000
+bank 34 bank34 $8000
+bank 35 bank35 $a000
+bank 36 bank36 $a000
+bank 38 bank38 $a000
+bank 40 bank40 $a000
+bank 45 bank45 $a000
+bank 46 bank46 $a000
+bank 49 bank49 $8000
+bank 52 bank52 $a000
+bank 54 bank54 $a000
+bank 55 bank55 $8000
+bank 56 bank56 $a000
+bank 57 bank57 $8000
+bank 60 bank60 $a000
+bank 61 bank61 $a000
+
+# Calls through a pointer: the far call (jsr far_call, then the routine's
+# address and bank), and jumps through $6038 and the IRQ's, to where the
+# game goes (in the bank it maps there)
+jump $0032 $f940
+jump $0032 $fbbf
+jump $d7ab $8015
+jump $d7ab $801f
+jump $d7ab $811d
+jump $d7ab $8301
+jump $d7ab $84a4
+jump $d7ab $84ad
+jump $d7ab $859f
+jump $d7ab $8829
+jump $d7ab $884d
+jump $d7ab $8851
+jump $d7ab $885c
+jump $d7ab $8ae7
+jump $d7ab $8b61
+jump $d7ab $8b7f
+jump $d7ab $8be4
+jump $d7ab $8bed
+jump $d7ab $8c53
+jump $d7ab $8c87
+jump $d7ab $8fdc
+jump $d7ab $8ff5
+jump $d7ab $917c
+jump $d7ab $95cd
+jump $d7ab $987d
+jump $d7ab $9952
+jump $d7ab $9b96
+jump $d7ab $9baa
+jump $d7ab $9bf7
+jump $d7ab $9cb3
+jump $d7ab $9d82
+jump $d7ab $9d8c
+jump $d7ab $9da3
+jump $d7ab $9ee1
+jump $d7ab $a000
+jump $d7ab $a051
+jump $d7ab $a078
+jump $d7ab $a0d5
+jump $d7ab $a15c
+jump $d7ab $a162
+jump $d7ab $a173
+jump $d7ab $a186
+jump $d7ab $a196
+jump $d7ab $a1af
+jump $d7ab $a1e6
+jump $d7ab $a1e8
+jump $d7ab $a1f7
+jump $d7ab $a222
+jump $d7ab $a24a
+jump $d7ab $a26e
+jump $d7ab $a277
+jump $d7ab $a283
+jump $d7ab $a2d4
+jump $d7ab $a2d5
+jump $d7ab $a2eb
+jump $d7ab $a2ee
+jump $d7ab $a304
+jump $d7ab $a35a
+jump $d7ab $a3fc
+jump $d7ab $a42b
+jump $d7ab $a467
+jump $d7ab $a480
+jump $d7ab $a499
+jump $d7ab $a4f1
+jump $d7ab $a52c
+jump $d7ab $a6c0
+jump $d7ab $a6cc
+jump $d7ab $a6f0
+jump $d7ab $a712
+jump $d7ab $a72a
+jump $d7ab $a761
+jump $d7ab $a776
+jump $d7ab $a77c
+jump $d7ab $a79b
+jump $d7ab $a7fa
+jump $d7ab $a804
+jump $d7ab $a80b
+jump $d7ab $a80c
+jump $d7ab $a812
+jump $d7ab $a81c
+jump $d7ab $a832
+jump $d7ab $a83b
+jump $d7ab $a86a
+jump $d7ab $a86c
+jump $d7ab $a8b9
+jump $d7ab $a961
+jump $d7ab $a98b
+jump $d7ab $aa1e
+jump $d7ab $aa2a
+jump $d7ab $aa4e
+jump $d7ab $aa5c
+jump $d7ab $aa66
+jump $d7ab $aa68
+jump $d7ab $aa96
+jump $d7ab $aaa3
+jump $d7ab $aaba
+jump $d7ab $aae2
+jump $d7ab $aae9
+jump $d7ab $ab49
+jump $d7ab $ab5a
+jump $d7ab $ab75
+jump $d7ab $ab76
+jump $d7ab $abb9
+jump $d7ab $abd9
+jump $d7ab $ac2f
+jump $d7ab $ac6c
+jump $d7ab $ac7c
+jump $d7ab $acc4
+jump $d7ab $accb
+jump $d7ab $acf6
+jump $d7ab $acf8
+jump $d7ab $ad3b
+jump $d7ab $ad52
+jump $d7ab $ad5e
+jump $d7ab $ae21
+jump $d7ab $ae5e
+jump $d7ab $aed1
+jump $d7ab $af9d
+jump $d7ab $afda
+jump $d7ab $aff5
+jump $d7ab $b04f
+jump $d7ab $b0bc
+jump $d7ab $b169
+jump $d7ab $b1c3
+jump $d7ab $b271
+jump $d7ab $b3e0
+jump $d7ab $b548
+jump $d7ab $b747
+jump $d7ab $b7dd
+jump $d7ab $baef
+jump $d7ab $bc5e
+jump $d7ab $bd38
+jump $d7ab $bd3e
+jump $d7ab $be44
+jump $d7ab $be50
+jump $d7ab $be57
+jump $d7ab $befd
+jump $d7ab $bf0b
+jump $d7ab $c082
+jump $d7ab $c086
+jump $d7ab $c94c
+jump $d7ab $c996
+jump $d7ab $d473
+jump $d7ab $d786
+jump $d7ab $d864
+jump $d7ab $d86a
+jump $d7ab $d8a6
+jump $d7ab $d8d5
+jump $d7ab $d968
+jump $d7ab $d97d
+jump $d7ab $d99c
+jump $d7ab $d9bb
+jump $d7ab $da89
+jump $d7ab $dda3
+jump $d7ab $ddaa
+jump $d7ab $dde7
+jump $d7ab $de45
+jump $d7ab $de4b
+jump $d7ab $de51
+jump $d7ab $ded0
+jump $d7ab $dee1
+jump $d7ab $df06
+jump $d7ab $df0d
+jump $d7ab $df61
+jump $d7ab $dfa3
+jump $d7ab $dfdf
+jump $d7ab $dffb
+jump $d7ab $e23c
+jump $d7ab $e26a
+jump $d7ab $e298
+jump $d7ab $e2a1
+jump $d7ab $e2d9
+jump $d7ae $da29
+routine 20:$a0d5 far_20_a0d5
+routine 20:$a15c far_20_a15c
+routine 20:$a162 far_20_a162
+routine 20:$a173 far_20_a173
+routine 20:$a186 far_20_a186
+routine 20:$a196 far_20_a196
+routine 20:$a1af far_20_a1af
+routine 20:$a1e8 far_20_a1e8
+routine 20:$a24a far_20_a24a
+routine 20:$a26e far_20_a26e
+routine 20:$a6c0 far_20_a6c0
+routine 20:$a6cc far_20_a6cc
+routine 20:$a72a far_20_a72a
+routine 20:$a79b far_20_a79b
+routine 20:$a804 far_20_a804
+routine 20:$a8b9 far_20_a8b9
+routine 20:$a961 far_20_a961
+routine 20:$aa5c far_20_aa5c
+routine 20:$aa66 far_20_aa66
+routine 20:$aae2 far_20_aae2
+routine 20:$ab5a far_20_ab5a
+routine 20:$ac6c far_20_ac6c
+routine 20:$acc4 far_20_acc4
+routine 21:$bc5e far_21_bc5e
+routine 22:$aa96 far_22_aa96
+routine 22:$aaa3 far_22_aaa3
+routine 22:$aae9 far_22_aae9
+routine 22:$ab49 far_22_ab49
+routine 22:$ab76 far_22_ab76
+routine 23:$baef far_23_baef
+routine 24:$a000 far_24_a000
+routine 24:$a051 far_24_a051
+routine 24:$a1f7 far_24_a1f7
+routine 24:$a283 far_24_a283
+routine 24:$a2ee far_24_a2ee
+routine 24:$a761 far_24_a761
+routine 24:$a7fa far_24_a7fa
+routine 24:$a81c far_24_a81c
+routine 24:$acf6 far_24_acf6
+routine 24:$ad52 far_24_ad52
+routine 24:$aed1 far_24_aed1
+routine 33:$8015 far_33_8015
+routine 33:$801f far_33_801f
+routine 33:$884d far_33_884d
+routine 33:$885c far_33_885c
+routine 33:$8fdc far_33_8fdc
+routine 33:$8ff5 far_33_8ff5
+routine 33:$95cd far_33_95cd
+routine 33:$987d far_33_987d
+routine 33:$9952 far_33_9952
+routine 33:$9b96 far_33_9b96
+routine 33:$9baa far_33_9baa
+routine 33:$9bf7 far_33_9bf7
+routine 33:$9cb3 far_33_9cb3
+routine 33:$9d82 far_33_9d82
+routine 33:$9d8c far_33_9d8c
+routine 33:$9da3 far_33_9da3
+routine 33:$9ee1 far_33_9ee1
+routine 34:$811d far_34_811d
+routine 34:$8301 far_34_8301
+routine 34:$84a4 far_34_84a4
+routine 34:$84ad far_34_84ad
+routine 34:$859f far_34_859f
+routine 34:$8829 far_34_8829
+routine 34:$8851 far_34_8851
+routine 34:$8ae7 far_34_8ae7
+routine 34:$8b61 far_34_8b61
+routine 34:$8b7f far_34_8b7f
+routine 34:$8be4 far_34_8be4
+routine 34:$8bed far_34_8bed
+routine 34:$8c53 far_34_8c53
+routine 34:$8c87 far_34_8c87
+routine 34:$917c far_34_917c
+routine 35:$aa1e far_35_aa1e
+routine 35:$aa2a far_35_aa2a
+routine 35:$aa68 far_35_aa68
+routine 35:$b04f far_35_b04f
+routine 35:$b0bc far_35_b0bc
+routine 35:$b3e0 far_35_b3e0
+routine 35:$be44 far_35_be44
+routine 35:$be57 far_35_be57
+routine 36:$a078 far_36_a078
+routine 36:$a1e6 far_36_a1e6
+routine 36:$a222 far_36_a222
+routine 36:$a277 far_36_a277
+routine 36:$a2d4 far_36_a2d4
+routine 36:$a2ee far_36_a2ee
+routine 36:$a6f0 far_36_a6f0
+routine 36:$a712 far_36_a712
+routine 36:$a77c far_36_a77c
+routine 36:$a80c far_36_a80c
+routine 36:$a812 far_36_a812
+routine 36:$a832 far_36_a832
+routine 36:$a86a far_36_a86a
+routine 38:$abb9 far_38_abb9
+routine 38:$abd9 far_38_abd9
+routine 38:$acf8 far_38_acf8
+routine 38:$ad3b far_38_ad3b
+routine 40:$bf0b far_40_bf0b
+routine 46:$a98b far_46_a98b
+routine 52:$ab75 far_52_ab75
+routine 52:$ac7c far_52_ac7c
+routine 52:$accb far_52_accb
+routine 54:$ac2f far_54_ac2f
+routine 56:$a776 far_56_a776
+routine 56:$ad5e far_56_ad5e
+routine 61:$a2d5 far_61_a2d5
+routine 61:$a2eb far_61_a2eb
+routine 61:$a304 far_61_a304
+routine 61:$a35a far_61_a35a
+routine 61:$a3fc far_61_a3fc
+routine 61:$a42b far_61_a42b
+routine 61:$a467 far_61_a467
+routine 61:$a480 far_61_a480
+routine 61:$a499 far_61_a499
+routine 61:$a4f1 far_61_a4f1
+routine 61:$a52c far_61_a52c
+routine 61:$a80b far_61_a80b
+routine 61:$a83b far_61_a83b
+routine 61:$a86c far_61_a86c
+routine 61:$aa4e far_61_aa4e
+routine 61:$aaba far_61_aaba
+routine 61:$ae21 far_61_ae21
+routine 61:$ae5e far_61_ae5e
+routine 61:$af9d far_61_af9d
+routine 61:$afda far_61_afda
+routine 61:$aff5 far_61_aff5
+routine 61:$b169 far_61_b169
+routine 61:$b1c3 far_61_b1c3
+routine 61:$b271 far_61_b271
+routine 61:$b548 far_61_b548
+routine 61:$b747 far_61_b747
+routine 61:$b7dd far_61_b7dd
+routine 61:$bd38 far_61_bd38
+routine 61:$bd3e far_61_bd3e
+routine 61:$be50 far_61_be50
+routine 61:$befd far_61_befd
+
+# Routine pointers the game stores with immediates (and the profile saw),
+# called through $D7A5 / jmp ($6038)
+jump $d7ab $a582
+jump $d7ab $a5c7
+jump $d7ab $a63a
+jump $d7ab $a688
+jump $d7ab $aacb
+jump $d7ab $ab1e
+jump $d7ab $b048
+jump $d7ab $b20f
+jump $d7ab $b3fb
+jump $d7ab $b4da
+jump $d7ab $b6fe
+jump $d7ab $b87a
+jump $d7ab $bcbe
+jump $d7ab $be6f
+jump $d7ab $bea0
+jump $d7ab $da29
+routine 25:$b87a pointer_b87a
+routine 35:$a5c7 pointer_a5c7
+routine 35:$a63a pointer_a63a
+routine 35:$a688 pointer_a688
+routine 36:$a582 pointer_a582
+routine 37:$b20f pointer_b20f
+routine 40:$b048 pointer_b048
+routine 40:$b6fe pointer_b6fe
+routine 40:$bcbe pointer_bcbe
+routine 42:$be6f pointer_be6f
+routine 42:$bea0 pointer_bea0
+routine 43:$b3fb pointer_b3fb
+routine 43:$b4da pointer_b4da
+routine 44:$aacb pointer_aacb
+routine 44:$ab1e pointer_ab1e
+
+# By hand
+routine $c0be pointer_after_call ; jsr, then the address of what it reads
+inline $c0be 2
+trap 61:$b217                      ; lda $b217,y / bne: the table's bytes are not zero
+trap 19:$a3a7     ; the table bytes after a branch the loaded value always takes
+code 44:$ab1a pointers_44_ab1a 2 high $ab1c
+jump 33:$9a91 33:$9b82             ; a script's routine (bank 25 sets it)
+
+# Collision with slopes: by the tile's shape, routines the game returns
+# through (lda high,y / pha / lda low,y / pha / rts)
+code $f16a slope_moves_f16a 12 rts high $f176
+code $f1b1 slope_moves_f1b1 12 rts high $f1bd
+code $f205 slope_moves_f205 12 rts high $f211
+code $f261 slope_moves_f261 12 rts high $f26d
+code $f2c8 slope_moves_f2c8 12 rts high $f2d4
+code $f34a slope_moves_f34a 12 rts high $f356
+code $f3bb slope_moves_f3bb 12 rts high $f3c7
+code $f41f slope_moves_f41f 12 rts high $f42b
+code $f490 slope_moves_f490 12 rts high $f49c
+code $f4ff slope_moves_f4ff 12 rts high $f50b
+code $f568 slope_moves_f568 12 rts high $f574
+code $f5de slope_moves_f5de 12 rts high $f5ea
+
+# Jumps through $6038 and other pointers in RAM, loaded from tables of
+# routines (generated from the code)
+code 34:$97de jumps_34_97de 3   ; (the jump at $97db)
+code 34:$986f jumps_34_986f 3   ; (the jump at $986c)
+code 34:$98cc jumps_34_98cc 3   ; (the jump at $98c9)
+code 34:$98ea jumps_34_98ea 3   ; (the jump at $98e7)
+code 34:$9b53 jumps_34_9b53 7   ; (the jump at $9b50)
+code 38:$af63 jumps_38_af63 16   ; (the jump at $af60)
+code 57:$82b0 jumps_57_82b0 8 high $82b8   ; (the jump at $82ad)
+code $cae2 jumps_62_cae2 7 high $cae9   ; (the jump at $cadf)
+code $ce31 jumps_62_ce31 63 high $ce70   ; (the jump at $ce10)
+code $ceaf jumps_62_ceaf 9 high $ceb8   ; (the jump at $ce00)
+
+# Routines in the windows that code outside them reaches, in the banks the
+# game maps there (generated from the code, the far calls and a recording)
+routine 18:$8000 window_8000
+routine 29:$8000 window_8000
+routine 57:$8000 window_8000
+routine 33:$8049 window_8049
+routine 33:$805b window_805b
+routine 33:$80c4 window_80c4
+routine 34:$80c4 window_80c4
+routine 57:$80c4 window_80c4
+routine 33:$8112 window_8112
+routine 33:$813a window_813a
+routine 34:$813a window_813a
+routine 57:$813a window_813a
+routine 18:$8170 window_8170
+routine 34:$8341 window_8341
+routine 34:$8371 window_8371
+routine 34:$84b9 window_84b9
+routine 29:$84bc window_84bc
+routine 34:$84bc window_84bc
+routine 39:$84bc window_84bc
+routine 57:$84bc window_84bc
+routine 34:$84e6 window_84e6
+routine 6:$84e8 window_84e8
+routine 29:$84e8 window_84e8
+routine 34:$84e8 window_84e8
+routine 57:$84e8 window_84e8
+routine 34:$8501 window_8501
+routine 34:$8503 window_8503
+routine 34:$851c window_851c
+routine 34:$851e window_851e
+routine 34:$8520 window_8520
+routine 57:$8520 window_8520
+routine 9:$8553 window_8553
+routine 14:$8553 window_8553
+routine 29:$8553 window_8553
+routine 34:$8553 window_8553
+routine 39:$8553 window_8553
+routine 57:$8553 window_8553
+routine 59:$8553 window_8553
+routine 9:$856e window_856e
+routine 34:$856e window_856e
+routine 59:$856e window_856e
+routine 33:$856f window_856f
+routine 34:$8589 window_8589
+routine 33:$8597 window_8597
+routine 34:$85b0 window_85b0
+routine 59:$85b0 window_85b0
+routine 29:$864e window_864e
+routine 34:$864e window_864e
+routine 34:$86c5 window_86c5
+routine 33:$873e window_873e
+routine 33:$8765 window_8765
+routine 33:$8781 window_8781
+routine 33:$87ad window_87ad
+routine 34:$87ad window_87ad
+routine 33:$87ba window_87ba
+routine 33:$88ca window_88ca
+routine 33:$88d5 window_88d5
+routine 33:$8921 window_8921
+routine 33:$892f window_892f
+routine 33:$8957 window_8957
+routine 33:$8980 window_8980
+routine 33:$899e window_899e
+routine 33:$89d9 window_89d9
+routine 33:$8a15 window_8a15
+routine 33:$8a36 window_8a36
+routine 33:$8a40 window_8a40
+routine 33:$8a4a window_8a4a
+routine 33:$8a5d window_8a5d
+routine 33:$8a6c window_8a6c
+routine 33:$8a78 window_8a78
+routine 33:$8a86 window_8a86
+routine 33:$8ade window_8ade
+routine 33:$8ae8 window_8ae8
+routine 33:$8af2 window_8af2
+routine 33:$8b06 window_8b06
+routine 33:$8b10 window_8b10
+routine 33:$8b1a window_8b1a
+routine 33:$8b4e window_8b4e
+routine 33:$8bab window_8bab
+routine 33:$8bd3 window_8bd3
+routine 33:$8bfa window_8bfa
+routine 33:$8c61 window_8c61
+routine 33:$8c7d window_8c7d
+routine 34:$8ce4 window_8ce4
+routine 33:$8ce8 window_8ce8
+routine 34:$8d2d window_8d2d
+routine 34:$8d3b window_8d3b
+routine 39:$8d3b window_8d3b
+routine 34:$8d84 window_8d84
+routine 0:$8ed6 window_8ed6
+routine 7:$8ed6 window_8ed6
+routine 12:$8ed6 window_8ed6
+routine 34:$8ed6 window_8ed6
+routine 47:$8ed6 window_8ed6
+routine 34:$8ef0 window_8ef0
+routine 33:$8fcc window_8fcc
+routine 33:$8fcf window_8fcf
+routine 34:$8fcf window_8fcf
+routine 33:$8fe6 window_8fe6
+routine 33:$8ffb window_8ffb
+routine 33:$9016 window_9016
+routine 33:$9021 window_9021
+routine 33:$9034 window_9034
+routine 33:$904a window_904a
+routine 34:$90d6 window_90d6
+routine 34:$92f3 window_92f3
+routine 34:$9319 window_9319
+routine 34:$939d window_939d
+routine 33:$940e window_940e
+routine 33:$9458 window_9458
+routine 34:$9458 window_9458
+routine 33:$97af window_97af
+routine 34:$97af window_97af
+routine 39:$97af window_97af
+routine 47:$97af window_97af
+routine 59:$97af window_97af
+routine 34:$97e8 window_97e8
+routine 39:$97e8 window_97e8
+routine 59:$97e8 window_97e8
+routine 34:$97ea window_97ea
+routine 39:$97ea window_97ea
+routine 59:$97ea window_97ea
+routine 33:$97ed window_97ed
+routine 39:$97ed window_97ed
+routine 53:$97ed window_97ed
+routine 59:$97ed window_97ed
+routine 2:$97ef window_97ef
+routine 33:$97ef window_97ef
+routine 34:$97ef window_97ef
+routine 47:$97ef window_97ef
+routine 59:$97ef window_97ef
+routine 33:$9899 window_9899
+routine 33:$98c3 window_98c3
+routine 33:$9c5a window_9c5a
+routine 33:$9c72 window_9c72
+routine 33:$9ced window_9ced
+routine 33:$9e67 window_9e67
+routine 34:$9e67 window_9e67
+routine 34:$9eda window_9eda
+routine 22:$a38c window_a38c
+routine 23:$a38c window_a38c
+routine 38:$a38c window_a38c
+routine 41:$a38c window_a38c
+routine 52:$a38c window_a38c
+routine 19:$a93d window_a93d
+routine 20:$a967 window_a967
+routine 23:$a967 window_a967
+routine 24:$a967 window_a967
+routine 35:$a967 window_a967
+routine 36:$a967 window_a967
+routine 37:$a967 window_a967
+routine 44:$a967 window_a967
+routine 45:$a967 window_a967
+routine 60:$a967 window_a967
+routine 41:$aa01 window_aa01
+routine 43:$aa01 window_aa01
+routine 45:$aa01 window_aa01
+routine 20:$b140 window_b140
+routine 21:$b140 window_b140
+routine 22:$b140 window_b140
+routine 23:$b140 window_b140
+routine 36:$b140 window_b140
+routine 37:$b140 window_b140
+routine 38:$b140 window_b140
+routine 43:$b140 window_b140
+routine 45:$b140 window_b140

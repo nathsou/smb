@@ -1,0 +1,14 @@
+# Routines implemented by hand in codegen/native/*.c rather than generated
+# (passed to the generator with --native). Each must keep the contract
+# printed in place of its body in codegen/lib/code.c.
+
+# Display: these talked to the PPU registers. The C versions write the Video
+# state directly (codegen/lib/video.h).
+reset
+frame_interrupt
+apply_vram_list
+set_scroll
+set_ppu_ctrl
+clear_screens
+clear_screen
+draw_title_screen
