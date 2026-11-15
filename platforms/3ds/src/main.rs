@@ -11,9 +11,10 @@
 //! The picture is split into layers (codegen/lib/layers.c: the background,
 //! each pixel on a plane, and the sprites), drawn as two textures that the
 //! GPU shows at different depths when the 3D slider is up. In SMB the level
-//! data places the hills, clouds and bushes behind the screen, the blocks,
-//! pipes and ground on it, the status bar fixed; in the other games the
-//! background is on the screen. The sprites are in front. Frames the layers
+//! data places the hills, clouds and bushes behind the screen, and the
+//! blocks, pipes and ground on it with the characters; in the other games
+//! the background and the characters are on the screen. Status bars float
+//! in front. Frames the layers
 //! cannot draw (split mid-screen, switched tiles) are drawn flat by the CPU,
 //! as when R turns the layers off.
 //!
@@ -90,10 +91,13 @@ pub struct LayerTarget {
 const PLANE_ALPHA: [u32; 4] = [0x00, 0x40, 0x80, 0xC0];
 
 /// How far (in pixels at full slider) each layer sits behind the screen;
-/// negative is in front.
-const DEPTH_SPRITES: f32 = -1.5;
-const DEPTH_ON: f32 = 0.0;
+/// negative is in front. The playfield (ground, blocks, pipes, coins) and
+/// the characters on it share the screen's plane; the scenery is behind
+/// it and the status bar floats in front, as an overlay.
+const DEPTH_PLAYFIELD: f32 = 0.0;
+const DEPTH_SPRITES: f32 = DEPTH_PLAYFIELD;
 const DEPTH_BEHIND: f32 = 3.0;
+const DEPTH_FIXED: f32 = -1.5;
 
 /// The layers' textures are 256x256, the picture in their top 240 rows.
 const TEX: u32 = 256;
@@ -237,8 +241,8 @@ impl LayerRenderer {
         gpu.set_texenv(0, TexEnv::replace(Source::Texture0));
         let layers = [
             (&self.background, DEPTH_BEHIND, TestFunc::Equal, PLANE_ALPHA[1]),
-            (&self.background, DEPTH_ON, TestFunc::Equal, PLANE_ALPHA[2]),
-            (&self.background, 0.0, TestFunc::Equal, PLANE_ALPHA[3]),
+            (&self.background, DEPTH_PLAYFIELD, TestFunc::Equal, PLANE_ALPHA[2]),
+            (&self.background, DEPTH_FIXED, TestFunc::Equal, PLANE_ALPHA[3]),
             (&self.sprites, DEPTH_SPRITES, TestFunc::NotEqual, 0),
         ];
         for (texture, depth, func, alpha) in layers {

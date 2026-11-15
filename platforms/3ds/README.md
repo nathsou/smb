@@ -32,10 +32,9 @@ plane shifted by its depth for each eye:
 
 | plane | what | depth |
 |---|---|---|
-| behind | hills, clouds, bushes, castles | 3 px behind the screen |
-| on | ground, bricks, blocks, pipes, coins | on the screen |
-| fixed | the status bar | on the screen |
-| sprites | Mario, enemies, items | 1.5 px in front |
+| behind | hills, clouds, bushes, castles (SMB) | 3 px behind the screen |
+| playfield | ground, bricks, blocks, pipes, coins, and the characters on them | on the screen |
+| fixed | the status bar (SMB, SMB3) | 1.5 px in front, an overlay |
 
 (depths at full 3D slider, for the "normal" preset; the bottom screen
 offers flat, subtle, normal and deep). With the slider down the picture is
